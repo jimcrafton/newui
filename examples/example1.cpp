@@ -14,19 +14,34 @@ newui::SyncReturn FrameClosed(newui::Frame& frame) {
 	return newui::SyncReturn::Handled;
 }
 
-// property.source() was set to the RootView being animated (see main()),
-// so this trampoline can push the interpolated color into that view's
-// style and get it repainted, the way a Delegate callback bound to a
-// specific instance normally would (see delegates1.cpp's Demo 7) - a
-// plain function pointer is all onValueChanged can hold.
-newui::SyncReturn BackgroundColorChanged(newui::PropertyBase& property) {
-	auto& colorProperty = static_cast<newui::Property<newui::Color>&>(property);
-	auto* view = static_cast<newui::RootView*>(property.source());
+// registerProperty()'s source must be a real object instance and field
+// one of *that same instance's* member fields. We want to animate the
+// RootView's style, so the property belongs on the LabelStyle instance
+// itself - but LabelStyle has no field a Property can bind to for this:
+// backgroundFill is a BLVar, not the POD scalar/struct Property requires.
+// This subclass adds one: bgColor is the field the Property binds to;
+// BackgroundColorChanged pushes it into backgroundFill on change.
+struct AnimatedLabelStyle : newui::LabelStyle {
+    newui::Color bgColor = newui::Color::fromName("red");
+};
 
-	view->style().backgroundFill = colorProperty.get().toBLRgba32();
+// onValueChanged's ValueChangedDelegate passes the source instance and a
+// pointer to the (already-updated) field straight through as extra
+// arguments (see property.h), so this trampoline needs no casts or
+// method calls at all: style is the same AnimatedLabelStyle instance
+// bgColor lives on (the way a bound callback normally would reach its
+// instance - see delegates1.cpp's Demo 7 - but strongly typed instead of
+// a void*), and color is the new value directly. ViewStyle::markDirty()
+// finds its own way to the owning RootView (via view()->rootView(),
+// populated by View::setStyle()/addChild() - see rootview.cpp/
+// subview.cpp), so no RootView-specific downcast is needed here either,
+// even though this style happens to be attached directly to one.
+newui::SyncReturn BackgroundColorChanged(newui::Property<AnimatedLabelStyle, newui::Color>& property,
+        AnimatedLabelStyle* style, newui::Color* color) {
+	style->backgroundFill = color->toBLRgba32();
 	// invalidate() alone would just re-blit the existing pixel buffer -
 	// markDirty() is what re-runs paintStyle()/paint() into it first.
-	view->markDirty();
+	style->markDirty();
 
 	return newui::SyncReturn::Handled;
 }
@@ -51,31 +66,40 @@ int main() {
     //v.style().backgroundFill = newui::Color::fromName("yellow").toBLRgba32();
     //v.style().borderFill = newui::Color::fromName("lightblue").toBLRgba32();
     //v.style().borderWidth = 2.0;
-    auto labelStyle = std::make_unique<newui::LabelStyle>();
-	
+    auto labelStyle = std::make_unique<AnimatedLabelStyle>();
+
     labelStyle->backgroundFill = newui::Color::fromSystemColor(newui::SystemColor::ButtonHighlight).toBLRgba32();
-    
+
 	labelStyle->text = "Hello, World!";
     labelStyle->textColor = newui::Color::fromName("black").toBLRgba32();
-    
+
+    // Grab the raw address before ownership moves into v below - the
+    // AnimatedLabelStyle itself lives on the heap and doesn't move; only
+    // which unique_ptr owns it changes, so labelStylePtr stays valid for
+    // as long as v keeps this style set.
+    AnimatedLabelStyle* labelStylePtr = labelStyle.get();
     v.setStyle(std::move(labelStyle));
 
     // Animate the root view's background color from red to blue over 3
-    // seconds. bgColor/bgColorProperty/animationManager all need to stay
-    // alive until app.run() returns, since AnimationManager drives the
-    // animation from RunLoop idle time for as long as the loop runs.
-    newui::Color bgColor = newui::Color::fromName("red");
-    newui::Property<newui::Color> bgColorProperty("backgroundColor", &v, &bgColor);
-    bgColorProperty.onValueChanged.add(&BackgroundColorChanged);
+    // seconds via a Property bound directly to the LabelStyle instance
+    // attached to v - registerProperty()'s source is that same instance,
+    // field is its own bgColor member. PropertyManager/AnimationManager
+    // are both process-wide singletons - a Property or a playback clock
+    // can only ever be reached through them, never constructed directly.
+    newui::PropertyManager::clear();
+    auto* bgColorProperty =
+        newui::PropertyManager::registerProperty(labelStylePtr, &labelStylePtr->bgColor, "backgroundColor");
+    bgColorProperty->onValueChanged.add(&BackgroundColorChanged);
 
-    newui::AnimationManager animationManager;  // defaults to 30 fps
+    
+    newui::AnimationManager::clear();  // defaults to 30 fps
     constexpr int kBackgroundColorDurationFrames = 3 * 30;  // 3 seconds @ 30 fps
 
     newui::Animation* bgColorAnimation =
-        animationManager.addAnimation("background-color", 0, kBackgroundColorDurationFrames);
-    bgColorAnimation->addKey("red", 0)->setValue(&bgColorProperty, newui::Color::fromName("red"));
+        newui::AnimationManager::addAnimation("background-color", 0, kBackgroundColorDurationFrames);
+    bgColorAnimation->addKey("red", 0)->setValue(bgColorProperty, newui::Color::fromName("red"));
     bgColorAnimation->addKey("blue", kBackgroundColorDurationFrames)
-        ->setValue(&bgColorProperty, newui::Color::fromName("blue"),
+        ->setValue(bgColorProperty, newui::Color::fromName("blue"),
             [](newui::Color start, newui::Color end, float t) {
                 return newui::Color(
                     start.r + (end.r - start.r) * t,
@@ -90,33 +114,8 @@ int main() {
     // clock reaches its first frame.
     bgColorAnimation->processFrame(0);
 
-    animationManager.run(app.runLoop());
+    newui::AnimationManager::addToRunLoop(app.runLoop());
 
-    /*
-    v.onRedrawNeeded += [](newui::RootView& view) -> newui::SyncReturn {
-        BLContext ctx(view.getImageBuffer());
-
-        ctx.fill_all(BLRgba32(255, 0, 0));
-
-        newui::Size size = view.getBounds().size();
-        double cx = size.width * 0.5;
-        double top = size.height * 0.2;
-        double left = size.width * 0.2;
-        double right = size.width * 0.8;
-        double bottom = size.height * 0.8;
-
-        ctx.set_fill_style(BLRgba32(0, 255, 0));
-        ctx.fill_triangle(cx, top, left, bottom, right, bottom);
-
-        ctx.set_stroke_style(BLRgba32(0, 0, 255));
-        ctx.set_stroke_width(4.0);
-        ctx.stroke_triangle(cx, top, left, bottom, right, bottom);
-
-        ctx.end();
-
-        return newui::SyncReturn::Handled;
-        };
-        */
 	v.onSizeChanged += [](newui::View& v, const newui::Size& newSize) -> newui::SyncReturn {
 		newui::RootView& view = reinterpret_cast<newui::RootView&>(v);
 		printf("View (%p, hwnd: %p) size changed to %.0fx%.0f\n", &view, view.getFrame()->frameHandle(), newSize.width, newSize.height);

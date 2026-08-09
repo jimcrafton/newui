@@ -28,6 +28,13 @@ namespace newui {
 		childViews_.erase(std::remove(childViews_.begin(), childViews_.end(), child), childViews_.end());
 	}
 
+	void View::propagateRootView(RootView* root) {
+		setRootView(root);
+		for (SubView* child : childViews_) {
+			child->propagateRootView(root);
+		}
+	}
+
 	void View::paintChildren(BLContext& ctx) {
 		for (SubView* child : childViews_) {
 			if (!child->isVisible()) {

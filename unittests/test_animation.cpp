@@ -138,9 +138,9 @@ TEST(Key, StoresNameAndKeyFrame) {
 }
 
 TEST(Key, SetValueAddsAFindableEntry) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
 
     key.setValue(opacity, 0.5f);
@@ -149,37 +149,37 @@ TEST(Key, SetValueAddsAFindableEntry) {
     ASSERT_NE(found, nullptr);
     EXPECT_EQ(found->property(), opacity);
 
-    auto* typed = static_cast<newui::TypedKeyValue<float>*>(found);
+    auto* typed = static_cast<newui::TypedKeyValue<void, float>*>(found);
     EXPECT_FLOAT_EQ(typed->value(), 0.5f);
 }
 
 TEST(Key, FindValueReturnsNullForUnsetProperty) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
 
     EXPECT_EQ(key.findValue(opacity), nullptr);
 }
 
 TEST(Key, SetValueTwiceReplacesRatherThanDuplicating) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
 
     key.setValue(opacity, 0.25f);
     key.setValue(opacity, 0.75f);
 
     ASSERT_EQ(key.values().size(), 1u);
-    auto* typed = static_cast<newui::TypedKeyValue<float>*>(key.findValue(opacity));
+    auto* typed = static_cast<newui::TypedKeyValue<void, float>*>(key.findValue(opacity));
     EXPECT_FLOAT_EQ(typed->value(), 0.75f);
 }
 
 TEST(Key, ApplyWritesValueThroughToField) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
     key.setValue(opacity, 1.0f);
 
@@ -189,9 +189,9 @@ TEST(Key, ApplyWritesValueThroughToField) {
 }
 
 TEST(Key, SetValueDefaultsToLinearInterpolationKind) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
 
     key.setValue(opacity, 1.0f);
@@ -200,9 +200,9 @@ TEST(Key, SetValueDefaultsToLinearInterpolationKind) {
 }
 
 TEST(Key, SetValueAcceptsAnInterpolationKind) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
 
     key.setValue(opacity, 1.0f, newui::InterpolationKind::EaseIn);
@@ -211,9 +211,9 @@ TEST(Key, SetValueAcceptsAnInterpolationKind) {
 }
 
 TEST(Key, SetInterpolationKindChangesItAfterTheFact) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
     newui::Key key("k", 0);
     key.setValue(opacity, 1.0f);
 
@@ -273,9 +273,9 @@ TEST(Animation, AddKeyReturnsAStablePointer) {
 // ---------------------------------------------------------------------
 
 TEST(AnimationProcessFrame, InterpolatesLinearlyBetweenTwoKeys) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float opacityField = -1.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &opacityField, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &opacityField, "opacity");
 
     newui::Animation animation("fade", 0, 10);
     animation.addKey("start", 0)->setValue(opacity, 0.0f);
@@ -292,9 +292,9 @@ TEST(AnimationProcessFrame, InterpolatesLinearlyBetweenTwoKeys) {
 }
 
 TEST(AnimationProcessFrame, HoldsFirstKeysValueAtOrBeforeIt) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     int healthField = -1;
-    auto* health = newui::PropertyManager::instance().registerProperty(nullptr, &healthField, "health");
+    auto* health = newui::PropertyManager::registerProperty(nullptr, &healthField, "health");
 
     newui::Animation animation("anim", 5, 10);  // starts at frame 5
     animation.addKey("start", 0)->setValue(health, 100);
@@ -305,9 +305,9 @@ TEST(AnimationProcessFrame, HoldsFirstKeysValueAtOrBeforeIt) {
 }
 
 TEST(AnimationProcessFrame, HoldsLastKeysValueAtOrAfterIt) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     int healthField = -1;
-    auto* health = newui::PropertyManager::instance().registerProperty(nullptr, &healthField, "health");
+    auto* health = newui::PropertyManager::registerProperty(nullptr, &healthField, "health");
 
     newui::Animation animation("anim", 0, 10);
     animation.addKey("start", 0)->setValue(health, 100);
@@ -318,9 +318,9 @@ TEST(AnimationProcessFrame, HoldsLastKeysValueAtOrAfterIt) {
 }
 
 TEST(AnimationProcessFrame, UsesAnimationsStartTimeToOffsetIntoLocalKeyFrames) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = -1.0f;
-    auto* value = newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    auto* value = newui::PropertyManager::registerProperty(nullptr, &field, "value");
 
     newui::Animation animation("anim", 100, 10);  // active over absolute [100, 110)
     animation.addKey("start", 0)->setValue(value, 0.0f);
@@ -331,9 +331,9 @@ TEST(AnimationProcessFrame, UsesAnimationsStartTimeToOffsetIntoLocalKeyFrames) {
 }
 
 TEST(AnimationProcessFrame, ThreeKeysInterpolatesWithinTheRightSegment) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = -1.0f;
-    auto* value = newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    auto* value = newui::PropertyManager::registerProperty(nullptr, &field, "value");
 
     newui::Animation animation("anim", 0, 20);
     animation.addKey("a", 0)->setValue(value, 0.0f);
@@ -349,11 +349,11 @@ TEST(AnimationProcessFrame, EachKeyValueUsesItsOwnInterpolationKind) {
     // curves - one Linear, one EaseIn - prove processFrame() honors each
     // KeyValue's own interpolationKind() independently rather than
     // applying one kind to the whole Key.
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float linearField = -1.0f;
     float easeInField = -1.0f;
-    auto* linearValue = newui::PropertyManager::instance().registerProperty(nullptr, &linearField, "linear");
-    auto* easeInValue = newui::PropertyManager::instance().registerProperty(nullptr, &easeInField, "easeIn");
+    auto* linearValue = newui::PropertyManager::registerProperty(nullptr, &linearField, "linear");
+    auto* easeInValue = newui::PropertyManager::registerProperty(nullptr, &easeInField, "easeIn");
 
     newui::Animation animation("anim", 0, 10);
 
@@ -375,9 +375,9 @@ TEST(AnimationProcessFrame, EachKeyValueUsesItsOwnInterpolationKind) {
 }
 
 TEST(AnimationProcessFrame, CustomInterpolationFunctionOverridesInterpolationKind) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = -1.0f;
-    auto* value = newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    auto* value = newui::PropertyManager::registerProperty(nullptr, &field, "value");
 
     newui::Animation animation("anim", 0, 10);
     animation.addKey("start", 0)->setValue(value, 0.0f);
@@ -401,9 +401,9 @@ TEST(AnimationProcessFrame, CustomInterpolationFunctionInterpolatesStructFieldsS
     // custom function (see AnimationProcessFrame.StructFieldStepsRather-
     // Interpolating above) - a custom componentwise fn is what makes a
     // struct-typed property interpolate smoothly between Keys instead.
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     newui::Point positionField(-1.0f, -1.0f);
-    auto* position = newui::PropertyManager::instance().registerProperty(nullptr, &positionField, "position");
+    auto* position = newui::PropertyManager::registerProperty(nullptr, &positionField, "position");
 
     auto lerpPoint = [](newui::Point start, newui::Point end, float t) {
         return newui::Point(start.x + (end.x - start.x) * t, start.y + (end.y - start.y) * t);
@@ -419,13 +419,13 @@ TEST(AnimationProcessFrame, CustomInterpolationFunctionInterpolatesStructFieldsS
 }
 
 TEST(Key, SetInterpolationFunctionOnTypedKeyValueIsRetrievable) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 0.0f;
-    auto* value = newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    auto* value = newui::PropertyManager::registerProperty(nullptr, &field, "value");
     newui::Key key("k", 0);
     key.setValue(value, 1.0f);
 
-    auto* typed = static_cast<newui::TypedKeyValue<float>*>(key.findValue(value));
+    auto* typed = static_cast<newui::TypedKeyValue<void, float>*>(key.findValue(value));
     EXPECT_FALSE(typed->hasInterpolationFunction());
 
     typed->setInterpolationFunction([](float, float, float) { return 0.0f; });
@@ -439,9 +439,9 @@ TEST(Key, SetInterpolationFunctionOnTypedKeyValueIsRetrievable) {
 // ---------------------------------------------------------------------
 
 TEST(AnimationProcessFrame, StructFieldStepsRatherThanInterpolating) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     newui::Point positionField(-1.0f, -1.0f);
-    auto* position = newui::PropertyManager::instance().registerProperty(nullptr, &positionField, "position");
+    auto* position = newui::PropertyManager::registerProperty(nullptr, &positionField, "position");
 
     newui::Animation animation("move", 0, 10);
     animation.addKey("start", 0)->setValue(position, newui::Point(0.0f, 0.0f));
@@ -460,9 +460,9 @@ TEST(AnimationProcessFrame, PropertyOnlySetByLaterKeyAppliesAcrossTheWholeSegmen
     // directly (see property.h's comment on that method), so it holds
     // that value for the whole start->end segment rather than only at the
     // exact end frame.
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = -1.0f;
-    auto* opacity = newui::PropertyManager::instance().registerProperty(nullptr, &field, "opacity");
+    auto* opacity = newui::PropertyManager::registerProperty(nullptr, &field, "opacity");
 
     newui::Animation animation("anim", 0, 10);
     animation.addKey("start", 0);  // sets nothing
@@ -473,9 +473,9 @@ TEST(AnimationProcessFrame, PropertyOnlySetByLaterKeyAppliesAcrossTheWholeSegmen
 }
 
 TEST(AnimationProcessFrame, NoOpWhenAnimationHasNoKeys) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = 42.0f;
-    newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    newui::PropertyManager::registerProperty(nullptr, &field, "value");
     newui::Animation animation("empty", 0, 10);
 
     animation.processFrame(5);
@@ -488,36 +488,36 @@ TEST(AnimationProcessFrame, NoOpWhenAnimationHasNoKeys) {
 // ---------------------------------------------------------------------
 
 TEST(AnimationManager, DefaultsToThirtyFramesPerSecond) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    EXPECT_EQ(manager.frameRate(), newui::FrameRate::FPS30());
+    
+    newui::AnimationManager::clear();
+    EXPECT_EQ(newui::AnimationManager::frameRate(), newui::FrameRate::FPS30());
 }
 
 TEST(AnimationManager, SetFrameRateChangesIt) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate::NTSC());
-    EXPECT_EQ(manager.frameRate(), newui::FrameRate::NTSC());
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate::NTSC());
+    EXPECT_EQ(newui::AnimationManager::frameRate(), newui::FrameRate::NTSC());
 }
 
 TEST(AnimationManager, AddAnimationReturnsAStablePointer) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    newui::Animation* first = manager.addAnimation("a", 0, 10);
+    
+    newui::AnimationManager::clear();
+    newui::Animation* first = newui::AnimationManager::addAnimation("a", 0, 10);
     for (int i = 0; i < 20; ++i) {
-        manager.addAnimation("filler", 0, 10);
+        newui::AnimationManager::addAnimation("filler", 0, 10);
     }
 
     EXPECT_EQ(first->name(), "a");
 }
 
 TEST(AnimationManager, RemoveAnimationDropsIt) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    newui::Animation* keep = manager.addAnimation("keep", 0, 10);
-    newui::Animation* drop = manager.addAnimation("drop", 0, 10);
+    
+    newui::AnimationManager::clear();
+    newui::Animation* keep = newui::AnimationManager::addAnimation("keep", 0, 10);
+    newui::Animation* drop = newui::AnimationManager::addAnimation("drop", 0, 10);
 
-    manager.removeAnimation(drop);
+    newui::AnimationManager::removeAnimation(drop);
 
     // No direct "contains" accessor - proven indirectly via processIdle()
     // in the behavioral tests below instead. Here we just confirm the
@@ -526,16 +526,16 @@ TEST(AnimationManager, RemoveAnimationDropsIt) {
 }
 
 TEST(AnimationManager, ClearRemovesAnimationsAndResetsPlayback) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate::NTSC());
-    manager.addAnimation("a", 0, 10);
-    manager.processIdle();  // starts the clock
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate::NTSC());
+    newui::AnimationManager::addAnimation("a", 0, 10);
+    newui::AnimationManager::processIdle();  // starts the clock
 
-    manager.clear();
+    newui::AnimationManager::clear();
 
-    EXPECT_EQ(manager.frameRate(), newui::FrameRate::FPS30());
-    EXPECT_EQ(manager.currentFrame(), 0u);
+    EXPECT_EQ(newui::AnimationManager::frameRate(), newui::FrameRate::FPS30());
+    EXPECT_EQ(newui::AnimationManager::currentFrame(), 0u);
 }
 
 // ---------------------------------------------------------------------
@@ -544,64 +544,64 @@ TEST(AnimationManager, ClearRemovesAnimationsAndResetsPlayback) {
 // ---------------------------------------------------------------------
 
 TEST(AnimationManagerProcessIdle, FirstCallStartsTheClockWithoutAdvancing) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    EXPECT_FALSE(manager.processIdle());
-    EXPECT_EQ(manager.currentFrame(), 0u);
+    
+    newui::AnimationManager::clear();
+    EXPECT_FALSE(newui::AnimationManager::processIdle());
+    EXPECT_EQ(newui::AnimationManager::currentFrame(), 0u);
 }
 
 TEST(AnimationManagerProcessIdle, DoesNotAdvanceBeforeAFrameDurationElapses) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate(1));  // 1 fps - a whole second per frame
-    manager.processIdle();    // starts the clock
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate(1));  // 1 fps - a whole second per frame
+    newui::AnimationManager::processIdle();    // starts the clock
 
-    manager.processIdle();    // effectively immediately after
+    newui::AnimationManager::processIdle();    // effectively immediately after
 
-    EXPECT_EQ(manager.currentFrame(), 0u);
+    EXPECT_EQ(newui::AnimationManager::currentFrame(), 0u);
 }
 
 TEST(AnimationManagerProcessIdle, AdvancesFrameOnceEnoughTimeHasElapsed) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate(1000));  // 1 ms/frame, so a short sleep is enough
-    manager.processIdle();       // starts the clock
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate(1000));  // 1 ms/frame, so a short sleep is enough
+    newui::AnimationManager::processIdle();       // starts the clock
 
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    manager.processIdle();
+    newui::AnimationManager::processIdle();
 
-    EXPECT_GT(manager.currentFrame(), 0u);
+    EXPECT_GT(newui::AnimationManager::currentFrame(), 0u);
 }
 
 TEST(AnimationManagerProcessIdle, AlwaysReportsNotDone) {
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    EXPECT_FALSE(manager.processIdle());
-    EXPECT_FALSE(manager.processIdle());
+    
+    newui::AnimationManager::clear();
+    EXPECT_FALSE(newui::AnimationManager::processIdle());
+    EXPECT_FALSE(newui::AnimationManager::processIdle());
 }
 
 TEST(AnimationManagerProcessIdle, ProcessesOnlyAnimationsActiveAtTheCurrentFrame) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float activeField = -1.0f;
     float inactiveField = -1.0f;
-    auto* activeValue = newui::PropertyManager::instance().registerProperty(nullptr, &activeField, "active");
-    auto* inactiveValue = newui::PropertyManager::instance().registerProperty(nullptr, &inactiveField, "inactive");
+    auto* activeValue = newui::PropertyManager::registerProperty(nullptr, &activeField, "active");
+    auto* inactiveValue = newui::PropertyManager::registerProperty(nullptr, &inactiveField, "inactive");
 
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate(1000));
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate(1000));
 
-    newui::Animation* active = manager.addAnimation("active", 0, 1000000);
+    newui::Animation* active = newui::AnimationManager::addAnimation("active", 0, 1000000);
     active->addKey("k", 0)->setValue(activeValue, 7.0f);
 
     // startTime is far in the future, so it should never become active
     // during this test.
-    newui::Animation* inactive = manager.addAnimation("inactive", 1000000000ull, 10);
+    newui::Animation* inactive = newui::AnimationManager::addAnimation("inactive", 1000000000ull, 10);
     inactive->addKey("k", 0)->setValue(inactiveValue, 9.0f);
 
-    manager.processIdle();  // starts the clock
+    newui::AnimationManager::processIdle();  // starts the clock
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    manager.processIdle();  // should advance at least one frame
+    newui::AnimationManager::processIdle();  // should advance at least one frame
 
     EXPECT_FLOAT_EQ(activeField, 7.0f);
     EXPECT_FLOAT_EQ(inactiveField, -1.0f);  // never touched
@@ -612,15 +612,15 @@ TEST(AnimationManagerProcessIdle, ProcessesOnlyAnimationsActiveAtTheCurrentFrame
 // ---------------------------------------------------------------------
 
 TEST(AnimationManagerRun, DrivesAnAnimationToCompletionViaRunLoopIdle) {
-    newui::PropertyManager::instance().clear();
+    newui::PropertyManager::clear();
     float field = -1.0f;
-    auto* value = newui::PropertyManager::instance().registerProperty(nullptr, &field, "value");
+    auto* value = newui::PropertyManager::registerProperty(nullptr, &field, "value");
 
-    newui::AnimationManager& manager = newui::AnimationManager::instance();
-    manager.clear();
-    manager.setFrameRate(newui::FrameRate(1000));  // fast, so the test doesn't need to wait long
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate(1000));  // fast, so the test doesn't need to wait long
 
-    newui::Animation* animation = manager.addAnimation("anim", 0, 5);
+    newui::Animation* animation = newui::AnimationManager::addAnimation("anim", 0, 5);
     animation->addKey("start", 0)->setValue(value, 0.0f);
     animation->addKey("end", 5)->setValue(value, 100.0f);
 
@@ -628,7 +628,7 @@ TEST(AnimationManagerRun, DrivesAnAnimationToCompletionViaRunLoopIdle) {
     std::thread loopThread([&runLoop]() { runLoop.run(); });
     runLoop.waitUntilStarted();
 
-    manager.run(runLoop);
+    newui::AnimationManager::addToRunLoop(runLoop);
 
     // At 1000 fps a 5-frame animation finishes in ~5ms; sleep with a
     // generous margin, then stop the loop. quit()/join() synchronizes

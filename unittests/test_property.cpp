@@ -9,7 +9,17 @@ namespace {
 int g_changeCount = 0;
 std::string g_lastChangedName;
 
-newui::SyncReturn RecordChange(newui::PropertyBase& property) {
+// A template, not a plain function, since onValueChanged's Sender is now
+// the fully-typed Property<SourceT, ValueT> (not PropertyBase), and it
+// also passes the source and the (already-updated) field directly as
+// extra args - see property.h's ValueChangedDelegate. Taking
+// &RecordChange in a context expecting a specific
+// SyncReturn(*)(Property<SourceT, ValueT>&, SourceT*, ValueT*) deduces
+// ValueT/SourceT from that target type, so this one template still
+// serves every Property type used below without needing a differently-
+// named callback per type.
+template<typename SourceT, typename ValueT>
+newui::SyncReturn RecordChange(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
     ++g_changeCount;
     g_lastChangedName = property.name();
     return newui::SyncReturn::Handled;
@@ -281,7 +291,7 @@ TEST(PropertyManager, RegisterPropertyCreatesAndStoresProperty) {
     int field = 1;
     int source = 0;
 
-    newui::Property<int>* property = manager.registerProperty(&source, &field, "value");
+    auto* property = manager.registerProperty(&source, &field, "value");
 
     ASSERT_NE(property, nullptr);
     EXPECT_EQ(property->name(), "value");
@@ -304,8 +314,8 @@ TEST(PropertyManager, SameNameOnDifferentSourcesAreDistinctProperties) {
     int fieldA = 1;
     int fieldB = 2;
 
-    newui::Property<int>* propertyA = manager.registerProperty(&sourceA, &fieldA, "value");
-    newui::Property<int>* propertyB = manager.registerProperty(&sourceB, &fieldB, "value");
+    auto* propertyA = manager.registerProperty(&sourceA, &fieldA, "value");
+    auto* propertyB = manager.registerProperty(&sourceB, &fieldB, "value");
 
     EXPECT_NE(propertyA, propertyB);
     EXPECT_EQ(manager.getProperty(&sourceA, "value"), propertyA);
@@ -338,8 +348,8 @@ TEST(PropertyManager, RegisteringSameKeyTwiceReplacesThePreviousProperty) {
     int field = 1;
     int source = 0;
 
-    newui::Property<int>* first = manager.registerProperty(&source, &field, "value");
-    newui::Property<int>* second = manager.registerProperty(&source, &field, "value");
+    auto* first = manager.registerProperty(&source, &field, "value");
+    auto* second = manager.registerProperty(&source, &field, "value");
 
     EXPECT_NE(first, second);
     EXPECT_EQ(manager.getProperty(&source, "value"), second);

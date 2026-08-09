@@ -5,7 +5,7 @@
 #include <newui/geometry.h>
 
 namespace newui {
-
+    class View;
     // Classic 3D beveled edge look, as used for raised buttons, pressed/
     // sunken controls, and grooved/ridged separators. See paintEdge3D().
     enum class Edge3DStyle {
@@ -71,7 +71,7 @@ namespace newui {
     // override it, call ViewStyle::paint() first for the background/
     // border, then add whatever's specific to that widget kind.
     class ViewStyle {
-    public:
+    public:        
         virtual ~ViewStyle() = default;
 
         BLVar backgroundFill;
@@ -138,6 +138,18 @@ namespace newui {
 
             ctx.restore();
         }
+
+        View* view() {
+            return view_;
+        }
+
+        void setView(View* v) {
+            view_ = v;
+        }
+
+        void markDirty();
+    private:
+        View* view_ = nullptr;
     };
 
     // ViewStyle plus a classic 3D beveled edge (e.g. a raised look for a

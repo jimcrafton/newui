@@ -3,6 +3,12 @@
 // then walking through the different ways to interpolate them - the
 // built-in InterpolationKind curves, a custom lambda, a keyframe vector,
 // and componentwise interpolation of struct fields like Point and Color.
+//
+// PropertyManager is a process-wide singleton (see PropertyManager::
+// instance()) - a Property can only ever be created through it, never
+// constructed directly, since it's the sole owner of every Property's
+// lifetime. Each demo below calls instance().clear() first so it can be
+// read on its own without needing to know what an earlier demo registered.
 
 #include "newui/newui.h"
 #include "newui/property.h"
@@ -31,12 +37,20 @@ struct Entity {
 };
 
 // ---------------------------------------------------------------------
-// Demo 1: PropertyManager as the normal way to create/own a Property -
+// Demo 1: PropertyManager as the only way to create/own a Property -
 // register a scalar field, read/write it through the Property instead of
 // the field directly, and observe onValueChanged.
 // ---------------------------------------------------------------------
 
-newui::SyncReturn LogValueChanged(newui::PropertyBase& property) {
+// A template, not a plain function, since onValueChanged's Sender is now
+// the fully-typed Property<SourceT, ValueT> (not PropertyBase), and it
+// also passes the source and the (already-updated) field directly as
+// extra args - see property.h's ValueChangedDelegate. Taking
+// &LogValueChanged in a context expecting a specific
+// SyncReturn(*)(Property<SourceT, ValueT>&, SourceT*, ValueT*) deduces
+// ValueT/SourceT from that target type.
+template<typename SourceT, typename ValueT>
+newui::SyncReturn LogValueChanged(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
     std::cout << "  onValueChanged: '" << property.name() << "' changed\n";
     return newui::SyncReturn::Handled;
 }
@@ -44,7 +58,8 @@ newui::SyncReturn LogValueChanged(newui::PropertyBase& property) {
 void demoPropertyManagerBasics() {
     std::cout << "\n== Demo 1: PropertyManager - register, get/set, onValueChanged ==\n";
 
-    newui::PropertyManager properties;
+    newui::PropertyManager& properties = newui::PropertyManager::instance();
+    properties.clear();
     Entity hero;
     hero.name = "Hero";
 
@@ -74,7 +89,7 @@ void demoPropertyManagerBasics() {
 // [0,1] - here we just sample a few t values to compare curves.
 // ---------------------------------------------------------------------
 
-void printCurve(const char* label, newui::Property<float>& property, newui::InterpolationKind kind) {
+void printCurve(const char* label, newui::Property<void, float>& property, newui::InterpolationKind kind) {
     property.setupInterpolation(0.0f, 100.0f, kind);
 
     std::cout << "  " << std::left << std::setw(10) << label << ": ";
@@ -88,13 +103,14 @@ void printCurve(const char* label, newui::Property<float>& property, newui::Inte
 void demoBuiltInInterpolationKinds() {
     std::cout << "\n== Demo 2: built-in InterpolationKind curves (t = 0, 0.25, 0.5, 0.75, 1) ==\n";
 
+    newui::PropertyManager::instance().clear();
     float opacity = 0.0f;
-    newui::Property<float> opacityProperty("opacity", nullptr, &opacity);
+    auto* opacityProperty = newui::PropertyManager::instance().registerProperty(nullptr, &opacity, "opacity");
 
-    printCurve("Linear", opacityProperty, newui::InterpolationKind::Linear);
-    printCurve("EaseIn", opacityProperty, newui::InterpolationKind::EaseIn);
-    printCurve("EaseOut", opacityProperty, newui::InterpolationKind::EaseOut);
-    printCurve("EaseInOut", opacityProperty, newui::InterpolationKind::EaseInOut);
+    printCurve("Linear", *opacityProperty, newui::InterpolationKind::Linear);
+    printCurve("EaseIn", *opacityProperty, newui::InterpolationKind::EaseIn);
+    printCurve("EaseOut", *opacityProperty, newui::InterpolationKind::EaseOut);
+    printCurve("EaseInOut", *opacityProperty, newui::InterpolationKind::EaseInOut);
 }
 
 // ---------------------------------------------------------------------
@@ -109,9 +125,10 @@ void demoBuiltInInterpolationKinds() {
 void demoCustomFunctionInterpolation() {
     std::cout << "\n== Demo 3: interpolate(t, fn) - custom overshoot easing ==\n";
 
+    newui::PropertyManager::instance().clear();
     float scale = 0.0f;
-    newui::Property<float> scaleProperty("scale", nullptr, &scale);
-    scaleProperty.setupInterpolation(0.0f, 1.0f);
+    auto* scaleProperty = newui::PropertyManager::instance().registerProperty(nullptr, &scale, "scale");
+    scaleProperty->setupInterpolation(0.0f, 1.0f);
 
     float overshoot = 1.70158f;  // capture a tunable parameter - only possible
                                   // because this overload isn't limited to
@@ -124,8 +141,8 @@ void demoCustomFunctionInterpolation() {
 
     std::cout << "  scale: ";
     for (float t = 0.0f; t <= 1.0f; t += 0.2f) {
-        scaleProperty.interpolate(t, backOut);
-        std::cout << std::setw(7) << std::fixed << std::setprecision(3) << scaleProperty.get();
+        scaleProperty->interpolate(t, backOut);
+        std::cout << std::setw(7) << std::fixed << std::setprecision(3) << scaleProperty->get();
     }
     std::cout << "  (overshoots past 1.0 before settling)\n";
 }
@@ -141,14 +158,15 @@ void demoCustomFunctionInterpolation() {
 void demoKeyframeInterpolation() {
     std::cout << "\n== Demo 4: interpolate(t, keyframes) - a hand-authored pulse curve ==\n";
 
+    newui::PropertyManager::instance().clear();
     float pulse = 0.0f;
-    newui::Property<float> pulseProperty("pulse", nullptr, &pulse);
+    auto* pulseProperty = newui::PropertyManager::instance().registerProperty(nullptr, &pulse, "pulse");
     std::vector<float> keyframes{0.0f, 1.0f, 0.2f, 1.0f, 0.0f};
 
     std::cout << "  pulse: ";
     for (float t = 0.0f; t <= 1.0f; t += 0.125f) {
-        pulseProperty.interpolate(t, keyframes);
-        std::cout << std::setw(6) << std::fixed << std::setprecision(2) << pulseProperty.get();
+        pulseProperty->interpolate(t, keyframes);
+        std::cout << std::setw(6) << std::fixed << std::setprecision(2) << pulseProperty->get();
     }
     std::cout << "\n";
 }
@@ -164,8 +182,9 @@ void demoKeyframeInterpolation() {
 void demoPointProperty() {
     std::cout << "\n== Demo 5: Property<Point> - componentwise interpolation via fn ==\n";
 
+    newui::PropertyManager& properties = newui::PropertyManager::instance();
+    properties.clear();
     Entity hero;
-    newui::PropertyManager properties;
     auto* position = properties.registerProperty(&hero, &hero.position, "position");
     position->setupInterpolation(newui::Point(0.0f, 0.0f), newui::Point(100.0f, 50.0f));
 
@@ -197,8 +216,9 @@ void demoPointProperty() {
 void demoColorProperty() {
     std::cout << "\n== Demo 6: Property<Color> - componentwise interpolation via fn ==\n";
 
+    newui::PropertyManager& properties = newui::PropertyManager::instance();
+    properties.clear();
     Entity hero;
-    newui::PropertyManager properties;
     auto* tint = properties.registerProperty(&hero, &hero.tint, "tint");
     tint->setupInterpolation(newui::Color::fromName("red"), newui::Color::fromName("blue"));
 
@@ -227,7 +247,8 @@ void demoColorProperty() {
 void demoMultipleSourcesSameName() {
     std::cout << "\n== Demo 7: same property name on different sources ==\n";
 
-    newui::PropertyManager properties;
+    newui::PropertyManager& properties = newui::PropertyManager::instance();
+    properties.clear();
     Entity hero;
     Entity villain;
     hero.name = "Hero";
@@ -262,13 +283,15 @@ void demoMultipleSourcesSameName() {
 void demoTrigInterpolation() {
     std::cout << "\n== Demo 8: interpolate(t, fn) using sin()/cos() ==\n";
 
+    newui::PropertyManager::instance().clear();
+
     // Cosine interpolation: (1 - cos(t*pi)) / 2 eases smoothly in and out,
     // like EaseInOut, but derived from a continuous wave instead of a
     // piecewise quadratic - handy when a curve needs to match a
     // sine/cosine-based process driving something else (audio, physics).
     float brightness = 0.0f;
-    newui::Property<float> brightnessProperty("brightness", nullptr, &brightness);
-    brightnessProperty.setupInterpolation(0.0f, 100.0f);
+    auto* brightnessProperty = newui::PropertyManager::instance().registerProperty(nullptr, &brightness, "brightness");
+    brightnessProperty->setupInterpolation(0.0f, 100.0f);
 
     auto cosineEase = [](float start, float end, float t) {
         float eased = (1.0f - std::cos(t * kPi)) * 0.5f;
@@ -277,8 +300,8 @@ void demoTrigInterpolation() {
 
     std::cout << "  brightness (cosine ease): ";
     for (float t = 0.0f; t <= 1.0f; t += 0.25f) {
-        brightnessProperty.interpolate(t, cosineEase);
-        std::cout << std::setw(7) << std::fixed << std::setprecision(2) << brightnessProperty.get();
+        brightnessProperty->interpolate(t, cosineEase);
+        std::cout << std::setw(7) << std::fixed << std::setprecision(2) << brightnessProperty->get();
     }
     std::cout << "\n";
 
@@ -289,7 +312,7 @@ void demoTrigInterpolation() {
     newui::Point center(50.0f, 50.0f);
     float radius = 20.0f;
     newui::Point orbitPosition = center;
-    newui::Property<newui::Point> orbitProperty("orbitPosition", nullptr, &orbitPosition);
+    auto* orbitProperty = newui::PropertyManager::instance().registerProperty(nullptr, &orbitPosition, "orbitPosition");
 
     auto orbit = [center, radius](newui::Point /*start*/, newui::Point /*end*/, float t) {
         float angle = t * 2.0f * kPi;
@@ -298,9 +321,9 @@ void demoTrigInterpolation() {
 
     std::cout << "  orbit position (t = 0, 0.25, 0.5, 0.75, 1):\n";
     for (float t = 0.0f; t <= 1.0f; t += 0.25f) {
-        orbitProperty.interpolate(t, orbit);
+        orbitProperty->interpolate(t, orbit);
         std::cout << "    t=" << std::fixed << std::setprecision(2) << t
-                  << " -> (" << orbitProperty.get().x << ", " << orbitProperty.get().y << ")\n";
+                  << " -> (" << orbitProperty->get().x << ", " << orbitProperty->get().y << ")\n";
     }
 }
 

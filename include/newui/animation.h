@@ -15,9 +15,9 @@ namespace newui {
 
     // One (Property, value) pair inside a Key - the concrete value that
     // property should hold once that Key becomes active. Non-template base
-    // so Key can hold entries for Property<int>, Property<float>,
-    // Property<Point>, ... in a single list; TypedKeyValue<T> below is
-    // what actually gets constructed (see Key::setValue()).
+    // so Key can hold entries for Property<int, Foo>, Property<float, Bar>,
+    // ... in a single list; TypedKeyValue<SourceT, ValueT> below is what
+    // actually gets constructed (see Key::setValue()).
     class KeyValue {
     public:
         virtual ~KeyValue() = default;
@@ -25,12 +25,12 @@ namespace newui {
         virtual PropertyBase* property() const = 0;
 
         // Which curve interpolateFrom() blends into this value with - see
-        // Property<T>::setupInterpolation()'s kind parameter, which this
-        // is passed straight through to. Only affects arithmetic property
-        // types (see interpolateFrom()); ignored for struct types, which
-        // always step regardless. Defaults to Linear - set via the kind
-        // parameter on Key::setValue(), or here directly to change it
-        // after the fact.
+        // Property<SourceT, ValueT>::setupInterpolation()'s kind parameter,
+        // which this is passed straight through to. Only affects
+        // arithmetic property types (see interpolateFrom()); ignored for
+        // struct types, which always step regardless. Defaults to Linear -
+        // set via the kind parameter on Key::setValue(), or here directly
+        // to change it after the fact.
         InterpolationKind interpolationKind() const {
             return interpolationKind_;
         }
@@ -50,47 +50,48 @@ namespace newui {
         // previous Key that set it, or nullptr if no earlier Key does) to
         // this value, at t in [0,1], writing the result into the bound
         // field. If a custom interpolation function was set (see
-        // TypedKeyValue<T>::setInterpolationFunction()), that's used -
-        // this is the only way a struct property type (Point, Color, ...)
-        // interpolates smoothly, since it puts the actual blending in the
-        // caller's hands instead of needing this class to know how.
-        // Otherwise, scalar (arithmetic) property types fall back to
-        // interpolationKind()'s built-in curve - see
-        // Property<T>::interpolate(t) - and anything else (a struct with
-        // no custom function) has no generic way to blend at all, so it
-        // just steps straight to its value once t reaches 1 and otherwise
-        // holds whatever the previous Key left it at.
+        // TypedKeyValue<SourceT, ValueT>::setInterpolationFunction()),
+        // that's used - this is the only way a struct property type
+        // (Point, Color, ...) interpolates smoothly, since it puts the
+        // actual blending in the caller's hands instead of needing this
+        // class to know how. Otherwise, scalar (arithmetic) property types
+        // fall back to interpolationKind()'s built-in curve - see
+        // Property<SourceT, ValueT>::interpolate(t) - and anything else (a
+        // struct with no custom function) has no generic way to blend at
+        // all, so it just steps straight to its value once t reaches 1
+        // and otherwise holds whatever the previous Key left it at.
         //
         // from, if not null, must wrap the same property (and therefore
-        // the same T) as this KeyValue - Animation::processFrame() only
-        // ever pairs up KeyValues it found via the same PropertyBase*, so
-        // this holds by construction.
+        // the same ValueT/SourceT) as this KeyValue - Animation::
+        // processFrame() only ever pairs up KeyValues it found via the
+        // same PropertyBase*, so this holds by construction.
         virtual void interpolateFrom(const KeyValue* from, float t) const = 0;
 
     protected:
         InterpolationKind interpolationKind_ = InterpolationKind::Linear;
     };
 
-    template<typename T>
+    template<typename SourceT, typename ValueT>
     class TypedKeyValue : public KeyValue {
     public:
         // Given the start/end this KeyValue is interpolating between and
         // t, returns the value to write - see setInterpolationFunction().
-        using InterpolationFunction = typename Property<T>::InterpolationFunction;
+        using InterpolationFunction = typename Property<SourceT, ValueT>::InterpolationFunction;
 
-        TypedKeyValue(Property<T>* property, T value, InterpolationKind kind = InterpolationKind::Linear)
+        TypedKeyValue(Property<SourceT, ValueT>* property, ValueT value,
+                InterpolationKind kind = InterpolationKind::Linear)
             : property_(property), value_(value) {
             interpolationKind_ = kind;
         }
 
-        TypedKeyValue(Property<T>* property, T value, InterpolationFunction fn)
+        TypedKeyValue(Property<SourceT, ValueT>* property, ValueT value, InterpolationFunction fn)
             : property_(property), value_(value), interpolationFunction_(std::move(fn)) {}
 
-        Property<T>* typedProperty() const {
+        Property<SourceT, ValueT>* typedProperty() const {
             return property_;
         }
 
-        const T& value() const {
+        const ValueT& value() const {
             return value_;
         }
 
@@ -99,9 +100,10 @@ namespace newui {
         // (limited to plain function pointers so it can publish lock-free
         // snapshots), this accepts any callable, including a capturing
         // lambda, since it's a single direct call rather than a
-        // multicast list - same as Property<T>::interpolate(t, fn), which
-        // this is passed straight through to. Pass an empty
-        // std::function to fall back to interpolationKind() again.
+        // multicast list - same as Property<SourceT, ValueT>::
+        // interpolate(t, fn), which this is passed straight through to.
+        // Pass an empty std::function to fall back to interpolationKind()
+        // again.
         void setInterpolationFunction(InterpolationFunction fn) {
             interpolationFunction_ = std::move(fn);
         }
@@ -124,34 +126,34 @@ namespace newui {
                 return;
             }
 
-            const T& startValue = static_cast<const TypedKeyValue<T>*>(from)->value_;
+            const ValueT& startValue = static_cast<const TypedKeyValue<SourceT, ValueT>*>(from)->value_;
             property_->setupInterpolation(startValue, value_, interpolationKind_);
 
             if (interpolationFunction_) {
-                // A custom curve was supplied - this works for any T,
-                // struct types included, since the caller does the actual
-                // blending (see properties1.cpp's Demo 5/6 for the
-                // pattern - componentwise lerp for Point/Color).
+                // A custom curve was supplied - this works for any
+                // ValueT, struct types included, since the caller does
+                // the actual blending (see properties1.cpp's Demo 5/6
+                // for the pattern - componentwise lerp for Point/Color).
                 property_->interpolate(t, interpolationFunction_);
-            } else if constexpr (std::is_arithmetic<T>::value) {
+            } else if constexpr (std::is_arithmetic<ValueT>::value) {
                 property_->interpolate(t);
             } else {
-                // Non-arithmetic T with no custom function: no generic
-                // way to blend an arbitrary struct, so step instead -
-                // hold at `from`'s value until t reaches 1. Re-applying
-                // `from` on every mid-segment call (rather than leaving
-                // the field alone) is what makes processFrame() correct
-                // for a direct/out-of-order call - e.g. seeking straight
-                // to a frame mid-animation - not just for sequential
-                // playback that happened to already apply `from` on an
-                // earlier call.
+                // Non-arithmetic ValueT with no custom function: no
+                // generic way to blend an arbitrary struct, so step
+                // instead - hold at `from`'s value until t reaches 1.
+                // Re-applying `from` on every mid-segment call (rather
+                // than leaving the field alone) is what makes
+                // processFrame() correct for a direct/out-of-order call -
+                // e.g. seeking straight to a frame mid-animation - not
+                // just for sequential playback that happened to already
+                // apply `from` on an earlier call.
                 from->apply();
             }
         }
 
     private:
-        Property<T>* property_;
-        T value_;
+        Property<SourceT, ValueT>* property_;
+        ValueT value_;
         InterpolationFunction interpolationFunction_;
     };
 
@@ -189,34 +191,38 @@ namespace newui {
         // matters for arithmetic property types; struct-typed properties
         // always step regardless of kind unless a custom interpolation
         // function is set too (via the overload below, or
-        // TypedKeyValue<T>::setInterpolationFunction() on the returned
-        // KeyValue - see findValue()).
-        template<typename T>
-        void setValue(Property<T>* property, T value, InterpolationKind kind = InterpolationKind::Linear) {
+        // TypedKeyValue<SourceT, ValueT>::setInterpolationFunction() on
+        // the returned KeyValue - see findValue()). ValueT and SourceT
+        // are both deduced from property.
+        template<typename SourceT, typename ValueT>
+        void setValue(Property<SourceT, ValueT>* property, ValueT value,
+                InterpolationKind kind = InterpolationKind::Linear) {
             for (auto& entry : values_) {
                 if (entry->property() == property) {
-                    entry = std::make_unique<TypedKeyValue<T>>(property, value, kind);
+                    entry = std::make_unique<TypedKeyValue<SourceT, ValueT>>(property, value, kind);
                     return;
                 }
             }
-            values_.push_back(std::make_unique<TypedKeyValue<T>>(property, std::move(value), kind));
+            values_.push_back(std::make_unique<TypedKeyValue<SourceT, ValueT>>(property, std::move(value), kind));
         }
 
         // Same as above, but blends into value using a custom curve (fn)
         // instead of one of the built-in InterpolationKind shapes -
-        // see TypedKeyValue<T>::setInterpolationFunction(). This is the
-        // way to smoothly interpolate a struct-typed property (Point,
-        // Color, ...) between Keys, since fn - not this class - does the
-        // actual componentwise blending.
-        template<typename T>
-        void setValue(Property<T>* property, T value, typename TypedKeyValue<T>::InterpolationFunction fn) {
+        // see TypedKeyValue<SourceT, ValueT>::setInterpolationFunction().
+        // This is the way to smoothly interpolate a struct-typed property
+        // (Point, Color, ...) between Keys, since fn - not this class -
+        // does the actual componentwise blending.
+        template<typename SourceT, typename ValueT>
+        void setValue(Property<SourceT, ValueT>* property, ValueT value,
+                typename TypedKeyValue<SourceT, ValueT>::InterpolationFunction fn) {
             for (auto& entry : values_) {
                 if (entry->property() == property) {
-                    entry = std::make_unique<TypedKeyValue<T>>(property, value, std::move(fn));
+                    entry = std::make_unique<TypedKeyValue<SourceT, ValueT>>(property, value, std::move(fn));
                     return;
                 }
             }
-            values_.push_back(std::make_unique<TypedKeyValue<T>>(property, std::move(value), std::move(fn)));
+            values_.push_back(
+                std::make_unique<TypedKeyValue<SourceT, ValueT>>(property, std::move(value), std::move(fn)));
         }
 
         const std::vector<std::unique_ptr<KeyValue>>& values() const {
@@ -343,35 +349,38 @@ namespace newui {
             return manager;
         }
 
-        FrameRate frameRate() const {
-            return currentFrame_.framerate();
+        static FrameRate frameRate()  {
+            return AnimationManager::instance().currentFrame_.framerate();
         }
 
-        void setFrameRate(FrameRate frameRate) {
-            currentFrame_.setFramerate(frameRate);
+        static void setFrameRate(FrameRate frameRate) {
+            AnimationManager::instance().currentFrame_.setFramerate(frameRate);
         }
 
         // Current frame number, advanced by processIdle() at frameRate()
         // frames per second based on elapsed wall-clock time since
         // playback started (the first processIdle() call).
-        std::uint64_t currentFrame() const {
-            return currentFrame_.value();
+        static std::uint64_t currentFrame() {
+            return AnimationManager::instance().currentFrame_.value();
         }
 
         // Creates an Animation, owned by this AnimationManager, and
         // returns a pointer to it - stable for the manager's lifetime
         // regardless of further addAnimation() calls.
-        Animation* addAnimation(const std::string& name, std::uint64_t startTime, std::uint64_t duration);
+        static Animation* addAnimation(const std::string& name, std::uint64_t startTime, std::uint64_t duration);
 
         // Removes and destroys animation, if it's registered with this
         // manager.
-        void removeAnimation(Animation* animation);
+        static void removeAnimation(Animation* animation);
 
         // Registers this manager's idle processing with runLoop - see
         // processIdle(). The returned idle task never reports itself
         // done, so it keeps running for as long as runLoop does.
-        void run(RunLoop& runLoop) {
-            runLoop.postIdle([this]() { return processIdle(); });
+        static void addToRunLoop(RunLoop& runLoop) {
+            
+            runLoop.postIdle([]() {                 
+                return AnimationManager::processIdle();
+               });
         }
 
         // Advances currentFrame() by however many whole frames have
@@ -382,7 +391,7 @@ namespace newui {
         // frame) does neither. Always returns false - see run() - so a
         // manager driven via RunLoop::postIdle() keeps being called for
         // as long as the loop runs, not just until the first frame.
-        bool processIdle();
+        static bool processIdle();
 
         // Removes every registered Animation and resets playback (frame
         // rate, current frame, and the started-clock state) back to a
@@ -391,7 +400,7 @@ namespace newui {
         // can start from a clean AnimationManager despite it being a
         // process-wide singleton (see the class comment) rather than a
         // fresh instance per test.
-        void clear();
+        static void clear();
 
     private:
         AnimationManager() = default;

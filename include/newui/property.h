@@ -12,26 +12,26 @@
 
 namespace newui {
 
-    // What Property<T> (and PropertyManager::registerProperty()) accept for
-    // T: a scalar (int, float, ...) or a POD struct/class built out of them
-    // (e.g. newui::Point) - trivially copyable (safe to copy/compare/
-    // destroy byte-wise; no user-defined copy/move/destructor) and
-    // standard-layout (no virtual functions/bases, uniform member access).
-    // Deliberately std::is_trivially_copyable rather than the stricter
-    // std::is_trivial: newui's own value types (Point, Size, Rect, ...)
-    // give their members default member initializers ("float x = 0.0f;"),
-    // which makes their default constructor non-trivial without affecting
-    // copy/comparison safety - is_trivial would wrongly reject them here.
-    // Named separately from is_arithmetic since only the latter is accepted
-    // by Property<T>::interpolate(t) and interpolate(t, keyframes) - see
-    // their comments below.
-    template<typename T>
+    // What Property<SourceT, ValueT> (and PropertyManager::registerProperty())
+    // accept for ValueT: a scalar (int, float, ...) or a POD struct/class
+    // built out of them (e.g. newui::Point) - trivially copyable (safe to
+    // copy/compare/destroy byte-wise; no user-defined copy/move/destructor)
+    // and standard-layout (no virtual functions/bases, uniform member
+    // access). Deliberately std::is_trivially_copyable rather than the
+    // stricter std::is_trivial: newui's own value types (Point, Size, Rect,
+    // ...) give their members default member initializers
+    // ("float x = 0.0f;"), which makes their default constructor non-
+    // trivial without affecting copy/comparison safety - is_trivial would
+    // wrongly reject them here. Named separately from is_arithmetic since
+    // only the latter is accepted by Property<SourceT, ValueT>::interpolate(t)
+    // and interpolate(t, keyframes) - see their comments below.
+    template<typename ValueT>
     struct IsPodLike : std::integral_constant<bool,
-        std::is_arithmetic<T>::value
-            || (std::is_trivially_copyable<T>::value && std::is_standard_layout<T>::value)> {};
+        std::is_arithmetic<ValueT>::value
+            || (std::is_trivially_copyable<ValueT>::value && std::is_standard_layout<ValueT>::value)> {};
 
-    // Selects how Property<T>::interpolate() maps its [0,1] t parameter onto
-    // the [start,end] range set by setupInterpolation().
+    // Selects how Property<SourceT, ValueT>::interpolate() maps its [0,1] t
+    // parameter onto the [start,end] range set by setupInterpolation().
     enum class InterpolationKind {
         Linear,
         EaseIn,
@@ -39,10 +39,13 @@ namespace newui {
         EaseInOut,
     };
 
-    // Non-template base so PropertyManager can hold Property<int>,
-    // Property<float>, etc. in a single collection, and so
-    // ValueChangedDelegate has one concrete Sender type. Property<T> below
-    // is the type client code actually constructs and uses.
+    // Non-template base so PropertyManager can hold Property<Foo, int>,
+    // Property<Bar, float>, etc. in a single collection. Property<SourceT,
+    // ValueT> below is the type client code actually constructs and uses;
+    // this only has what's left once ValueT/SourceT are erased - name(),
+    // the untyped source() (see Property::typedSource() for the typed
+    // version), and interpolate(t) (the one curve shape that doesn't need
+    // ValueT/SourceT known at the call site - see Property::interpolate()).
     class PropertyBase {
     public:
         PropertyBase(const std::string& name, void* source) : name_(name), source_(source) {}
@@ -56,11 +59,6 @@ namespace newui {
             return source_;
         }
 
-        // Fired by set() (and so by interpolate(), which writes through
-        // set()) once the bound field's value has actually changed.
-        typedef Delegate<PropertyBase> ValueChangedDelegate;
-        ValueChangedDelegate onValueChanged;
-
         // Writes the value at t (see setupInterpolation()) into the bound
         // field. t is expected to be in [0,1]; values outside that range
         // extrapolate rather than clamp.
@@ -72,43 +70,82 @@ namespace newui {
     };
 
     // Binds a single POD scalar or POD struct field (int, float,
-    // newui::Point, ...) on *source, read and written through get()/set().
-    // Normally created and owned via PropertyManager::registerProperty()
-    // rather than directly. The built-in curve overloads of interpolate()
-    // - the InterpolationKind-based one and the keyframe-vector one - only
-    // support scalar T, since they interpolate by doing arithmetic
-    // directly on T; interpolate(t, fn) works for struct T too, since the
-    // caller-supplied fn does the actual blending (e.g. componentwise).
-    template<typename T>
+    // newui::Point, ...) of type ValueT on *source (of type SourceT), read
+    // and written through get()/set(). Normally created and owned via
+    // PropertyManager::registerProperty() rather than directly.
+    //
+    // Templated on both ValueT and SourceT (rather than just ValueT) so
+    // onValueChanged fires with a fully-typed Property<SourceT, ValueT>&
+    // as its Sender - unlike a Delegate<PropertyBase> callback, one here
+    // never needs to static_cast either the property (to call get()) or
+    // its source (via typedSource(), the strongly-typed counterpart to
+    // PropertyBase::source()'s void*).
+    //
+    // The built-in curve overloads of interpolate() - the
+    // InterpolationKind-based one and the keyframe-vector one - only
+    // support scalar ValueT, since they interpolate by doing arithmetic
+    // directly on it; interpolate(t, fn) works for struct ValueT too,
+    // since the caller-supplied fn does the actual blending (e.g.
+    // componentwise).
+    template<typename SourceT, typename ValueT>
     class Property : public PropertyBase {
-        static_assert(IsPodLike<T>::value,
-            "Property<T> only supports POD scalar types (int, float, ...) or "
-            "POD structs made up of them (e.g. newui::Point).");
+        static_assert(IsPodLike<ValueT>::value,
+            "Property<SourceT, ValueT> only supports POD scalar types (int, float, ...) or "
+            "POD structs made up of them (e.g. newui::Point) for ValueT.");
 
     public:
         // Given the start/end set by setupInterpolation() and t, returns
         // the value to write - see the interpolate(t, fn) overload below.
-        using InterpolationFunction = std::function<T(T start, T end, float t)>;
+        using InterpolationFunction = std::function<ValueT(ValueT start, ValueT end, float t)>;
 
-        T get() const {
+        // Convenience aliases for this Property's own type and the
+        // pointer/reference shapes its API traffics in - used below and
+        // in ValueChangedDelegate's callback signature.
+        typedef Property<SourceT, ValueT> PropertyT;
+        typedef SourceT* SourcePtr;
+        typedef ValueT* ValuePtr;
+        typedef ValueT& ValueRef;
+        typedef const ValueT& ConstValueRef;
+
+        // Fired by set() (and so by interpolate(), which writes through
+        // set()) once the bound field's value has actually changed.
+        // Sender is this concrete Property<SourceT, ValueT>, not
+        // PropertyBase, and the callback also receives the source
+        // instance and a pointer to the (already updated) field directly,
+        // so it never needs to call typedSource()/get() itself, let alone
+        // static_cast anything.
+        typedef Delegate<PropertyT, SourcePtr, ValuePtr> ValueChangedDelegate;
+        ValueChangedDelegate onValueChanged;
+
+        // The source instance this property's field belongs to, strongly
+        // typed - a cast-free alternative to PropertyBase::source()'s
+        // void*.
+        SourcePtr typedSource() const {
+            return static_cast<SourcePtr>(source_);
+        }
+
+        // Returns a reference, not a copy, so reading a struct ValueT
+        // (Point, Color, ...) doesn't pay for copying every field just to
+        // look at it.
+        ConstValueRef get() const {
             return *field_;
         }
 
         // Writes value into the bound field and fires onValueChanged - but
         // only if value actually differs from the field's current value
         // (matching e.g. SubView::setBounds()'s onSizeChanged).
-        void set(T value) {
+        void set(ConstValueRef value) {
             if (*field_ == value) {
                 return;
             }
 
             *field_ = value;
-            onValueChanged(*this);
+            onValueChanged(*this, typedSource(), field_);
         }
 
         // Establishes the range interpolate() maps its t input onto. Does
         // not itself touch the field - call interpolate() to do that.
-        void setupInterpolation(T start, T end, InterpolationKind kind = InterpolationKind::Linear) {
+        void setupInterpolation(ValueT start, ValueT end, InterpolationKind kind = InterpolationKind::Linear) {
             interpStart_ = start;
             interpEnd_ = end;
             interpKind_ = kind;
@@ -117,19 +154,20 @@ namespace newui {
         // Maps t through the InterpolationKind set by setupInterpolation()
         // and writes the resulting value via set() - so onValueChanged
         // still only fires when that write actually changes the field.
-        // Only supported for scalar T (this does the blend by direct
-        // arithmetic on T); throws for struct T - use interpolate(t, fn)
-        // instead, which leaves the actual blending up to the caller.
+        // Only supported for scalar ValueT (this does the blend by direct
+        // arithmetic on it); throws for struct ValueT - use
+        // interpolate(t, fn) instead, which leaves the actual blending up
+        // to the caller.
         void interpolate(float t) override {
-            if constexpr (std::is_arithmetic<T>::value) {
+            if constexpr (std::is_arithmetic<ValueT>::value) {
                 float eased = ease(t, interpKind_);
                 double value = static_cast<double>(interpStart_)
                     + (static_cast<double>(interpEnd_) - static_cast<double>(interpStart_)) * eased;
-                set(static_cast<T>(value));
+                set(static_cast<ValueT>(value));
             } else {
                 throw std::logic_error(
-                    "Property<T>::interpolate(t): built-in InterpolationKind curves require "
-                    "a scalar T; use interpolate(t, fn) for struct field types.");
+                    "Property<SourceT, ValueT>::interpolate(t): built-in InterpolationKind curves "
+                    "require a scalar ValueT; use interpolate(t, fn) for struct field types.");
             }
         }
 
@@ -151,18 +189,18 @@ namespace newui {
         // falls between and linearly interpolates across them (t outside
         // [0,1] extrapolates along whichever end segment it falls beyond).
         // keyframes must have at least one entry. Only available for scalar
-        // T (each keyframe is a single float); there's no generic way to
-        // build a struct T out of one, so this overload doesn't exist for
-        // struct T rather than failing at runtime - use interpolate(t, fn)
-        // instead.
-        template<typename U = T, typename = typename std::enable_if<std::is_arithmetic<U>::value>::type>
+        // ValueT (each keyframe is a single float); there's no generic way
+        // to build a struct ValueT out of one, so this overload doesn't
+        // exist for struct ValueT rather than failing at runtime - use
+        // interpolate(t, fn) instead.
+        template<typename U = ValueT, typename = typename std::enable_if<std::is_arithmetic<U>::value>::type>
         void interpolate(float t, const std::vector<float>& keyframes) {
             if (keyframes.empty()) {
                 return;
             }
 
             if (keyframes.size() == 1) {
-                set(static_cast<T>(keyframes[0]));
+                set(static_cast<ValueT>(keyframes[0]));
                 return;
             }
 
@@ -178,7 +216,7 @@ namespace newui {
 
             float frac = scaled - static_cast<float>(index);
             float value = keyframes[index] + (keyframes[index + 1] - keyframes[index]) * frac;
-            set(static_cast<T>(value));
+            set(static_cast<ValueT>(value));
         }
 
     private:
@@ -188,7 +226,7 @@ namespace newui {
         // as a Property that isn't tracked by one.
         friend class PropertyManager;
 
-        Property(const std::string& name, void* source, T* field)
+        Property(const std::string& name, SourceT* source, ValueT* field)
             : PropertyBase(name, source), field_(field) {}
 
         static float ease(float t, InterpolationKind kind) {
@@ -205,9 +243,9 @@ namespace newui {
             }
         }
 
-        T* field_;
-        T interpStart_{};
-        T interpEnd_{};
+        ValueT* field_;
+        ValueT interpStart_{};
+        ValueT interpEnd_{};
         InterpolationKind interpKind_ = InterpolationKind::Linear;
     };
 
@@ -233,43 +271,60 @@ namespace newui {
             return manager;
         }
 
-        // Creates a Property<T> binding name on *source to *field, stores
-        // it (owned by this PropertyManager) keyed by (name, source), and
-        // returns a pointer to it. Registering the same (name, source) pair
-        // again replaces (and deletes) whatever was registered before.
-        template<typename T>
-        Property<T>* registerProperty(void* source, T* field, const std::string& name) {
-            static_assert(IsPodLike<T>::value,
+        // Creates a Property<SourceT, ValueT> binding name on *source to
+        // *field, stores it (owned by this PropertyManager) keyed by
+        // (name, source), and returns a pointer to it. Registering the
+        // same (name, source) pair again replaces (and deletes) whatever
+        // was registered before. ValueT and SourceT are both deduced from
+        // source/field - see the std::nullptr_t overload below for
+        // registerProperty(nullptr, field, name), where there's no
+        // meaningful source type to deduce.
+        template<typename SourceT, typename ValueT>
+        static Property<SourceT, ValueT>* registerProperty(SourceT* source, ValueT* field, const std::string& name) {
+            static_assert(IsPodLike<ValueT>::value,
                 "PropertyManager::registerProperty only supports POD scalar types (int, float, ...) "
-                "or POD structs made up of them (e.g. newui::Point).");
+                "or POD structs made up of them (e.g. newui::Point) for the field type.");
+            auto& pm = PropertyManager::instance();
 
-            Property<T>* property = new Property<T>(name, source, field);
-            Key key{name, source};
+            Property<SourceT, ValueT>* property = new Property<SourceT, ValueT>(name, source, field);
+            Key key{ name, static_cast<void*>(source) };
 
-            auto it = properties_.find(key);
-            if (it != properties_.end()) {
+            auto it = pm.properties_.find(key);
+            if (it != pm.properties_.end()) {
                 delete it->second;
                 it->second = property;
-            } else {
-                properties_.emplace(std::move(key), property);
+            }
+            else {
+                pm.properties_.emplace(std::move(key), property);
             }
 
             return property;
         }
 
+        // registerProperty(nullptr, field, name) - std::nullptr_t doesn't
+        // match the SourceT* deduction above (nullptr isn't "a pointer to
+        // SourceT" for any SourceT), so a source-less property (no
+        // meaningful owning instance) needs this explicit overload;
+        // SourceT is void, and typedSource() degenerates to the same thing
+        // as PropertyBase::source().
+        template<typename ValueT>
+        static Property<void, ValueT>* registerProperty(std::nullptr_t, ValueT* field, const std::string& name) {
+            return registerProperty<void, ValueT>(static_cast<void*>(nullptr), field, name);
+        }
+
         // Returns the Property registered for (source, name), or nullptr
         // if none has been registered (or it was already removed).
-        PropertyBase* getProperty(void* source, const std::string& name) const;
+        static PropertyBase* getProperty(void* source, const std::string& name);
 
         // Deletes the Property registered for (source, name), if any.
-        void removeProperty(void* source, const std::string& name);
+        static void removeProperty(void* source, const std::string& name);
 
         // Deletes every registered Property and forgets about all of
         // them. Not part of normal application use - this exists for
         // test isolation, so each test can start from a clean
         // PropertyManager despite it being a process-wide singleton (see
         // the class comment) rather than a fresh instance per test.
-        void clear();
+        static void clear();
 
     private:
         PropertyManager() = default;

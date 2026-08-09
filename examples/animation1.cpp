@@ -10,6 +10,12 @@
 // just its timing - see Demo 4's hand-written Bezier arc and Demo 5's
 // reusable newui::CurveInterpolation<T>, which generalizes it to any
 // number of control points).
+//
+// PropertyManager and AnimationManager are both process-wide singletons
+// (see their instance() methods) - a Property or an AnimationManager-
+// driven playback clock can only ever be reached through them. Each demo
+// calls PropertyManager::instance().clear() first so it can be read on
+// its own without needing to know what an earlier demo registered.
 
 #include "newui/newui.h"
 #include "newui/animation.h"
@@ -37,16 +43,17 @@ struct Entity {
 void demoBasicKeyframing() {
     std::cout << "\n== Demo 1: two Keys, default Linear interpolation ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<float> opacity("opacity", &entity, &entity.opacity);
+    auto* opacity = newui::PropertyManager::instance().registerProperty(&entity, &entity.opacity, "opacity");
 
     newui::Animation animation("fade-in", 0, 10);
-    animation.addKey("start", 0)->setValue(&opacity, 0.0f);
-    animation.addKey("end", 10)->setValue(&opacity, 100.0f);
+    animation.addKey("start", 0)->setValue(opacity, 0.0f);
+    animation.addKey("end", 10)->setValue(opacity, 100.0f);
 
     for (std::uint64_t frame = 0; frame <= 10; frame += 2) {
         animation.processFrame(frame);
-        std::cout << "  frame " << std::setw(2) << frame << ": opacity = " << opacity.get() << "\n";
+        std::cout << "  frame " << std::setw(2) << frame << ": opacity = " << opacity->get() << "\n";
     }
 }
 
@@ -60,18 +67,19 @@ void demoBasicKeyframing() {
 void demoInterpolationKindPerKey() {
     std::cout << "\n== Demo 2: EaseIn rising, EaseOut falling ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<float> scale("scale", &entity, &entity.scale);
+    auto* scale = newui::PropertyManager::instance().registerProperty(&entity, &entity.scale, "scale");
 
     newui::Animation animation("pulse", 0, 20);
-    animation.addKey("low", 0)->setValue(&scale, 0.0f);
-    animation.addKey("high", 10)->setValue(&scale, 100.0f, newui::InterpolationKind::EaseIn);
-    animation.addKey("low-again", 20)->setValue(&scale, 0.0f, newui::InterpolationKind::EaseOut);
+    animation.addKey("low", 0)->setValue(scale, 0.0f);
+    animation.addKey("high", 10)->setValue(scale, 100.0f, newui::InterpolationKind::EaseIn);
+    animation.addKey("low-again", 20)->setValue(scale, 0.0f, newui::InterpolationKind::EaseOut);
 
     for (std::uint64_t frame = 0; frame <= 20; frame += 2) {
         animation.processFrame(frame);
         std::cout << "  frame " << std::setw(2) << frame << ": "
-                  << std::fixed << std::setprecision(1) << scale.get() << "\n";
+                  << std::fixed << std::setprecision(1) << scale->get() << "\n";
     }
 }
 
@@ -85,18 +93,19 @@ void demoInterpolationKindPerKey() {
 void demoCustomTimingCurve() {
     std::cout << "\n== Demo 3: custom curve - back-out overshoot ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<float> scale("scale", &entity, &entity.scale);
+    auto* scale = newui::PropertyManager::instance().registerProperty(&entity, &entity.scale, "scale");
 
     newui::Animation animation("pop-in", 0, 10);
-    animation.addKey("start", 0)->setValue(&scale, 0.0f);
+    animation.addKey("start", 0)->setValue(scale, 0.0f);
 
     float overshoot = 1.70158f;  // capture a tunable parameter - only
                                   // possible because this takes any
                                   // callable, not just a plain function
                                   // pointer like Delegate requires.
     newui::Key* end = animation.addKey("end", 10);
-    end->setValue(&scale, 1.0f, [overshoot](float start, float endValue, float t) {
+    end->setValue(scale, 1.0f, [overshoot](float start, float endValue, float t) {
         t -= 1.0f;
         float eased = t * t * ((overshoot + 1.0f) * t + overshoot) + 1.0f;
         return start + (endValue - start) * eased;
@@ -105,7 +114,7 @@ void demoCustomTimingCurve() {
     for (std::uint64_t frame = 0; frame <= 10; ++frame) {
         animation.processFrame(frame);
         std::cout << "  frame " << std::setw(2) << frame << ": "
-                  << std::fixed << std::setprecision(3) << scale.get() << "\n";
+                  << std::fixed << std::setprecision(3) << scale->get() << "\n";
     }
     std::cout << "  (overshoots past 1.0 before settling)\n";
 }
@@ -122,16 +131,17 @@ void demoCustomTimingCurve() {
 void demoBezierPathCurve() {
     std::cout << "\n== Demo 4: custom curve - quadratic Bezier path for a Point ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<newui::Point> position("position", &entity, &entity.position);
+    auto* position = newui::PropertyManager::instance().registerProperty(&entity, &entity.position, "position");
 
     newui::Point control(100.0f, 0.0f);  // pulls the arc up and over
 
     newui::Animation animation("arc", 0, 10);
-    animation.addKey("start", 0)->setValue(&position, newui::Point(0.0f, 100.0f));
+    animation.addKey("start", 0)->setValue(position, newui::Point(0.0f, 100.0f));
 
     newui::Key* end = animation.addKey("end", 10);
-    end->setValue(&position, newui::Point(100.0f, 100.0f),
+    end->setValue(position, newui::Point(100.0f, 100.0f),
         [control](newui::Point start, newui::Point endPoint, float t) {
             float u = 1.0f - t;
             float x = u * u * start.x + 2.0f * u * t * control.x + t * t * endPoint.x;
@@ -142,8 +152,8 @@ void demoBezierPathCurve() {
     for (std::uint64_t frame = 0; frame <= 10; frame += 2) {
         animation.processFrame(frame);
         std::cout << "  frame " << std::setw(2) << frame << ": ("
-                  << std::fixed << std::setprecision(1) << position.get().x << ", "
-                  << position.get().y << ")\n";
+                  << std::fixed << std::setprecision(1) << position->get().x << ", "
+                  << position->get().y << ")\n";
     }
     std::cout << "  (curves through (100, 0) instead of a straight line to (100, 100))\n";
 }
@@ -162,22 +172,23 @@ void demoBezierPathCurve() {
 void demoCurveInterpolation() {
     std::cout << "\n== Demo 5: CurveInterpolation<Point> - a reusable, N-point Bezier ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<newui::Point> position("position", &entity, &entity.position);
+    auto* position = newui::PropertyManager::instance().registerProperty(&entity, &entity.position, "position");
 
     newui::CurveInterpolation<newui::Point> curve;
     curve.addPoint(newui::Point(0.0f, 0.0f));      // pulls the path down first...
     curve.addPoint(newui::Point(100.0f, 200.0f));  // ...then sharply back up
 
     newui::Animation animation("s-curve", 0, 10);
-    animation.addKey("start", 0)->setValue(&position, newui::Point(0.0f, 100.0f));
-    animation.addKey("end", 10)->setValue(&position, newui::Point(100.0f, 100.0f), curve);
+    animation.addKey("start", 0)->setValue(position, newui::Point(0.0f, 100.0f));
+    animation.addKey("end", 10)->setValue(position, newui::Point(100.0f, 100.0f), curve);
 
     for (std::uint64_t frame = 0; frame <= 10; frame += 2) {
         animation.processFrame(frame);
         std::cout << "  frame " << std::setw(2) << frame << ": ("
-                  << std::fixed << std::setprecision(1) << position.get().x << ", "
-                  << position.get().y << ")\n";
+                  << std::fixed << std::setprecision(1) << position->get().x << ", "
+                  << position->get().y << ")\n";
     }
     std::cout << "  (cubic Bezier: an S-shaped path through both control points)\n";
 }
@@ -190,7 +201,13 @@ void demoCurveInterpolation() {
 // curve's progress is visible as it happens on the loop's own thread.
 // ---------------------------------------------------------------------
 
-newui::SyncReturn LogOpacityChanged(newui::PropertyBase& property) {
+// A template, not a plain function, since onValueChanged's Sender is now
+// the fully-typed Property<SourceT, ValueT> (not PropertyBase) - see
+// property.h. Taking &LogOpacityChanged in a context expecting a
+// specific SyncReturn(*)(Property<SourceT, ValueT>&) deduces
+// ValueT/SourceT from that target type.
+template<typename SourceT, typename ValueT>
+newui::SyncReturn LogOpacityChanged(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
     std::cout << "  onValueChanged: '" << property.name() << "' updated (thread "
               << std::this_thread::get_id() << ")\n";
     return newui::SyncReturn::Handled;
@@ -199,22 +216,24 @@ newui::SyncReturn LogOpacityChanged(newui::PropertyBase& property) {
 void demoAnimationManagerWithRunLoop() {
     std::cout << "\n== Demo 6: AnimationManager driving playback via RunLoop idle time ==\n";
 
+    newui::PropertyManager::instance().clear();
     Entity entity;
-    newui::Property<float> opacity("opacity", &entity, &entity.opacity);
-    opacity.onValueChanged.add(&LogOpacityChanged);
+    auto* opacity = newui::PropertyManager::instance().registerProperty(&entity, &entity.opacity, "opacity");
+    opacity->onValueChanged.add(&LogOpacityChanged);
 
-    newui::AnimationManager manager;
-    manager.setFrameRate(newui::FrameRate::NTSC());  // ~29.97 fps
+    
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate::NTSC());  // ~29.97 fps
 
-    newui::Animation* animation = manager.addAnimation("fade-in", 0, 15);
-    animation->addKey("start", 0)->setValue(&opacity, 0.0f);
-    animation->addKey("end", 15)->setValue(&opacity, 100.0f, newui::InterpolationKind::EaseInOut);
+    newui::Animation* animation = newui::AnimationManager::addAnimation("fade-in", 0, 15);
+    animation->addKey("start", 0)->setValue(opacity, 0.0f);
+    animation->addKey("end", 15)->setValue(opacity, 100.0f, newui::InterpolationKind::EaseInOut);
 
     newui::RunLoop runLoop;
     std::thread loopThread([&runLoop]() { runLoop.run(); });
     runLoop.waitUntilStarted();
 
-    manager.run(runLoop);
+    newui::AnimationManager::addToRunLoop(runLoop);
 
     // 15 frames at ~29.97 fps is ~500ms; give it a comfortable margin.
     // quit()/join() below synchronizes with the loop thread, so reading
@@ -227,7 +246,7 @@ void demoAnimationManagerWithRunLoop() {
     loopThread.join();
 
     std::cout << "  final opacity: " << entity.opacity
-              << " (manager reached frame " << manager.currentFrame() << ")\n";
+              << " (manager reached frame " << newui::AnimationManager::currentFrame() << ")\n";
 }
 
 int main() {

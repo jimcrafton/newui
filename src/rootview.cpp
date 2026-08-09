@@ -10,6 +10,12 @@ namespace newui {
 	RootView::RootView(Frame* frame, const newui::Rect& bounds, const std::string& name) : parentFrame_(frame) {
 		bounds_ = bounds;
 		name_ = name;
+
+		// A RootView is its own root - rootView() (and therefore
+		// ViewStyle::markDirty()'s view_->rootView() chain) needs this set
+		// on itself, not just propagated down to children (see
+		// addChild()).
+		setRootView(this);
 	}
 
 	RootView::~RootView() {
@@ -112,12 +118,18 @@ namespace newui {
 	void RootView::addChild(SubView* child)
 	{
 		child->setParentView(this);
-		View::addChild(child);		
+		// propagateRootView(), not setRootView(): child may already have
+		// its own subtree (built before being attached here), and every
+		// descendant in it needs to pick up this RootView too, not just
+		// child itself.
+		child->propagateRootView(rootView());
+		View::addChild(child);
 	}
 
 	void RootView::removeChild(SubView* child) {
 		View::removeChild(child);
 		child->setParentView(nullptr);
+		child->propagateRootView(nullptr);
 	}
 
 	std::tuple<RootView*, SubView*> RootView::getTarget(HWND hwnd)

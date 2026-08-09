@@ -10,7 +10,7 @@
 #include <newui/viewstyle.h>
 
 namespace newui {
-
+    class RootView;
     class SubView;
 
     // Common state shared by View and SubView: bounds/visible/name storage
@@ -64,7 +64,11 @@ namespace newui {
         // Swaps in a different ViewStyle (e.g. std::make_unique<ButtonStyle>())
         // to draw widget-specific chrome; see ViewStyle::paint().
         void setStyle(std::unique_ptr<ViewStyle> style) {
+            if (nullptr != style_) {
+                style_->setView(nullptr);
+            }
             style_ = std::move(style);
+            style_->setView(this);
         }
 
         void setHighlighted(bool highlighted) {
@@ -127,6 +131,26 @@ namespace newui {
 
         virtual bool initialize();
         virtual void destroy();
+
+        RootView* rootView() {
+            return rootView_;
+        }
+
+        void setRootView(RootView* val) {
+            rootView_ = val;
+        }
+
+        // Sets rootView() on this View and recurses into every descendant
+        // already in childViews_ - so attaching/detaching a SubView (sub)
+        // tree that was built before (or after) it had a RootView still
+        // gets every existing descendant's rootView() updated, not just
+        // the immediate child being attached/detached. See
+        // RootView::addChild()/removeChild() and
+        // SubView::addChild()/removeChild(), which call this instead of
+        // plain setRootView() for exactly that reason.
+        void propagateRootView(RootView* root);
+
+
     protected:
         Rect bounds_;
         bool visible_ = false;
@@ -138,6 +162,8 @@ namespace newui {
         bool highlighted_ = false;
 
         std::vector<SubView*> childViews_;
+
+        RootView* rootView_ = nullptr;
     };
 
 }

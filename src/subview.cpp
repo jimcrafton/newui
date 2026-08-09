@@ -31,11 +31,17 @@ void SubView::setVisible(bool visible) {
 void SubView::addChild(SubView* child) {
 	View::addChild(child);
 	child->parent_ = this;
+	// propagateRootView(), not setRootView(): child may already have its
+	// own subtree (built before being attached here), and every
+	// descendant in it needs to pick up this rootView() too, not just
+	// child itself.
+	child->propagateRootView(rootView());
 }
 
 void SubView::removeChild(SubView* child) {
     View::removeChild(child);
     child->parent_ = nullptr;
+    child->propagateRootView(nullptr);
 }
 
 bool SubView::initialize()

@@ -59,40 +59,43 @@ void Animation::processFrame(std::uint64_t frame) {
 }
 
 Animation* AnimationManager::addAnimation(const std::string& name, std::uint64_t startTime, std::uint64_t duration) {
+    auto& inst = AnimationManager::instance();
+
     auto animation = std::make_unique<Animation>(name, startTime, duration);
     Animation* result = animation.get();
-    animations_.push_back(std::move(animation));
+    inst.animations_.push_back(std::move(animation));
     return result;
 }
 
 void AnimationManager::removeAnimation(Animation* animation) {
-    animations_.erase(
-        std::remove_if(animations_.begin(), animations_.end(),
+    auto& inst = AnimationManager::instance();
+    inst.animations_.erase(
+        std::remove_if(inst.animations_.begin(), inst.animations_.end(),
             [animation](const std::unique_ptr<Animation>& entry) { return entry.get() == animation; }),
-        animations_.end());
+        inst.animations_.end());
 }
 
 bool AnimationManager::processIdle() {
     auto now = std::chrono::steady_clock::now();
-
-    if (!started_) {
-        clockStart_ = now;
-        started_ = true;
+    auto& inst = AnimationManager::instance();
+    if (!inst.started_) {
+        inst.clockStart_ = now;
+        inst.started_ = true;
         return false;
     }
 
-    AnimationFrame next(currentFrame_.framerate());
-    next.setFromElapsed(clockStart_, now);
+    AnimationFrame next(inst.currentFrame_.framerate());
+    next.setFromElapsed(inst.clockStart_, now);
 
-    if (next.value() <= currentFrame_.value()) {
+    if (next.value() <= inst.currentFrame_.value()) {
         return false;
     }
 
-    currentFrame_ = next;
+    inst.currentFrame_ = next;
 
-    for (const auto& animation : animations_) {
-        if (animation->isActiveAt(currentFrame_.value())) {
-            animation->processFrame(currentFrame_.value());
+    for (const auto& animation : inst.animations_) {
+        if (animation->isActiveAt(inst.currentFrame_.value())) {
+            animation->processFrame(inst.currentFrame_.value());
         }
     }
 
@@ -100,10 +103,11 @@ bool AnimationManager::processIdle() {
 }
 
 void AnimationManager::clear() {
-    animations_.clear();
-    currentFrame_ = AnimationFrame();
-    clockStart_ = std::chrono::steady_clock::time_point();
-    started_ = false;
+    auto& inst = AnimationManager::instance();
+    inst.animations_.clear();
+    inst.currentFrame_ = AnimationFrame();
+    inst.clockStart_ = std::chrono::steady_clock::time_point();
+    inst.started_ = false;
 }
 
 }
