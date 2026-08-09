@@ -17,6 +17,22 @@ public:
     bool operator!=(const Point& other) const {
         return !(*this == other);
     }
+
+    // Vector-space arithmetic (Point doubles as a 2D vector) - lets
+    // generic code that only needs +, -, and scalar * (e.g.
+    // CurveInterpolation<T>'s De Casteljau evaluation) work with Point
+    // the same way it does with a plain arithmetic T.
+    Point operator+(const Point& other) const {
+        return Point(x + other.x, y + other.y);
+    }
+
+    Point operator-(const Point& other) const {
+        return Point(x - other.x, y - other.y);
+    }
+
+    Point operator*(float scalar) const {
+        return Point(x * scalar, y * scalar);
+    }
 };
 
 class Size {

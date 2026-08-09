@@ -230,8 +230,7 @@ void Application::run() {
     frame_->onDestroyed += FrameDestroyed;
 
 
-	RunLoop runLoop;
-	runLoop.run();
+	runLoop_.run();
 }
 
 }

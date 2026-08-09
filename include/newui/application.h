@@ -5,6 +5,7 @@
 #include <string>
 
 #include "newui/newui.h"
+#include "newui/runloop.h"
 
 namespace newui {
 
@@ -32,6 +33,15 @@ public:
 
     void run();
 
+    // The RunLoop run() pumps. Exposed so code that needs to hook into
+    // idle time (e.g. AnimationManager::run()) can do so before calling
+    // Application::run() - postIdle()'d tasks queue up regardless of
+    // whether the loop has started pumping yet, so registering early is
+    // safe (see RunLoop::postIdle()'s comment).
+    RunLoop& runLoop() {
+        return runLoop_;
+    }
+
     HINSTANCE instanceHandle() const {
         return instanceHandle_;
     }
@@ -50,6 +60,7 @@ private:
     Frame* frame_ = nullptr;
 	HWND dummyWindowHandle_ = nullptr;
     HINSTANCE instanceHandle_ = nullptr;
+    RunLoop runLoop_;
 
     static LRESULT CALLBACK DummyWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 

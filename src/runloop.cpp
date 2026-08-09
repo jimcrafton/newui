@@ -7,6 +7,7 @@
 
 
 namespace newui {
+	
 
     void RunLoop::run() {
 
@@ -33,8 +34,10 @@ namespace newui {
 
         while (!done ) {
 			while (isIdle && (!::PeekMessage(&msg, NULL, NULL, NULL, PM_NOREMOVE))) {
-				//internal_idleTime();
-				isIdle = false;
+				idleProcessing();
+				if (!hasIdleTasks()) {
+					isIdle = false;
+				}
 			}
 
 			do {
@@ -174,4 +177,33 @@ namespace newui {
     {
         ::PostThreadMessage(threadId_, WM_QUIT, 0, 0);
     }
+
+	void RunLoop::idleProcessing()
+	{
+		std::function<bool()> task;
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			if (idleTasks_.empty()) {
+				return;
+			}
+			task = std::move(idleTasks_.front());
+			idleTasks_.pop_front();
+		}
+
+		if (!task) {
+			return;
+		}
+
+		bool complete = task();
+		if (!complete) {
+			std::lock_guard<std::mutex> lock(mutex_);
+			idleTasks_.push_back(std::move(task));
+		}
+	}
+
+	bool RunLoop::hasIdleTasks()
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		return !idleTasks_.empty();
+	}
 }

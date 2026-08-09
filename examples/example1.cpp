@@ -3,6 +3,7 @@
 #include "newui/frame.h"
 #include "newui/rootview.h"
 #include "newui/color.h"
+#include "newui/animation.h"
 #include <blend2d/blend2d.h>
 
 #include <iostream>
@@ -10,6 +11,23 @@
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
 	printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+	return newui::SyncReturn::Handled;
+}
+
+// property.source() was set to the RootView being animated (see main()),
+// so this trampoline can push the interpolated color into that view's
+// style and get it repainted, the way a Delegate callback bound to a
+// specific instance normally would (see delegates1.cpp's Demo 7) - a
+// plain function pointer is all onValueChanged can hold.
+newui::SyncReturn BackgroundColorChanged(newui::PropertyBase& property) {
+	auto& colorProperty = static_cast<newui::Property<newui::Color>&>(property);
+	auto* view = static_cast<newui::RootView*>(property.source());
+
+	view->style().backgroundFill = colorProperty.get().toBLRgba32();
+	// invalidate() alone would just re-blit the existing pixel buffer -
+	// markDirty() is what re-runs paintStyle()/paint() into it first.
+	view->markDirty();
+
 	return newui::SyncReturn::Handled;
 }
 
@@ -41,6 +59,38 @@ int main() {
     labelStyle->textColor = newui::Color::fromName("black").toBLRgba32();
     
     v.setStyle(std::move(labelStyle));
+
+    // Animate the root view's background color from red to blue over 3
+    // seconds. bgColor/bgColorProperty/animationManager all need to stay
+    // alive until app.run() returns, since AnimationManager drives the
+    // animation from RunLoop idle time for as long as the loop runs.
+    newui::Color bgColor = newui::Color::fromName("red");
+    newui::Property<newui::Color> bgColorProperty("backgroundColor", &v, &bgColor);
+    bgColorProperty.onValueChanged.add(&BackgroundColorChanged);
+
+    newui::AnimationManager animationManager;  // defaults to 30 fps
+    constexpr int kBackgroundColorDurationFrames = 3 * 30;  // 3 seconds @ 30 fps
+
+    newui::Animation* bgColorAnimation =
+        animationManager.addAnimation("background-color", 0, kBackgroundColorDurationFrames);
+    bgColorAnimation->addKey("red", 0)->setValue(&bgColorProperty, newui::Color::fromName("red"));
+    bgColorAnimation->addKey("blue", kBackgroundColorDurationFrames)
+        ->setValue(&bgColorProperty, newui::Color::fromName("blue"),
+            [](newui::Color start, newui::Color end, float t) {
+                return newui::Color(
+                    start.r + (end.r - start.r) * t,
+                    start.g + (end.g - start.g) * t,
+                    start.b + (end.b - start.b) * t,
+                    start.a + (end.a - start.a) * t);
+                });
+
+    // Apply the starting color immediately so the very first paint
+    // already shows red, rather than the LabelStyle's original
+    // ButtonHighlight background until AnimationManager's idle-driven
+    // clock reaches its first frame.
+    bgColorAnimation->processFrame(0);
+
+    animationManager.run(app.runLoop());
 
     /*
     v.onRedrawNeeded += [](newui::RootView& view) -> newui::SyncReturn {
