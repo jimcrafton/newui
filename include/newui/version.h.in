@@ -1,0 +1,6 @@
+#pragma once
+
+#define NEWUI_VERSION_MAJOR @newui_VERSION_MAJOR@
+#define NEWUI_VERSION_MINOR @newui_VERSION_MINOR@
+#define NEWUI_VERSION_PATCH @newui_VERSION_PATCH@
+#define NEWUI_VERSION_STRING "@newui_VERSION@"
