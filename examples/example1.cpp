@@ -97,7 +97,7 @@ int main() {
 
     newui::Animation* bgColorAnimation =
         newui::AnimationManager::addAnimation("background-color", 0, kBackgroundColorDurationFrames);
-    bgColorAnimation->addKey("red", 0)->setValue(bgColorProperty, newui::Color::fromName("red"));
+    bgColorAnimation->addKey("red", 10)->setValue(bgColorProperty, newui::Color::fromName("red"));
     bgColorAnimation->addKey("blue", kBackgroundColorDurationFrames)
         ->setValue(bgColorProperty, newui::Color::fromName("blue"),
             [](newui::Color start, newui::Color end, float t) {
@@ -115,27 +115,6 @@ int main() {
     bgColorAnimation->processFrame(0);
 
     newui::AnimationManager::addToRunLoop(app.runLoop());
-
-	v.onSizeChanged += [](newui::View& v, const newui::Size& newSize) -> newui::SyncReturn {
-		newui::RootView& view = reinterpret_cast<newui::RootView&>(v);
-		printf("View (%p, hwnd: %p) size changed to %.0fx%.0f\n", &view, view.getFrame()->frameHandle(), newSize.width, newSize.height);
-        return newui::SyncReturn::Handled;
-		};  
-
-
-    v.onMouseMove += [](newui::View& v, const newui::Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) -> newui::SyncReturn {
-		
-		printf("View (%p) mouse moved to %.0f,%.0f\n", &v, pt.x, pt.y);
-        return newui::SyncReturn::Handled;
-		};
-
-
-    v.onKeyPress += [](newui::View& v, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) -> newui::SyncReturn {
-
-		char c = (char)keyCharVal;
-        printf("View (%p) key pressed: '%c'\n", &v, c);
-        return newui::SyncReturn::Handled;
-        };
 
     app.run();
 

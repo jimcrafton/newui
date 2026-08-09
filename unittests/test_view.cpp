@@ -14,30 +14,37 @@ newui::RootView* SentinelRoot() {
 }  // namespace
 
 TEST(ViewPropagateRootView, SetsItOnASingleView) {
-    newui::SubView view;
+    auto* view = new newui::SubView();
 
-    view.propagateRootView(SentinelRoot());
+    view->propagateRootView(SentinelRoot());
 
-    EXPECT_EQ(view.rootView(), SentinelRoot());
+    EXPECT_EQ(view->rootView(), SentinelRoot());
+
+    delete view;
 }
 
 TEST(ViewPropagateRootView, NullClearsIt) {
-    newui::SubView view;
-    view.propagateRootView(SentinelRoot());
+    auto* view = new newui::SubView();
+    view->propagateRootView(SentinelRoot());
 
-    view.propagateRootView(nullptr);
+    view->propagateRootView(nullptr);
 
-    EXPECT_EQ(view.rootView(), nullptr);
+    EXPECT_EQ(view->rootView(), nullptr);
+
+    delete view;
 }
 
 TEST(SubViewAddChild, PropagatesRootViewToNewChild) {
-    newui::SubView parent;
-    newui::SubView child;
-    parent.propagateRootView(SentinelRoot());
+    auto* parent = new newui::SubView();
+    auto* child = new newui::SubView();
+    parent->propagateRootView(SentinelRoot());
 
-    parent.addChild(&child);
+    parent->addChild(child);
 
-    EXPECT_EQ(child.rootView(), SentinelRoot());
+    EXPECT_EQ(child->rootView(), SentinelRoot());
+
+    delete child;
+    delete parent;
 }
 
 TEST(SubViewAddChild, PropagatesRootViewToPreexistingGrandchildren) {
@@ -45,33 +52,41 @@ TEST(SubViewAddChild, PropagatesRootViewToPreexistingGrandchildren) {
     // RootView - the gap this guards against: attaching just the
     // immediate child to a rooted parent used to leave already-existing
     // descendants (grandchild here) with a stale/null rootView().
-    newui::SubView grandchild;
-    newui::SubView child;
-    child.addChild(&grandchild);
+    auto* grandchild = new newui::SubView();
+    auto* child = new newui::SubView();
+    child->addChild(grandchild);
 
-    EXPECT_EQ(grandchild.rootView(), nullptr);  // nothing rooted yet
+    EXPECT_EQ(grandchild->rootView(), nullptr);  // nothing rooted yet
 
-    newui::SubView parent;
-    parent.propagateRootView(SentinelRoot());
+    auto* parent = new newui::SubView();
+    parent->propagateRootView(SentinelRoot());
 
-    parent.addChild(&child);
+    parent->addChild(child);
 
-    EXPECT_EQ(child.rootView(), SentinelRoot());
-    EXPECT_EQ(grandchild.rootView(), SentinelRoot());  // propagated through
+    EXPECT_EQ(child->rootView(), SentinelRoot());
+    EXPECT_EQ(grandchild->rootView(), SentinelRoot());  // propagated through
+
+    delete grandchild;
+    delete child;
+    delete parent;
 }
 
 TEST(SubViewRemoveChild, PropagatesNullToWholeDetachedSubtree) {
-    newui::SubView grandchild;
-    newui::SubView child;
-    child.addChild(&grandchild);
+    auto* grandchild = new newui::SubView();
+    auto* child = new newui::SubView();
+    child->addChild(grandchild);
 
-    newui::SubView parent;
-    parent.propagateRootView(SentinelRoot());
-    parent.addChild(&child);
-    ASSERT_EQ(grandchild.rootView(), SentinelRoot());
+    auto* parent = new newui::SubView();
+    parent->propagateRootView(SentinelRoot());
+    parent->addChild(child);
+    ASSERT_EQ(grandchild->rootView(), SentinelRoot());
 
-    parent.removeChild(&child);
+    parent->removeChild(child);
 
-    EXPECT_EQ(child.rootView(), nullptr);
-    EXPECT_EQ(grandchild.rootView(), nullptr);
+    EXPECT_EQ(child->rootView(), nullptr);
+    EXPECT_EQ(grandchild->rootView(), nullptr);
+
+    delete grandchild;
+    delete child;
+    delete parent;
 }

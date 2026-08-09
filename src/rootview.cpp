@@ -28,6 +28,12 @@ namespace newui {
 		}
 
 		bounds_ = bounds;
+		// updateLayout() before resizeImageBuffer(): the latter is what
+		// triggers the actual repaint (via notifyRedrawNeeded()), so
+		// children need their new bounds in place first - otherwise
+		// that repaint would still walk childViews_ at their pre-resize
+		// positions/sizes.
+		updateLayout();
 		resizeImageBuffer((int)bounds_.size().width, (int)bounds_.size().height);
 		onSizeChanged(*this, bounds_.size());
 		::SetWindowPos(viewHwnd_, NULL,

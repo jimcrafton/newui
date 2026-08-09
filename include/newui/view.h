@@ -7,6 +7,7 @@
 #include <newui/newui.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
+#include <newui/layout.h>
 #include <newui/viewstyle.h>
 
 namespace newui {
@@ -17,6 +18,12 @@ namespace newui {
     // and the trivial accessors that read it identically in both. Anything
     // whose behavior differs between the two (setBounds, setVisible,
     // addChild/removeChild, initialize, destroy) stays in the derived class.
+    //
+    // Heap-only by convention, never stack/member-embedded: construct
+    // SubView/RootView with new, same as everything else this codebase
+    // owns via a raw pointer (a parent's childViews_, PropertyManager's
+    // properties_, Frame's rootView_, ...) and frees explicitly - see
+    // View::destroy().
     class View {
     public:
         virtual ~View() = default;
@@ -52,6 +59,34 @@ namespace newui {
 
         virtual void addChild(SubView* child);
         virtual void removeChild(SubView* child);
+
+        // Read-only view of this View's direct children, in the order
+        // addChild() attached them - what a Layout arranges (see
+        // Layout::arrange()).
+        const std::vector<SubView*>& childViews() const {
+            return childViews_;
+        }
+
+        Layout* layout() const {
+            return layout_.get();
+        }
+
+        // Swaps in a different Layout (e.g. std::make_unique<StackLayout>())
+        // to arrange childViews() automatically - see Layout and
+        // updateLayout(). Pass nullptr to go back to manual positioning
+        // (childViews() bounds are left exactly as they are until
+        // something else sets them, same as before a Layout was ever
+        // attached).
+        void setLayout(std::unique_ptr<Layout> layout);
+
+        // Re-runs layout()->arrange(*this), if a Layout is attached; a
+        // no-op otherwise. Called automatically whenever this View's own
+        // size changes (SubView::setBounds()/RootView::setBounds()) or
+        // its child list changes (addChild()/removeChild()) - normal use
+        // never needs to call this directly; it's exposed for the rare
+        // case of forcing a re-arrange without either of those (e.g.
+        // after mutating a child's LayoutParams in place).
+        void updateLayout();
 
         ViewStyle& style() {
             return *style_;
@@ -160,6 +195,8 @@ namespace newui {
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;
+
+        std::unique_ptr<Layout> layout_;
 
         std::vector<SubView*> childViews_;
 

@@ -13,13 +13,13 @@ namespace newui {
 
 	class SubView;
 
+    // Heap-only, like View - see View's class comment. Construct with
+    // new RootView(...), not on the stack - see Frame::rootView_ for
+    // the only place this is currently done.
     class RootView : public View {
     public:
-        RootView( Frame* frame, const newui::Rect& bounds, const std::string& name );
+        RootView(Frame* frame, const newui::Rect& bounds, const std::string& name);
         virtual ~RootView();
-
-
-
 
         void setBounds(const Rect& bounds);
         void setVisible(bool visible);

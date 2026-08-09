@@ -30,7 +30,7 @@ add_library(newui STATIC
     "src/rootview.cpp"
     src/subview.cpp
     src/fontmanager.cpp
- "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp")
+ "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp" "include/newui/layout.h" "src/layout.cpp")
 
 target_include_directories(newui PUBLIC
     include

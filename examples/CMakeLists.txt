@@ -32,3 +32,9 @@ add_executable(animation1
 )
 
 target_link_libraries(animation1 PRIVATE newui)
+
+add_executable(layout1
+    layout1.cpp
+)
+
+target_link_libraries(layout1 PRIVATE newui)

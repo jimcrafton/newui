@@ -22,10 +22,23 @@ namespace newui {
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);
+		updateLayout();
 	}
 
 	void View::removeChild(SubView* child) {
 		childViews_.erase(std::remove(childViews_.begin(), childViews_.end(), child), childViews_.end());
+		updateLayout();
+	}
+
+	void View::setLayout(std::unique_ptr<Layout> layout) {
+		layout_ = std::move(layout);
+		updateLayout();
+	}
+
+	void View::updateLayout() {
+		if (layout_) {
+			layout_->arrange(*this);
+		}
 	}
 
 	void View::propagateRootView(RootView* root) {

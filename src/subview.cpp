@@ -17,6 +17,7 @@ void SubView::setBounds(const Rect& bounds) {
 
     bounds_ = bounds;
     onSizeChanged(*this, bounds_.size());
+    updateLayout();
 }
 
 void SubView::setVisible(bool visible) {
