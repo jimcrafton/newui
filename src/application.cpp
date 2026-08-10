@@ -4,6 +4,9 @@
 #include "newui/newui.h"
 #include "newui/runloop.h"
 
+#include <json5/json5.hpp>
+#include <json5/json5_builder.hpp>
+
 #include <stdexcept>
 
 namespace newui {
@@ -189,48 +192,77 @@ void Application::run() {
         return;
     }
     
-    instanceHandle_ = ::GetModuleHandle(NULL);
+	try {
+		instanceHandle_ = ::GetModuleHandle(NULL);
 
-    INITCOMMONCONTROLSEX icc{};
-    icc.dwSize = sizeof(icc);
-    icc.dwICC = ICC_WIN95_CLASSES;
-    if (!::InitCommonControlsEx(&icc)) {
-        throw std::runtime_error("newui::Application: InitCommonControlsEx failed");
-    }
-    HWND parent = ::GetDesktopWindow();
-    
-    //RegisterWin32ToolKitClass(::GetModuleHandleW(NULL));
-    WNDCLASSEXA wcex;
-	std::string className = "Application-dummy-" + name_;
+		INITCOMMONCONTROLSEX icc{};
+		icc.dwSize = sizeof(icc);
+		icc.dwICC = ICC_WIN95_CLASSES;
+		if (!::InitCommonControlsEx(&icc)) {
+			throw std::runtime_error("newui::Application: InitCommonControlsEx failed");
+		}
+		HWND parent = ::GetDesktopWindow();
 
-    wcex.cbSize = sizeof(wcex);
+		//RegisterWin32ToolKitClass(::GetModuleHandleW(NULL));
+		WNDCLASSEXA wcex;
+		std::string className = "Application-dummy-" + name_;
 
-    wcex.style = 0;
-    wcex.lpfnWndProc = (WNDPROC)Application::DummyWndProc;
-    wcex.cbClsExtra = 0;
-    wcex.cbWndExtra = 0;
-    wcex.hInstance = instanceHandle_;
-    wcex.hIcon = NULL;
-    wcex.hCursor = NULL;
-    wcex.hbrBackground = 0;
-    wcex.lpszMenuName = NULL;
-    wcex.lpszClassName = className.c_str();
-    wcex.hIconSm = NULL;
+		wcex.cbSize = sizeof(wcex);
 
-    ::RegisterClassExA(&wcex);
+		wcex.style = 0;
+		wcex.lpfnWndProc = (WNDPROC)Application::DummyWndProc;
+		wcex.cbClsExtra = 0;
+		wcex.cbWndExtra = 0;
+		wcex.hInstance = instanceHandle_;
+		wcex.hIcon = NULL;
+		wcex.hCursor = NULL;
+		wcex.hbrBackground = 0;
+		wcex.lpszMenuName = NULL;
+		wcex.lpszClassName = className.c_str();
+		wcex.hIconSm = NULL;
 
-	
-    dummyWindowHandle_ = ::CreateWindowA(className.c_str(), NULL, WS_POPUP, 0, 0, 0, 0, parent, NULL, instanceHandle_, NULL);
-    
-
-    if (!frame_->initialize()) {
-        throw std::runtime_error("newui::Application: Failed to initialize frame");
-    }
-    
-    frame_->onDestroyed += FrameDestroyed;
+		::RegisterClassExA(&wcex);
 
 
-	runLoop_.run();
+		dummyWindowHandle_ = ::CreateWindowA(className.c_str(), NULL, WS_POPUP, 0, 0, 0, 0, parent, NULL, instanceHandle_, NULL);
+
+
+		if (!frame_->initialize()) {
+			throw std::runtime_error("newui::Application: Failed to initialize frame");
+		}
+
+		frame_->onDestroyed += FrameDestroyed;
+
+
+
+
+		runLoop_.run();
+	}
+	catch (const std::exception& e) {
+		printf("exception trapped: %s", e.what());
+		throw e;
+	}
+}
+
+void Application::writeFields(json5::builder& w) const {
+	w.push_object();
+	for (const auto& kvp : customValues_) {
+		w[kvp.first] = w.new_string(kvp.second);
+	}
+	w["custom"] = w.pop();
+}
+
+void Application::readFields(const json5::value& obj) {
+	customValues_.clear();
+
+	json5::value customVal = obj["custom"];
+	if (!customVal.is_object()) {
+		return;
+	}
+
+	for (auto kvp : json5::object_view(customVal)) {
+		customValues_[kvp.first] = kvp.second.get_c_str("");
+	}
 }
 
 }

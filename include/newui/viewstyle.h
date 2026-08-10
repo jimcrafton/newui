@@ -3,6 +3,7 @@
 #include <blend2d/blend2d.h>
 #include <newui/font.h>
 #include <newui/geometry.h>
+#include <newui/uicomponent.h>
 
 namespace newui {
     class View;
@@ -70,8 +71,8 @@ namespace newui {
     // (a 3D edge, a checkmark, ...) - paint() is the extension point;
     // override it, call ViewStyle::paint() first for the background/
     // border, then add whatever's specific to that widget kind.
-    class ViewStyle {
-    public:        
+    class ViewStyle : public UIComponent {
+    public:
         virtual ~ViewStyle() = default;
 
         BLVar backgroundFill;
@@ -148,6 +149,15 @@ namespace newui {
         }
 
         void markDirty();
+
+        // UIComponent: backgroundFill/borderFill/borderWidth/highlightFill/
+        // opacity/compositingOp/font. Defined out-of-line in viewstyle.cpp
+        // (unlike paint() above) since the json5 types writeFields()/
+        // readFields() take are only forward-declared here (see
+        // uicomponent.h) - keeps json5's real headers out of this one.
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
     private:
         View* view_ = nullptr;
     };
@@ -182,6 +192,9 @@ namespace newui {
             bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
             clientBounds = clientBounds.deflated(doubled ? edgeWidth * 2.0f : edgeWidth);
         }
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
     };
 
     // ViewStyle plus a single line of text (background/border only besides
@@ -235,6 +248,9 @@ namespace newui {
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
             ctx.restore();
         }
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),
@@ -294,6 +310,9 @@ namespace newui {
             // drawn by the client goes to the right of that.
             clientBounds = clientBounds.deflated(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
         }
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
     };
 
 }

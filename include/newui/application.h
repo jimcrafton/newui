@@ -3,15 +3,17 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "newui/newui.h"
 #include "newui/runloop.h"
+#include "newui/uicomponent.h"
 
 namespace newui {
 
     class Frame; // Forward declaration of Frame class
 
-class Application {
+class Application : public UIComponent {
 public:
     static Application& instance();
 
@@ -28,6 +30,9 @@ public:
 
     void setFrame(Frame* frame);
     Frame* getFrame() {
+        return frame_;
+    }
+    const Frame* getFrame() const {
         return frame_;
     }
 
@@ -49,6 +54,34 @@ public:
 	HWND dummyWindowHandle() const {
 		return dummyWindowHandle_;
 	}
+
+    // Open-ended bag for whatever app-specific data a caller wants to
+    // persist alongside window state - e.g. "lastOpenedFile". Written/
+    // read as a nested "custom" object of strings by writeFields()/
+    // readFields() below. name_ (the dummy-window Win32 class-name
+    // component) is deliberately not part of that - it's a startup
+    // identity set by app code (setName()), not restorable session state.
+    void setCustomValue(const std::string& key, const std::string& value) {
+        customValues_[key] = value;
+    }
+
+    bool getCustomValue(const std::string& key, std::string& outValue) const {
+        auto it = customValues_.find(key);
+        if (it == customValues_.end()) {
+            return false;
+        }
+        outValue = it->second;
+        return true;
+    }
+
+    const std::unordered_map<std::string, std::string>& customValues() const {
+        return customValues_;
+    }
+
+    // UIComponent: just the custom-data bag above.
+    void writeFields(json5::builder& w) const override;
+    void readFields(const json5::value& obj) override;
+
 private:
     Application();
     ~Application();
@@ -61,6 +94,7 @@ private:
 	HWND dummyWindowHandle_ = nullptr;
     HINSTANCE instanceHandle_ = nullptr;
     RunLoop runLoop_;
+    std::unordered_map<std::string, std::string> customValues_;
 
     static LRESULT CALLBACK DummyWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 

@@ -1,5 +1,9 @@
 #include "newui/view.h"
 #include "newui/subview.h"
+#include "newui/json5_helpers.h"
+
+#include <json5/json5.hpp>
+#include <json5/json5_builder.hpp>
 
 namespace newui {
 	bool View::initialize()
@@ -73,6 +77,18 @@ namespace newui {
 
 		if (style_) {
 			style_->paint(ctx, bounds_.size(), highlighted_, clientBounds_);
-		} 
+		}
+	}
+
+	void View::writeFields(json5::builder& w) const {
+		w["name"] = w.new_string(name_);
+		w["visible"] = visible_;
+		writeRect(w, "bounds", bounds_);
+	}
+
+	void View::readFields(const json5::value& obj) {
+		name_ = obj["name"].get_c_str(name_.c_str());
+		visible_ = obj["visible"].get_bool(visible_);
+		bounds_ = readRect(obj["bounds"], bounds_);
 	}
 }

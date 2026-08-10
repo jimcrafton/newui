@@ -23,6 +23,12 @@ set(ASMJIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/asmjit CACHE PATH "" FORCE)
 
 add_subdirectory(3rdparty/blend2d)
 
+# json5 - Dependency
+# ==================
+# Vendored under 3rdparty/ as a permanent part of the project (P-i-N/json5,
+# MIT, header-only) - used by the UIComponent-based save/load format (see
+# include/newui/serialization.h).
+
 add_library(newui STATIC
     src/newui.cpp
     src/application.cpp
@@ -30,11 +36,15 @@ add_library(newui STATIC
     "src/rootview.cpp"
     src/subview.cpp
     src/fontmanager.cpp
- "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp" "include/newui/layout.h" "src/layout.cpp")
+ "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp" "include/newui/layout.h" "src/layout.cpp"
+    "include/newui/uicomponent.h" "src/uicomponent.cpp"
+    "include/newui/json5_helpers.h" "src/json5_helpers.cpp"
+    "include/newui/serialization.h" "src/serialization.cpp")
 
 target_include_directories(newui PUBLIC
     include
     ${CMAKE_CURRENT_BINARY_DIR}/include
+    3rdparty/json5/include
 )
 
 target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib)

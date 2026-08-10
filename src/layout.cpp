@@ -4,6 +4,106 @@
 
 #include "newui/subview.h"
 #include "newui/view.h"
+#include "newui/json5_helpers.h"
+
+#include <json5/json5.hpp>
+#include <json5/json5_builder.hpp>
+
+namespace {
+
+    const char* orientationToString(newui::Orientation v) {
+        return v == newui::Orientation::Horizontal ? "Horizontal" : "Vertical";
+    }
+
+    newui::Orientation orientationFromString(const std::string& s, newui::Orientation defaultValue) {
+        if (s == "Horizontal") return newui::Orientation::Horizontal;
+        if (s == "Vertical") return newui::Orientation::Vertical;
+        return defaultValue;
+    }
+
+    const char* mainAxisAlignmentToString(newui::MainAxisAlignment v) {
+        switch (v) {
+            case newui::MainAxisAlignment::Start: return "Start";
+            case newui::MainAxisAlignment::Center: return "Center";
+            case newui::MainAxisAlignment::End: return "End";
+            case newui::MainAxisAlignment::SpaceBetween: return "SpaceBetween";
+            case newui::MainAxisAlignment::SpaceAround: return "SpaceAround";
+            case newui::MainAxisAlignment::SpaceEvenly: return "SpaceEvenly";
+        }
+        return "Start";
+    }
+
+    newui::MainAxisAlignment mainAxisAlignmentFromString(const std::string& s, newui::MainAxisAlignment defaultValue) {
+        if (s == "Start") return newui::MainAxisAlignment::Start;
+        if (s == "Center") return newui::MainAxisAlignment::Center;
+        if (s == "End") return newui::MainAxisAlignment::End;
+        if (s == "SpaceBetween") return newui::MainAxisAlignment::SpaceBetween;
+        if (s == "SpaceAround") return newui::MainAxisAlignment::SpaceAround;
+        if (s == "SpaceEvenly") return newui::MainAxisAlignment::SpaceEvenly;
+        return defaultValue;
+    }
+
+    const char* crossAxisAlignmentToString(newui::CrossAxisAlignment v) {
+        switch (v) {
+            case newui::CrossAxisAlignment::Start: return "Start";
+            case newui::CrossAxisAlignment::Center: return "Center";
+            case newui::CrossAxisAlignment::End: return "End";
+            case newui::CrossAxisAlignment::Stretch: return "Stretch";
+        }
+        return "Stretch";
+    }
+
+    newui::CrossAxisAlignment crossAxisAlignmentFromString(const std::string& s, newui::CrossAxisAlignment defaultValue) {
+        if (s == "Start") return newui::CrossAxisAlignment::Start;
+        if (s == "Center") return newui::CrossAxisAlignment::Center;
+        if (s == "End") return newui::CrossAxisAlignment::End;
+        if (s == "Stretch") return newui::CrossAxisAlignment::Stretch;
+        return defaultValue;
+    }
+
+    // Anchor is a bitflag enum - written/read as a "|"-joined list of the
+    // flags that are set, e.g. "Left|Top".
+    std::string anchorToString(newui::Anchor a) {
+        std::string result;
+        auto append = [&](newui::Anchor flag, const char* name) {
+            if (newui::hasAnchor(a, flag)) {
+                if (!result.empty()) {
+                    result += '|';
+                }
+                result += name;
+            }
+        };
+        append(newui::Anchor::Left, "Left");
+        append(newui::Anchor::Top, "Top");
+        append(newui::Anchor::Right, "Right");
+        append(newui::Anchor::Bottom, "Bottom");
+        append(newui::Anchor::CenterX, "CenterX");
+        append(newui::Anchor::CenterY, "CenterY");
+        return result;
+    }
+
+    newui::Anchor anchorFromString(const std::string& s) {
+        newui::Anchor result = newui::Anchor::None;
+        size_t start = 0;
+        while (start <= s.size()) {
+            size_t sep = s.find('|', start);
+            std::string token = s.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
+            if (token == "Left") result |= newui::Anchor::Left;
+            else if (token == "Top") result |= newui::Anchor::Top;
+            else if (token == "Right") result |= newui::Anchor::Right;
+            else if (token == "Bottom") result |= newui::Anchor::Bottom;
+            else if (token == "CenterX") result |= newui::Anchor::CenterX;
+            else if (token == "CenterY") result |= newui::Anchor::CenterY;
+
+            if (sep == std::string::npos) {
+                break;
+            }
+            start = sep + 1;
+        }
+        return result;
+    }
+
+}
 
 namespace newui {
 
@@ -267,6 +367,67 @@ namespace newui {
         }
 
         show((activeIndex_ + children.size() - 1) % children.size());
+    }
+
+    void AnchorLayoutParams::writeFields(json5::builder& w) const {
+        w["anchors"] = w.new_string(anchorToString(anchors));
+        w["leftMargin"] = leftMargin;
+        w["topMargin"] = topMargin;
+        w["rightMargin"] = rightMargin;
+        w["bottomMargin"] = bottomMargin;
+        w["width"] = width;
+        w["height"] = height;
+    }
+
+    void AnchorLayoutParams::readFields(const json5::value& obj) {
+        anchors = anchorFromString(obj["anchors"].get_c_str(""));
+        leftMargin = obj["leftMargin"].get<float>(leftMargin);
+        topMargin = obj["topMargin"].get<float>(topMargin);
+        rightMargin = obj["rightMargin"].get<float>(rightMargin);
+        bottomMargin = obj["bottomMargin"].get<float>(bottomMargin);
+        width = obj["width"].get<float>(width);
+        height = obj["height"].get<float>(height);
+    }
+
+    void StackLayoutParams::writeFields(json5::builder& w) const {
+        w["weight"] = weight;
+        if (crossAxisAlignment.has_value()) {
+            w["crossAxisAlignment"] = w.new_string(crossAxisAlignmentToString(*crossAxisAlignment));
+        }
+    }
+
+    void StackLayoutParams::readFields(const json5::value& obj) {
+        weight = obj["weight"].get<float>(weight);
+
+        if (json5::value v = obj["crossAxisAlignment"]; v.is_string()) {
+            crossAxisAlignment = crossAxisAlignmentFromString(v.get_c_str(), CrossAxisAlignment::Stretch);
+        } else {
+            crossAxisAlignment.reset();
+        }
+    }
+
+    void StackLayout::writeFields(json5::builder& w) const {
+        w["orientation"] = w.new_string(orientationToString(orientation_));
+        w["mainAxisAlignment"] = w.new_string(mainAxisAlignmentToString(mainAxisAlignment_));
+        w["crossAxisAlignment"] = w.new_string(crossAxisAlignmentToString(crossAxisAlignment_));
+        w["spacing"] = spacing_;
+        w["padding"] = padding_;
+    }
+
+    void StackLayout::readFields(const json5::value& obj) {
+        orientation_ = orientationFromString(obj["orientation"].get_c_str(""), orientation_);
+        mainAxisAlignment_ = mainAxisAlignmentFromString(obj["mainAxisAlignment"].get_c_str(""), mainAxisAlignment_);
+        crossAxisAlignment_ = crossAxisAlignmentFromString(obj["crossAxisAlignment"].get_c_str(""), crossAxisAlignment_);
+        spacing_ = obj["spacing"].get<float>(spacing_);
+        padding_ = obj["padding"].get<float>(padding_);
+    }
+
+    void CardLayout::writeFields(json5::builder& w) const {
+        w["activeIndex"] = double(activeIndex_);
+    }
+
+    void CardLayout::readFields(const json5::value& obj) {
+        activeIndex_ = obj["activeIndex"].get<std::size_t>(activeIndex_);
     }
 
 }

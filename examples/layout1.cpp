@@ -14,6 +14,13 @@
 // RootView::setBounds() call View::updateLayout() automatically; see
 // view.h).
 
+
+
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+
+
 #include "newui/newui.h"
 #include "newui/application.h"
 #include "newui/frame.h"
@@ -47,6 +54,11 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
 }
 
 int main() {
+
+    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+
+
+
     std::cout << "newui " << newui::version() << " - layout example\n";
     std::cout << "Sidebar + 3 flexible panels (StackLayout), badge pinned via a nested AnchorLayout.\n";
     std::cout << "Resize the window to see StackLayout re-flow the row live.\n";

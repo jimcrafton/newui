@@ -1,3 +1,11 @@
+
+
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+
+
+
 #include "newui/newui.h"
 #include "newui/application.h"
 #include "newui/frame.h"
@@ -48,6 +56,9 @@ newui::SyncReturn BackgroundColorChanged(newui::Property<AnimatedLabelStyle, new
 
 
 int main() {
+    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+
+
     std::cout << "newui " << newui::version() << "\n";
 
     newui::Frame frame;

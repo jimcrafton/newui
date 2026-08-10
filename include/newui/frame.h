@@ -4,12 +4,13 @@
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/rootview.h>
+#include <newui/uicomponent.h>
 #include <tuple>
 
 
 namespace newui {
 
-class Frame {
+class Frame : public UIComponent {
 public:
     Frame();
     ~Frame();
@@ -32,6 +33,9 @@ public:
 
 	void setBounds(const Rect& bounds);
 
+	const Rect& getBounds() const {
+		return bounds_;
+	}
 
 	std::tuple<Frame*, RootView*> getTarget(HWND hwnd) ;
 
@@ -55,6 +59,16 @@ public:
 	const RootView& getView() const {
 		return *rootView_;
 	}
+
+	// UIComponent: title_/bounds_ directly (plain data members, no live
+	// HWND needed - works even before initialize() creates frameHandle_).
+	// Also queries/restores the live show-state (normal/maximized/
+	// minimized) via WINDOWPLACEMENT - that half needs a live
+	// frameHandle_, so readFields() should only be called once
+	// initialize() has run; see Frame::onCreated for the recommended
+	// integration point.
+	void writeFields(json5::builder& w) const override;
+	void readFields(const json5::value& obj) override;
 
     private:
     std::string title_;

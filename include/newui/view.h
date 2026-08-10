@@ -8,6 +8,7 @@
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
+#include <newui/uicomponent.h>
 #include <newui/viewstyle.h>
 
 namespace newui {
@@ -24,7 +25,7 @@ namespace newui {
     // owns via a raw pointer (a parent's childViews_, PropertyManager's
     // properties_, Frame's rootView_, ...) and frees explicitly - see
     // View::destroy().
-    class View {
+    class View : public UIComponent {
     public:
         virtual ~View() = default;
 
@@ -185,6 +186,12 @@ namespace newui {
         // plain setRootView() for exactly that reason.
         void propagateRootView(RootView* root);
 
+        // UIComponent: covers name_/bounds_/visible_ only - style_/layout_/
+        // childViews_ are nested UIComponents of their own, composed by
+        // the tree-walker in serialization.cpp, not written here. See
+        // SubView/RootView for the typeName()-relevant subclass overrides.
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
 
     protected:
         Rect bounds_;

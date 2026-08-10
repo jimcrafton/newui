@@ -49,6 +49,7 @@ namespace newui {
 		// imageBuffer_ points directly into it.
 		imageBuffer_.reset();
 
+
 		if (width <= 0 || height <= 0) {
 			imagePixels_.clear();
 			return;
@@ -56,6 +57,7 @@ namespace newui {
 
 		const size_t stride = size_t(width) * 4;
 		imagePixels_.assign(stride * size_t(height), 0);
+		imagePixels_.shrink_to_fit();
 
 		imageBuffer_.create_from_data(width, height, BL_FORMAT_XRGB32, imagePixels_.data(), intptr_t(stride));
 
@@ -76,7 +78,7 @@ namespace newui {
 		if (imagePixels_.empty()) {
 			return;
 		}
-
+		
 		BLContext ctx(imageBuffer_);
 		paintStyle(ctx);
 		paint(ctx);
@@ -89,6 +91,7 @@ namespace newui {
 			return;
 		}
 
+		
 		BLImageData data;
 		imageBuffer_.get_data(&data);
 
@@ -100,9 +103,11 @@ namespace newui {
 		bmi.bmiHeader.biBitCount = 32;
 		bmi.bmiHeader.biCompression = BI_RGB;
 
+
 		::StretchDIBits(hdc, 0, 0, data.size.w, data.size.h,
 			0, 0, data.size.w, data.size.h,
 			data.pixel_data, &bmi, DIB_RGB_COLORS, SRCCOPY);
+
 	}
 
 	void RootView::invalidate() {

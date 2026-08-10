@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 
+#include <newui/uicomponent.h>
+
 namespace newui {
 
     class View;
@@ -18,9 +20,14 @@ namespace newui {
     // set (or one of the wrong kind for whichever Layout is attached to
     // its parent) gets that Layout's own default behavior for the unset
     // case - see each Layout subclass's arrange() for what that is.
-    class LayoutParams {
+    class LayoutParams : public UIComponent {
     public:
         virtual ~LayoutParams() = default;
+
+        // No fields of its own - trivial no-op base, overridden by
+        // AnchorLayoutParams/StackLayoutParams for their own fields.
+        void writeFields(json5::builder& w) const override {}
+        void readFields(const json5::value& obj) override {}
     };
 
     // Arranges a View's direct children (its childViews() - always
@@ -39,7 +46,7 @@ namespace newui {
     // will have children slightly overlap it; pad the affected children
     // (e.g. AnchorLayoutParams' margins, or StackLayout::setPadding()) to
     // compensate if that matters.
-    class Layout {
+    class Layout : public UIComponent {
     public:
         virtual ~Layout() = default;
 
@@ -52,6 +59,11 @@ namespace newui {
         // CardLayout is the exception: it owns visibility itself (see
         // its class comment), so it doesn't pre-filter by it.
         virtual void arrange(View& container) = 0;
+
+        // No fields of its own - trivial no-op base, overridden by
+        // AnchorLayout/StackLayout/CardLayout for their own fields.
+        void writeFields(json5::builder& w) const override {}
+        void readFields(const json5::value& obj) override {}
     };
 
     // Which edges (and/or centerlines) of the container a child pinned
@@ -114,6 +126,9 @@ namespace newui {
         // instead.
         float width = 0.0f;
         float height = 0.0f;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
     };
 
     // Pins each child to some combination of its container's edges and
@@ -126,6 +141,9 @@ namespace newui {
     class AnchorLayout : public Layout {
     public:
         void arrange(View& container) override;
+
+        // No fields of its own (unlike StackLayout/CardLayout) - inherits
+        // Layout's no-op writeFields()/readFields().
     };
 
     // Which direction a StackLayout arranges its children along - the
@@ -185,6 +203,9 @@ namespace newui {
         // Overrides the StackLayout's own crossAxisAlignment for this
         // child alone; unset (the default) means "use the container's".
         std::optional<CrossAxisAlignment> crossAxisAlignment;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
     };
 
     // Arranges children in a single row (Orientation::Horizontal) or
@@ -241,6 +262,9 @@ namespace newui {
 
         void arrange(View& container) override;
 
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
     private:
         Orientation orientation_;
         MainAxisAlignment mainAxisAlignment_ = MainAxisAlignment::Start;
@@ -286,6 +310,16 @@ namespace newui {
         std::size_t activeIndex() const {
             return activeIndex_;
         }
+
+        // Written/read as a plain index (not resolved through show(name)'s
+        // by-name lookup) - the tree-walker rebuilds children before
+        // restoring layout state, but readFields() itself has no way to
+        // reach this Layout's container to validate/clamp the index against
+        // childViews() at read time; arrange() already clamps it lazily
+        // the next time it runs (see the class comment), so an
+        // out-of-range value loaded here is harmless.
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
 
     private:
         std::size_t activeIndex_ = 0;
