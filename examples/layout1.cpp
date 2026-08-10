@@ -16,11 +16,6 @@
 
 
 
-#define _CRTDBG_MAP_ALLOC
-#include <stdlib.h>
-#include <crtdbg.h>
-
-
 #include "newui/newui.h"
 #include "newui/application.h"
 #include "newui/frame.h"
@@ -28,6 +23,7 @@
 #include "newui/subview.h"
 #include "newui/layout.h"
 #include "newui/color.h"
+#include "newui/serialization.h"
 #include <blend2d/blend2d.h>
 
 #include <iostream>
@@ -35,6 +31,9 @@
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
     printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+
+    //saveFrameToFile(frame, "frame.json");
+
     return newui::SyncReturn::Handled;
 }
 
@@ -55,20 +54,20 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
 
 int main() {
 
-    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
-
-
-
     std::cout << "newui " << newui::version() << " - layout example\n";
     std::cout << "Sidebar + 3 flexible panels (StackLayout), badge pinned via a nested AnchorLayout.\n";
     std::cout << "Resize the window to see StackLayout re-flow the row live.\n";
 
     newui::Frame frame;
 
+    //D:\code\newui\out\build\x64-Debug\examples\frame.json
+    loadFrameToFile(frame, "D:\\code\\newui\\out\\build\\x64-Debug\\examples\\frame.json");
+
     newui::Application& app = newui::Application::instance();
     app.setName("layout1");
     app.setFrame(&frame);
 
+    /*
     frame.setTitle("Layout Example");
     frame.setBounds(newui::Rect(10, 10, 900, 500));
     frame.onClosed += FrameClosed;
@@ -123,7 +122,7 @@ int main() {
     badgeParams->height = 24.0f;
     badge->setLayoutParams(std::move(badgeParams));
     content1->addChild(badge);
-
+    */
     app.run();
 
     return 0;

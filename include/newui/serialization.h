@@ -37,13 +37,9 @@ namespace newui {
         }
 
         // Internal - used by the tree walker in serialization.cpp. Return
-        // nullptr/empty unique_ptr if name isn't registered.
-        static SubView* createSubView(const std::string& name);
-        static std::unique_ptr<ViewStyle> createStyle(const std::string& name);
-        static std::unique_ptr<Layout> createLayout(const std::string& name);
-        static std::unique_ptr<LayoutParams> createLayoutParams(const std::string& name);
-
-
+        // nullptr/empty unique_ptr if name isn't registered (or is
+        // registered as a different kind than T - e.g.
+        // createInstancePtr<Layout>("ButtonStyle")).
         template< typename T>
         static T* createInstancePtr(const std::string& name) {
             T* result = nullptr;
@@ -51,10 +47,18 @@ namespace newui {
             auto& inst = SerializationRegistry::instance();
             auto found = inst.factories_.find(name);
             if (found != inst.factories_.end()) {
-                auto createFn = found->second;
+                const auto& createFn = found->second;
                 auto ptr = createFn();
                 result = dynamic_cast<T*>(ptr.get());
-                ptr.release();
+                if (result != nullptr) {
+                    // Ownership transfers to the caller (raw - matches
+                    // SubView's own new/delete convention, and is what
+                    // createInstance<T>() below re-wraps in a unique_ptr
+                    // for its own callers). Only release when the cast
+                    // succeeded - ptr's destructor cleans up correctly on
+                    // a kind mismatch instead of leaking result.
+                    ptr.release();
+                }
             }
 
             return result;
@@ -103,14 +107,6 @@ namespace newui {
 
             factories_[demangleTypeName(typeid(T))] = [] { return std::unique_ptr<UIComponent>(new T()); };
         }
-
-
-        
-
-        // Default-constructs the type registered under name, or nullptr if
-        // name isn't registered. create*() below downcast this via
-        // dynamic_cast to the kind they need.
-        std::unique_ptr<UIComponent> create(const std::string& name) const;
 
         std::unordered_map<std::string, std::function<std::unique_ptr<UIComponent>()>> factories_;
     };

@@ -28,54 +28,6 @@ namespace newui {
         return registry;
     }
 
-    std::unique_ptr<UIComponent> SerializationRegistry::create(const std::string& name) const {
-        auto it = factories_.find(name);
-        return it != factories_.end() ? it->second() : nullptr;
-    }
-
-    /*
-
-    SubView* SerializationRegistry::createSubView(const std::string& name) {
-        std::unique_ptr<UIComponent> c = instance().create(name);
-        SubView* result = dynamic_cast<SubView*>(c.get());
-        if (result == nullptr) {
-            return nullptr;  // unregistered name, or registered as a different kind
-        }
-        c.release();  // ownership now the caller's, raw - matches SubView's own new/delete convention
-        return result;
-    }
-
-    std::unique_ptr<ViewStyle> SerializationRegistry::createStyle(const std::string& name) {
-        std::unique_ptr<UIComponent> c = instance().create(name);
-        ViewStyle* result = dynamic_cast<ViewStyle*>(c.get());
-        if (result == nullptr) {
-            return nullptr;
-        }
-        c.release();
-        return std::unique_ptr<ViewStyle>(result);
-    }
-
-    std::unique_ptr<Layout> SerializationRegistry::createLayout(const std::string& name) {
-        std::unique_ptr<UIComponent> c = instance().create(name);
-        Layout* result = dynamic_cast<Layout*>(c.get());
-        if (result == nullptr) {
-            return nullptr;
-        }
-        c.release();
-        return std::unique_ptr<Layout>(result);
-    }
-
-    std::unique_ptr<LayoutParams> SerializationRegistry::createLayoutParams(const std::string& name) {
-        std::unique_ptr<UIComponent> c = instance().create(name);
-        LayoutParams* result = dynamic_cast<LayoutParams*>(c.get());
-        if (result == nullptr) {
-            return nullptr;
-        }
-        c.release();
-        return std::unique_ptr<LayoutParams>(result);
-    }
-    */
-
 }
 
 namespace {
