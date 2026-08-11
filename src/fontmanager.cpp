@@ -1,6 +1,7 @@
 #include "newui/fontmanager.h"
 #include "newui/font.h"
 #include "newui/newui.h"
+#include "newui/bundle.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -129,7 +130,13 @@ bool FontManager::createFont(const std::string& nameOrPath, float size, BLFont& 
 
     BLFontFace face;
     if (face.create_from_file(path.c_str()) != BL_SUCCESS) {
-        return false;
+        // Neither a known system font name nor a directly-loadable path -
+        // last resort, try it as a Bundle-relative resource
+        // (Resources/Fonts/<nameOrPath>).
+        std::string bundlePath = Bundle::instance().resourcePath("Fonts/" + nameOrPath);
+        if (bundlePath.empty() || face.create_from_file(bundlePath.c_str()) != BL_SUCCESS) {
+            return false;
+        }
     }
 
     BLFont font;

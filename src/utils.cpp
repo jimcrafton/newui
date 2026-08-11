@@ -6,6 +6,39 @@
 
 
 namespace newui {
+	std::string extractNamespace(const std::type_info& info)
+	{
+		std::string result = "";
+
+		std::string name = info.name();
+		size_t pos = name.rfind("::");
+		if (pos != std::string::npos) {
+			result = name.substr(0, pos + 2);
+		}
+		return result;
+	}
+
+	std::string demangleTypeName(const std::type_info& info) {
+		std::string name = info.name();
+
+		static const char* kPrefixes[] = { "class ", "struct ", "enum ", "union " };
+		for (const char* prefix : kPrefixes) {
+			size_t len = std::strlen(prefix);
+			if (name.compare(0, len, prefix) == 0) {
+				name.erase(0, len);
+				break;
+			}
+		}
+
+		size_t pos = name.rfind("::");
+		if (pos != std::string::npos) {
+			name.erase(0, pos + 2);
+		}
+
+		return name;
+	}
+
+
 	std::uint32_t translateVirtualKey(int vkCode, int charCode) {
 		std::uint32_t result = 0;
 

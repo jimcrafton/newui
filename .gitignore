@@ -2,3 +2,5 @@ build/
 out/
 .vs/
 CMakeUserPresets.json
+tools/reflectgen/.venv/
+tools/reflectgen/__pycache__/

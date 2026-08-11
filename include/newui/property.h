@@ -88,7 +88,7 @@ namespace newui {
     // since the caller-supplied fn does the actual blending (e.g.
     // componentwise).
     template<typename SourceT, typename ValueT>
-    class Property : public PropertyBase {
+    class ObservableProperty : public PropertyBase {
         static_assert(IsPodLike<ValueT>::value,
             "Property<SourceT, ValueT> only supports POD scalar types (int, float, ...) or "
             "POD structs made up of them (e.g. newui::Point) for ValueT.");
@@ -101,7 +101,7 @@ namespace newui {
         // Convenience aliases for this Property's own type and the
         // pointer/reference shapes its API traffics in - used below and
         // in ValueChangedDelegate's callback signature.
-        typedef Property<SourceT, ValueT> PropertyT;
+        typedef ObservableProperty<SourceT, ValueT> PropertyT;
         typedef SourceT* SourcePtr;
         typedef ValueT* ValuePtr;
         typedef ValueT& ValueRef;
@@ -226,7 +226,7 @@ namespace newui {
         // as a Property that isn't tracked by one.
         friend class PropertyManager;
 
-        Property(const std::string& name, SourceT* source, ValueT* field)
+        ObservableProperty(const std::string& name, SourceT* source, ValueT* field)
             : PropertyBase(name, source), field_(field) {}
 
         static float ease(float t, InterpolationKind kind) {
@@ -280,13 +280,13 @@ namespace newui {
         // registerProperty(nullptr, field, name), where there's no
         // meaningful source type to deduce.
         template<typename SourceT, typename ValueT>
-        static Property<SourceT, ValueT>* registerProperty(SourceT* source, ValueT* field, const std::string& name) {
+        static ObservableProperty<SourceT, ValueT>* registerProperty(SourceT* source, ValueT* field, const std::string& name) {
             static_assert(IsPodLike<ValueT>::value,
                 "PropertyManager::registerProperty only supports POD scalar types (int, float, ...) "
                 "or POD structs made up of them (e.g. newui::Point) for the field type.");
             auto& pm = PropertyManager::instance();
 
-            Property<SourceT, ValueT>* property = new Property<SourceT, ValueT>(name, source, field);
+            ObservableProperty<SourceT, ValueT>* property = new ObservableProperty<SourceT, ValueT>(name, source, field);
             Key key{ name, static_cast<void*>(source) };
 
             auto it = pm.properties_.find(key);
@@ -308,7 +308,7 @@ namespace newui {
         // SourceT is void, and typedSource() degenerates to the same thing
         // as PropertyBase::source().
         template<typename ValueT>
-        static Property<void, ValueT>* registerProperty(std::nullptr_t, ValueT* field, const std::string& name) {
+        static ObservableProperty<void, ValueT>* registerProperty(std::nullptr_t, ValueT* field, const std::string& name) {
             return registerProperty<void, ValueT>(static_cast<void*>(nullptr), field, name);
         }
 

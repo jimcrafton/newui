@@ -15,6 +15,7 @@ add_executable(newui_tests
     test_view.cpp
     test_layout.cpp
     test_serialization.cpp
+    test_bundle.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

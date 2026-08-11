@@ -19,7 +19,7 @@ std::string g_lastChangedName;
 // serves every Property type used below without needing a differently-
 // named callback per type.
 template<typename SourceT, typename ValueT>
-newui::SyncReturn RecordChange(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
+newui::SyncReturn RecordChange(newui::ObservableProperty<SourceT, ValueT>& property, SourceT*, ValueT*) {
     ++g_changeCount;
     g_lastChangedName = property.name();
     return newui::SyncReturn::Handled;

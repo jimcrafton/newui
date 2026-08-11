@@ -1,7 +1,8 @@
 #pragma once
 
 #include <string>
-#include <typeinfo>
+#include "newui/utils.h"
+
 
 namespace json5 {
     class builder;
@@ -10,14 +11,7 @@ namespace json5 {
 
 namespace newui {
 
-    // Strips MSVC's typeid(...).name() decoration down to a bare class
-    // name: "class newui::ButtonStyle" -> "ButtonStyle" ("class "/"struct "/
-    // "enum "/"union " prefix stripped, then everything up to the last "::"
-    // dropped). MSVC only (this project's sole toolchain) - unlike
-    // Itanium-ABI compilers (GCC/Clang), MSVC's name() is already
-    // human-readable, not mangled, so this needs no abi::__cxa_demangle
-    // equivalent.
-    std::string demangleTypeName(const std::type_info& info);
+    
 
     // Shared serialization contract for every polymorphic type that can
     // appear as a JSON5 node: View (SubView/RootView), ViewStyle, Layout,

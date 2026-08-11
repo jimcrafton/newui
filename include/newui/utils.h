@@ -1,9 +1,21 @@
 
 #pragma once
-#include <cstdint>
+#include <windows.h>
 
+#include <cstdint>
+#include <typeinfo>
 
 namespace newui {
+	// Strips MSVC's typeid(...).name() decoration down to a bare class
+	// name: "class newui::ButtonStyle" -> "ButtonStyle" ("class "/"struct "/
+	// "enum "/"union " prefix stripped, then everything up to the last "::"
+	// dropped). MSVC only (this project's sole toolchain) - unlike
+	// Itanium-ABI compilers (GCC/Clang), MSVC's name() is already
+	// human-readable, not mangled, so this needs no abi::__cxa_demangle
+	// equivalent.
+	std::string demangleTypeName(const std::type_info& info);
+	std::string extractNamespace(const std::type_info& info);
+
 
 	struct KeyboardEventInfo {
 		int scanCode = 0;

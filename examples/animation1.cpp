@@ -207,7 +207,7 @@ void demoCurveInterpolation() {
 // specific SyncReturn(*)(Property<SourceT, ValueT>&) deduces
 // ValueT/SourceT from that target type.
 template<typename SourceT, typename ValueT>
-newui::SyncReturn LogOpacityChanged(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
+newui::SyncReturn LogOpacityChanged(newui::ObservableProperty<SourceT, ValueT>& property, SourceT*, ValueT*) {
     std::cout << "  onValueChanged: '" << property.name() << "' updated (thread "
               << std::this_thread::get_id() << ")\n";
     return newui::SyncReturn::Handled;

@@ -44,7 +44,7 @@ struct AnimatedLabelStyle : newui::LabelStyle {
 // populated by View::setStyle()/addChild() - see rootview.cpp/
 // subview.cpp), so no RootView-specific downcast is needed here either,
 // even though this style happens to be attached directly to one.
-newui::SyncReturn BackgroundColorChanged(newui::Property<AnimatedLabelStyle, newui::Color>& property,
+newui::SyncReturn BackgroundColorChanged(newui::ObservableProperty<AnimatedLabelStyle, newui::Color>& property,
         AnimatedLabelStyle* style, newui::Color* color) {
 	style->backgroundFill = color->toBLRgba32();
 	// invalidate() alone would just re-blit the existing pixel buffer -

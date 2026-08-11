@@ -50,7 +50,7 @@ struct Entity {
 // SyncReturn(*)(Property<SourceT, ValueT>&, SourceT*, ValueT*) deduces
 // ValueT/SourceT from that target type.
 template<typename SourceT, typename ValueT>
-newui::SyncReturn LogValueChanged(newui::Property<SourceT, ValueT>& property, SourceT*, ValueT*) {
+newui::SyncReturn LogValueChanged(newui::ObservableProperty<SourceT, ValueT>& property, SourceT*, ValueT*) {
     std::cout << "  onValueChanged: '" << property.name() << "' changed\n";
     return newui::SyncReturn::Handled;
 }
@@ -89,7 +89,7 @@ void demoPropertyManagerBasics() {
 // [0,1] - here we just sample a few t values to compare curves.
 // ---------------------------------------------------------------------
 
-void printCurve(const char* label, newui::Property<void, float>& property, newui::InterpolationKind kind) {
+void printCurve(const char* label, newui::ObservableProperty<void, float>& property, newui::InterpolationKind kind) {
     property.setupInterpolation(0.0f, 100.0f, kind);
 
     std::cout << "  " << std::left << std::setw(10) << label << ": ";

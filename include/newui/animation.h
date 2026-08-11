@@ -76,18 +76,18 @@ namespace newui {
     public:
         // Given the start/end this KeyValue is interpolating between and
         // t, returns the value to write - see setInterpolationFunction().
-        using InterpolationFunction = typename Property<SourceT, ValueT>::InterpolationFunction;
+        using InterpolationFunction = typename ObservableProperty<SourceT, ValueT>::InterpolationFunction;
 
-        TypedKeyValue(Property<SourceT, ValueT>* property, ValueT value,
+        TypedKeyValue(ObservableProperty<SourceT, ValueT>* property, ValueT value,
                 InterpolationKind kind = InterpolationKind::Linear)
             : property_(property), value_(value) {
             interpolationKind_ = kind;
         }
 
-        TypedKeyValue(Property<SourceT, ValueT>* property, ValueT value, InterpolationFunction fn)
+        TypedKeyValue(ObservableProperty<SourceT, ValueT>* property, ValueT value, InterpolationFunction fn)
             : property_(property), value_(value), interpolationFunction_(std::move(fn)) {}
 
-        Property<SourceT, ValueT>* typedProperty() const {
+        ObservableProperty<SourceT, ValueT>* typedProperty() const {
             return property_;
         }
 
@@ -152,7 +152,7 @@ namespace newui {
         }
 
     private:
-        Property<SourceT, ValueT>* property_;
+        ObservableProperty<SourceT, ValueT>* property_;
         ValueT value_;
         InterpolationFunction interpolationFunction_;
     };
@@ -195,7 +195,7 @@ namespace newui {
         // the returned KeyValue - see findValue()). ValueT and SourceT
         // are both deduced from property.
         template<typename SourceT, typename ValueT>
-        void setValue(Property<SourceT, ValueT>* property, ValueT value,
+        void setValue(ObservableProperty<SourceT, ValueT>* property, ValueT value,
                 InterpolationKind kind = InterpolationKind::Linear) {
             for (auto& entry : values_) {
                 if (entry->property() == property) {
@@ -213,7 +213,7 @@ namespace newui {
         // (Point, Color, ...) between Keys, since fn - not this class -
         // does the actual componentwise blending.
         template<typename SourceT, typename ValueT>
-        void setValue(Property<SourceT, ValueT>* property, ValueT value,
+        void setValue(ObservableProperty<SourceT, ValueT>* property, ValueT value,
                 typename TypedKeyValue<SourceT, ValueT>::InterpolationFunction fn) {
             for (auto& entry : values_) {
                 if (entry->property() == property) {
