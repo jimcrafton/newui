@@ -20,9 +20,5 @@ add_executable(newui_tests
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)
 
-target_compile_definitions(newui_tests PRIVATE
-    NEWUI_EXPECTED_VERSION="${PROJECT_VERSION}"
-)
-
 include(GoogleTest)
 gtest_discover_tests(newui_tests)
