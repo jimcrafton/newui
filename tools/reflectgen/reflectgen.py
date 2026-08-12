@@ -11,6 +11,7 @@ See README.md for setup and details on what's (not yet) supported.
 import argparse
 import glob
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -153,6 +154,36 @@ def has_reflect_friend(class_cursor):
         if child.kind == CursorKind.FRIEND_DECL:
             return True
     return False
+
+
+# Matches one "key=value" pair inside a "@reflect key=value[,key=value...]"
+# annotation - see reflect_annotations() below.
+REFLECT_ANNOTATION_PAIR_RE = re.compile(r"([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([A-Za-z_][A-Za-z_0-9]*)")
+
+
+def reflect_annotations(cursor):
+    # cursor.raw_comment is the comment text immediately preceding cursor
+    # (line "//" or block "/* */", no doxygen markers required), or None if
+    # there isn't one - which is the common case, so this has to handle
+    # that before anything else touches it.
+    raw_comment = cursor.raw_comment
+    if not raw_comment:
+        return {}
+
+    marker = "@reflect"
+    pos = raw_comment.find(marker)
+    if pos < 0:
+        return {}
+
+    annotation_text = raw_comment[pos + len(marker):]
+    return {m.group(1): m.group(2) for m in REFLECT_ANNOTATION_PAIR_RE.finditer(annotation_text)}
+
+
+def is_reflect_ignored(cursor):
+    # "@reflect ignore=true" right above a class/struct excludes it from
+    # generation entirely - e.g. for a type that's hand-registered
+    # elsewhere, or isn't meant to be reflectable at all.
+    return reflect_annotations(cursor).get("ignore", "").lower() == "true"
 
 
 class Field:
@@ -312,6 +343,13 @@ def find_declarations(tu, path):
                 # a user type to register - skip it.
                 if child.get_num_template_arguments() != -1:
                     continue
+
+                # "@reflect ignore=true" in a comment directly above the
+                # class/struct excludes it from generation - see
+                # is_reflect_ignored()/reflect_annotations() above.
+                if is_reflect_ignored(child):
+                    continue
+
                 if child.is_definition() and same_file(child.location.file, path):
                     classes.append(collect_class(child))
                     collect_nested_enums(child)
@@ -488,6 +526,12 @@ def main():
         # system libclang is 19.1.0. See reflectgen's README for the
         # LLVM-upgrade alternative to this bypass.
         clang_args = clang_args + ["-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH"]
+    if "-fparse-all-comments" not in clang_args:
+        # Without this, libclang only attaches a "doxygen-style" comment
+        # (///, /** */, //!) to a cursor's raw_comment - a plain "//"
+        # comment (what "@reflect ignore=true" is written as, see
+        # is_reflect_ignored()) is otherwise invisible to it entirely.
+        clang_args = clang_args + ["-fparse-all-comments"]
 
     index = cindex.Index.create()
     all_classes = []

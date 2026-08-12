@@ -14,13 +14,17 @@ namespace newui {
         registerTypeOnSelf<ButtonStyle>();
         registerTypeOnSelf<LabelStyle>();
         registerTypeOnSelf<CheckBoxStyle>();
+        registerTypeOnSelf<ThemedButtonStyle>();
+        registerTypeOnSelf<ThemedCheckBoxStyle>();
 
         registerTypeOnSelf<AnchorLayout>();
-        registerTypeOnSelf<StackLayout>();
+        registerTypeOnSelf<FlexLayout>();
         registerTypeOnSelf<CardLayout>();
+        registerTypeOnSelf<GridLayout>();
 
         registerTypeOnSelf<AnchorLayoutParams>();
-        registerTypeOnSelf<StackLayoutParams>();
+        registerTypeOnSelf<FlexLayoutParams>();
+        registerTypeOnSelf<GridLayoutParams>();
     }
 
     SerializationRegistry& SerializationRegistry::instance() {

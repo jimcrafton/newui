@@ -4,10 +4,26 @@
 #include "newui/newui.h"
 #include "newui/runloop.h"
 
+#include <uxtheme.h>
+
 #include <json5/json5.hpp>
 #include <json5/json5_builder.hpp>
 
 #include <stdexcept>
+
+// Forces the linker to merge a comctl32 v6 ("visual styles") dependency
+// into whatever final .exe links this static library - without it,
+// OpenThemeData() (see ThemedViewStyle, viewstyle.h/.cpp) silently returns
+// null even with InitCommonControlsEx() called below, since theming
+// requires the process to declare this dependency in its manifest. A
+// manifest *resource* embedded in a static library's own .res doesn't
+// propagate into the final .exe's linked-in manifest the way object-file
+// symbols do, but this linker-pragma directive is honored from any .obj
+// pulled into the final link - so it reaches every consumer (examples,
+// unittests, newui_app) automatically, with nothing to add on their side.
+#pragma comment(linker, \
+    "\"/manifestdependency:type='Win32' name='Microsoft.Windows.Common-Controls' " \
+    "version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 namespace newui {
 
@@ -201,6 +217,18 @@ void Application::run() {
 		if (!::InitCommonControlsEx(&icc)) {
 			throw std::runtime_error("newui::Application: InitCommonControlsEx failed");
 		}
+
+		// BufferedPaintInit()/UnInit() bracket any use of the buffered-paint
+		// APIs (BeginBufferedPaint/GetBufferedPaintBits/EndBufferedPaint) on
+		// this thread - required before ThemedViewStyle::paint() (viewstyle.cpp)
+		// can use them. Not treated as fatal if it fails - a themed style's
+		// paint() already no-ops gracefully when it can't render (see its
+		// comment), so a plain View just misses its native chrome rather than
+		// the whole application failing to start.
+		if (FAILED(::BufferedPaintInit())) {
+			printf("newui::Application: BufferedPaintInit failed - themed styles won't render\n");
+		}
+
 		HWND parent = ::GetDesktopWindow();
 
 		//RegisterWin32ToolKitClass(::GetModuleHandleW(NULL));
@@ -237,6 +265,8 @@ void Application::run() {
 
 
 		runLoop_.run();
+
+		::BufferedPaintUnInit();
 	}
 	catch (const std::exception& e) {
 		printf("exception trapped: %s", e.what());

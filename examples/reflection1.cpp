@@ -27,6 +27,7 @@
 
 #include <any>
 #include <iostream>
+#include <map>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -42,6 +43,14 @@ public:
 
     float price = 0.0f;
     bool active = true;
+
+    // A sequential collection field (public - no ClassAccess needed) and an
+    // associative one (private - reached the same way label_/quantity_/
+    // weight_ are, via ClassAccess<Widget> below). Both are registered with
+    // the exact same .property(name, scope, &Widget::field) call any
+    // scalar field uses - see demoCollectionProperties() for what that
+    // buys on top.
+    std::vector<std::string> tags;
 
     int addQuantity(int amount) {
         quantity_ += amount;
@@ -60,6 +69,7 @@ private:
     std::string label_ = "widget";
     int quantity_ = 1;
     float weight_ = 2.5f;
+    std::map<std::string, float> ratings_ = { {"quality", 4.5f}, {"value", 3.5f} };
 };
 
 // ---------------------------------------------------------------------
@@ -77,6 +87,7 @@ template<> struct newui::reflection::detail::ClassAccess<Widget> {
     static constexpr auto label_() { return &Widget::label_; }
     static constexpr auto quantity_() { return &Widget::quantity_; }
     static constexpr auto weight_() { return &Widget::weight_; }
+    static constexpr auto ratings_() { return &Widget::ratings_; }
 };
 
 void registerWidgetReflection() {
@@ -86,10 +97,12 @@ void registerWidgetReflection() {
         .property("label_", Scope::Private, detail::ClassAccess<Widget>::label_())
         .property("quantity_", Scope::Private, detail::ClassAccess<Widget>::quantity_())
         .property("weight_", Scope::Private, detail::ClassAccess<Widget>::weight_())
-        // price/active are public - no InstanceAccessor needed, &Widget::price
-        // is legal from any context.
+        .property("ratings_", Scope::Private, detail::ClassAccess<Widget>::ratings_())
+        // price/active/tags are public - no InstanceAccessor needed,
+        // &Widget::price is legal from any context.
         .property("price", Scope::Public, &Widget::price)
         .property("active", Scope::Public, &Widget::active)
+        .property("tags", Scope::Public, &Widget::tags)
 
         .method("addQuantity", Scope::Public, &Widget::addQuantity)
         .method("describe", Scope::Public, &Widget::describe)
@@ -231,6 +244,52 @@ void demoCreateInstance() {
     delete customWidget;
 }
 
+void demoCollectionProperties() {
+    std::cout << "\n== Demo 6: collection properties (tags: vector, ratings_: map) ==\n";
+
+    const Class* widgetClass = classinfo(typeid(Widget));
+    Widget w("gadget", 3);
+    w.tags = { "sale", "featured" };
+
+    const Property* tagsProp = widgetClass->property("tags");
+    const Property* ratingsProp = widgetClass->property("ratings_");
+
+    std::cout << "  tags: isCollection=" << std::boolalpha << tagsProp->isCollection()
+               << ", isAssociative=" << tagsProp->isAssociative() << "\n";
+    std::cout << "  ratings_: isCollection=" << std::boolalpha << ratingsProp->isCollection()
+               << ", isAssociative=" << ratingsProp->isAssociative() << "\n";
+
+    // dynamic_cast to PropertyCollection is what unlocks element-level
+    // access - element/key type + count()/get()/set() all work off a
+    // std::any the caller already has (here, obtained from the base
+    // Property::get(instance) whole-container accessor), never off a raw
+    // ValueT the caller would have to already know at compile time.
+    const auto* tagsCollection = dynamic_cast<const PropertyCollection*>(tagsProp);
+    const auto* ratingsCollection = dynamic_cast<const PropertyCollection*>(ratingsProp);
+
+    std::any tagsBoxed = tagsProp->get(&w);
+    std::cout << "  tags count=" << tagsCollection->count(tagsBoxed) << "\n";
+    for (std::size_t i = 0; i < tagsCollection->count(tagsBoxed); ++i) {
+        std::cout << "    [" << i << "] " << std::any_cast<std::string>(tagsCollection->get(tagsBoxed, i)) << "\n";
+    }
+    tagsCollection->set(tagsBoxed, 0, std::any(std::string("clearance")));
+    tagsProp->set(&w, tagsBoxed);  // write the mutated copy back into w
+    std::cout << "  after set(0, \"clearance\"): tags[0]=" << w.tags[0] << "\n";
+
+    std::any ratingsBoxed = ratingsProp->get(&w);
+    std::cout << "  ratings_ count=" << ratingsCollection->count(ratingsBoxed) << "\n";
+    std::cout << "  ratings_[\"quality\"] = "
+               << std::any_cast<float>(ratingsCollection->get(ratingsBoxed, std::any(std::string("quality")))) << "\n";
+    ratingsCollection->set(ratingsBoxed, std::any(std::string("value")), std::any(5.0f));
+    ratingsProp->set(&w, ratingsBoxed);  // write the mutated copy back into w
+
+    // Re-read through reflection to confirm the write landed - ratings_ is
+    // private, there's no other legitimate way to see it from main().
+    std::any confirmBoxed = ratingsProp->get(&w);
+    std::cout << "  after set(\"value\", 5.0): ratings_[\"value\"] = "
+               << std::any_cast<float>(ratingsCollection->get(confirmBoxed, std::any(std::string("value")))) << "\n";
+}
+
 int main() {
     std::cout << "newui " << newui::version() << " - reflection examples\n";
 
@@ -239,6 +298,7 @@ int main() {
     demoSetProperties();
     demoInvokeMethods();
     demoCreateInstance();
+    demoCollectionProperties();
 
     return 0;
 }

@@ -24,7 +24,7 @@ TEST(Serialization, RoundTripsSubViewTree) {
     auto* root = new newui::SubView();
     root->setBounds(newui::Rect(0, 0, 400, 300));
     root->setVisible(true);
-    root->setLayout(std::make_unique<newui::StackLayout>(newui::Orientation::Horizontal));
+    root->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
 
     auto buttonStyle = std::make_unique<newui::ButtonStyle>();
     buttonStyle->backgroundFill = newui::Color::fromName("cornflowerblue").toBLRgba32();
@@ -38,7 +38,7 @@ TEST(Serialization, RoundTripsSubViewTree) {
     child->setBounds(newui::Rect(0, 0, 120, 300));
     child->setVisible(true);
     child->setStyle(std::move(buttonStyle));
-    child->setLayoutParams(std::make_unique<newui::StackLayoutParams>(1.0f));
+    child->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     root->addChild(child);
 
     const std::string json = newui::saveViewTree(*root);
@@ -48,7 +48,7 @@ TEST(Serialization, RoundTripsSubViewTree) {
 
     EXPECT_EQ(loadedRoot->getBounds(), root->getBounds());
 
-    auto* loadedLayout = dynamic_cast<newui::StackLayout*>(loadedRoot->layout());
+    auto* loadedLayout = dynamic_cast<newui::FlexLayout*>(loadedRoot->layout());
     ASSERT_NE(loadedLayout, nullptr);
     EXPECT_EQ(loadedLayout->orientation(), newui::Orientation::Horizontal);
 
@@ -64,9 +64,88 @@ TEST(Serialization, RoundTripsSubViewTree) {
     EXPECT_FALSE(loadedStyle->backgroundFill.is_null());
     EXPECT_TRUE(loadedStyle->highlightFill.is_null());
 
-    auto* loadedParams = dynamic_cast<newui::StackLayoutParams*>(loadedChild->layoutParams());
+    auto* loadedParams = dynamic_cast<newui::FlexLayoutParams*>(loadedChild->layoutParams());
     ASSERT_NE(loadedParams, nullptr);
     EXPECT_EQ(loadedParams->weight, 1.0f);
+
+    root->destroy();
+    delete root;
+    loadedRoot->destroy();
+    delete loadedRoot;
+}
+
+TEST(Serialization, RoundTripsThemedButtonStyle) {
+    auto* root = new newui::SubView();
+    root->setBounds(newui::Rect(0, 0, 100, 30));
+    root->setVisible(true);
+
+    auto themedStyle = std::make_unique<newui::ThemedButtonStyle>();
+    themedStyle->pressed = true;
+    themedStyle->enabled = false;
+    root->setStyle(std::move(themedStyle));
+
+    const std::string json = newui::saveViewTree(*root);
+
+    auto* loadedRoot = new newui::SubView();
+    ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
+
+    auto* loadedStyle = dynamic_cast<newui::ThemedButtonStyle*>(&loadedRoot->style());
+    ASSERT_NE(loadedStyle, nullptr);
+    EXPECT_TRUE(loadedStyle->pressed);
+    EXPECT_FALSE(loadedStyle->enabled);
+
+    root->destroy();
+    delete root;
+    loadedRoot->destroy();
+    delete loadedRoot;
+}
+
+TEST(Serialization, RoundTripsGridLayout) {
+    auto* root = new newui::SubView();
+    root->setBounds(newui::Rect(0, 0, 300, 200));
+    root->setVisible(true);
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedColumn(80.0f);
+    grid->addStarColumn(2.0f);
+    grid->addAutoRow();
+    grid->setColumnSpacing(4.0f);
+    grid->setRowSpacing(2.0f);
+    root->setLayout(std::move(grid));
+
+    auto* child = new newui::SubView();
+    child->setName("cell");
+    child->setBounds(newui::Rect(0, 0, 10, 10));
+    child->setVisible(true);
+    auto params = std::make_unique<newui::GridLayoutParams>(0, 1);
+    params->columnSpan = 1;
+    params->horizontalAlignment = newui::CrossAxisAlignment::Center;
+    child->setLayoutParams(std::move(params));
+    root->addChild(child);
+
+    const std::string json = newui::saveViewTree(*root);
+
+    auto* loadedRoot = new newui::SubView();
+    ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
+
+    auto* loadedGrid = dynamic_cast<newui::GridLayout*>(loadedRoot->layout());
+    ASSERT_NE(loadedGrid, nullptr);
+    ASSERT_EQ(loadedGrid->columns().size(), 2u);
+    EXPECT_EQ(loadedGrid->columns()[0].kind, newui::GridTrackKind::Fixed);
+    EXPECT_FLOAT_EQ(loadedGrid->columns()[0].value, 80.0f);
+    EXPECT_EQ(loadedGrid->columns()[1].kind, newui::GridTrackKind::Star);
+    EXPECT_FLOAT_EQ(loadedGrid->columns()[1].value, 2.0f);
+    ASSERT_EQ(loadedGrid->rows().size(), 1u);
+    EXPECT_EQ(loadedGrid->rows()[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_FLOAT_EQ(loadedGrid->columnSpacing(), 4.0f);
+    EXPECT_FLOAT_EQ(loadedGrid->rowSpacing(), 2.0f);
+
+    ASSERT_EQ(loadedRoot->childViews().size(), 1u);
+    auto* loadedParams = dynamic_cast<newui::GridLayoutParams*>(loadedRoot->childViews()[0]->layoutParams());
+    ASSERT_NE(loadedParams, nullptr);
+    EXPECT_EQ(loadedParams->row, 0u);
+    EXPECT_EQ(loadedParams->column, 1u);
+    EXPECT_EQ(loadedParams->horizontalAlignment, newui::CrossAxisAlignment::Center);
 
     root->destroy();
     delete root;

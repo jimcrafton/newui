@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <blend2d/blend2d.h>
 
@@ -72,7 +73,7 @@ namespace newui {
             return layout_.get();
         }
 
-        // Swaps in a different Layout (e.g. std::make_unique<StackLayout>())
+        // Swaps in a different Layout (e.g. std::make_unique<FlexLayout>())
         // to arrange childViews() automatically - see Layout and
         // updateLayout(). Pass nullptr to go back to manual positioning
         // (childViews() bounds are left exactly as they are until
@@ -119,18 +120,60 @@ namespace newui {
         // Called automatically before paint() by whatever's orchestrating
         // the draw (paintChildren() for children, RootView::repaint() for
         // itself), so it always runs first without subclasses needing to
-        // remember to call it. Captures style()'s clientBounds output into
-        // getClientBounds(), so paint() overrides know where to draw
-        // without overlapping whatever chrome the style just painted.
+        // remember to call it.
         void paintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)
-        // left over after paintStyle()'s most recent run painted the
-        // style's chrome - see ViewStyle::paint()'s clientBounds parameter.
-        // Default-constructed (a zero rect) until the first paintStyle()
-        // call sets it.
-        const Rect& getClientBounds() const {
-            return clientBounds_;
+        // left over for content/children after style()'s chrome (border,
+        // 3D edge, checkbox glyph, ...) - see ViewStyle::computeClientBounds().
+        // Computed live from the current style()/getBounds() every call, so
+        // it's always correct with no dependency on paintStyle() ever
+        // having run - safe to call from Layout::arrange() (see Layout's
+        // class comment) or anywhere else that needs it before the first
+        // paint.
+        Rect getClientBounds() const {
+            return style_ ? style_->computeClientBounds(bounds_.size())
+                           : Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+        }
+
+        // "What size would this view like to be" - independent of its
+        // current getBounds() size, so a Layout can consult it without
+        // that being circular (Layout is what sets bounds in the first
+        // place). Returns the explicit override set via setDesiredSize(),
+        // if any; otherwise falls back to computeDesiredSize() below.
+        Size desiredSize() const {
+            return desiredSizeOverride_.has_value() ? *desiredSizeOverride_ : computeDesiredSize();
+        }
+
+        // Sets an explicit override, taking precedence over
+        // computeDesiredSize() until clearDesiredSize() is called. Doesn't
+        // itself move/resize this view - it's just a value a Layout (or
+        // anything else) can read; nothing happens until something
+        // consults it (e.g. FlexLayout's/GridLayout's arrange()).
+        void setDesiredSize(const Size& size) {
+            desiredSizeOverride_ = size;
+        }
+
+        // Reverts to computeDesiredSize()'s computed fallback.
+        void clearDesiredSize() {
+            desiredSizeOverride_.reset();
+        }
+
+        bool hasDesiredSizeOverride() const {
+            return desiredSizeOverride_.has_value();
+        }
+
+        // Computed fallback used by desiredSize() when no explicit
+        // override is set. Default just returns the current bounds size -
+        // the same "natural size" proxy FlexLayout's non-wrap path (née
+        // StackLayout) already relied on, so a view that never calls
+        // setDesiredSize() or overrides this behaves exactly as it always
+        // has. A SubView subclass (or a future ViewStyle-driven widget -
+        // e.g. a label computing from font metrics, none exist yet) can
+        // override this to compute a real answer instead of requiring
+        // every caller to set one by hand.
+        virtual Size computeDesiredSize() const {
+            return bounds_.size();
         }
 
         // Draws this view's own content. Default is a no-op; SubView
@@ -144,6 +187,22 @@ namespace newui {
         // own children, so children draw on top of whatever's already in
         // the buffer in bounds-relative local coordinates.
         void paintChildren(BLContext& ctx);
+
+        // Finds the deepest visible descendant SubView whose bounds
+        // contain localPt (a point in this View's own local coordinate
+        // space - the same space getBounds()/paintChildren() use for
+        // direct children), searching topmost-drawn-first (reverse child
+        // order, matching paintChildren()'s draw order - a later-added
+        // child paints over an earlier one, so it should also hit-test
+        // first for overlapping bounds) and recursing into whichever
+        // child it hits, so a click on a deeply nested SubView returns
+        // that SubView directly, not just its top-level ancestor. Returns
+        // nullptr (outLocalPt left untouched) if localPt isn't over any
+        // visible child - the caller's own point is then still valid, in
+        // this View's own local space, i.e. this View itself is the
+        // target. Used by RootView to route mouse events to the right
+        // SubView - see RootView::mouseDown()/mouseMove() etc.
+        SubView* hitTestChildren(const Point& localPt, Point& outLocalPt) const;
 
         SizeChangedDelegate onSizeChanged;
         VisibilityChangedDelegate onVisibilityChanged;
@@ -169,6 +228,10 @@ namespace newui {
         virtual void destroy();
 
         RootView* rootView() {
+            return rootView_;
+        }
+
+        const RootView* rootView() const {
             return rootView_;
         }
 
@@ -198,7 +261,7 @@ namespace newui {
         bool visible_ = false;
         std::string name_;
 
-        Rect clientBounds_;
+        std::optional<Size> desiredSizeOverride_;
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;

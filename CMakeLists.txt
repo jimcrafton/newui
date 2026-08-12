@@ -75,7 +75,7 @@ target_include_directories(newui PUBLIC
     3rdparty/json5/include
 )
 
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib)
+target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib)
 
 # Resource bundles
 # =================

@@ -5,6 +5,16 @@
 #include <newui/geometry.h>
 #include <newui/uicomponent.h>
 
+// <newui/uicomponent.h> already transitively includes <windows.h> (via
+// "newui/utils.h") without NOMINMAX defined first - see the
+// feedback_no_std_minmax memory if this file ever needs std::min/std::max;
+// use a ternary instead. <uxtheme.h>/<vssym32.h> need windows.h already
+// included, which by this point it is.
+#include <uxtheme.h>
+#include <vssym32.h>
+
+#include <string>
+
 namespace newui {
     class View;
     // Classic 3D beveled edge look, as used for raised buttons, pressed/
@@ -98,21 +108,38 @@ namespace newui {
         // storage for whoever paints text for this view.
         Font font;
 
+        // The rect (local to a view of this size, (0,0) at its top-left) a
+        // client should paint its own content/children in without
+        // overlapping whatever chrome this style's paint() draws - the
+        // paint-free equivalent of paint()'s clientBounds out-parameter
+        // below, safe to call without a BLContext or an actual paint pass
+        // (e.g. from View::getClientBounds(), or a Layout arranging
+        // children). paint() delegates to this (see its comment) so the
+        // two can never drift apart. Subclasses that paint additional
+        // chrome on top of the base background/border (a 3D edge, a
+        // checkbox glyph, ...) override this the same way they override
+        // paint() - chain to the base first, then deflate further by
+        // whatever they add; see ButtonStyle/CheckBoxStyle.
+        virtual Rect computeClientBounds(const Size& size) const {
+            return Rect(0.0f, 0.0f, size.width, size.height).deflated(borderWidth);
+        }
+
         // Paints this style into ctx, which is already translated/clipped
         // to (0,0)-(size.width,size.height) for the view being styled;
         // highlighted mirrors the view's isHighlighted() at paint time.
         // Base implementation: background (backgroundFill, or
         // highlightFill when highlighted and set) then border.
         //
-        // clientBounds is an out parameter: the rect (in the same local
-        // coordinates) a client should paint its own content in afterward,
-        // so it doesn't draw over whatever chrome this style just painted -
-        // e.g. a 2px border deflates it by 2px on each side. Subclasses
-        // that paint additional chrome (a 3D edge, a checkbox glyph, ...)
-        // should call the base paint() first to get this, then deflate it
-        // further by whatever they added; see ButtonStyle/CheckBoxStyle.
+        // clientBounds is an out parameter, set to computeClientBounds(size)
+        // above - since that call is unqualified, it dispatches virtually
+        // on this object's real (possibly derived) type even when reached
+        // via a subclass's paint() chaining to this base paint() first, so
+        // clientBounds already comes out fully correct for the actual
+        // style before a subclass's own paint() override has drawn
+        // anything further - see ButtonStyle/CheckBoxStyle, which rely on
+        // this and don't need to touch clientBounds again themselves.
         virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
-            clientBounds = Rect(0.0f, 0.0f, size.width, size.height).deflated(borderWidth);
+            clientBounds = computeClientBounds(size);
 
             if (size.width <= 0.0f || size.height <= 0.0f) {
                 return;
@@ -141,6 +168,10 @@ namespace newui {
         }
 
         View* view() {
+            return view_;
+        }
+
+        const View* view() const {
             return view_;
         }
 
@@ -175,6 +206,17 @@ namespace newui {
         BLVar edgeHighlightColor;
         BLVar edgeShadowColor;
 
+        // Etched/Bump are two nested bevels, so they occupy 2x edgeWidth
+        // inward from the outer edge; Raised/Sunken are just the one.
+        Rect computeClientBounds(const Size& size) const override {
+            Rect bounds = ViewStyle::computeClientBounds(size);
+            if (edgeWidth <= 0.0f || (edgeHighlightColor.is_null() && edgeShadowColor.is_null())) {
+                return bounds;
+            }
+            bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
+            return bounds.deflated(doubled ? edgeWidth * 2.0f : edgeWidth);
+        }
+
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
@@ -186,11 +228,6 @@ namespace newui {
             ctx.set_comp_op(compositingOp);
             paintEdge3D(ctx, size, edgeStyle, edgeHighlightColor, edgeShadowColor, edgeWidth);
             ctx.restore();
-
-            // Etched/Bump are two nested bevels, so they occupy 2x edgeWidth
-            // inward from the outer edge; Raised/Sunken are just the one.
-            bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
-            clientBounds = clientBounds.deflated(doubled ? edgeWidth * 2.0f : edgeWidth);
         }
 
         void writeFields(json5::builder& w) const override;
@@ -272,6 +309,17 @@ namespace newui {
         // drawn by the client to the right of the box.
         float boxLabelSpacing = 4.0f;
 
+        // The box occupies the left boxSize + boxLabelSpacing of whatever
+        // the border already left clientBounds with; a label drawn by the
+        // client goes to the right of that.
+        Rect computeClientBounds(const Size& size) const override {
+            Rect bounds = ViewStyle::computeClientBounds(size);
+            if (boxSize <= 0.0f) {
+                return bounds;
+            }
+            return bounds.deflated(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
+        }
+
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
@@ -304,15 +352,127 @@ namespace newui {
             }
 
             ctx.restore();
-
-            // The box occupies the left boxSize + boxLabelSpacing of
-            // whatever the border already left clientBounds with; a label
-            // drawn by the client goes to the right of that.
-            clientBounds = clientBounds.deflated(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
         }
 
         void writeFields(json5::builder& w) const override;
         void readFields(const json5::value& obj) override;
+    };
+
+    // Base for a second family of styles alongside ViewStyle/ButtonStyle/
+    // CheckBoxStyle above - instead of hand-drawing chrome with Blend2D,
+    // these ask Windows itself to draw a real native "visual styles"
+    // control via uxtheme.dll, so a themed View looks exactly like a real
+    // Win32 control under whatever visual style is active.
+    //
+    // uxtheme's DrawThemeBackground() draws into a GDI HDC, not a
+    // BLContext - paint() (defined in viewstyle.cpp) bridges the two via
+    // the modern "buffered paint" pattern (BeginBufferedPaint/
+    // DrawThemeBackground/GetBufferedPaintBits/EndBufferedPaint), which is
+    // what correctly extracts a real per-pixel alpha channel for theme
+    // parts that aren't fully opaque (a hover glow, a focus highlight,
+    // ...) - a raw DrawThemeBackground into a plain memory DC would
+    // silently drop that. GetBufferedPaintBits() hands back top-down,
+    // premultiplied-alpha BGRA pixels - exactly BL_FORMAT_PRGB32, so no
+    // conversion is needed before wrapping them in a BLImage and blitting
+    // into ctx. opacity is deliberately NOT applied to that blit (unlike
+    // ViewStyle::paint()'s fills) - Blend2D's blit_image() has no
+    // set_fill_alpha()-equivalent global-alpha knob, and a native control
+    // faded via alpha isn't an obviously-wanted look; out of scope for v1.
+    //
+    // A subclass names the theme "class" (themeClassName, e.g. L"BUTTON",
+    // passed to the constructor) and which part/state to draw
+    // (partId()/stateId(), pure virtual - each concrete widget knows its
+    // own vssym32.h constants and how highlighted/its own state fields map
+    // to them - see ThemedButtonStyle/ThemedCheckBoxStyle). The HTHEME
+    // handle is opened lazily (needs a live HWND, only available once this
+    // style is attached to a View with an already-initialize()'d RootView
+    // - see View::rootView()/RootView::windowHandle()) and cached;
+    // closeTheme() drops it so the next paint() reopens it (e.g. after a
+    // WM_THEMECHANGED - not wired up automatically in v1).
+    //
+    // Non-copyable: owns a Win32 HTHEME handle.
+    class ThemedViewStyle : public ViewStyle {
+    public:
+        explicit ThemedViewStyle(std::wstring themeClassName) : themeClassName_(std::move(themeClassName)) {}
+        ~ThemedViewStyle() override;
+
+        ThemedViewStyle(const ThemedViewStyle&) = delete;
+        ThemedViewStyle& operator=(const ThemedViewStyle&) = delete;
+
+        void closeTheme();
+
+        // Queries GetThemeBackgroundContentRect() for the real deflation
+        // this theme part's chrome needs - but only if a theme is already
+        // cached (see paint()'s comment); otherwise falls back to "no
+        // deflation" (matches ViewStyle's own no-border default) rather
+        // than guessing. A paint-free caller (e.g. Layout::arrange()
+        // before this View has ever been painted) can therefore see a
+        // too-generous clientBounds the very first time - resolves itself
+        // once paint() has run once and cached the theme.
+        Rect computeClientBounds(const Size& size) const override;
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+
+    protected:
+        // Which vssym32.h part/state to draw - highlighted mirrors the
+        // view's isHighlighted() at paint time, same as every other
+        // paint() in this file.
+        virtual int partId() const = 0;
+        virtual int stateId(bool highlighted) const = 0;
+
+    private:
+        std::wstring themeClassName_;
+        mutable HTHEME theme_ = nullptr;
+    };
+
+    // ThemedViewStyle plus a native "push button" (BUTTON/BP_PUSHBUTTON).
+    // pressed mirrors an explicit "mouse currently down on this view"
+    // signal the caller has to track itself - this toolkit has no
+    // built-in press-tracking (the same convention ButtonStyle's own
+    // edge-swap-on-mouse-down demo already relies on); highlighted
+    // (passed into paint()) already covers hover/focus.
+    class ThemedButtonStyle : public ThemedViewStyle {
+    public:
+        ThemedButtonStyle() : ThemedViewStyle(L"BUTTON") {}
+
+        bool pressed = false;
+        bool enabled = true;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
+    protected:
+        int partId() const override { return BP_PUSHBUTTON; }
+
+        int stateId(bool highlighted) const override {
+            if (!enabled) return PBS_DISABLED;
+            if (pressed) return PBS_PRESSED;
+            if (highlighted) return PBS_HOT;
+            return PBS_NORMAL;
+        }
+    };
+
+    // ThemedViewStyle plus a native checkbox (BUTTON/BP_CHECKBOX).
+    class ThemedCheckBoxStyle : public ThemedViewStyle {
+    public:
+        ThemedCheckBoxStyle() : ThemedViewStyle(L"BUTTON") {}
+
+        bool checked = false;
+        bool pressed = false;
+        bool enabled = true;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
+    protected:
+        int partId() const override { return BP_CHECKBOX; }
+
+        int stateId(bool highlighted) const override {
+            if (!enabled) return checked ? CBS_CHECKEDDISABLED : CBS_UNCHECKEDDISABLED;
+            if (pressed) return checked ? CBS_CHECKEDPRESSED : CBS_UNCHECKEDPRESSED;
+            if (highlighted) return checked ? CBS_CHECKEDHOT : CBS_UNCHECKEDHOT;
+            return checked ? CBS_CHECKEDNORMAL : CBS_UNCHECKEDNORMAL;
+        }
     };
 
 }

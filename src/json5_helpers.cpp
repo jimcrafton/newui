@@ -27,6 +27,23 @@ namespace newui {
             v["height"].get<float>(defaultValue.size().height));
     }
 
+    void writeSize(json5::builder& w, const char* key, const Size& size) {
+        w.push_object();
+        w["width"] = size.width;
+        w["height"] = size.height;
+        w[key] = w.pop();
+    }
+
+    Size readSize(const json5::value& v, const Size& defaultValue) {
+        if (!v.is_object()) {
+            return defaultValue;
+        }
+
+        return Size(
+            v["width"].get<float>(defaultValue.width),
+            v["height"].get<float>(defaultValue.height));
+    }
+
     void writeColor(json5::builder& w, const char* key, const BLVar& color) {
         if (color.is_null() || (!color.is_rgba32() && !color.is_rgba64())) {
             return;

@@ -5,6 +5,33 @@
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
 
+namespace {
+
+	// True if candidate is subtreeRoot itself, or a descendant of it -
+	// walks candidate's own parent() chain upward (each SubView's parent_
+	// is set correctly at every depth by SubView::addChild()/
+	// RootView::addChild(), regardless of nesting - see subview.h) until
+	// it either reaches subtreeRoot (true) or the chain runs out at
+	// something that isn't a SubView, i.e. the RootView itself (false).
+	// Used by RootView::notifySubViewRemoved() to decide whether a
+	// removed subtree carries away this RootView's hovered/captured/
+	// focused pointer with it.
+	bool isWithinSubtree(const newui::SubView* candidate, const newui::SubView* subtreeRoot) {
+		for (const newui::View* cur = candidate; cur != nullptr; ) {
+			if (cur == subtreeRoot) {
+				return true;
+			}
+			const newui::SubView* sv = dynamic_cast<const newui::SubView*>(cur);
+			if (sv == nullptr) {
+				return false;
+			}
+			cur = sv->parent();
+		}
+		return false;
+	}
+
+}
+
 namespace newui {
 
 	RootView::RootView(Frame* frame, const newui::Rect& bounds, const std::string& name) : parentFrame_(frame) {
@@ -134,13 +161,83 @@ namespace newui {
 		// descendant in it needs to pick up this RootView too, not just
 		// child itself.
 		child->propagateRootView(rootView());
+		child->setParent(this);
 		View::addChild(child);
+		
 	}
 
 	void RootView::removeChild(SubView* child) {
+		notifySubViewRemoved(child);
 		View::removeChild(child);
 		child->setParentView(nullptr);
+		child->setParent(nullptr);
 		child->propagateRootView(nullptr);
+	}
+
+	Point RootView::accumulatedOffset(const SubView* view) const {
+		Point offset(0.0f, 0.0f);
+		for (const View* cur = view; cur != nullptr; ) {
+			const SubView* sv = dynamic_cast<const SubView*>(cur);
+			if (sv == nullptr) {
+				break;
+			}
+			offset = offset + sv->getBounds().pos();
+			cur = sv->parent();
+		}
+		return offset;
+	}
+
+	void RootView::updateHoveredSubView(SubView* target, const Point& rootPt) {
+		if (target == hoveredSubView_) {
+			return;
+		}
+
+		if (hoveredSubView_ != nullptr) {
+			SubView* left = hoveredSubView_;
+			left->onMouseLeft(*left, rootPt - accumulatedOffset(left), 0, 0);
+			left->setHighlighted(false);
+			left->style().markDirty();
+		}
+
+		hoveredSubView_ = target;
+
+		if (hoveredSubView_ != nullptr) {
+			hoveredSubView_->onMouseEntered(*hoveredSubView_, rootPt - accumulatedOffset(hoveredSubView_), 0, 0);
+			hoveredSubView_->setHighlighted(true);
+			hoveredSubView_->style().markDirty();
+		}
+	}
+
+	void RootView::setFocusedSubView(SubView* target) {
+		if (target == focusedSubView_) {
+			return;
+		}
+
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->onLostFocus(*focusedSubView_);
+		}
+
+		focusedSubView_ = target;
+
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->onGotFocus(*focusedSubView_);
+		}
+	}
+
+	void RootView::notifySubViewRemoved(SubView* removedSubtreeRoot) {
+		if (removedSubtreeRoot == nullptr) {
+			return;
+		}
+
+		if (hoveredSubView_ != nullptr && isWithinSubtree(hoveredSubView_, removedSubtreeRoot)) {
+			hoveredSubView_ = nullptr;
+		}
+		if (capturedSubView_ != nullptr && isWithinSubtree(capturedSubView_, removedSubtreeRoot)) {
+			capturedSubView_ = nullptr;
+		}
+		if (focusedSubView_ != nullptr && isWithinSubtree(focusedSubView_, removedSubtreeRoot)) {
+			focusedSubView_ = nullptr;
+		}
 	}
 
 	std::tuple<RootView*, SubView*> RootView::getTarget(HWND hwnd)
@@ -171,45 +268,121 @@ namespace newui {
 		onMouseEntered(*this, pt, 0, 0);
 	}
 
+	// Every mouseXxx() below fires this RootView's own delegate first
+	// (pt in RootView-local/window-client coordinates, unchanged
+	// pre-existing behavior) and then, where applicable, routes a second,
+	// translated copy of the event to whichever SubView is the right
+	// target - hit-tested under the cursor, or capturedSubView_/
+	// focusedSubView_ where capture/focus semantics apply (see
+	// hoveredSubView()/capturedSubView()/focusedSubView() in rootview.h).
 	void RootView::mouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseDown(*this, pt, btnMask, keyMask);
+
+		Point localPt;
+		SubView* target = hitTestChildren(pt, localPt);
+		capturedSubView_ = target;
+		setFocusedSubView(target);
+
+		if (target != nullptr) {
+			target->onMouseDown(*target, localPt, btnMask, keyMask);
+		}
 	}
 
 	void RootView::mouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseMove(*this, pt, btnMask, keyMask);
+
+		Point hoverLocalPt;
+		SubView* hoverTarget = hitTestChildren(pt, hoverLocalPt);
+		updateHoveredSubView(hoverTarget, pt);
+
+		SubView* dispatchTarget = capturedSubView_ != nullptr ? capturedSubView_ : hoverTarget;
+		if (dispatchTarget != nullptr) {
+			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
+			dispatchTarget->onMouseMove(*dispatchTarget, localPt, btnMask, keyMask);
+		}
 	}
 
 	void RootView::mouseWheel(const Point& pt, float mouseDelta, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseWheel(*this, pt, mouseDelta);
+
+		Point localPt;
+		SubView* target = hitTestChildren(pt, localPt);
+		if (target != nullptr) {
+			target->onMouseWheel(*target, localPt, mouseDelta);
+		}
 	}
-	
+
 	void RootView::mouseLeft(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseLeft(*this, pt, btnMask, keyMask);
+
+		// The cursor left the whole window, not just whatever SubView it
+		// was last over - nothing is hovered now, regardless of
+		// capturedSubView_ (capture is unaffected: a drag that started on
+		// a SubView keeps routing mouseMove()/mouseUp() to it even while
+		// the cursor is outside the window entirely - see handleMessage()'s
+		// SetCapture()).
+		updateHoveredSubView(nullptr, pt);
 	}
 
 	void RootView::mouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseUp(*this, pt, btnMask, keyMask);
+
+		Point localPt;
+		SubView* target = capturedSubView_;
+		if (target != nullptr) {
+			localPt = pt - accumulatedOffset(target);
+		} else {
+			target = hitTestChildren(pt, localPt);
+		}
+
+		capturedSubView_ = nullptr;
+
+		if (target != nullptr) {
+			target->onMouseUp(*target, localPt, btnMask, keyMask);
+		}
 	}
 
 	void RootView::mouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseDblClick(*this, pt, btnMask, keyMask);
+
+		// Windows doesn't send a fresh WM_LBUTTONDOWN for the second
+		// click of a double-click (WM_LBUTTONDBLCLK stands in for it), so
+		// this re-establishes capture/focus exactly like mouseDown() does -
+		// otherwise a click-drag starting on a double-click would have no
+		// capturedSubView_ to route through.
+		Point localPt;
+		SubView* target = hitTestChildren(pt, localPt);
+		capturedSubView_ = target;
+		setFocusedSubView(target);
+
+		if (target != nullptr) {
+			target->onMouseDblClick(*target, localPt, btnMask, keyMask);
+		}
 	}
 
 
 	void RootView::gotFocus()
 	{
 		onGotFocus(*this);
+
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->onGotFocus(*focusedSubView_);
+		}
 	}
 
 	void RootView::lostFocus()
 	{
 		onLostFocus(*this);
+
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->onLostFocus(*focusedSubView_);
+		}
 	}
 
 	void RootView::keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode)
@@ -219,7 +392,7 @@ namespace newui {
 				onKeyPress(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
 			}
 			break;
-			
+
 			case keKeyDown: {
 				onKeyDown(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
 			}
@@ -227,6 +400,27 @@ namespace newui {
 
 			case keKeyUp: {
 				onKeyUp(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
+			}
+			break;
+		}
+
+		if (focusedSubView_ == nullptr) {
+			return;
+		}
+
+		switch (eventType) {
+			case keKeyPress: {
+				focusedSubView_->onKeyPress(*focusedSubView_, keyMask, keyCharVal, repeatCount, VKeyCode);
+			}
+			break;
+
+			case keKeyDown: {
+				focusedSubView_->onKeyDown(*focusedSubView_, keyMask, keyCharVal, repeatCount, VKeyCode);
+			}
+			break;
+
+			case keKeyUp: {
+				focusedSubView_->onKeyUp(*focusedSubView_, keyMask, keyCharVal, repeatCount, VKeyCode);
 			}
 			break;
 		}
@@ -275,6 +469,14 @@ namespace newui {
 				mouseDown(pt, btnMask, keyMask);
 
 				::SetFocus(viewHwnd_);
+				// Keeps delivering WM_MOUSEMOVE/WM_*BUTTONUP to this window
+				// even once the cursor leaves it - needed so
+				// capturedSubView_ (set by mouseDown() above) keeps
+				// receiving mouseMove()/mouseUp() for the rest of a drag
+				// that goes outside the window's bounds. Released on the
+				// matching button-up below (or via WM_CAPTURECHANGED if
+				// something else steals it first).
+				::SetCapture(viewHwnd_);
 				result = true;
 			}
 			break;
@@ -313,6 +515,12 @@ namespace newui {
 				auto keyMask = translateKeyMask(tmpWParam);
 
 				mouseUp(pt, btnMask, keyMask);
+				// Matches the SetCapture() in WM_LBUTTONDOWN/WM_MBUTTONDOWN/
+				// WM_RBUTTONDOWN - releases capture once mouseUp() above
+				// has already cleared capturedSubView_. Safe to call even
+				// if this window doesn't currently hold capture (e.g. a
+				// button-up with no matching prior button-down).
+				::ReleaseCapture();
 				result = true;
 			}
 			break;
@@ -393,8 +601,26 @@ namespace newui {
 				*/
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
-				
+
 				mouseDblClick(pt, btnMask, keyMask);
+				// See the WM_LBUTTONDOWN/etc. comment - mouseDblClick()
+				// re-establishes capturedSubView_ the same way mouseDown()
+				// does, since Windows sends WM_LBUTTONDBLCLK instead of a
+				// second WM_LBUTTONDOWN, so the Win32-level capture needs
+				// re-establishing here too.
+				::SetCapture(viewHwnd_);
+				result = true;
+			}
+			break;
+
+			case WM_CAPTURECHANGED: {
+				// Something else (a system drag operation, another
+				// window, ...) took over mouse capture out from under us -
+				// capturedSubView_ would no longer receive real
+				// WM_MOUSEMOVE/WM_*BUTTONUP messages to route, so drop it
+				// rather than have it linger stale until some unrelated
+				// future click happens to overwrite it.
+				capturedSubView_ = nullptr;
 				result = true;
 			}
 			break;

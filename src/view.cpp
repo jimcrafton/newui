@@ -13,12 +13,30 @@ namespace newui {
 
 	void View::destroy()
 	{
-		// Remove all children from this SubView
-		for (SubView* child : childViews_) {
-			child->destroy();
+		// Deliberately re-reads childViews_.front() each pass rather than
+		// holding an iterator across the loop: child->destroy() removes
+		// itself from its parent's childViews_ (see SubView::destroy()'s
+		// parent_->removeChild(this)) - when that parent is *this* (the
+		// common case, destroying a whole subtree top-down), a live
+		// range-based-for iterator would be invalidated out from under it
+		// mid-walk. count is a sanity check, not the loop's termination
+		// condition (that's childViews_.empty()) - it catches "still had
+		// N-original-children left over after N iterations" (e.g.
+		// something re-added a child mid-destroy), not "a child failed to
+		// remove itself" (that fails earlier and louder: the next
+		// iteration's front() would still be the just-deleted child,
+		// crashing on the use-after-free before this check is ever
+		// reached).
+		std::size_t count = childViews_.size();
+		while (!childViews_.empty()) {
+			SubView* child = childViews_.front();
+			child->destroy();  // removes itself from childViews_ - see above
 			delete child;
+			--count;
+			if (count == 0 && !childViews_.empty()) {
+				throw std::runtime_error("removal logic busted in this view");
+			}
 		}
-		childViews_.clear();
 
 		onDestroyed(*this);
 	}
@@ -26,6 +44,7 @@ namespace newui {
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);
+		
 		updateLayout();
 	}
 
@@ -72,11 +91,37 @@ namespace newui {
 		}
 	}
 
-	void View::paintStyle(BLContext& ctx) {
-		clientBounds_ = Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+	SubView* View::hitTestChildren(const Point& localPt, Point& outLocalPt) const {
+		for (auto it = childViews_.rbegin(); it != childViews_.rend(); ++it) {
+			SubView* child = *it;
+			if (!child->isVisible()) {
+				continue;
+			}
 
+			const Rect& bounds = child->getBounds();
+			if (!bounds.contains(localPt)) {
+				continue;
+			}
+
+			Point childLocalPt(localPt.x - bounds.left(), localPt.y - bounds.top());
+
+			Point deeperLocalPt;
+			if (SubView* deeper = child->hitTestChildren(childLocalPt, deeperLocalPt)) {
+				outLocalPt = deeperLocalPt;
+				return deeper;
+			}
+
+			outLocalPt = childLocalPt;
+			return child;
+		}
+
+		return nullptr;
+	}
+
+	void View::paintStyle(BLContext& ctx) {
 		if (style_) {
-			style_->paint(ctx, bounds_.size(), highlighted_, clientBounds_);
+			Rect unused;
+			style_->paint(ctx, bounds_.size(), highlighted_, unused);
 		}
 	}
 
@@ -84,11 +129,19 @@ namespace newui {
 		w["name"] = w.new_string(name_);
 		w["visible"] = visible_;
 		writeRect(w, "bounds", bounds_);
+		if (desiredSizeOverride_.has_value()) {
+			writeSize(w, "desiredSize", *desiredSizeOverride_);
+		}
 	}
 
 	void View::readFields(const json5::value& obj) {
 		name_ = obj["name"].get_c_str(name_.c_str());
 		visible_ = obj["visible"].get_bool(visible_);
 		bounds_ = readRect(obj["bounds"], bounds_);
+		if (json5::value v = obj["desiredSize"]; v.is_object()) {
+			desiredSizeOverride_ = readSize(v);
+		} else {
+			desiredSizeOverride_.reset();
+		}
 	}
 }

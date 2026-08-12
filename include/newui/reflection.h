@@ -1,8 +1,10 @@
 #pragma once
 
 #include <any>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -40,6 +42,74 @@ namespace newui::reflection {
         template<typename T> struct ClassAccess;
     }
 
+    // container_traits<ContainerT> - one specialization per STL container
+    // type reflectable as a Property "collection" (see PropertyCollection/
+    // TypedPropertyCollection below). The primary template is deliberately
+    // empty (no ElementT member) rather than declared-only: looking up
+    // container_traits<T>::ElementT for an unsupported T then fails inside
+    // is_reflectable_collection's own immediate context (SFINAE-friendly),
+    // instead of erroring while implicitly instantiating an incomplete
+    // primary template body.
+    namespace detail {
+        template<typename ContainerT>
+        struct container_traits {};
+
+        template<typename T, typename Alloc>
+        struct container_traits<std::vector<T, Alloc>> {
+            using ElementT = T;
+            using KeyT = std::size_t;
+            static constexpr bool associative = false;
+            static std::size_t count(const std::vector<T, Alloc>& c) { return c.size(); }
+            static T getByIndex(const std::vector<T, Alloc>& c, std::size_t index) { return c.at(index); }
+            static void setByIndex(std::vector<T, Alloc>& c, std::size_t index, const T& value) { c.at(index) = value; }
+            static T getByKey(const std::vector<T, Alloc>& c, std::size_t key) { return getByIndex(c, key); }
+            static void setByKey(std::vector<T, Alloc>& c, std::size_t key, const T& value) { setByIndex(c, key, value); }
+        };
+
+        template<typename T, std::size_t N>
+        struct container_traits<std::array<T, N>> {
+            using ElementT = T;
+            using KeyT = std::size_t;
+            static constexpr bool associative = false;
+            static std::size_t count(const std::array<T, N>&) { return N; }
+            static T getByIndex(const std::array<T, N>& c, std::size_t index) { return c.at(index); }
+            static void setByIndex(std::array<T, N>& c, std::size_t index, const T& value) { c.at(index) = value; }
+            static T getByKey(const std::array<T, N>& c, std::size_t key) { return getByIndex(c, key); }
+            static void setByKey(std::array<T, N>& c, std::size_t key, const T& value) { setByIndex(c, key, value); }
+        };
+
+        // Positional (index-based) access enumerates in key order via
+        // std::advance() on an iterator - only stable as long as the map
+        // isn't mutated between calls, same caveat as any iterator-derived
+        // index would have.
+        template<typename K, typename V, typename Compare, typename Alloc>
+        struct container_traits<std::map<K, V, Compare, Alloc>> {
+            using ElementT = V;
+            using KeyT = K;
+            static constexpr bool associative = true;
+            static std::size_t count(const std::map<K, V, Compare, Alloc>& c) { return c.size(); }
+            static V getByIndex(const std::map<K, V, Compare, Alloc>& c, std::size_t index) {
+                auto it = c.begin();
+                std::advance(it, index);
+                return it->second;
+            }
+            static void setByIndex(std::map<K, V, Compare, Alloc>& c, std::size_t index, const V& value) {
+                auto it = c.begin();
+                std::advance(it, index);
+                it->second = value;
+            }
+            static V getByKey(const std::map<K, V, Compare, Alloc>& c, const K& key) { return c.at(key); }
+            static void setByKey(std::map<K, V, Compare, Alloc>& c, const K& key, const V& value) { c[key] = value; }
+        };
+
+        template<typename T, typename = void>
+        struct is_reflectable_collection : std::false_type {};
+        template<typename T>
+        struct is_reflectable_collection<T, std::void_t<typename container_traits<T>::ElementT>> : std::true_type {};
+        template<typename T>
+        inline constexpr bool is_reflectable_collection_v = is_reflectable_collection<T>::value;
+    }
+
     // Placed once in a class body to grant newui::reflection's ClassAccess<T>
     // template access to this class's private/protected members - nothing
     // more. There's no opt-in/exclude marker here: reflectgen (once it
@@ -60,9 +130,28 @@ namespace newui::reflection {
         Private,
     };
 
+    // Property::flags() - Collection marks a Property that also implements
+    // PropertyCollection (see below); Associative only means anything
+    // combined with Collection (a std::map, keyed by something other than a
+    // plain index, vs. a std::vector/std::array keyed by index).
+    enum class PropertyFlags : std::uint32_t {
+        None        = 0,
+        Collection  = 1u << 0,
+        Associative = 1u << 1,
+    };
+
+    inline PropertyFlags operator|(PropertyFlags lhs, PropertyFlags rhs) {
+        return static_cast<PropertyFlags>(static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
+    }
+    inline PropertyFlags operator&(PropertyFlags lhs, PropertyFlags rhs) {
+        return static_cast<PropertyFlags>(static_cast<std::uint32_t>(lhs) & static_cast<std::uint32_t>(rhs));
+    }
+    inline PropertyFlags& operator|=(PropertyFlags& lhs, PropertyFlags rhs) { return lhs = lhs | rhs; }
+
     // One parameter of a Method/Delegate/Constructor. name is best-effort
     // (may be empty - not every call site has one available) and never
     // affects invoke(); only position within the argument list and type do.
+    //@reflect ignore=true
     struct Argument {
         std::string name;
         std::type_index type;
@@ -74,6 +163,7 @@ namespace newui::reflection {
     // the constructor below wires up the same std::any-thunk-based
     // implementation this class always had; TypedField<ValueT> (below)
     // overrides address()/get()/set() instead of using it.
+    //@reflect ignore=true
     class Field {
     public:
         Field(std::string name, std::type_index type, void* address,
@@ -115,6 +205,7 @@ namespace newui::reflection {
     // Property below), so there's no accessor-function indirection at all:
     // just a real ValueT* stored directly. Adds no std::any-thunk state of
     // its own; address()/get()/set() are overridden outright.
+    //@reflect ignore=true
     template<typename ValueT>
     class TypedField : public Field {
     public:
@@ -135,17 +226,23 @@ namespace newui::reflection {
     // set() work. address() is the zero-copy live pointer into instance;
     // get()/set() are a boxed convenience layer on top for callers that only
     // have a name string and no compile-time type to cast address() with.
+    //@reflect ignore=true
     class Property {
     public:
         Property(std::string name, std::type_index type, Scope scope,
-                  void* (*address)(void*), std::any (*get)(void*), void (*set)(void*, const std::any&))
-            : name_(std::move(name)), type_(type), scope_(scope), address_(address), get_(get), set_(set) {}
+                  void* (*address)(void*), std::any (*get)(void*), void (*set)(void*, const std::any&),
+                  PropertyFlags flags = PropertyFlags::None)
+            : name_(std::move(name)), type_(type), scope_(scope), address_(address), get_(get), set_(set),
+              flags_(flags) {}
 
         virtual ~Property() = default;
 
         const std::string& name() const { return name_; }
         std::type_index type() const { return type_; }
         Scope scope() const { return scope_; }
+        PropertyFlags flags() const { return flags_; }
+        bool isCollection() const { return (flags_ & PropertyFlags::Collection) != PropertyFlags::None; }
+        bool isAssociative() const { return (flags_ & PropertyFlags::Associative) != PropertyFlags::None; }
 
         virtual void* address(void* instance) const { return address_ ? address_(instance) : nullptr; }
         virtual std::any get(void* instance) const { return get_ ? get_(instance) : std::any(); }
@@ -172,6 +269,7 @@ namespace newui::reflection {
         AddressFn address_;
         GetFn get_;
         SetFn set_;
+        PropertyFlags flags_;
     };
 
     // T-aware TypedProperty<SourceT,ValueT> - stores a real pointer-to-
@@ -186,6 +284,7 @@ namespace newui::reflection {
     // member_, so ClassBuilder<T>::property()'s typed overload doesn't need
     // any separately hand-written thunk functions at all - compare to the
     // untyped overload, which still needs one each for address/get/set.
+    //@reflect ignore=true
     template<typename SourceT, typename ValueT>
     class TypedProperty : public Property {
     public:
@@ -213,6 +312,105 @@ namespace newui::reflection {
         MemberPtr member_;
     };
 
+    // A Property whose value is itself a collection (std::vector/std::array/
+    // std::map - see container_traits above) - element-level access beyond
+    // Property's own whole-container address()/get()/set(). Concrete (not
+    // abstract), same idiom as Property/Field: every method here has a
+    // do-nothing default (element type/key type of void, count of 0, a
+    // no-op get/set), and TypedPropertyCollection<SourceT,ContainerT>
+    // (below) overrides all of it with a real container_traits-backed
+    // implementation - a bare PropertyCollection is never useful on its
+    // own, just like a bare Property/Field never carries real thunks
+    // outside ClassBuilder's untyped path.
+    //
+    // count()/get()/set() below act on a std::any the caller already holds
+    // (typically Property::get(instance)'s result) rather than on a live
+    // SourceT instance directly - this is what lets a caller enumerate/
+    // mutate collection elements from nothing but a std::any value, with no
+    // compile-time ValueT and no void* instance pointer to a still-live
+    // owning object. get(std::any&, size_t)/get(std::any&, const std::any&)
+    // both exist so a caller can index sequentially (vector/array) or by a
+    // real key (map) through the same interface - for a sequential
+    // collection the key overload just treats the key as an index.
+    //
+    // Property::get(void*)/set(void*, const std::any&) declared here would
+    // otherwise be hidden by this class's own get()/set() overloads (C++
+    // name hiding is per-name, not per-signature) - the using-declarations
+    // below keep the whole-container path reachable through a
+    // PropertyCollection*/TypedPropertyCollection*, not just via an upcast
+    // to Property*.
+    //@reflect ignore=true
+    class PropertyCollection : public Property {
+    public:
+        using Property::get;
+        using Property::set;
+
+        PropertyCollection(std::string name, std::type_index type, Scope scope,
+                             void* (*address)(void*), std::any (*get)(void*), void (*set)(void*, const std::any&),
+                             PropertyFlags flags = PropertyFlags::Collection)
+            : Property(std::move(name), type, scope, address, get, set, flags) {}
+
+        virtual std::type_index elementType() const { return typeid(void); }
+        virtual std::type_index keyType() const { return typeid(void); }
+
+        virtual std::size_t count(std::any& instance) const { return 0; }
+        virtual std::any get(std::any& instance, std::size_t index) const { return std::any(); }
+        virtual void set(std::any& instance, std::size_t index, const std::any& value) const {}
+        virtual std::any get(std::any& instance, const std::any& key) const { return std::any(); }
+        virtual void set(std::any& instance, const std::any& key, const std::any& value) const {}
+    };
+
+    // T-aware TypedPropertyCollection<SourceT,ContainerT> - stores a real
+    // pointer-to-data-member (ContainerT SourceT::*), same as TypedProperty,
+    // and overrides Property's address()/get()/set() the same way for
+    // whole-container access. container_traits<ContainerT> (above) supplies
+    // every element-level operation, so - like TypedProperty needing no
+    // hand-written thunks - this needs no per-container-type code beyond
+    // the container_traits specialization already having been written once.
+    //@reflect ignore=true
+    template<typename SourceT, typename ContainerT>
+    class TypedPropertyCollection : public PropertyCollection {
+    public:
+        using Traits = detail::container_traits<ContainerT>;
+        using ElementT = typename Traits::ElementT;
+        using KeyT = typename Traits::KeyT;
+        using MemberPtr = ContainerT SourceT::*;
+
+        TypedPropertyCollection(std::string name, Scope scope, MemberPtr member)
+            : PropertyCollection(std::move(name), typeid(ContainerT), scope, nullptr, nullptr, nullptr,
+                  Traits::associative ? (PropertyFlags::Collection | PropertyFlags::Associative) : PropertyFlags::Collection),
+              member_(member) {}
+
+        void* address(void* instance) const override { return &container(instance); }
+        std::any get(void* instance) const override { return std::any(container(instance)); }
+        void set(void* instance, const std::any& value) const override {
+            container(instance) = std::any_cast<ContainerT>(value);
+        }
+
+        std::type_index elementType() const override { return typeid(ElementT); }
+        std::type_index keyType() const override { return typeid(KeyT); }
+
+        std::size_t count(std::any& instance) const override { return Traits::count(unbox(instance)); }
+        std::any get(std::any& instance, std::size_t index) const override {
+            return std::any(Traits::getByIndex(unbox(instance), index));
+        }
+        void set(std::any& instance, std::size_t index, const std::any& value) const override {
+            Traits::setByIndex(unbox(instance), index, std::any_cast<ElementT>(value));
+        }
+        std::any get(std::any& instance, const std::any& key) const override {
+            return std::any(Traits::getByKey(unbox(instance), std::any_cast<KeyT>(key)));
+        }
+        void set(std::any& instance, const std::any& key, const std::any& value) const override {
+            Traits::setByKey(unbox(instance), std::any_cast<KeyT>(key), std::any_cast<ElementT>(value));
+        }
+
+    private:
+        ContainerT& container(void* instance) const { return static_cast<SourceT*>(instance)->*member_; }
+        static ContainerT& unbox(std::any& instance) { return std::any_cast<ContainerT&>(instance); }
+
+        MemberPtr member_;
+    };
+
     // A member function. Unlike Property/Field/Delegate, invoke() only ever
     // works for genuinely public methods - constructing or calling code is a
     // bigger trust boundary than reading/writing an existing field, so
@@ -222,6 +420,7 @@ namespace newui::reflection {
     // for introspection/tooling), but invoke_ stays null and invoke() throws
     // - same idiom Property<SourceT,ValueT>::interpolate(t) already uses in
     // property.h for an unsupported operation, rather than a silent no-op.
+    //@reflect ignore=true
     class Method {
     public:
         Method(std::string name, Scope scope, bool isVirtual, bool isAbstract,
@@ -273,6 +472,7 @@ namespace newui::reflection {
     // RetT(SourceT::*)(Args...) const are unrelated pointer-to-member
     // types in C++ - fn_/constFn_ are both nullable so invoke() just calls
     // whichever one was actually set.
+    //@reflect ignore=true
     template<typename SourceT, typename RetT, typename... Args>
     class TypedMethod : public Method {
     public:
@@ -323,6 +523,7 @@ namespace newui::reflection {
     // it, which is closer to "use existing state" than "call arbitrary
     // private implementation code", so unlike Method it isn't restricted to
     // public delegates.
+    //@reflect ignore=true
     class Delegate {
     public:
         Delegate(std::string name, Scope scope, std::type_index senderType, std::vector<Argument> arguments,
@@ -366,6 +567,7 @@ namespace newui::reflection {
     // same friended way as TypedProperty's member_, for a private
     // delegate), and unpacks std::any args to call syncCall() directly -
     // same std::index_sequence trick as TypedMethod.
+    //@reflect ignore=true
     template<typename SourceT, typename... Args>
     class TypedDelegate : public Delegate {
     public:
@@ -397,11 +599,13 @@ namespace newui::reflection {
     // One name/value pair of a reflected enum. value is always normalized to
     // int64_t regardless of the enum's real underlying type, so Enum doesn't
     // need to be templated on it.
+    //@reflect ignore=true
     struct EnumValue {
         std::string name;
         std::int64_t value;
     };
 
+    //@reflect ignore=true
     class Enum {
     public:
         Enum(std::type_index type, std::string name) : type_(type), name_(std::move(name)) {}
@@ -441,6 +645,7 @@ namespace newui::reflection {
     // One constructor overload. Unlike Property/Field/Delegate, and same as
     // Method, only ever built from a genuinely public constructor - see
     // Class::createInstance()'s comment.
+    //@reflect ignore=true
     class Constructor {
     public:
         Constructor(std::vector<Argument> arguments, std::any (*invoke)(const std::vector<std::any>&))
@@ -470,6 +675,7 @@ namespace newui::reflection {
     // (not just to run) - a correctness win over the untyped path, where a
     // hand-written invoker's arguments could silently drift out of sync
     // with SourceT's real constructor.
+    //@reflect ignore=true
     template<typename SourceT, typename... Args>
     class TypedConstructor : public Constructor {
     public:
@@ -506,6 +712,7 @@ namespace newui::reflection {
     // shallow-copy the pointers into a double-free, or need a deep-copy
     // Property::clone() nobody needs) - moving is still fine, it just
     // transfers ownership of the same pointers.
+    //@reflect ignore=true
     class Class {
     public:
         Class(std::type_index type, std::string name, std::string namespaceName)
@@ -581,6 +788,7 @@ namespace newui::reflection {
     // (below) - so that's the only way one of these gets built. Adds no
     // data members of its own, purely behavioral sugar over the inherited
     // Class state.
+    //@reflect ignore=true
     template<typename T>
     class TypedClass : public Class {
     public:
@@ -631,6 +839,7 @@ namespace newui::reflection {
     // special access of its own. Same for a private member's pointer-to-
     // member via the typed path - the specialization just exposes it as a
     // plain static method instead.
+    //@reflect ignore=true
     template<typename T>
     class ClassBuilder {
     public:
@@ -662,7 +871,11 @@ namespace newui::reflection {
 
         template<typename ValueT>
         ClassBuilder& property(std::string name, Scope scope, ValueT T::* member) {
-            class_->properties_.push_back(new TypedProperty<T, ValueT>(std::move(name), scope, member));
+            if constexpr (detail::is_reflectable_collection_v<ValueT>) {
+                class_->properties_.push_back(new TypedPropertyCollection<T, ValueT>(std::move(name), scope, member));
+            } else {
+                class_->properties_.push_back(new TypedProperty<T, ValueT>(std::move(name), scope, member));
+            }
             return *this;
         }
 
@@ -745,6 +958,7 @@ namespace newui::reflection {
         std::unique_ptr< TypedClass<T> > class_;
     };
 
+    //@reflect ignore=true
     class EnumBuilder {
     public:
         EnumBuilder(std::type_index type, std::string name) : enum_(type, std::move(name)) {}
@@ -776,6 +990,7 @@ namespace newui::reflection {
     // ownership convention for a polymorphic registry in property.h.
     // registerEnum()/Enum stay by-value (no TypedEnum, no polymorphism
     // needed there) - only Class needed this.
+    //@reflect ignore=true
     class ReflectionRegistry {
     public:
         ReflectionRegistry(const ReflectionRegistry&) = delete;

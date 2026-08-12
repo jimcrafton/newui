@@ -26,6 +26,14 @@ namespace newui {
     // defaultValue unchanged if v isn't an object (e.g. the key was absent).
     Rect readRect(const json5::value& v, const Rect& defaultValue = Rect());
 
+    // Writes size as a nested {width,height} object under w[key] - same
+    // shape as writeRect(), just the position-less half of it.
+    void writeSize(json5::builder& w, const char* key, const Size& size);
+
+    // Reads a {width,height} object back into a Size. Returns defaultValue
+    // unchanged if v isn't an object (e.g. the key was absent).
+    Size readSize(const json5::value& v, const Size& defaultValue = Size());
+
     // Writes color as w[key] = "#RRGGBBAA" (via Color::toString()) if it
     // holds a solid RGBA32/64 color. Omits the key entirely if color is
     // null, or holds a gradient/image pattern - solid-color-only scope,

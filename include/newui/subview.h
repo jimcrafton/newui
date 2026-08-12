@@ -12,8 +12,12 @@ public:
     SubView();
     virtual ~SubView();
 
-	SubView* parent() const {
+	View* parent() const {
 		return parent_;
+	}
+
+	void setParent(View* newParent) {
+		parent_ = newParent;
 	}
 
 	void setBounds(const Rect& bounds);
@@ -52,7 +56,7 @@ public:
 private:
     RootView* parentView_ = nullptr;
 
-	SubView* parent_ = nullptr;
+	View* parent_ = nullptr;
 
 	std::unique_ptr<LayoutParams> layoutParams_;
 };

@@ -106,3 +106,17 @@ doesn't mangle).
 Only classes with a `NEWUI_REFLECT_FRIEND()` in their body get their
 private/protected members reflected; classes without it are still
 scanned, but only their public members are emitted.
+
+A class/struct can opt out of generation entirely with a `// @reflect
+ignore=true` comment directly above its declaration:
+
+```cpp
+// @reflect ignore=true
+class NotReflectable {
+    ...
+};
+```
+
+(`-fparse-all-comments` is passed to clang automatically so a plain `//`
+comment like this is visible at all - libclang only attaches a
+doxygen-style comment, `///`/`/** */`/`//!`, to a cursor by default.)

@@ -13,6 +13,22 @@ BLContext& SharedContext() {
     return ctx;
 }
 
+// Test-local subclasses exposing ThemedButtonStyle/ThemedCheckBoxStyle's
+// protected partId()/stateId() for direct assertions on their state-
+// precedence logic - no live HWND/HTHEME needed for that, unlike paint()
+// itself.
+class TestableThemedButtonStyle : public newui::ThemedButtonStyle {
+public:
+    using newui::ThemedButtonStyle::partId;
+    using newui::ThemedButtonStyle::stateId;
+};
+
+class TestableThemedCheckBoxStyle : public newui::ThemedCheckBoxStyle {
+public:
+    using newui::ThemedCheckBoxStyle::partId;
+    using newui::ThemedCheckBoxStyle::stateId;
+};
+
 }  // namespace
 
 TEST(ViewStyle, NoBorderLeavesClientBoundsAtFullSize) {
@@ -131,6 +147,100 @@ TEST(CheckBoxStyle, CheckedStatePaintsWithoutAlteringClientBounds) {
 }
 
 // ---------------------------------------------------------------------------
+// computeClientBounds() - the paint-free equivalent of paint()'s
+// clientBounds out-parameter (see ViewStyle::computeClientBounds()'s
+// comment). No BLContext/SharedContext() needed for any of these.
+// ---------------------------------------------------------------------------
+
+TEST(ViewStyle, ComputeClientBoundsMatchesNoBorderCase) {
+    newui::ViewStyle style;
+    newui::Rect clientBounds = style.computeClientBounds(newui::Size(64, 64));
+
+    EXPECT_FLOAT_EQ(clientBounds.left(), 0.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 64.0f);
+}
+
+TEST(ViewStyle, ComputeClientBoundsDeflatesByBorderWidth) {
+    newui::ViewStyle style;
+    style.borderWidth = 2.0f;
+
+    newui::Rect clientBounds = style.computeClientBounds(newui::Size(64, 64));
+
+    EXPECT_FLOAT_EQ(clientBounds.left(), 2.0f);
+    EXPECT_FLOAT_EQ(clientBounds.top(), 2.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 60.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 60.0f);
+}
+
+TEST(ViewStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
+    newui::ViewStyle style;
+    style.borderFill = BLRgba32(0, 0, 255);
+    style.borderWidth = 3.0f;
+
+    newui::Rect computed = style.computeClientBounds(newui::Size(64, 64));
+
+    newui::Rect painted;
+    style.paint(SharedContext(), newui::Size(64, 64), false, painted);
+
+    EXPECT_EQ(computed, painted);
+}
+
+TEST(ButtonStyle, ComputeClientBoundsDeflatesByEdgeWidth) {
+    newui::ButtonStyle btn;
+    btn.edgeStyle = newui::Edge3DStyle::Raised;
+    btn.edgeWidth = 2.0f;
+    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
+    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+
+    newui::Rect clientBounds = btn.computeClientBounds(newui::Size(64, 64));
+
+    EXPECT_FLOAT_EQ(clientBounds.left(), 2.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 60.0f);
+}
+
+TEST(ButtonStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
+    newui::ButtonStyle btn;
+    btn.edgeStyle = newui::Edge3DStyle::Etched;
+    btn.edgeWidth = 2.0f;
+    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
+    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+
+    newui::Rect computed = btn.computeClientBounds(newui::Size(64, 64));
+
+    newui::Rect painted;
+    btn.paint(SharedContext(), newui::Size(64, 64), false, painted);
+
+    EXPECT_EQ(computed, painted);
+}
+
+TEST(CheckBoxStyle, ComputeClientBoundsDeflatesOnlyTheLeftSide) {
+    newui::CheckBoxStyle cb;
+    cb.boxSize = 13.0f;
+    cb.boxLabelSpacing = 4.0f;
+
+    newui::Rect clientBounds = cb.computeClientBounds(newui::Size(100, 20));
+
+    EXPECT_FLOAT_EQ(clientBounds.left(), 17.0f);  // boxSize + boxLabelSpacing
+    EXPECT_FLOAT_EQ(clientBounds.top(), 0.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 83.0f);
+}
+
+TEST(CheckBoxStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
+    newui::CheckBoxStyle cb;
+    cb.boxSize = 13.0f;
+    cb.boxLabelSpacing = 4.0f;
+    cb.boxFill = BLRgba32(255, 255, 255);
+    cb.checkColor = BLRgba32(0, 0, 0);
+
+    newui::Rect computed = cb.computeClientBounds(newui::Size(100, 20));
+
+    newui::Rect painted;
+    cb.paint(SharedContext(), newui::Size(100, 20), false, painted);
+
+    EXPECT_EQ(computed, painted);
+}
+
+// ---------------------------------------------------------------------------
 // LabelStyle
 // ---------------------------------------------------------------------------
 
@@ -218,6 +328,81 @@ TEST(LabelStyle, TextIsCenteredWithinClientBounds) {
 
     EXPECT_NEAR(centroidX, width * 0.5, width * 0.25);
     EXPECT_NEAR(centroidY, height * 0.5, height * 0.35);
+}
+
+// ---------------------------------------------------------------------------
+// ThemedButtonStyle / ThemedCheckBoxStyle - real theme rendering needs a
+// live HWND (same constraint this project already accepts for Frame/
+// RootView - see HANDOFF.md), so these only cover what's verifiable
+// headlessly: paint()'s graceful no-op with no live window behind it yet,
+// computeClientBounds()'s no-theme-cached fallback, and stateId()'s
+// precedence logic. Serialization round-tripping is covered in
+// test_serialization.cpp, matching how ButtonStyle/CheckBoxStyle's own
+// round-trip is tested there rather than here.
+// ---------------------------------------------------------------------------
+
+TEST(ThemedButtonStyle, PaintWithNoAttachedViewDoesNotCrash) {
+    newui::ThemedButtonStyle style;
+    // setView() never called - view() stays nullptr, so paint() has no
+    // HWND to open a theme against.
+
+    newui::Rect clientBounds;
+    style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 64.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 64.0f);
+}
+
+TEST(ThemedButtonStyle, ComputeClientBoundsFallsBackToFullSizeWithNoCachedTheme) {
+    newui::ThemedButtonStyle style;
+
+    newui::Rect clientBounds = style.computeClientBounds(newui::Size(80, 24));
+
+    EXPECT_FLOAT_EQ(clientBounds.left(), 0.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 80.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 24.0f);
+}
+
+TEST(ThemedButtonStyle, StateIdPrecedenceIsDisabledThenPressedThenHotThenNormal) {
+    TestableThemedButtonStyle style;
+
+    EXPECT_EQ(style.partId(), BP_PUSHBUTTON);
+    EXPECT_EQ(style.stateId(false), PBS_NORMAL);
+    EXPECT_EQ(style.stateId(true), PBS_HOT);
+
+    style.pressed = true;
+    EXPECT_EQ(style.stateId(true), PBS_PRESSED);  // pressed beats hot
+
+    style.enabled = false;
+    EXPECT_EQ(style.stateId(true), PBS_DISABLED);  // disabled beats everything
+}
+
+TEST(ThemedCheckBoxStyle, PaintWithNoAttachedViewDoesNotCrash) {
+    newui::ThemedCheckBoxStyle style;
+
+    newui::Rect clientBounds;
+    style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 64.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 64.0f);
+}
+
+TEST(ThemedCheckBoxStyle, StateIdPrecedenceAndCheckedDoubling) {
+    TestableThemedCheckBoxStyle style;
+
+    EXPECT_EQ(style.partId(), BP_CHECKBOX);
+    EXPECT_EQ(style.stateId(false), CBS_UNCHECKEDNORMAL);
+    EXPECT_EQ(style.stateId(true), CBS_UNCHECKEDHOT);
+
+    style.checked = true;
+    EXPECT_EQ(style.stateId(false), CBS_CHECKEDNORMAL);
+    EXPECT_EQ(style.stateId(true), CBS_CHECKEDHOT);
+
+    style.pressed = true;
+    EXPECT_EQ(style.stateId(true), CBS_CHECKEDPRESSED);  // pressed beats hot
+
+    style.enabled = false;
+    EXPECT_EQ(style.stateId(true), CBS_CHECKEDDISABLED);  // disabled beats everything
 }
 
 // ---------------------------------------------------------------------------

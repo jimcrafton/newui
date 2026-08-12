@@ -25,7 +25,7 @@ namespace newui {
 
         // Registry-keyed name written as this node's "type" field on save,
         // and looked up in SerializationRegistry on load to find the right
-        // default-constructing factory - e.g. "ButtonStyle", "StackLayout".
+        // default-constructing factory - e.g. "ButtonStyle", "FlexLayout".
         // Not virtual and never overridden: typeid(*this) already reports
         // the most-derived dynamic type (UIComponent is polymorphic), so
         // one definition here covers every subclass automatically -

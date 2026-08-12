@@ -64,6 +64,78 @@ namespace newui {
         void invalidate();
 
         std::tuple<RootView*, SubView*> getTarget(HWND hwnd);
+
+        // Which SubView the mouse is currently over (nullptr if none) -
+        // updated on every mouse move/leave; drives onMouseEntered()/
+        // onMouseLeft() and View::setHighlighted() (see
+        // updateHoveredSubView()).
+        SubView* hoveredSubView() const {
+            return hoveredSubView_;
+        }
+
+        // Which SubView is currently receiving mouse input regardless of
+        // where the cursor actually is - set by mouseDown()/
+        // mouseDblClick(), cleared by mouseUp(). Standard mouse-capture
+        // semantics: a drag that started on a SubView keeps delivering
+        // mouseMove()/mouseUp() to it even if the cursor leaves its
+        // bounds (or the window entirely - see handleMessage()'s
+        // SetCapture()/ReleaseCapture() calls).
+        SubView* capturedSubView() const {
+            return capturedSubView_;
+        }
+
+        // Which SubView keyboard events (keyEvent()) are routed to -
+        // nullptr means "just the window itself", the pre-existing
+        // behavior (onKeyDown()/onKeyPress()/onKeyUp() only ever fired on
+        // this RootView). Set automatically on mouseDown()/
+        // mouseDblClick() (clicking a SubView focuses it, clicking empty
+        // space clears it), or call this directly for programmatic focus.
+        void setFocusedSubView(SubView* target);
+
+        SubView* focusedSubView() const {
+            return focusedSubView_;
+        }
+
+        // Clears hoveredSubView_/capturedSubView_/focusedSubView_ if any
+        // of them is removedSubtreeRoot itself or one of its descendants -
+        // called by RootView::removeChild()/SubView::removeChild() before
+        // detaching a subtree, so this RootView never holds onto a
+        // dangling pointer into memory that's about to be (or already
+        // was) deleted. No got/lostFocus or entered/left events fire for
+        // this - the view is on its way out, nothing left to safely
+        // notify.
+        void notifySubViewRemoved(SubView* removedSubtreeRoot);
+
+        // The live Win32 window handle backing this RootView, or nullptr
+        // before initialize() has created it. Needed by anything that has
+        // to talk to a real Win32 API against this window directly - e.g.
+        // ThemedViewStyle (viewstyle.h) opening an HTHEME via
+        // OpenThemeData(), which requires a real HWND.
+        HWND windowHandle() const {
+            return viewHwnd_;
+        }
+
+    protected:
+        // Win32-message-driven event entry points - protected (not
+        // private) purely for testability, so a test-local subclass can
+        // drive them directly without a real HWND/message pump (see
+        // TestableRootView in unittests/test_rootview.cpp, same pattern
+        // as TestableThemedButtonStyle in test_viewstyle.cpp exposing a
+        // protected method via a using-declaration). handleMessage() is
+        // the only real caller in production code.
+        void mouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+		void mouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        void mouseEntered(const Point& pt);
+        void mouseWheel(const Point& pt, float mouseDelta, std::uint32_t btnMask, std::uint32_t keyMask);
+        void mouseLeft(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        void mouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        void mouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+
+        void gotFocus();
+        void lostFocus();
+
+        void keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+
     private:
 	    Frame* parentFrame_ = nullptr;
 		HWND viewHwnd_ = nullptr;
@@ -86,25 +158,37 @@ namespace newui {
 
         bool mouseEnteredControl_ = false;
 
+        // Mouse/keyboard routing state - see hoveredSubView()/
+        // capturedSubView()/focusedSubView() above for what each means.
+        SubView* hoveredSubView_ = nullptr;
+        SubView* capturedSubView_ = nullptr;
+        SubView* focusedSubView_ = nullptr;
+
+        // Converts a point in this RootView's own local space into view's
+        // local space, by walking view's parent() chain up to (but not
+        // including) this RootView and subtracting each ancestor's own
+        // bounds position along the way - the same accumulated-offset
+        // math paintChildren()'s ctx.translate() calls perform
+        // incrementally per level, done here in one shot for an arbitrary
+        // point instead. Needed for mouseMove()/mouseUp() to keep
+        // targeting capturedSubView_ correctly even once the cursor is no
+        // longer over its bounds (or any of its ancestors').
+        Point accumulatedOffset(const SubView* view) const;
+
+        // Updates hoveredSubView_ to target, firing onMouseLeft()/
+        // onMouseEntered() (and toggling View::setHighlighted() +
+        // style().markDirty(), so hover state actually repaints) on
+        // whichever of the old/new hovered views actually changed. rootPt
+        // is the mouse position in this RootView's own local space - a
+        // no-op if target is already the current hoveredSubView_.
+        void updateHoveredSubView(SubView* target, const Point& rootPt);
+
         bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
 
         static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 
         void viewCreated();
-
-        void mouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-		void mouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        void mouseEntered(const Point& pt);
-        void mouseWheel(const Point& pt, float mouseDelta, std::uint32_t btnMask, std::uint32_t keyMask);
-        void mouseLeft(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        void mouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        void mouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-
-        void gotFocus();
-        void lostFocus();
-
-        void keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
     };
 
 }
