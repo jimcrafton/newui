@@ -187,6 +187,15 @@ namespace newui {
 		return offset;
 	}
 
+	Point RootView::localToScreen(const Point& rootLocalPt) const {
+		if (viewHwnd_ == nullptr) {
+			return rootLocalPt;
+		}
+		POINT pt = rootLocalPt;
+		::ClientToScreen(viewHwnd_, &pt);
+		return pt;
+	}
+
 	void RootView::updateHoveredSubView(SubView* target, const Point& rootPt) {
 		if (target == hoveredSubView_) {
 			return;
@@ -238,6 +247,16 @@ namespace newui {
 		if (focusedSubView_ != nullptr && isWithinSubtree(focusedSubView_, removedSubtreeRoot)) {
 			focusedSubView_ = nullptr;
 		}
+	}
+
+	View* RootView::cursorTargetAt(const Point& pt) {
+		if (capturedSubView_ != nullptr) {
+			return capturedSubView_;
+		}
+
+		Point localPt;
+		SubView* hit = hitTestChildren(pt, localPt);
+		return hit != nullptr ? static_cast<View*>(hit) : static_cast<View*>(this);
 	}
 
 	std::tuple<RootView*, SubView*> RootView::getTarget(HWND hwnd)
@@ -562,6 +581,27 @@ namespace newui {
 				auto keyMask = translateKeyMask(wParam);
 				short mouseDelta = (short)HIWORD(wParam);   // wheel rotation
 				mouseWheel(pt, mouseDelta, btnMask, keyMask);
+				result = true;
+			}
+			break;
+
+			case WM_SETCURSOR: {
+				// LOWORD(lParam) is the hit-test code from the preceding
+				// WM_NCHITTEST - only override the cursor for the client
+				// area (HTCLIENT); anything else (resize borders, etc.)
+				// should keep getting Windows' own default handling.
+				if (LOWORD(lParam) != HTCLIENT) {
+					result = false;
+					break;
+				}
+
+				POINT pt;
+				::GetCursorPos(&pt);
+				::ScreenToClient(viewHwnd_, &pt);
+
+				View* target = cursorTargetAt(Point(static_cast<float>(pt.x), static_cast<float>(pt.y)));
+				::SetCursor(target->resolvedCursor());
+				outLRESULT = TRUE;
 				result = true;
 			}
 			break;

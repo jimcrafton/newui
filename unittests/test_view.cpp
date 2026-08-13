@@ -123,6 +123,158 @@ TEST(ViewDesiredSize, ClearDesiredSizeRevertsToComputedFallback) {
 }
 
 // ---------------------------------------------------------------------------
+// cursor()/setCursor(Cursor)/cursorKind()/resolvedCursor() - RootView::
+// handleMessage()'s WM_SETCURSOR case (rootview.cpp) is what actually shows
+// resolvedCursor() on screen; these only cover the pure state/resolution
+// logic. Cursor itself (cursor.h/cursor.cpp) is tested standalone in
+// test_cursor.cpp - these only cover View's own use of it.
+// ---------------------------------------------------------------------------
+
+TEST(ViewCursor, DefaultsToArrow) {
+    auto* view = new newui::SubView();
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Arrow);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_ARROW));
+
+    delete view;
+}
+
+TEST(ViewCursor, MutatingCursorInPlaceChangesCursorKindAndResolvedCursor) {
+    auto* view = new newui::SubView();
+
+    view->cursor().setCursorKind(newui::CursorKind::Hand);
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Hand);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_HAND));
+
+    delete view;
+}
+
+TEST(ViewCursor, SetCursorReplacesItWholesale) {
+    auto* view = new newui::SubView();
+
+    view->setCursor(newui::Cursor(newui::CursorKind::Hand));
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Hand);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_HAND));
+
+    delete view;
+}
+
+TEST(ViewCursor, SetCursorWithACustomImageResolvesToARealBuiltHandle) {
+    auto* view = new newui::SubView();
+    BLImage image(16, 16, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.set_fill_style(BLRgba32(255, 0, 0, 255));
+    ctx.fill_all();
+    ctx.end();
+
+    view->setCursor(newui::Cursor(image));
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Custom);
+    EXPECT_NE(view->resolvedCursor(), nullptr);
+
+    delete view;
+}
+
+TEST(ViewCursor, SettingCursorKindAfterCustomClearsTheCustomHandle) {
+    auto* view = new newui::SubView();
+    BLImage image(16, 16, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.set_fill_style(BLRgba32(255, 0, 0, 255));
+    ctx.fill_all();
+    ctx.end();
+    view->setCursor(newui::Cursor(image));
+
+    view->cursor().setCursorKind(newui::CursorKind::IBeam);
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::IBeam);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_IBEAM));
+
+    delete view;
+}
+
+// ---------------------------------------------------------------------------
+// cursor().setPath() - the PNG-loading path plumbed through View via its
+// Cursor member, including Cursor owning (and releasing, via its own
+// destructor - see cursor.h) whatever it loads. Writes a real, tiny PNG
+// to disk via BLImage::write_to_file() for each case - same "create the
+// on-disk fixture the test needs, then delete it" convention
+// test_bundle.cpp uses for its own resource-file tests.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void WriteTestCursorPNG(const std::string& path, int width, int height) {
+    BLImage image(width, height, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.set_fill_style(BLRgba32(0, 0, 255, 128));
+    ctx.fill_all();
+    ctx.end();
+    ASSERT_EQ(image.write_to_file(path.c_str()), BL_SUCCESS);
+}
+
+}  // namespace
+
+TEST(ViewCursor, SetPathAdoptsTheLoadedCursorAsCustom) {
+    const std::string path = "view_cursor_test_small.png";
+    WriteTestCursorPNG(path, 16, 16);
+
+    auto* view = new newui::SubView();
+    EXPECT_TRUE(view->cursor().setPath(path));
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Custom);
+    EXPECT_EQ(view->cursor().path(), path);
+    EXPECT_NE(view->resolvedCursor(), nullptr);
+
+    delete view;  // ~View() -> ~Cursor() releases the owned handle - crash/leak-under-a-sanitizer is the only way this could fail
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(ViewCursor, SetPathFailureLeavesTheExistingCursorUnchanged) {
+    auto* view = new newui::SubView();
+    view->cursor().setCursorKind(newui::CursorKind::Wait);
+
+    EXPECT_FALSE(view->cursor().setPath("NoSuchCursorFile.png"));
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Wait);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_WAIT));
+
+    delete view;
+}
+
+TEST(ViewCursor, SetPathFailsWhenThePNGExceedsMaxSize) {
+    const std::string path = "view_cursor_test_large.png";
+    WriteTestCursorPNG(path, 40, 40);
+
+    auto* view = new newui::SubView();
+    EXPECT_FALSE(view->cursor().setPath(path));
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Arrow);  // untouched default
+
+    delete view;
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
+    const std::string path = "view_cursor_test_replace.png";
+    WriteTestCursorPNG(path, 16, 16);
+
+    auto* view = new newui::SubView();
+    ASSERT_TRUE(view->cursor().setPath(path));
+
+    // Should ::DestroyCursor() the previously-owned handle rather than
+    // leaking it - no direct observable side effect here beyond "doesn't
+    // crash", but the resulting state should be exactly as if setPath()
+    // had never been called.
+    view->cursor().setCursorKind(newui::CursorKind::Arrow);
+
+    EXPECT_EQ(view->cursorKind(), newui::CursorKind::Arrow);
+    EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_ARROW));
+
+    delete view;
+    ::DeleteFileA(path.c_str());
+}
+
+// ---------------------------------------------------------------------------
 // hitTestChildren() - pure geometry, no RootView/live window involved.
 // RootView::mouseDown()/mouseMove()/etc. (rootview.cpp) are what actually
 // call this to route real input to the right SubView - covered separately

@@ -115,6 +115,26 @@ namespace newui {
             return viewHwnd_;
         }
 
+        // Sums getBounds().pos() up view's own parent() chain, translating
+        // it into this RootView's own local/window-client space - the same
+        // accumulated-offset math paintChildren()'s ctx.translate() calls
+        // perform incrementally per level, done here in one shot for an
+        // arbitrary SubView (regardless of nesting depth). Used internally
+        // by mouseMove()/mouseUp() to keep targeting capturedSubView_
+        // correctly once the cursor is no longer over its bounds; exposed
+        // publicly so callers can position something (e.g. a popup menu -
+        // see MenuBar/ContextMenu, menus.h) relative to an arbitrary
+        // SubView without duplicating this walk - combine with
+        // localToScreen() below for real screen coordinates.
+        Point accumulatedOffset(const SubView* view) const;
+
+        // Converts a point in this RootView's own local/window-client
+        // space (e.g. accumulatedOffset(view) + view's own size) to real
+        // screen coordinates via ::ClientToScreen() against windowHandle() -
+        // needs a live window (returns rootLocalPt unchanged if
+        // windowHandle() is null).
+        Point localToScreen(const Point& rootLocalPt) const;
+
     protected:
         // Win32-message-driven event entry points - protected (not
         // private) purely for testability, so a test-local subclass can
@@ -135,6 +155,19 @@ namespace newui {
         void lostFocus();
 
         void keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+
+        // Which View's cursor() should be shown for a mouse position pt
+        // (in this RootView's own local/window-client space).
+        // capturedSubView_ takes priority over a fresh hit-test - same
+        // reasoning as mouseMove()'s dispatchTarget: a drag that started
+        // on a SubView (e.g. dragging a splitter) keeps showing that
+        // SubView's cursor even once the pointer leaves its bounds. Falls
+        // back to this RootView itself (its own cursor()) if neither
+        // applies. Protected purely for testability, like the mouseXxx()
+        // methods above - handleMessage()'s WM_SETCURSOR case is the only
+        // real caller, feeding it the live cursor position via
+        // GetCursorPos()/ScreenToClient().
+        View* cursorTargetAt(const Point& pt);
 
     private:
 	    Frame* parentFrame_ = nullptr;
@@ -163,17 +196,6 @@ namespace newui {
         SubView* hoveredSubView_ = nullptr;
         SubView* capturedSubView_ = nullptr;
         SubView* focusedSubView_ = nullptr;
-
-        // Converts a point in this RootView's own local space into view's
-        // local space, by walking view's parent() chain up to (but not
-        // including) this RootView and subtracting each ancestor's own
-        // bounds position along the way - the same accumulated-offset
-        // math paintChildren()'s ctx.translate() calls perform
-        // incrementally per level, done here in one shot for an arbitrary
-        // point instead. Needed for mouseMove()/mouseUp() to keep
-        // targeting capturedSubView_ correctly even once the cursor is no
-        // longer over its bounds (or any of its ancestors').
-        Point accumulatedOffset(const SubView* view) const;
 
         // Updates hoveredSubView_ to target, firing onMouseLeft()/
         // onMouseEntered() (and toggling View::setHighlighted() +

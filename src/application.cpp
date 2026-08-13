@@ -211,6 +211,23 @@ void Application::run() {
 	try {
 		instanceHandle_ = ::GetModuleHandle(NULL);
 
+		// Declares this process per-monitor-v2 DPI aware, so Windows stops
+		// bitmap-stretching our windows on a non-96-DPI display (a
+		// DPI-unaware process renders blurry and wrong-sized there
+		// instead). Has to run before any window class is registered or
+		// any window created - RegisterClassExA/CreateWindowA below read
+		// the calling thread's current DPI awareness context. Not fatal
+		// if it fails (e.g. pre-Windows 10 1703) - same "degrade, don't
+		// throw" convention as BufferedPaintInit() just below. This only
+		// stops the blur, though: View/Layout/RootView's own pixel-based
+		// coordinates aren't scaled for DPI yet, so content can still
+		// render at physical-pixel (i.e. too-small-looking) size on a
+		// scaled display - real per-DPI scaling is a separate, larger
+		// follow-up task, not attempted here.
+		if (!::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
+			printf("newui::Application: SetProcessDpiAwarenessContext failed - window may render blurry on a scaled display\n");
+		}
+
 		INITCOMMONCONTROLSEX icc{};
 		icc.dwSize = sizeof(icc);
 		icc.dwICC = ICC_WIN95_CLASSES;

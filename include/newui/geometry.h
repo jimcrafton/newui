@@ -1,11 +1,29 @@
 #pragma once
 
+// Only for the POINT/RECT conversions below - safe to pull in here (this
+// whole toolkit is Win32-only throughout, see newui.h) via newui.h itself
+// rather than a raw <windows.h>, so NOMINMAX/UNICODE are already defined
+// before windows.h is reached even if this header happens to be the first
+// one included in some translation unit - see the std::min/max hazard
+// documented against utils.h (feedback_no_std_minmax memory/HANDOFF.md
+// Part 6) for exactly what skipping that sequencing once already broke.
+#include "newui/newui.h"
+
 namespace newui {
 
 class Point {
 public:
     Point() = default;
     Point(float x, float y) : x(x), y(y) {}
+
+    // Implicit both ways - POINT/Point round-trip freely at any Win32 API
+    // boundary (::ClientToScreen(hwnd, &point) etc.) without an explicit
+    // cast at every call site.
+    Point(const POINT& pt) : x(float(pt.x)), y(float(pt.y)) {}
+
+    operator POINT() const {
+        return POINT{ LONG(x), LONG(y) };
+    }
 
     float x = 0.0f;
     float y = 0.0f;
@@ -60,7 +78,18 @@ public:
     Rect(const Point& pos, const Size& size)
         : size_(size), pos_(pos) {}
 
-    
+    // Implicit both ways, same reasoning as Point's POINT conversions
+    // above - RECT::right/bottom are already exclusive edges, exactly
+    // matching how right()/bottom() are already defined here.
+    Rect(const RECT& r)
+        : size_(float(r.right - r.left), float(r.bottom - r.top))
+        , pos_(float(r.left), float(r.top)) {}
+
+    operator RECT() const {
+        return RECT{ LONG(left()), LONG(top()), LONG(right()), LONG(bottom()) };
+    }
+
+
 
     Point pos() const {
         return pos_;

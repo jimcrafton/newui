@@ -1,9 +1,14 @@
 // A tour of newui::Layout: arranging SubView children automatically
 // instead of hand-computing bounds() for each one. See layout.h for the
 // Layout subclasses this demonstrates:
-//   - FlexLayout arranges the root view's direct children in a
-//     horizontal row - a fixed-width sidebar plus three flexible
-//     content panels sharing the leftover width by weight.
+//   - The root view's own layout is a vertical FlexLayout with three rows:
+//     a MenuBar (newui/menus.h - a custom-drawn, uxtheme-themed menu bar,
+//     File/Edit/View/Help, not a native Win32 HMENU bar - see
+//     AddDemoMenuBar()), then a toolbar strip (viewstyle.h's push/
+//     drop-down/split-button/separator/chevron theme parts - see
+//     AddToolbarDemo()), then mainRow filling everything left over.
+//   - mainRow's own horizontal FlexLayout - a fixed-width sidebar plus
+//     three flexible content panels sharing the leftover width by weight.
 //   - AnchorLayout, nested inside one of those content panels, pins a
 //     small badge to its top-right corner - showing that a Layout
 //     arranges whatever View it's attached to, not just the root, and
@@ -15,6 +20,12 @@
 //     (ThemedButtonStyle/ThemedCheckBoxStyle - see viewstyle.h), stacked
 //     via its own nested vertical FlexLayout, to show a themed style
 //     composing with Layout the same way the hand-drawn styles do.
+//   - The themed button shows a hand cursor and content2 shows a
+//     crosshair while hovered - see View::setCursor()/View::cursor()/
+//     CursorKind (cursor.h). content1 shows a small custom red-dot cursor
+//     loaded from a real PNG file at runtime - see cursor().setPath()
+//     and WriteDotCursorPNG() below. Move the mouse between them and the
+//     rest of the window (default arrow) to see it change live.
 // Every panel is otherwise empty (just a background/border color) so
 // the arrangement is the only thing on screen - resize the window to
 // see FlexLayout re-flow it live (SubView::setBounds()/
@@ -31,6 +42,9 @@
 #include "newui/layout.h"
 #include "newui/color.h"
 #include "newui/serialization.h"
+#include "newui/cursor.h"
+#include "newui/menus.h"
+#include "newui/tabcontrol.h"
 #include <blend2d/blend2d.h>
 
 #include <iostream>
@@ -42,6 +56,221 @@ newui::SyncReturn FrameClosed(newui::Frame& frame) {
     //saveFrameToFile(frame, "frame.json");
 
     return newui::SyncReturn::Handled;
+}
+
+// --- MenuBar demo (newui/menus.h) ---------------------------------------
+// Delegate callbacks are plain function pointers (no capturing lambdas -
+// see delegate.h), so the frame this needs to reach back into (Exit) is
+// stashed at file scope, set once in main() - same convention
+// FrameClosed() above already follows for frame. MenuBar/ContextMenu need
+// no such state for click routing - see menus.h.
+
+newui::Frame* g_demoFrame = nullptr;
+
+newui::SyncReturn MenuItemClicked(newui::MenuItem& item) {
+    printf("Menu item clicked: \"%s\" (command id %u)\n", item.text.c_str(), item.commandId());
+    fflush(stdout);  // printf alone can sit in a fully-buffered console until exit
+    return newui::SyncReturn::Handled;
+}
+
+newui::SyncReturn ExitClicked(newui::MenuItem& item) {
+    printf("Menu item clicked: \"%s\" - closing the window\n", item.text.c_str());
+    fflush(stdout);
+    if (g_demoFrame != nullptr && g_demoFrame->frameHandle() != nullptr) {
+        ::SendMessage(g_demoFrame->frameHandle(), WM_CLOSE, 0, 0);
+    }
+    return newui::SyncReturn::Handled;
+}
+
+// A plain (non-radio) checkable item toggles itself explicitly - a
+// ContextMenu::setChecked(item, !item.checked) call would need the
+// ContextMenu that showed it, which is already gone (destroyed) by the
+// time onClick fires from inside its own show() - so a checkable item's
+// own handler just flips the model bool directly; the *next* time this
+// item's dropdown is shown, a fresh ContextMenu build reads item.checked
+// and renders the checkmark correctly either way.
+newui::SyncReturn WordWrapToggled(newui::MenuItem& item) {
+    item.checked = !item.checked;
+    printf("Word Wrap: %s\n", item.checked ? "on" : "off");
+    fflush(stdout);
+    return newui::SyncReturn::Handled;
+}
+
+// MFT_OWNERDRAW demo (still native - only dropdown items go through
+// ContextMenu's real HMENU; the top-level File/Edit/View/Help buttons
+// themselves are plain SubViews now, drawn by MenuBar itself via
+// ThemedMenuBarItemStyle - see menus.cpp): a colored swatch + label,
+// drawn with plain GDI against whatever HDC/rect Windows hands over in
+// WM_DRAWITEM (see MenuItem::onDraw). A Blend2D-quality version could
+// instead paint into a newui::Image (graphics.h) sized to itemRect and
+// BitBlt its memDC() onto hdc - not done here, to keep this demo simple.
+newui::SyncReturn DrawFancyMenuItem(newui::MenuItem& item, HDC hdc, const newui::Rect& itemRect, UINT /*odAction*/, UINT odState) {
+    bool selected = (odState & ODS_SELECTED) != 0;
+
+    RECT rc = { LONG(itemRect.left()), LONG(itemRect.top()), LONG(itemRect.right()), LONG(itemRect.bottom()) };
+    HBRUSH background = ::CreateSolidBrush(selected ? RGB(51, 102, 204) : RGB(255, 255, 255));
+    ::FillRect(hdc, &rc, background);
+    ::DeleteObject(background);
+
+    RECT swatchRect = { rc.left + 4, rc.top + 4, rc.left + 18, rc.bottom - 4 };
+    HBRUSH swatch = ::CreateSolidBrush(RGB(220, 80, 40));
+    ::FillRect(hdc, &swatchRect, swatch);
+    ::DeleteObject(swatch);
+
+    ::SetBkMode(hdc, TRANSPARENT);
+    ::SetTextColor(hdc, selected ? RGB(255, 255, 255) : RGB(0, 0, 0));
+    RECT textRect = { swatchRect.right + 6, rc.top, rc.right - 4, rc.bottom };
+    ::DrawTextA(hdc, item.text.c_str(), -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+
+    return newui::SyncReturn::Handled;
+}
+
+// outSize arrives pre-filled with the default text-measured fallback (see
+// MenuItem::onMeasure) - widen it to leave room for the color swatch
+// DrawFancyMenuItem() draws.
+newui::SyncReturn MeasureFancyMenuItem(newui::MenuItem&, newui::Size& outSize) {
+    outSize.width += 22.0f;
+    return newui::SyncReturn::Handled;
+}
+
+// Builds the demo File/Edit/View/Help menu tree and attaches a MenuBar to
+// root - ordinary SubView tree from here on, so this needs no live HWND
+// or Frame::initialize()/app.run() sequencing at all (unlike the old
+// native-HMENU version) - it can run any time before or after other
+// addChild() calls, exactly like every other panel in this demo.
+void AddDemoMenuBar(newui::RootView& root) {
+    std::vector<std::unique_ptr<newui::MenuItem>> menuItems;
+
+    auto fileMenu = std::make_unique<newui::MenuItem>("File");
+    fileMenu->addChild(std::make_unique<newui::MenuItem>("New"))->onClick.add(&MenuItemClicked);
+    fileMenu->addChild(std::make_unique<newui::MenuItem>("Open"))->onClick.add(&MenuItemClicked);
+    newui::MenuItem* saveItem = fileMenu->addChild(std::make_unique<newui::MenuItem>("Save"));
+    saveItem->shortcutText = "Ctrl+S";
+    saveItem->onClick.add(&MenuItemClicked);
+    fileMenu->addChild(newui::MenuItem::Separator());
+    fileMenu->addChild(std::make_unique<newui::MenuItem>("Exit"))->onClick.add(&ExitClicked);
+    menuItems.push_back(std::move(fileMenu));
+
+    auto editMenu = std::make_unique<newui::MenuItem>("Edit");
+    editMenu->addChild(std::make_unique<newui::MenuItem>("Word Wrap"))->onClick.add(&WordWrapToggled);
+    menuItems.push_back(std::move(editMenu));
+
+    // A 3-item radio group - ContextMenu::dispatchCommand() handles the
+    // mutual-exclusion (unchecking siblings) automatically, see menus.h.
+    auto viewMenu = std::make_unique<newui::MenuItem>("View");
+    for (const char* label : { "Small", "Medium", "Large" }) {
+        auto sizeItem = std::make_unique<newui::MenuItem>(label);
+        sizeItem->radioGroup = 0;
+        sizeItem->checked = (std::string(label) == "Medium");
+        sizeItem->onClick.add(&MenuItemClicked);
+        viewMenu->addChild(std::move(sizeItem));
+    }
+    menuItems.push_back(std::move(viewMenu));
+
+    auto helpMenu = std::make_unique<newui::MenuItem>("Help");
+    auto fancyItem = std::make_unique<newui::MenuItem>("Fancy (Owner-Drawn)");
+    fancyItem->ownerDrawn = true;
+    fancyItem->onMeasure.add(&MeasureFancyMenuItem);
+    fancyItem->onDraw.add(&DrawFancyMenuItem);
+    fancyItem->onClick.add(&MenuItemClicked);
+    helpMenu->addChild(std::move(fancyItem));
+    menuItems.push_back(std::move(helpMenu));
+
+    auto* menuBar = new newui::MenuBar();
+    menuBar->setMenuItems(std::move(menuItems));
+    menuBar->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
+    root.addChild(menuBar);
+}
+
+// Toolbar batch demo (viewstyle.h) - a horizontal strip of native-themed
+// toolbar chrome: a plain push button, a checked (toggled-on) push
+// button, a separator, a drop-down button (its chrome and arrow-glyph
+// parts are separate theme parts, shown here as two adjacent Views - see
+// ThemedToolbarDropDownButtonStyle's class comment), a split button (same
+// two-part shape - main clickable face + its own dropdown-arrow part),
+// another separator, and an overflow chevron (REBAR/RP_CHEVRON, not
+// actually a TOOLBAR part - see ThemedRebarChevronStyle). Same "each part
+// is its own SubView, no real click/dropdown behavior wired up" scope as
+// everywhere else in this file - a visual tour of the theme parts, not a
+// functioning toolbar.
+void AddToolbarDemo(newui::RootView& root) {
+    auto* toolbarRow = new newui::SubView();
+    toolbarRow->setName("toolbarRow");
+    toolbarRow->setVisible(true);
+    toolbarRow->style().backgroundFill = newui::Color::fromName("whitesmoke").toBLRgba32();
+    toolbarRow->setDesiredSize(newui::Size(0.0f, 32.0f));
+    toolbarRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
+    auto toolbarLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    toolbarLayout->setSpacing(2.0f);
+    toolbarLayout->setPadding(4.0f);
+    toolbarLayout->setCrossAxisAlignment(newui::CrossAxisAlignment::Center);
+    toolbarRow->setLayout(std::move(toolbarLayout));
+    root.addChild(toolbarRow);
+
+    auto* pushButton = new newui::SubView();
+    pushButton->setName("toolbarPushButton");
+    pushButton->setVisible(true);
+    pushButton->setStyle(std::make_unique<newui::ThemedToolbarButtonStyle>());
+    pushButton->setDesiredSize(newui::Size(28.0f, 24.0f));
+    toolbarRow->addChild(pushButton);
+
+    auto* checkedButton = new newui::SubView();
+    checkedButton->setName("toolbarCheckedButton");
+    checkedButton->setVisible(true);
+    auto checkedButtonStyle = std::make_unique<newui::ThemedToolbarButtonStyle>();
+    checkedButtonStyle->checked = true;
+    checkedButton->setStyle(std::move(checkedButtonStyle));
+    checkedButton->setDesiredSize(newui::Size(28.0f, 24.0f));
+    toolbarRow->addChild(checkedButton);
+
+    auto MakeSeparator = [&](const char* name) {
+        auto* separator = new newui::SubView();
+        separator->setName(name);
+        separator->setVisible(true);
+        separator->setStyle(std::make_unique<newui::ThemedToolbarSeparatorStyle>());
+        separator->setDesiredSize(newui::Size(6.0f, 24.0f));
+        toolbarRow->addChild(separator);
+    };
+    MakeSeparator("toolbarSeparator1");
+
+    auto* dropDownButton = new newui::SubView();
+    dropDownButton->setName("toolbarDropDownButton");
+    dropDownButton->setVisible(true);
+    dropDownButton->setStyle(std::make_unique<newui::ThemedToolbarDropDownButtonStyle>());
+    dropDownButton->setDesiredSize(newui::Size(28.0f, 24.0f));
+    toolbarRow->addChild(dropDownButton);
+
+    auto* dropDownGlyph = new newui::SubView();
+    dropDownGlyph->setName("toolbarDropDownGlyph");
+    dropDownGlyph->setVisible(true);
+    dropDownGlyph->setStyle(std::make_unique<newui::ThemedToolbarDropDownButtonGlyphStyle>());
+    dropDownGlyph->setDesiredSize(newui::Size(12.0f, 24.0f));
+    toolbarRow->addChild(dropDownGlyph);
+
+    MakeSeparator("toolbarSeparator2");
+
+    auto* splitButton = new newui::SubView();
+    splitButton->setName("toolbarSplitButton");
+    splitButton->setVisible(true);
+    splitButton->setStyle(std::make_unique<newui::ThemedToolbarSplitButtonStyle>());
+    splitButton->setDesiredSize(newui::Size(28.0f, 24.0f));
+    toolbarRow->addChild(splitButton);
+
+    auto* splitButtonDropDown = new newui::SubView();
+    splitButtonDropDown->setName("toolbarSplitButtonDropDown");
+    splitButtonDropDown->setVisible(true);
+    splitButtonDropDown->setStyle(std::make_unique<newui::ThemedToolbarSplitButtonDropDownStyle>());
+    splitButtonDropDown->setDesiredSize(newui::Size(14.0f, 24.0f));
+    toolbarRow->addChild(splitButtonDropDown);
+
+    MakeSeparator("toolbarSeparator3");
+
+    auto* chevron = new newui::SubView();
+    chevron->setName("toolbarChevron");
+    chevron->setVisible(true);
+    chevron->setStyle(std::make_unique<newui::ThemedRebarChevronStyle>());
+    chevron->setDesiredSize(newui::Size(16.0f, 24.0f));
+    toolbarRow->addChild(chevron);
 }
 
 // Every panel in this demo is otherwise empty - a flat background fill
@@ -57,6 +286,27 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
     panel->style().borderFill = newui::Color::fromName(borderColorName).toBLRgba32();
     panel->style().borderWidth = borderWidth;
     return panel;
+}
+
+// Draws a small solid red dot (alpha falls off to fully transparent past
+// its radius) into a real 32x32 PNG on disk, at path - demo data for
+// View::cursor().setPath() (view.h/cursor.h), which needs an actual
+// image file to load. Generated at runtime rather than shipped as a
+// checked-in asset, so this example stays self-contained; a real app
+// would just ship a hand-authored cursor PNG under Resources/Cursors/
+// instead and reference it by name alone (see Bundle, bundle.h -
+// loadCursorFromFile() already falls back to that location).
+void WriteDotCursorPNG(const std::string& path) {
+    const int size = 32;
+    BLImage image(size, size, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.set_comp_op(BL_COMP_OP_SRC_COPY);  // fully-transparent background, not black
+    ctx.fill_all(BLRgba32(0, 0, 0, 0));
+    ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+    ctx.set_fill_style(BLRgba32(220, 20, 20, 255));
+    ctx.fill_circle(size / 2.0, size / 2.0, size / 2.0 - 2.0);
+    ctx.end();
+    image.write_to_file(path.c_str());
 }
 
 // Builds a small 2-column "form" grid as parent's own Layout - column 0
@@ -95,10 +345,34 @@ void AddGridDemo(newui::SubView* parent) {
     parent->addChild(input2);
 }
 
+// TabControl demo (tabcontrol.h) - a real, clickable tabbed control (not
+// just the loose individual ThemedTabItemStyle/ThemedTabPaneStyle parts
+// already shown in content2's own themed-controls demo above) - 3 tabs,
+// each a plain colored page, switched by clicking. parent's own layout
+// must already be (or about to become) an AnchorLayout, since this fills
+// parent via AnchorLayoutParams(Left|Top|Right|Bottom) - same "dock to
+// fill" shape the badge demo below already uses for content1.
+void AddTabControlDemo(newui::SubView* parent) {
+    auto* tabs = new newui::TabControl();
+    auto tabsParams = std::make_unique<newui::AnchorLayoutParams>(
+        newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Right | newui::Anchor::Bottom);
+    tabsParams->leftMargin = 8.0f;
+    tabsParams->topMargin = 8.0f;
+    tabsParams->rightMargin = 8.0f;
+    tabsParams->bottomMargin = 8.0f;
+    tabs->setLayoutParams(std::move(tabsParams));
+    parent->addChild(tabs);
+
+    tabs->addTab("Red", MakePanel("tabPageRed", "indianred", "darkred"));
+    tabs->addTab("Green", MakePanel("tabPageGreen", "mediumseagreen", "darkgreen"));
+    tabs->addTab("Blue", MakePanel("tabPageBlue", "cornflowerblue", "navy"));
+}
+
 int main() {
 
     std::cout << "newui " << newui::version() << " - layout example\n";
-    std::cout << "Sidebar + 3 flexible panels (FlexLayout), badge pinned via a nested AnchorLayout,\n";
+    std::cout << "Sidebar + 3 flexible panels (FlexLayout), a clickable TabControl filling the first,\n";
+    std::cout << "a badge pinned over it via a nested AnchorLayout,\n";
     std::cout << "a small form grid (GridLayout) nested in the third panel,\n";
     std::cout << "a themed button + checkbox (uxtheme) stacked in the sidebar.\n";
     std::cout << "Resize the window to see FlexLayout re-flow the row live.\n";
@@ -116,12 +390,27 @@ int main() {
     newui::RootView& root = frame.getView();
     root.style().backgroundFill = newui::Color::fromName("white").toBLRgba32();
 
-    // A horizontal row directly on the root view - spacing between
-    // panels, padding from the window's own edges.
-    auto flexLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
-    flexLayout->setSpacing(12.0f);
-    flexLayout->setPadding(16.0f);
-    root.setLayout(std::move(flexLayout));
+    // Outer vertical split: the MenuBar row on top (its own fixed
+    // desiredSize height - see menus.cpp), then mainRow (weight 1.0)
+    // filling everything left over - what used to be root's own direct
+    // horizontal row (sidebar + content1/2/3), now nested one level so it
+    // can share root's vertical space with the menu bar above it.
+    root.setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+
+    AddDemoMenuBar(root);
+    AddToolbarDemo(root);
+
+    auto* mainRow = new newui::SubView();
+    mainRow->setName("mainRow");
+    mainRow->setVisible(true);
+    mainRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    // Spacing between panels, padding from the window's own edges - same
+    // values the outer root layout used to have directly.
+    auto mainRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    mainRowLayout->setSpacing(12.0f);
+    mainRowLayout->setPadding(16.0f);
+    mainRow->setLayout(std::move(mainRowLayout));
+    root.addChild(mainRow);
 
     // Sidebar: fixed width (its "natural" size - see FlexLayoutParams'
     // weight comment), full height via the default
@@ -132,7 +421,7 @@ int main() {
     // its natural main-axis size.
     auto* sidebar = MakePanel("sidebar", "steelblue", "navy");
     sidebar->setBounds(newui::Rect(0, 0, 160, 0));
-    root.addChild(sidebar);
+    mainRow->addChild(sidebar);
 
     // A couple of real Win32 controls (drawn via uxtheme, not this
     // toolkit's own hand-drawn chrome) stacked in the sidebar via its own
@@ -151,6 +440,7 @@ int main() {
     themedButton->setVisible(true);
     themedButton->setStyle(std::make_unique<newui::ThemedButtonStyle>());
     themedButton->setDesiredSize(newui::Size(120.0f, 28.0f));
+    themedButton->setCursor(newui::Cursor(newui::CursorKind::Hand));
     auto themedButtonParams = std::make_unique<newui::FlexLayoutParams>();
     themedButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
     themedButton->setLayoutParams(std::move(themedButtonParams));
@@ -168,20 +458,307 @@ int main() {
     themedCheckBox->setLayoutParams(std::move(themedCheckBoxParams));
     sidebar->addChild(themedCheckBox);
 
+    // The 8 new "batch 1" themed styles below (uxtheme parts that fit
+    // ThemedViewStyle's simple partId()/stateId() shape directly - see
+    // HANDOFF.md) - stacked in the sidebar purely so all of them get a
+    // real live-window paint() pass to eyeball, same as the button/
+    // checkbox above; not otherwise functionally wired up (no click
+    // toggling, no real up/down spinner logic, ...).
+    auto* themedRadioButton = new newui::SubView();
+    themedRadioButton->setName("themedRadioButton");
+    themedRadioButton->setVisible(true);
+    auto themedRadioButtonStyle = std::make_unique<newui::ThemedRadioButtonStyle>();
+    themedRadioButtonStyle->checked = true;
+    themedRadioButton->setStyle(std::move(themedRadioButtonStyle));
+    themedRadioButton->setDesiredSize(newui::Size(20.0f, 20.0f));
+    auto themedRadioButtonParams = std::make_unique<newui::FlexLayoutParams>();
+    themedRadioButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedRadioButton->setLayoutParams(std::move(themedRadioButtonParams));
+    sidebar->addChild(themedRadioButton);
+
+    auto* themedToolbarButton = new newui::SubView();
+    themedToolbarButton->setName("themedToolbarButton");
+    themedToolbarButton->setVisible(true);
+    auto themedToolbarButtonStyle = std::make_unique<newui::ThemedToolbarButtonStyle>();
+    themedToolbarButton->setStyle(std::move(themedToolbarButtonStyle));
+    themedToolbarButton->setDesiredSize(newui::Size(32.0f, 28.0f));
+    auto themedToolbarButtonParams = std::make_unique<newui::FlexLayoutParams>();
+    themedToolbarButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedToolbarButton->setLayoutParams(std::move(themedToolbarButtonParams));
+    sidebar->addChild(themedToolbarButton);
+
+    auto* themedEdit = new newui::SubView();
+    themedEdit->setName("themedEdit");
+    themedEdit->setVisible(true);
+    themedEdit->setStyle(std::make_unique<newui::ThemedEditStyle>());
+    themedEdit->setDesiredSize(newui::Size(136.0f, 22.0f));
+    sidebar->addChild(themedEdit);
+
+    auto* themedTooltip = new newui::SubView();
+    themedTooltip->setName("themedTooltip");
+    themedTooltip->setVisible(true);
+    themedTooltip->setStyle(std::make_unique<newui::ThemedTooltipStyle>());
+    themedTooltip->setDesiredSize(newui::Size(136.0f, 24.0f));
+    sidebar->addChild(themedTooltip);
+
+    auto* themedStatusPane = new newui::SubView();
+    themedStatusPane->setName("themedStatusPane");
+    themedStatusPane->setVisible(true);
+    themedStatusPane->setStyle(std::make_unique<newui::ThemedStatusPaneStyle>());
+    themedStatusPane->setDesiredSize(newui::Size(136.0f, 22.0f));
+    // Renders as just a one-sided divider line, not a full box border -
+    // that's real, correct uxtheme behavior for a standalone SP_PANE, not
+    // a bug - see ThemedStatusPaneStyle's comment in viewstyle.h.
+    sidebar->addChild(themedStatusPane);
+
+    auto* themedGroupBox = new newui::SubView();
+    themedGroupBox->setName("themedGroupBox");
+    themedGroupBox->setVisible(true);
+    themedGroupBox->setStyle(std::make_unique<newui::ThemedGroupBoxStyle>());
+    themedGroupBox->setDesiredSize(newui::Size(136.0f, 40.0f));
+    sidebar->addChild(themedGroupBox);
+
+    // Up/down spin arrows side by side via their own tiny nested
+    // horizontal FlexLayout, rather than a container of their own -
+    // reuses sidebar's own vertical stacking for the row itself.
+    auto* themedSpinRow = new newui::SubView();
+    themedSpinRow->setName("themedSpinRow");
+    themedSpinRow->setVisible(true);
+    themedSpinRow->setDesiredSize(newui::Size(136.0f, 20.0f));
+    auto spinRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    spinRowLayout->setSpacing(4.0f);
+    themedSpinRow->setLayout(std::move(spinRowLayout));
+    sidebar->addChild(themedSpinRow);
+
+    auto* themedSpinUp = new newui::SubView();
+    themedSpinUp->setName("themedSpinUp");
+    themedSpinUp->setVisible(true);
+    themedSpinUp->setStyle(std::make_unique<newui::ThemedSpinButtonStyle>());
+    themedSpinUp->setDesiredSize(newui::Size(16.0f, 20.0f));
+    themedSpinRow->addChild(themedSpinUp);
+
+    auto* themedSpinDown = new newui::SubView();
+    themedSpinDown->setName("themedSpinDown");
+    themedSpinDown->setVisible(true);
+    auto themedSpinDownStyle = std::make_unique<newui::ThemedSpinButtonStyle>();
+    themedSpinDownStyle->isUpButton = false;
+    themedSpinDown->setStyle(std::move(themedSpinDownStyle));
+    themedSpinDown->setDesiredSize(newui::Size(16.0f, 20.0f));
+    themedSpinRow->addChild(themedSpinDown);
+
     // Three flexible panels sharing the row's leftover width by weight
     // (CSS flex-grow) - content2 is twice as wide as content1/content3
     // since its weight is double theirs.
     auto* content1 = MakePanel("content1", "lightcoral", "darkred");
     content1->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    root.addChild(content1);
+    // View::cursor().setPath() demo - a real 32x32 PNG with alpha,
+    // generated at runtime by WriteDotCursorPNG() above (see its comment).
+    WriteDotCursorPNG("layout1_dot_cursor.png");
+    if (!content1->cursor().setPath("layout1_dot_cursor.png")) {
+        std::cerr << "cursor().setPath() failed for content1's cursor\n";
+    }
+    mainRow->addChild(content1);
 
     auto* content2 = MakePanel("content2", "khaki", "darkgoldenrod");
     content2->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(2.0f));
-    root.addChild(content2);
+    content2->setCursor(newui::Cursor(newui::CursorKind::Cross));
+    mainRow->addChild(content2);
+
+    // Batch-2 themed uxtheme styles demo - stacked in content2 via its
+    // own nested vertical FlexLayout, same "needs a real live-window
+    // paint() pass to eyeball" reasoning as batch 1's sidebar demo.
+    auto content2Layout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
+    content2Layout->setSpacing(6.0f);
+    content2Layout->setPadding(12.0f);
+    content2->setLayout(std::move(content2Layout));
+
+    auto* themedListItem = new newui::SubView();
+    themedListItem->setName("themedListItem");
+    themedListItem->setVisible(true);
+    auto themedListItemStyle = std::make_unique<newui::ThemedListItemStyle>();
+    themedListItemStyle->selected = true;
+    themedListItem->setStyle(std::move(themedListItemStyle));
+    themedListItem->setDesiredSize(newui::Size(180.0f, 20.0f));
+    content2->addChild(themedListItem);
+
+    // Header item + sort arrow side by side.
+    auto* headerRow = new newui::SubView();
+    headerRow->setName("headerRow");
+    headerRow->setVisible(true);
+    headerRow->setDesiredSize(newui::Size(180.0f, 20.0f));
+    auto headerRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    headerRowLayout->setSpacing(2.0f);
+    headerRow->setLayout(std::move(headerRowLayout));
+    content2->addChild(headerRow);
+
+    auto* themedHeaderItem = new newui::SubView();
+    themedHeaderItem->setName("themedHeaderItem");
+    themedHeaderItem->setVisible(true);
+    auto themedHeaderItemStyle = std::make_unique<newui::ThemedHeaderItemStyle>();
+    themedHeaderItemStyle->sorted = true;
+    themedHeaderItem->setStyle(std::move(themedHeaderItemStyle));
+    themedHeaderItem->setDesiredSize(newui::Size(150.0f, 20.0f));
+    headerRow->addChild(themedHeaderItem);
+
+    auto* themedHeaderSortArrow = new newui::SubView();
+    themedHeaderSortArrow->setName("themedHeaderSortArrow");
+    themedHeaderSortArrow->setVisible(true);
+    themedHeaderSortArrow->setStyle(std::make_unique<newui::ThemedHeaderSortArrowStyle>());
+    themedHeaderSortArrow->setDesiredSize(newui::Size(20.0f, 20.0f));
+    headerRow->addChild(themedHeaderSortArrow);
+
+    // Tree item + expand glyph side by side.
+    auto* treeRow = new newui::SubView();
+    treeRow->setName("treeRow");
+    treeRow->setVisible(true);
+    treeRow->setDesiredSize(newui::Size(180.0f, 18.0f));
+    auto treeRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    treeRowLayout->setSpacing(2.0f);
+    treeRow->setLayout(std::move(treeRowLayout));
+    content2->addChild(treeRow);
+
+    auto* themedTreeGlyph = new newui::SubView();
+    themedTreeGlyph->setName("themedTreeGlyph");
+    themedTreeGlyph->setVisible(true);
+    auto themedTreeGlyphStyle = std::make_unique<newui::ThemedTreeGlyphStyle>();
+    themedTreeGlyphStyle->expanded = true;
+    themedTreeGlyph->setStyle(std::move(themedTreeGlyphStyle));
+    themedTreeGlyph->setDesiredSize(newui::Size(16.0f, 16.0f));
+    treeRow->addChild(themedTreeGlyph);
+
+    auto* themedTreeItem = new newui::SubView();
+    themedTreeItem->setName("themedTreeItem");
+    themedTreeItem->setVisible(true);
+    themedTreeItem->setStyle(std::make_unique<newui::ThemedTreeItemStyle>());
+    themedTreeItem->setDesiredSize(newui::Size(160.0f, 18.0f));
+    treeRow->addChild(themedTreeItem);
+
+    // A tiny 3-tab strip (left/middle/right edge parts) + pane below it.
+    auto* tabRow = new newui::SubView();
+    tabRow->setName("tabRow");
+    tabRow->setVisible(true);
+    tabRow->setDesiredSize(newui::Size(180.0f, 24.0f));
+    tabRow->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    content2->addChild(tabRow);
+
+    auto* tabLeft = new newui::SubView();
+    tabLeft->setName("tabLeft");
+    tabLeft->setVisible(true);
+    auto tabLeftStyle = std::make_unique<newui::ThemedTabItemStyle>();
+    tabLeftStyle->position = newui::ThemedTabItemStyle::Position::Left;
+    tabLeftStyle->selected = true;
+    tabLeft->setStyle(std::move(tabLeftStyle));
+    tabLeft->setDesiredSize(newui::Size(60.0f, 24.0f));
+    tabRow->addChild(tabLeft);
+
+    auto* tabMiddle = new newui::SubView();
+    tabMiddle->setName("tabMiddle");
+    tabMiddle->setVisible(true);
+    tabMiddle->setStyle(std::make_unique<newui::ThemedTabItemStyle>());
+    tabMiddle->setDesiredSize(newui::Size(60.0f, 24.0f));
+    tabRow->addChild(tabMiddle);
+
+    auto* tabRight = new newui::SubView();
+    tabRight->setName("tabRight");
+    tabRight->setVisible(true);
+    auto tabRightStyle = std::make_unique<newui::ThemedTabItemStyle>();
+    tabRightStyle->position = newui::ThemedTabItemStyle::Position::Right;
+    tabRight->setStyle(std::move(tabRightStyle));
+    tabRight->setDesiredSize(newui::Size(60.0f, 24.0f));
+    tabRow->addChild(tabRight);
+
+    auto* themedTabPane = new newui::SubView();
+    themedTabPane->setName("themedTabPane");
+    themedTabPane->setVisible(true);
+    themedTabPane->setStyle(std::make_unique<newui::ThemedTabPaneStyle>());
+    themedTabPane->setDesiredSize(newui::Size(180.0f, 40.0f));
+    content2->addChild(themedTabPane);
+
+    // Trackbar track + thumb, overlaid via a nested AnchorLayout so the
+    // thumb sits on top of the track instead of stacked below it.
+    auto* trackbarRow = new newui::SubView();
+    trackbarRow->setName("trackbarRow");
+    trackbarRow->setVisible(true);
+    trackbarRow->setDesiredSize(newui::Size(180.0f, 20.0f));
+    trackbarRow->setLayout(std::make_unique<newui::AnchorLayout>());
+    content2->addChild(trackbarRow);
+
+    auto* themedTrackbarTrack = new newui::SubView();
+    themedTrackbarTrack->setName("themedTrackbarTrack");
+    themedTrackbarTrack->setVisible(true);
+    themedTrackbarTrack->setStyle(std::make_unique<newui::ThemedTrackbarTrackStyle>());
+    auto trackParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Right | newui::Anchor::Top);
+    trackParams->topMargin = 8.0f;
+    trackParams->height = 6.0f;
+    themedTrackbarTrack->setLayoutParams(std::move(trackParams));
+    trackbarRow->addChild(themedTrackbarTrack);
+
+    auto* themedTrackbarThumb = new newui::SubView();
+    themedTrackbarThumb->setName("themedTrackbarThumb");
+    themedTrackbarThumb->setVisible(true);
+    themedTrackbarThumb->setStyle(std::make_unique<newui::ThemedTrackbarThumbStyle>());
+    auto thumbParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
+    thumbParams->leftMargin = 70.0f;
+    thumbParams->width = 12.0f;
+    thumbParams->height = 20.0f;
+    themedTrackbarThumb->setLayoutParams(std::move(thumbParams));
+    trackbarRow->addChild(themedTrackbarThumb);
+
+    // Scrollbar: up arrow, thumb, track segment, down arrow - stacked
+    // vertically via their own nested FlexLayout.
+    auto* scrollbarColumn = new newui::SubView();
+    scrollbarColumn->setName("scrollbarColumn");
+    scrollbarColumn->setVisible(true);
+    scrollbarColumn->setDesiredSize(newui::Size(20.0f, 100.0f));
+    scrollbarColumn->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    content2->addChild(scrollbarColumn);
+
+    auto* scrollbarUpArrow = new newui::SubView();
+    scrollbarUpArrow->setName("scrollbarUpArrow");
+    scrollbarUpArrow->setVisible(true);
+    auto upArrowStyle = std::make_unique<newui::ThemedScrollbarArrowStyle>();
+    upArrowStyle->direction = newui::ThemedScrollbarArrowStyle::Direction::Up;
+    scrollbarUpArrow->setStyle(std::move(upArrowStyle));
+    scrollbarUpArrow->setDesiredSize(newui::Size(20.0f, 20.0f));
+    scrollbarColumn->addChild(scrollbarUpArrow);
+
+    auto* scrollbarThumb = new newui::SubView();
+    scrollbarThumb->setName("scrollbarThumb");
+    scrollbarThumb->setVisible(true);
+    auto scrollbarThumbStyle = std::make_unique<newui::ThemedScrollbarThumbStyle>();
+    scrollbarThumbStyle->horizontal = false;
+    scrollbarThumb->setStyle(std::move(scrollbarThumbStyle));
+    scrollbarThumb->setDesiredSize(newui::Size(20.0f, 30.0f));
+    scrollbarColumn->addChild(scrollbarThumb);
+
+    auto* scrollbarTrack = new newui::SubView();
+    scrollbarTrack->setName("scrollbarTrack");
+    scrollbarTrack->setVisible(true);
+    auto scrollbarTrackStyle = std::make_unique<newui::ThemedScrollbarTrackStyle>();
+    scrollbarTrackStyle->horizontal = false;
+    scrollbarTrack->setStyle(std::move(scrollbarTrackStyle));
+    scrollbarTrack->setDesiredSize(newui::Size(20.0f, 20.0f));
+    scrollbarColumn->addChild(scrollbarTrack);
+
+    auto* scrollbarDownArrow = new newui::SubView();
+    scrollbarDownArrow->setName("scrollbarDownArrow");
+    scrollbarDownArrow->setVisible(true);
+    auto downArrowStyle = std::make_unique<newui::ThemedScrollbarArrowStyle>();
+    downArrowStyle->direction = newui::ThemedScrollbarArrowStyle::Direction::Down;
+    scrollbarDownArrow->setStyle(std::move(downArrowStyle));
+    scrollbarDownArrow->setDesiredSize(newui::Size(20.0f, 20.0f));
+    scrollbarColumn->addChild(scrollbarDownArrow);
 
     auto* content3 = MakePanel("content3", "mediumseagreen", "darkgreen");
     content3->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    root.addChild(content3);
+    // ViewStyle::setBackgroundImage() demo - tiles the same dot-cursor
+    // PNG (WriteDotCursorPNG(), already generated above) as a repeating
+    // pattern fill (BLPattern's own default extend mode) in place of
+    // content3's plain "mediumseagreen" solid color from MakePanel().
+    if (!content3->style().setBackgroundImage("layout1_dot_cursor.png")) {
+        std::cerr << "setBackgroundImage() failed for content3's background\n";
+    }
+    mainRow->addChild(content3);
 
     // A small badge nested inside content1, pinned to its top-right
     // corner via a second, independent Layout - content1's own, not
@@ -189,6 +766,10 @@ int main() {
     // View the AnchorLayout is attached to, so this doesn't need to
     // know anything about content1's position within the row.
     content1->setLayout(std::make_unique<newui::AnchorLayout>());
+
+    // TabControl demo - fills content1 (see AddTabControlDemo() above);
+    // badge below is added after, so it draws on top of it.
+    AddTabControlDemo(content1);
 
     auto* badge = MakePanel("badge", "white", "darkred", 2.0f);
     auto badgeParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);

@@ -6,6 +6,7 @@
 #include <blend2d/blend2d.h>
 
 #include <newui/newui.h>
+#include <newui/cursor.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
@@ -204,6 +205,40 @@ namespace newui {
         // SubView - see RootView::mouseDown()/mouseMove() etc.
         SubView* hitTestChildren(const Point& localPt, Point& outLocalPt) const;
 
+        // Direct access to this View's Cursor (cursor.h) - see
+        // RootView::handleMessage()'s WM_SETCURSOR case, which is what
+        // actually calls ::SetCursor(resolvedCursor()) once per hovered/
+        // captured View. Mutate cursor() in place for anything Cursor
+        // supports (view->cursor().setCursorKind(CursorKind::Hand),
+        // view->cursor().setPath("hand.png"), view->cursor().setImage(img)),
+        // or replace it wholesale via setCursor(Cursor) below.
+        Cursor& cursor() {
+            return cursor_;
+        }
+
+        const Cursor& cursor() const {
+            return cursor_;
+        }
+
+        // Replaces cursor() wholesale, e.g.
+        // view->setCursor(newui::Cursor(newui::CursorKind::Hand)); or
+        // view->setCursor(newui::Cursor("hand.png")). For a load that
+        // might fail and needs checking, mutate in place instead:
+        // if (!view->cursor().setPath("hand.png")) { ... }
+        void setCursor(Cursor cursor) {
+            cursor_ = std::move(cursor);
+        }
+
+        // Convenience for cursor().kind().
+        CursorKind cursorKind() const {
+            return cursor_.kind();
+        }
+
+        // Convenience for cursor().handle().
+        HCURSOR resolvedCursor() const {
+            return cursor_.handle();
+        }
+
         SizeChangedDelegate onSizeChanged;
         VisibilityChangedDelegate onVisibilityChanged;
         CreatedDelegate onCreated;
@@ -265,6 +300,11 @@ namespace newui {
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;
+
+        // Owns/frees any custom HCURSOR it loaded itself (RAII, see
+        // cursor.h) - no explicit cleanup needed anywhere in View for
+        // that.
+        Cursor cursor_;
 
         std::unique_ptr<Layout> layout_;
 

@@ -132,6 +132,18 @@ namespace newui {
 		if (desiredSizeOverride_.has_value()) {
 			writeSize(w, "desiredSize", *desiredSizeOverride_);
 		}
+		// A Custom cursor with no path() (built via cursor().setImage() -
+		// an in-memory image has no stable, file-portable representation,
+		// same reasoning as BLPattern/BLGradient fills - viewstyle.cpp/
+		// HANDOFF.md) is skipped entirely. A Custom cursor loaded from a
+		// file (setPath()) *is* portable via that same path, so it
+		// round-trips as both fields below instead of being skipped.
+		if (cursor_.kind() != CursorKind::Custom) {
+			w["cursor"] = w.new_string(Cursor::cursorKindToString(cursor_.kind()));
+		} else if (!cursor_.path().empty()) {
+			w["cursor"] = w.new_string(Cursor::cursorKindToString(CursorKind::Custom));
+			w["cursorPath"] = w.new_string(cursor_.path());
+		}
 	}
 
 	void View::readFields(const json5::value& obj) {
@@ -142,6 +154,22 @@ namespace newui {
 			desiredSizeOverride_ = readSize(v);
 		} else {
 			desiredSizeOverride_.reset();
+		}
+
+		std::string cursorKindStr = obj["cursor"].get_c_str("");
+		if (!cursorKindStr.empty()) {
+			CursorKind kind = Cursor::cursorKindFromString(cursorKindStr, cursor_.kind());
+			if (kind == CursorKind::Custom) {
+				std::string cursorPath = obj["cursorPath"].get_c_str("");
+				// setPath() failing (file missing/unreadable at load time)
+				// leaves cursor_ untouched, same "current cursor left as-is
+				// on failure" contract setPath() always has.
+				if (!cursorPath.empty()) {
+					cursor_.setPath(cursorPath);
+				}
+			} else {
+				cursor_.setCursorKind(kind);
+			}
 		}
 	}
 }

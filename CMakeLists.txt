@@ -65,7 +65,11 @@ add_library(newui STATIC
     "include/newui/json5_helpers.h" "src/json5_helpers.cpp"
     "include/newui/serialization.h" "src/serialization.cpp"
     "include/newui/bundle.h" "src/bundle.cpp"
-    "include/newui/reflection.h" "src/reflection.cpp")
+    "include/newui/reflection.h" "src/reflection.cpp"
+    "include/newui/cursor.h" "src/cursor.cpp"
+    "include/newui/graphics.h" "src/graphics.cpp"
+    "include/newui/menus.h" "src/menus.cpp"
+    "include/newui/tabcontrol.h" "src/tabcontrol.cpp")
 
 add_dependencies(newui newui_version)
 

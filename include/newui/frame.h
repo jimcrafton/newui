@@ -51,7 +51,6 @@ public:
 		return frameHandle_;
 	}
 
-
 	RootView& getView() {
 		return *rootView_;
 	}

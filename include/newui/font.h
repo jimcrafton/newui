@@ -8,6 +8,16 @@
 
 namespace newui {
 
+    // Shaped-text measurements from Font::measureText() below - width is
+    // the shaped advance (how wide the text renders); ascent/descent come
+    // from the font itself (not the specific text), for vertical centering
+    // independent of which glyphs happen to be present.
+    struct TextMetrics {
+        float width = 0.0f;
+        float ascent = 0.0f;
+        float descent = 0.0f;
+    };
+
     // A font description (name, size, and style flags) that resolves to an
     // actual BLFont lazily, through FontManager, only when blFont() is
     // called. Font itself owns none of the BLFont data - the pointer
@@ -85,6 +95,34 @@ namespace newui {
                 dirty_ = false;
             }
             return blFont_;
+        }
+
+        // Shapes text against blFont() (BLGlyphBuffer::set_utf8_text() +
+        // BLFont::shape() + BLFont::get_text_metrics()) and returns its
+        // advance width plus this font's own ascent/descent - a
+        // default-constructed (all-zero) TextMetrics if blFont() can't
+        // resolve. Used for centering/sizing a drawn label (see
+        // newui::MenuBar's button labels, menus.cpp).
+        TextMetrics measureText(const std::string& text) const {
+            TextMetrics result;
+
+            BLFont* font = blFont();
+            if (font == nullptr) {
+                return result;
+            }
+
+            BLGlyphBuffer gb;
+            gb.set_utf8_text(text.c_str());
+            font->shape(gb);
+
+            BLTextMetrics tm;
+            font->get_text_metrics(gb, tm);
+            result.width = float(tm.advance.x);
+
+            const BLFontMetrics& fm = font->metrics();
+            result.ascent = fm.ascent;
+            result.descent = fm.descent;
+            return result;
         }
 
     private:

@@ -1,6 +1,7 @@
 #include "newui/frame.h"
 #include "newui/application.h"
 #include "newui/json5_helpers.h"
+#include "newui/menus.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_builder.hpp>
@@ -155,6 +156,20 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 		}
 		break;
 
+		case WM_MEASUREITEM: {
+			// Owner-drawn items inside a ContextMenu popup shown with
+			// this Frame's window as TrackPopupMenu's owner arrive here -
+			// stateless (identifies the MenuItem via itemData directly),
+			// so no MenuBar/ContextMenu instance is needed - see menus.h.
+			result = DispatchMenuMeasureItem(*reinterpret_cast<MEASUREITEMSTRUCT*>(lParam));
+		}
+		break;
+
+		case WM_DRAWITEM: {
+			result = DispatchMenuDrawItem(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+		}
+		break;
+
 		default: {
 			result = false; // Message not handled
 		}			
@@ -167,13 +182,14 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 bool Frame::frameCreated()
 {
 	//cretate main view
-	
+
 	if (!rootView_->initialize()) {
 		delete rootView_;
 		rootView_ = nullptr;
 
 		return false;
 	}
+
 	onCreated(*this);
 	return true;
 }

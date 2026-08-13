@@ -32,15 +32,107 @@ namespace {
 		return defaultValue;
 	}
 
+	const char* tabItemPositionToString(newui::ThemedTabItemStyle::Position p) {
+		switch (p) {
+			case newui::ThemedTabItemStyle::Position::Middle: return "Middle";
+			case newui::ThemedTabItemStyle::Position::Left: return "Left";
+			case newui::ThemedTabItemStyle::Position::Right: return "Right";
+			case newui::ThemedTabItemStyle::Position::Only: return "Only";
+		}
+		return "Middle";
+	}
+
+	newui::ThemedTabItemStyle::Position tabItemPositionFromString(const std::string& s, newui::ThemedTabItemStyle::Position defaultValue) {
+		if (s == "Middle") return newui::ThemedTabItemStyle::Position::Middle;
+		if (s == "Left") return newui::ThemedTabItemStyle::Position::Left;
+		if (s == "Right") return newui::ThemedTabItemStyle::Position::Right;
+		if (s == "Only") return newui::ThemedTabItemStyle::Position::Only;
+		return defaultValue;
+	}
+
+	const char* tabItemAlignmentToString(newui::ThemedTabItemStyle::TabAlignment a) {
+		switch (a) {
+			case newui::ThemedTabItemStyle::TabAlignment::Top: return "Top";
+			case newui::ThemedTabItemStyle::TabAlignment::Bottom: return "Bottom";
+			case newui::ThemedTabItemStyle::TabAlignment::Left: return "Left";
+			case newui::ThemedTabItemStyle::TabAlignment::Right: return "Right";
+		}
+		return "Top";
+	}
+
+	newui::ThemedTabItemStyle::TabAlignment tabItemAlignmentFromString(const std::string& s, newui::ThemedTabItemStyle::TabAlignment defaultValue) {
+		if (s == "Top") return newui::ThemedTabItemStyle::TabAlignment::Top;
+		if (s == "Bottom") return newui::ThemedTabItemStyle::TabAlignment::Bottom;
+		if (s == "Left") return newui::ThemedTabItemStyle::TabAlignment::Left;
+		if (s == "Right") return newui::ThemedTabItemStyle::TabAlignment::Right;
+		return defaultValue;
+	}
+
+	const char* scrollbarArrowDirectionToString(newui::ThemedScrollbarArrowStyle::Direction d) {
+		switch (d) {
+			case newui::ThemedScrollbarArrowStyle::Direction::Up: return "Up";
+			case newui::ThemedScrollbarArrowStyle::Direction::Down: return "Down";
+			case newui::ThemedScrollbarArrowStyle::Direction::Left: return "Left";
+			case newui::ThemedScrollbarArrowStyle::Direction::Right: return "Right";
+		}
+		return "Up";
+	}
+
+	newui::ThemedScrollbarArrowStyle::Direction scrollbarArrowDirectionFromString(const std::string& s, newui::ThemedScrollbarArrowStyle::Direction defaultValue) {
+		if (s == "Up") return newui::ThemedScrollbarArrowStyle::Direction::Up;
+		if (s == "Down") return newui::ThemedScrollbarArrowStyle::Direction::Down;
+		if (s == "Left") return newui::ThemedScrollbarArrowStyle::Direction::Left;
+		if (s == "Right") return newui::ThemedScrollbarArrowStyle::Direction::Right;
+		return defaultValue;
+	}
+
+	const char* scrollbarTrackPositionToString(newui::ThemedScrollbarTrackStyle::Position p) {
+		switch (p) {
+			case newui::ThemedScrollbarTrackStyle::Position::Lower: return "Lower";
+			case newui::ThemedScrollbarTrackStyle::Position::Upper: return "Upper";
+		}
+		return "Lower";
+	}
+
+	newui::ThemedScrollbarTrackStyle::Position scrollbarTrackPositionFromString(const std::string& s, newui::ThemedScrollbarTrackStyle::Position defaultValue) {
+		if (s == "Lower") return newui::ThemedScrollbarTrackStyle::Position::Lower;
+		if (s == "Upper") return newui::ThemedScrollbarTrackStyle::Position::Upper;
+		return defaultValue;
+	}
+
 }
 
 namespace newui {
 
 	void ViewStyle::markDirty()
 	{
-		if (nullptr != view_) {
+		// view_->rootView() is null for any View not yet attached to a
+		// live window tree (e.g. a freshly-constructed TabControl/MenuBar
+		// in a headless test, or any composite still being assembled
+		// before addChild() into a real RootView-rooted tree) - every
+		// pre-existing caller only ever ran from a live message pump
+		// (RootView::updateHoveredSubView(), Part 9), where a RootView is
+		// always already present, so this went unnoticed until
+		// TabControl::selectTab() called it from a headless test. No-op
+		// gracefully instead of crashing, same "do nothing without a live
+		// window" convention ThemedViewStyle::paint() already uses.
+		if (nullptr != view_ && nullptr != view_->rootView()) {
 			view_->rootView()->markDirty();
 		}
+	}
+
+	bool ViewStyle::setBackgroundImage(const std::string& path) {
+		BLImage image;
+		if (image.read_from_file(path.c_str()) != BL_SUCCESS) {
+			return false;
+		}
+
+		setBackgroundImage(image);
+		return true;
+	}
+
+	void ViewStyle::setBackgroundImage(const BLImage& image) {
+		backgroundFill = BLPattern(image);
 	}
 
 	void ViewStyle::writeFields(json5::builder& w) const {
@@ -278,6 +370,310 @@ namespace newui {
 		checked = obj["checked"].get_bool(checked);
 		pressed = obj["pressed"].get_bool(pressed);
 		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedRadioButtonStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["checked"] = checked;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedRadioButtonStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		checked = obj["checked"].get_bool(checked);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedGroupBoxStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["enabled"] = enabled;
+	}
+
+	void ThemedGroupBoxStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarButtonStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["checked"] = checked;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedToolbarButtonStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		checked = obj["checked"].get_bool(checked);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarDropDownButtonStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["checked"] = checked;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedToolbarDropDownButtonStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		checked = obj["checked"].get_bool(checked);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarDropDownButtonGlyphStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedToolbarDropDownButtonGlyphStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarSplitButtonStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["checked"] = checked;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedToolbarSplitButtonStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		checked = obj["checked"].get_bool(checked);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarSplitButtonDropDownStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["checked"] = checked;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedToolbarSplitButtonDropDownStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		checked = obj["checked"].get_bool(checked);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedToolbarSeparatorStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+	}
+
+	void ThemedToolbarSeparatorStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+	}
+
+	void ThemedTooltipStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["linked"] = linked;
+	}
+
+	void ThemedTooltipStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		linked = obj["linked"].get_bool(linked);
+	}
+
+	void ThemedSpinButtonStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["isUpButton"] = isUpButton;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedSpinButtonStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		isUpButton = obj["isUpButton"].get_bool(isUpButton);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedEditStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["focused"] = focused;
+		w["readOnly"] = readOnly;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedEditStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		focused = obj["focused"].get_bool(focused);
+		readOnly = obj["readOnly"].get_bool(readOnly);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedListItemStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["selected"] = selected;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedListItemStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		selected = obj["selected"].get_bool(selected);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedHeaderItemStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["pressed"] = pressed;
+		w["sorted"] = sorted;
+	}
+
+	void ThemedHeaderItemStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		pressed = obj["pressed"].get_bool(pressed);
+		sorted = obj["sorted"].get_bool(sorted);
+	}
+
+	void ThemedHeaderSortArrowStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["sortedAscending"] = sortedAscending;
+	}
+
+	void ThemedHeaderSortArrowStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		sortedAscending = obj["sortedAscending"].get_bool(sortedAscending);
+	}
+
+	void ThemedTreeItemStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["selected"] = selected;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedTreeItemStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		selected = obj["selected"].get_bool(selected);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedTreeGlyphStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["expanded"] = expanded;
+	}
+
+	void ThemedTreeGlyphStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		expanded = obj["expanded"].get_bool(expanded);
+	}
+
+	void ThemedTabItemStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["alignment"] = w.new_string(tabItemAlignmentToString(alignment));
+		w["position"] = w.new_string(tabItemPositionToString(position));
+		w["selected"] = selected;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedTabItemStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		alignment = tabItemAlignmentFromString(obj["alignment"].get_c_str(""), alignment);
+		position = tabItemPositionFromString(obj["position"].get_c_str(""), position);
+		selected = obj["selected"].get_bool(selected);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedTrackbarTrackStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+	}
+
+	void ThemedTrackbarTrackStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+	}
+
+	void ThemedTrackbarThumbStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedTrackbarThumbStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedScrollbarThumbStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedScrollbarThumbStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedScrollbarArrowStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["direction"] = w.new_string(scrollbarArrowDirectionToString(direction));
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedScrollbarArrowStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		direction = scrollbarArrowDirectionFromString(obj["direction"].get_c_str(""), direction);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedScrollbarTrackStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+		w["position"] = w.new_string(scrollbarTrackPositionToString(position));
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedScrollbarTrackStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+		position = scrollbarTrackPositionFromString(obj["position"].get_c_str(""), position);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedMenuBarItemStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["pressed"] = pressed;
+		w["enabled"] = enabled;
+	}
+
+	void ThemedMenuBarItemStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		pressed = obj["pressed"].get_bool(pressed);
+		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedRebarChevronStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+		w["pressed"] = pressed;
+	}
+
+	void ThemedRebarChevronStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+		pressed = obj["pressed"].get_bool(pressed);
 	}
 
 }

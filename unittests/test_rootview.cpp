@@ -28,6 +28,7 @@ public:
     using newui::RootView::gotFocus;
     using newui::RootView::lostFocus;
     using newui::RootView::keyEvent;
+    using newui::RootView::cursorTargetAt;
 };
 
 // Delegate::FunctionPtr is a plain function pointer (no capturing lambdas),
@@ -371,6 +372,55 @@ TEST(RootViewKeyEvents, KeyEventIsNotRoutedToASubViewWhenNothingIsFocused) {
     root->keyEvent(newui::keKeyDown, 0, 'A', 1, 65);
 
     EXPECT_EQ(g_keyDownEvent.count, 0);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// cursorTargetAt() - drives handleMessage()'s WM_SETCURSOR case (a real
+// HWND is needed to test that message handler end-to-end, so this only
+// covers the pure "which View's cursor applies here" logic it delegates
+// to - see rootview.h's comment on cursorTargetAt()).
+// ---------------------------------------------------------------------------
+
+TEST(RootViewCursor, ReturnsRootViewItselfWhenNothingIsHitAndNothingIsCaptured) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    EXPECT_EQ(root->cursorTargetAt(newui::Point(5, 5)), root);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewCursor, ReturnsHitChildWhenNothingIsCaptured) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    EXPECT_EQ(root->cursorTargetAt(newui::Point(20, 20)), child);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewCursor, CapturedViewWinsEvenWhenPointIsOutsideItsBounds) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    root->mouseDown(newui::Point(20, 20), 1, 0);
+    ASSERT_EQ(root->capturedSubView(), child);
+
+    // Far outside child's bounds - capture still wins over a fresh hit-test
+    // (which would otherwise return root itself here).
+    EXPECT_EQ(root->cursorTargetAt(newui::Point(150, 150)), child);
 
     root->destroy();
     delete root;
