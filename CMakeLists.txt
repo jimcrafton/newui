@@ -69,7 +69,9 @@ add_library(newui STATIC
     "include/newui/cursor.h" "src/cursor.cpp"
     "include/newui/graphics.h" "src/graphics.cpp"
     "include/newui/menus.h" "src/menus.cpp"
-    "include/newui/tabcontrol.h" "src/tabcontrol.cpp")
+    "include/newui/tabcontrol.h" "src/tabcontrol.cpp"
+    "include/newui/dialogs.h" "src/dialogs.cpp"
+    "include/newui/uicolormanager.h" "src/uicolormanager.cpp")
 
 add_dependencies(newui newui_version)
 
@@ -79,7 +81,14 @@ target_include_directories(newui PUBLIC
     3rdparty/json5/include
 )
 
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib)
+# Ole32/Uuid: COM (CoCreateInstance/CoInitializeEx and the CLSID_FileOpenDialog/
+# CLSID_FileSaveDialog symbol storage) for dialogs.h's Common Item Dialog
+# (IFileDialog) support. Shell32: SHCreateItemFromParsingName, used to turn
+# an initial-directory path into the IShellItem SetFolder() wants. Advapi32:
+# RegGetValueW, used by UIColorManager::isDarkMode() (uicolormanager.cpp)
+# to read HKCU's AppsUseLightTheme value. Dwmapi: DwmGetColorizationColor,
+# used by UIColorManager::colorFor() for the real Windows accent color.
+target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib)
 
 # Resource bundles
 # =================
@@ -96,6 +105,23 @@ function(newui_add_resources target resourceSourceDir)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${resourceSourceDir}" "$<TARGET_FILE_DIR:${target}>/Resources"
             COMMENT "Copying resources for ${target}")
+    endif()
+endfunction()
+
+# Copies infoJsonPath next to target's built .exe as "Info.json" - see
+# include/newui/bundle.h's Bundle::appName()/appVersion(), which reads it
+# from <executable directory>/Info.json the same way newui_add_resources()
+# above expects Resources/ there. Independent of that call - a target may
+# want one, the other, both (e.g. via tools/bundlegen, which scaffolds
+# both an Info.json and a Resources/ tree together), or neither - not
+# called anywhere by default, since no target has an Info.json of its own
+# yet.
+function(newui_add_bundle_info target infoJsonPath)
+    if(EXISTS "${infoJsonPath}")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "${infoJsonPath}" "$<TARGET_FILE_DIR:${target}>/Info.json"
+            COMMENT "Copying Info.json for ${target}")
     endif()
 endfunction()
 

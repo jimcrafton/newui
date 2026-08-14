@@ -50,15 +50,13 @@ newui::SyncReturn RecordMeasure(newui::MenuItem&, newui::Size& outSize) {
 }
 
 int g_drawCallCount = 0;
-UINT g_lastDrawAction = 0;
-UINT g_lastDrawState = 0;
+
 newui::Rect g_lastDrawRect;
 
-newui::SyncReturn RecordDraw(newui::MenuItem&, HDC, const newui::Rect& r, UINT action, UINT state) {
+newui::SyncReturn RecordDraw(newui::MenuItem& item, BLContext&, const newui::Rect& r) {
     ++g_drawCallCount;
     g_lastDrawRect = r;
-    g_lastDrawAction = action;
-    g_lastDrawState = state;
+
     return newui::SyncReturn::Handled;
 }
 
@@ -241,7 +239,7 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 
     menu.setEnabled(*wrap, false);
-    EXPECT_FALSE(wrap->enabled);
+    EXPECT_FALSE(wrap->state.isEnabled());
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_GRAYED, 0u);
 }
 
@@ -293,10 +291,12 @@ TEST(MenuFreeFunctions, DispatchMeasureItemAndDrawItemRouteToTheRightMenuItem) {
     dis.itemState = ODS_SELECTED;
     EXPECT_TRUE(newui::DispatchMenuDrawItem(dis));
     EXPECT_EQ(g_drawCallCount, 1);
-    EXPECT_EQ(g_lastDrawAction, static_cast<UINT>(ODA_DRAWENTIRE));
-    EXPECT_EQ(g_lastDrawState, static_cast<UINT>(ODS_SELECTED));
-    EXPECT_FLOAT_EQ(g_lastDrawRect.left(), 1.0f);
-    EXPECT_FLOAT_EQ(g_lastDrawRect.top(), 2.0f);
+    
+    // (0,0)-(width,height), local to DispatchMenuDrawItem()'s own private
+    // per-item Image - not dis.rcItem's original DC-relative (1,2)
+    // origin (see MenuItem::onDraw's doc comment, menus.h).
+    EXPECT_FLOAT_EQ(g_lastDrawRect.left(), 0.0f);
+    EXPECT_FLOAT_EQ(g_lastDrawRect.top(), 0.0f);
     EXPECT_FLOAT_EQ(g_lastDrawRect.size().width, 100.0f);
     EXPECT_FLOAT_EQ(g_lastDrawRect.size().height, 20.0f);
 }

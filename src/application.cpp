@@ -3,6 +3,7 @@
 #include "newui/frame.h"
 #include "newui/newui.h"
 #include "newui/runloop.h"
+#include "newui/uicolormanager.h"
 
 #include <uxtheme.h>
 
@@ -228,6 +229,14 @@ void Application::run() {
 			printf("newui::Application: SetProcessDpiAwarenessContext failed - window may render blurry on a scaled display\n");
 		}
 
+		// Opts this process into following the system Light/Dark mode
+		// setting on native surfaces this toolkit doesn't draw itself -
+		// chiefly a ContextMenu's real TrackPopupMenuEx() popup
+		// (uicolormanager.h) - undocumented, so silently a no-op on a
+		// Windows build old enough not to export it, same "degrade,
+		// don't throw" convention as the DPI awareness call just above.
+		enableProcessDarkModeSupport();
+
 		INITCOMMONCONTROLSEX icc{};
 		icc.dwSize = sizeof(icc);
 		icc.dwICC = ICC_WIN95_CLASSES;
@@ -242,8 +251,10 @@ void Application::run() {
 		// paint() already no-ops gracefully when it can't render (see its
 		// comment), so a plain View just misses its native chrome rather than
 		// the whole application failing to start.
+		bool bufferedPaintInitialized = true;
 		if (FAILED(::BufferedPaintInit())) {
 			printf("newui::Application: BufferedPaintInit failed - themed styles won't render\n");
+			bufferedPaintInitialized = false;
 		}
 
 		HWND parent = ::GetDesktopWindow();
@@ -279,16 +290,34 @@ void Application::run() {
 		frame_->onDestroyed += FrameDestroyed;
 
 
+		onStartup(*this);
+
+		//runLoop_.onEnding += Application::runLoopEnding;
+		//runLoop_.onEnd += Application::runLoopDone;
 
 
 		runLoop_.run();
 
-		::BufferedPaintUnInit();
+		if (bufferedPaintInitialized) {
+			::BufferedPaintUnInit();
+		}
+
+		onShutdown(*this);
 	}
 	catch (const std::exception& e) {
 		printf("exception trapped: %s", e.what());
 		throw e;
 	}
+}
+
+SyncReturn Application::runLoopEnding(RunLoop&)
+{
+	return newui::SyncReturn::Handled;
+}
+
+SyncReturn Application::runLoopDone(RunLoop&)
+{
+	return newui::SyncReturn::Handled;
 }
 
 void Application::writeFields(json5::builder& w) const {

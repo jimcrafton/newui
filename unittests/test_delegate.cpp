@@ -57,6 +57,30 @@ void ResetRecorder() {
     g_lastSenderId = 0;
 }
 
+// Exercises Delegate::add(instance, &T::Method), which binds a real
+// (non-static) member function rather than requiring a hand-written static
+// trampoline.
+class Listener {
+public:
+    newui::SyncReturn record(FakeSender& sender, int value) {
+        ++callCount;
+        lastSenderId = sender.id;
+        lastValue = value;
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn recordConst(FakeSender& sender, int value) const {
+        ++callCount;
+        lastSenderId = sender.id;
+        lastValue = value;
+        return newui::SyncReturn::Handled;
+    }
+
+    mutable int callCount = 0;
+    mutable int lastSenderId = 0;
+    mutable int lastValue = 0;
+};
+
 }  // namespace
 
 TEST(Delegate, SyncCallWithNoFunctionsDoesNothing) {
@@ -111,11 +135,21 @@ TEST(Delegate, AddIgnoresNullFunctionPointer) {
 TEST(Delegate, RemoveStopsFurtherCalls) {
     ResetRecorder();
     newui::Delegate<int> delegate;
-    delegate.add(&IncrementCount);
-    delegate.remove(&IncrementCount);
+    newui::Connection connection = delegate.add(&IncrementCount);
+    delegate.remove(connection);
     int sender = 1;
     delegate.syncCall(sender);
     EXPECT_EQ(g_callCount, 0);
+}
+
+TEST(Delegate, RemoveOnDefaultConnectionIsNoOp) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    delegate.add(&IncrementCount);
+    delegate.remove(newui::Connection());
+    int sender = 1;
+    delegate.syncCall(sender);
+    EXPECT_EQ(g_callCount, 1);
 }
 
 TEST(Delegate, SyncCallFirstReturnsIgnoredWhenNoneHandle) {
@@ -205,6 +239,74 @@ TEST(Delegate, FunctionPtrTakesSenderByReferenceAsFirstParameter) {
 // is intentionally a compile error - see the static_assert in delegate.h.
 // There's no standard way to assert that here without a compile-fail test
 // harness, so this is left as documentation.
+
+TEST(Delegate, SyncCallInvokesBoundMemberFunction) {
+    newui::Delegate<FakeSender, int> delegate;
+    Listener listener;
+    delegate.add(&listener, &Listener::record);
+
+    FakeSender sender{4};
+    delegate.syncCall(sender, 21);
+
+    EXPECT_EQ(listener.callCount, 1);
+    EXPECT_EQ(listener.lastSenderId, 4);
+    EXPECT_EQ(listener.lastValue, 21);
+}
+
+TEST(Delegate, SyncCallInvokesBoundConstMemberFunction) {
+    newui::Delegate<FakeSender, int> delegate;
+    const Listener listener;
+    delegate.add(&listener, &Listener::recordConst);
+
+    FakeSender sender{6};
+    delegate.syncCall(sender, 8);
+
+    EXPECT_EQ(listener.callCount, 1);
+    EXPECT_EQ(listener.lastSenderId, 6);
+    EXPECT_EQ(listener.lastValue, 8);
+}
+
+TEST(Delegate, RemoveMemberFunctionStopsFurtherCalls) {
+    newui::Delegate<FakeSender, int> delegate;
+    Listener listener;
+    newui::Connection connection = delegate.add(&listener, &Listener::record);
+    delegate.remove(connection);
+
+    FakeSender sender{1};
+    delegate.syncCall(sender, 1);
+
+    EXPECT_EQ(listener.callCount, 0);
+}
+
+TEST(Delegate, BoundMemberFunctionsOnDifferentInstancesAreIndependent) {
+    newui::Delegate<FakeSender, int> delegate;
+    Listener a;
+    Listener b;
+    newui::Connection connectionA = delegate.add(&a, &Listener::record);
+    delegate.add(&b, &Listener::record);
+
+    delegate.remove(connectionA);
+
+    FakeSender sender{2};
+    delegate.syncCall(sender, 5);
+
+    EXPECT_EQ(a.callCount, 0);
+    EXPECT_EQ(b.callCount, 1);
+}
+
+TEST(Delegate, SyncCallInvokesCapturingLambda) {
+    newui::Delegate<FakeSender, int> delegate;
+    int captured = 0;
+    delegate.add([&captured](FakeSender&, int value) {
+        captured = value;
+        return newui::SyncReturn::Handled;
+    });
+
+    FakeSender sender{1};
+    delegate.syncCall(sender, 99);
+
+    EXPECT_EQ(captured, 99);
+}
 
 TEST(Delegate, ConcurrentSyncCallDuringAddDoesNotCrash) {
     ResetRecorder();

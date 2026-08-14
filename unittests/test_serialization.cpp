@@ -729,6 +729,80 @@ TEST(Serialization, RoundTripsThemedTrackbarThumbStyle) {
     delete loadedRoot;
 }
 
+TEST(Serialization, RoundTripsThemedTrackbarTicksStyle) {
+    auto* root = new newui::SubView();
+    root->setBounds(newui::Rect(0, 0, 120, 6));
+    root->setVisible(true);
+
+    auto themedStyle = std::make_unique<newui::ThemedTrackbarTicksStyle>();
+    themedStyle->horizontal = false;
+    root->setStyle(std::move(themedStyle));
+
+    const std::string json = newui::saveViewTree(*root);
+
+    auto* loadedRoot = new newui::SubView();
+    ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
+
+    auto* loadedStyle = dynamic_cast<newui::ThemedTrackbarTicksStyle*>(&loadedRoot->style());
+    ASSERT_NE(loadedStyle, nullptr);
+    EXPECT_FALSE(loadedStyle->horizontal);
+
+    root->destroy();
+    delete root;
+    loadedRoot->destroy();
+    delete loadedRoot;
+}
+
+TEST(Serialization, RoundTripsThemedProgressBarTrackStyle) {
+    auto* root = new newui::SubView();
+    root->setBounds(newui::Rect(0, 0, 160, 16));
+    root->setVisible(true);
+
+    auto themedStyle = std::make_unique<newui::ThemedProgressBarTrackStyle>();
+    themedStyle->horizontal = false;
+    root->setStyle(std::move(themedStyle));
+
+    const std::string json = newui::saveViewTree(*root);
+
+    auto* loadedRoot = new newui::SubView();
+    ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
+
+    auto* loadedStyle = dynamic_cast<newui::ThemedProgressBarTrackStyle*>(&loadedRoot->style());
+    ASSERT_NE(loadedStyle, nullptr);
+    EXPECT_FALSE(loadedStyle->horizontal);
+
+    root->destroy();
+    delete root;
+    loadedRoot->destroy();
+    delete loadedRoot;
+}
+
+TEST(Serialization, RoundTripsThemedProgressBarFillStyle) {
+    auto* root = new newui::SubView();
+    root->setBounds(newui::Rect(0, 0, 80, 16));
+    root->setVisible(true);
+
+    auto themedStyle = std::make_unique<newui::ThemedProgressBarFillStyle>();
+    themedStyle->horizontal = false;
+    themedStyle->state = newui::ThemedProgressBarFillStyle::FillState::Error;
+    root->setStyle(std::move(themedStyle));
+
+    const std::string json = newui::saveViewTree(*root);
+
+    auto* loadedRoot = new newui::SubView();
+    ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
+
+    auto* loadedStyle = dynamic_cast<newui::ThemedProgressBarFillStyle*>(&loadedRoot->style());
+    ASSERT_NE(loadedStyle, nullptr);
+    EXPECT_FALSE(loadedStyle->horizontal);
+    EXPECT_EQ(loadedStyle->state, newui::ThemedProgressBarFillStyle::FillState::Error);
+
+    root->destroy();
+    delete root;
+    loadedRoot->destroy();
+    delete loadedRoot;
+}
+
 TEST(Serialization, RoundTripsThemedScrollbarThumbStyle) {
     auto* root = new newui::SubView();
     root->setBounds(newui::Rect(0, 0, 20, 40));
@@ -935,22 +1009,19 @@ TEST(Serialization, CustomRegisteredSubViewRoundTripsAsItself) {
 }
 
 TEST(Serialization, FrameFieldsRoundTripWithoutLiveWindow) {
-    // Frame is heap-only here and deliberately never deleted: ~Frame()
-    // throws unless destroy() has run, and destroy() is private, only
-    // reachable via a live window's WM_DESTROY (see frame.cpp) - there's
-    // no way to tear one down cleanly without an actual HWND. Fine for a
-    // one-off in a short-lived test process; not a pattern to reuse
-    // outside a test.
-    auto* frame = new newui::Frame();
-    frame->setTitle("My Window");
-    frame->setBounds(newui::Rect(10, 20, 800, 600));
+    // ~Frame() only throws over a live window that was never torn down
+    // through WM_DESTROY (see frame.cpp) - neither Frame below ever calls
+    // initialize(), so both are safe to destroy normally here.
+    newui::Frame frame;
+    frame.setTitle("My Window");
+    frame.setBounds(newui::Rect(10, 20, 800, 600));
 
-    const std::string json = newui::saveFrame(*frame);
+    const std::string json = newui::saveFrame(frame);
 
-    auto* loaded = new newui::Frame();
-    ASSERT_TRUE(newui::loadFrame(*loaded, json));
-    EXPECT_EQ(loaded->getTitle(), "My Window");
-    EXPECT_EQ(loaded->getBounds(), frame->getBounds());
+    newui::Frame loaded;
+    ASSERT_TRUE(newui::loadFrame(loaded, json));
+    EXPECT_EQ(loaded.getTitle(), "My Window");
+    EXPECT_EQ(loaded.getBounds(), frame.getBounds());
 }
 
 TEST(Serialization, ApplicationCustomDataRoundTrips) {

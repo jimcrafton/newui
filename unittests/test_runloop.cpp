@@ -185,6 +185,156 @@ TEST(RunLoopPostIdle, TaskIsRequeuedUntilItReturnsTrue) {
     loopThread.join();
 }
 
+// runModal()'s actual message-pumping/owner-disable behavior needs a live
+// window and real user interaction to exercise meaningfully (same
+// reasoning ContextMenu::show()/Dialog::showModal() are excluded from
+// unit tests - see test_menus.cpp/test_dialogs.cpp) - these tests only
+// cover the "must be called from the loop's own thread, after run() has
+// started" guard, which is safely testable without either.
+
+TEST(RunLoopRunModal, ThrowsIfCalledBeforeRun) {
+    newui::RunLoop runLoop;
+
+    EXPECT_THROW(runLoop.runModal(nullptr, nullptr, [] { return true; }), std::runtime_error);
+}
+
+TEST(RunLoopRunModal, ThrowsIfCalledFromDifferentThreadThanRun) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    // Called from this test's own thread, not loopThread - runModal()
+    // should refuse rather than silently pump some other thread's queue.
+    EXPECT_THROW(runLoop.runModal(nullptr, nullptr, [] { return true; }), std::runtime_error);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopRunModal, ReturnsTrueImmediatelyWhenIsDoneIsAlreadyTrue) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+    std::thread::id loopThreadId = loopThread.get_id();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+    bool sawResult = false;
+    std::thread::id ranOnThreadId;
+
+    // isDone() already true on the very first check, so runModal() never
+    // has to actually pump a message - safe to run for real, on the
+    // loop's own thread, from a posted task.
+    runLoop.post([&]() {
+        ranOnThreadId = std::this_thread::get_id();
+        sawResult = runLoop.runModal(nullptr, nullptr, [] { return true; });
+        {
+            std::lock_guard<std::mutex> lock(doneMutex);
+            ran = true;
+        }
+        doneCv.notify_all();
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(ranOnThreadId, loopThreadId);
+    EXPECT_TRUE(sawResult);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+// The Escape check inside runModal() has to walk up to the owning
+// top-level window (::GetAncestor(..., GA_ROOT)) rather than compare
+// msg.hwnd directly against modalHandle - keyboard focus (and therefore
+// WM_KEYDOWN's msg.hwnd) can sit on a child window instead of modalHandle
+// itself, e.g. a Dialog's RootView grabs focus on its own (see
+// RootView::initialize()'s SetFocus() call), never the top-level frame.
+// This creates a real (never-shown) top-level window plus a real
+// WS_CHILD window to stand in for that relationship, without needing an
+// actual newui::Frame/Dialog or any real user input - same "exercise
+// real Win32 objects headlessly" precedent as TestableContextMenu in
+// test_menus.cpp.
+TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+    bool endingFired = false;
+    bool sawResult = false;
+
+    runLoop.onModalEnding.add([&](newui::RunLoop&, bool& canClose) {
+        endingFired = true;
+        canClose = true;
+        return newui::SyncReturn::Handled;
+        });
+
+    runLoop.post([&]() {
+        // Windows are thread-affine - topLevel/child have to be created
+        // (and PostMessage'd to, and destroyed) from right here, on
+        // loopThread itself, or they'd belong to some other thread's
+        // queue and runModal()'s GetMessage() on this thread would never
+        // see messages posted to them at all.
+        HINSTANCE moduleHandle = ::GetModuleHandleA(nullptr);
+        HWND topLevel = ::CreateWindowExA(0, "STATIC", "", WS_POPUP,
+            0, 0, 0, 0, nullptr, nullptr, moduleHandle, nullptr);
+        HWND child = ::CreateWindowExA(0, "STATIC", "", WS_CHILD,
+            0, 0, 0, 0, topLevel, nullptr, moduleHandle, nullptr);
+
+        // Posted (not sent) so it's sitting in the queue for runModal()'s
+        // own GetMessage to actually retrieve, the same way a real
+        // Escape keypress would arrive - targeting child (standing in
+        // for whichever control currently has focus), not topLevel.
+        ::PostMessage(child, WM_KEYDOWN, VK_ESCAPE, 0);
+
+        sawResult = runLoop.runModal(topLevel, nullptr, [&]() { return endingFired; });
+
+        ::DestroyWindow(child);
+        ::DestroyWindow(topLevel);
+
+        {
+            std::lock_guard<std::mutex> lock(doneMutex);
+            ran = true;
+        }
+        doneCv.notify_all();
+        });
+
+    // If the ancestor walk regresses back to a direct msg.hwnd ==
+    // modalHandle comparison, Escape on child never gets recognized,
+    // onModalEnding never fires, isDone() never becomes true, and
+    // runModal() just sits blocked in GetMessage() - this waits with a
+    // timeout (EXPECT_TRUE, not ASSERT_TRUE) so that case reports a
+    // failure instead of hanging: quit()/join() below still have to run
+    // either way, since an early return here would leave loopThread
+    // joinable at scope exit, and a joinable std::thread's destructor
+    // calls std::terminate() - crashing the whole test binary, not just
+    // failing this one test.
+    bool completedInTime;
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        completedInTime = doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; });
+    }
+    EXPECT_TRUE(completedInTime);
+
+    // quit() unblocks runModal()'s GetMessage() even if it's still stuck
+    // waiting (completedInTime == false) - WM_QUIT gets picked up the
+    // same way any other message would, ending the modal loop (and then
+    // run() itself, and the posted task's own cleanup) regardless of
+    // whether isDone() ever agreed.
+    runLoop.quit();
+    loopThread.join();
+
+    EXPECT_TRUE(endingFired);
+    EXPECT_TRUE(sawResult);
+}
+
 TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
     newui::RunLoop runLoop;
     std::thread loopThread([&runLoop]() { runLoop.run(); });

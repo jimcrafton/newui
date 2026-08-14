@@ -22,6 +22,7 @@ add_executable(newui_tests
     test_serialization.cpp
     test_bundle.cpp
     test_reflection.cpp
+    test_dialogs.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

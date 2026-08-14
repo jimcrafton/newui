@@ -41,6 +41,42 @@ namespace newui {
 
         void markDirty();
 
+        // Drops every ThemedViewStyle's cached HTHEME across this
+        // RootView's whole tree (itself plus every descendant SubView) -
+        // see ThemedViewStyle::closeTheme()'s doc comment on why that's
+        // needed after a system theme change, since a stale HTHEME keeps
+        // drawing the *old* theme otherwise - then forces a full repaint
+        // via markDirty(), whose next paintStyle() call reopens each one
+        // lazily against whatever the theme now is. Called by Frame on
+        // WM_THEMECHANGED/WM_DWMCOLORIZATIONCOLORCHANGED, and on
+        // WM_SETTINGCHANGE specifically when its string is
+        // "ImmersiveColorSet" (see Frame::handleMessage()) - not needed
+        // for plain (non-Themed) ViewStyle subclasses, which cache
+        // nothing theme-related.
+        //
+        // Known limitation: this correctly re-fetches whatever the
+        // *current* theme data is, but classic common-control theme
+        // classes (BUTTON/EDIT/TRACKBAR/PROGRESS/SCROLLBAR/... - see
+        // ThemedViewStyle's subclasses in viewstyle.h) have no distinct
+        // dark-mode visual for OpenThemeData()/DrawThemeBackground() to
+        // return in the first place - confirmed live: toggling Settings >
+        // Personalization > Colors' Light/Dark mode (which sends
+        // WM_SETTINGCHANGE "ImmersiveColorSet", not WM_THEMECHANGED -
+        // that one's for switching between whole .theme files, a
+        // different, less common setting) correctly triggers this, but
+        // produces no visible change, even across a full app restart
+        // while already in Dark mode. Real dark-mode rendering for these
+        // controls needs a separate opt-in this toolkit doesn't do -
+        // SetWindowTheme(hwnd, L"DarkMode_Explorer", ...) plus
+        // AllowDarkModeForWindow/SetPreferredAppMode (uxtheme.dll
+        // ordinals 133/135) - all undocumented, unsupported by Microsoft
+        // outside their own apps (Explorer, Windows Terminal, ...), and
+        // only covering a subset of controls even when used (Trackbar/
+        // Progress may have no dark variant regardless). Out of scope for
+        // now; this function still does the right thing with whatever
+        // theme data actually exists.
+        void refreshThemes();
+
 
 
 		virtual bool initialize();

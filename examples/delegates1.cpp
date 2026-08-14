@@ -13,9 +13,15 @@
 
 // ---------------------------------------------------------------------
 // Demo 1: a delegate with no owning class at all. Delegate<int> makes int
-// the Sender - there's no real "instance" here, but every FunctionPtr
-// still receives it by reference (Delegate requires Sender to be a plain,
+// the Sender - there's no real "instance" here, but every listener still
+// receives it by reference (Delegate requires Sender to be a plain,
 // non-reference type; the & is added for you).
+//
+// add() returns a Connection token; remove() takes that token back. Since
+// listeners are stored type-erased (so lambdas, member functions and free
+// functions can all live in the same list), there's no way to remove a
+// listener "by value" the way a raw function pointer could be compared -
+// the Connection is what makes a specific add() undoable.
 // ---------------------------------------------------------------------
 
 newui::SyncReturn LogValue(int& value) {
@@ -36,7 +42,7 @@ void demoBasicMulticast() {
 
     newui::Delegate<int> validators;
     validators += &RejectNegative;
-    validators += &LogValue;
+    newui::Connection logConnection = validators.add(&LogValue);
 
     std::cout << "syncCall(42):\n";
     int good = 42;
@@ -46,7 +52,7 @@ void demoBasicMulticast() {
     int bad = -1;
     validators.syncCall(bad);  // RejectNegative errors, so LogValue never runs
 
-    validators -= &LogValue;
+    validators.remove(logConnection);
     std::cout << "after removing LogValue, syncCall(5):\n";
     int five = 5;
     validators.syncCall(five);  // no output - the only remaining handler ignores it
@@ -155,34 +161,47 @@ void demoPostCall() {
 }
 
 // ---------------------------------------------------------------------
-// Demo 6: += also accepts an anonymous function. Delegate stores plain
-// function pointers (FunctionPtr), so the lambda must capture nothing -
-// only a capture-less lambda converts implicitly to a function pointer.
+// Demo 6: += / add() also accept a lambda, and - unlike a raw function
+// pointer - it's free to capture. Listeners are stored as
+// std::function<SyncReturn(SenderRefT, Args...)>, so any callable whose
+// result converts to SyncReturn works; a lambda returning the
+// SyncReturn::ReturnCode enum (e.g. via `return SyncReturn::Handled;`
+// with no trailing return type) converts implicitly, same as it would
+// assigning into a SyncReturn variable.
 // ---------------------------------------------------------------------
 
-void demoAnonymousFunction() {
-    std::cout << "\n== Demo 6: += with an anonymous function ==\n";
+void demoLambdaListener() {
+    std::cout << "\n== Demo 6: add()/+= with lambdas, capturing and not ==\n";
 
     newui::Delegate<int> onTick;
-    // Trailing return type matters here: without it, a lambda that returns
-    // SyncReturn::Handled deduces SyncReturn::ReturnCode (the enum), not
-    // SyncReturn itself, which won't match FunctionPtr.
-    onTick += [](int& tick) -> newui::SyncReturn {
+    onTick += [](int& tick) {
         std::cout << "  anonymous handler: tick = " << tick << "\n";
+        return newui::SyncReturn::Handled;
+    };
+
+    int totalSeen = 0;
+    onTick += [&totalSeen](int& tick) {
+        totalSeen += tick;
         return newui::SyncReturn::Handled;
     };
 
     int tick = 3;
     onTick.syncCall(tick);
+    std::cout << "  totalSeen (captured by reference) = " << totalSeen << "\n";
 }
 
 // ---------------------------------------------------------------------
-// Demo 7: routing a delegate to a member function on a class instance.
-// Delegate only stores plain function pointers - it can't hold a bound
-// method for an arbitrary object, since that would need a capture. But
-// when Sender is the object itself, a static member function can act as
-// a trampoline: it arrives with a reference to the instance and simply
-// forwards the call into a real member function on it.
+// Demo 7: binding a real member function directly - no static trampoline
+// or capturing lambda needed for the common case of "call this method on
+// this instance". T is deduced from the arguments, so there's no
+// <Class, &Class::Method> template noise at the call site:
+//
+//   delegate.add(instance, &T::Method);
+//
+// Method still has the same (SenderRefT, Args...) shape any listener
+// does; instance is just who it's called on, and here that happens to be
+// the same Counter that owns the delegate. remove() just needs the
+// Connection add() returned.
 // ---------------------------------------------------------------------
 
 class Counter {
@@ -194,32 +213,68 @@ public:
         onChanged(*this, value_);
     }
 
-    // Matches FunctionPtr's signature, so it can be added directly with
-    // +=. It has no state of its own - it just forwards to the instance
-    // it's given.
-    static newui::SyncReturn HandleChanged(Counter& counter, int newValue) {
-        counter.logChange(newValue);
+    newui::SyncReturn logChange(Counter& /*counter*/, int newValue) {
+        std::cout << "  Counter::logChange: value is now " << newValue << "\n";
         return newui::SyncReturn::Handled;
     }
 
 private:
-    // The actual member function being "added" to the delegate, indirectly,
-    // via HandleChanged above.
-    void logChange(int newValue) {
-        std::cout << "  Counter::logChange: value is now " << newValue << "\n";
-    }
-
     int value_ = 0;
 };
 
-void demoMemberFunction() {
-    std::cout << "\n== Demo 7: routing a delegate to a member function ==\n";
+void demoBoundMemberFunction() {
+    std::cout << "\n== Demo 7: binding a member function directly with add(instance, &T::Method) ==\n";
 
     Counter counter;
-    counter.onChanged += &Counter::HandleChanged;
+    counter.onChanged.add(&counter, &Counter::logChange);
 
     counter.increment();
     counter.increment();
+}
+
+// ---------------------------------------------------------------------
+// Demo 8: const member functions bind the same way, bound to a const
+// instance. Also shows remove(Connection) taking out one listener while
+// leaving the other running.
+// ---------------------------------------------------------------------
+
+class Logger {
+public:
+    explicit Logger(std::string name) : name_(std::move(name)) {}
+
+    newui::SyncReturn onButtonClicked(Button& button, int clickCount) {
+        std::cout << "  [" << name_ << "] '" << button.label
+                  << "' clicked (count = " << clickCount << ")\n";
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn onButtonClickedConst(Button& button, int clickCount) const {
+        std::cout << "  [" << name_ << ", const] '" << button.label
+                   << "' clicked (count = " << clickCount << ")\n";
+        return newui::SyncReturn::Handled;
+    }
+
+private:
+    std::string name_;
+};
+
+void demoConstMemberAndRemoval() {
+    std::cout << "\n== Demo 8: const member functions, and remove(Connection) ==\n";
+
+    Button saveButton;
+    saveButton.label = "Save";
+
+    Logger logger("audit-log");
+    const Logger constLogger("const-audit-log");
+
+    newui::Connection loggerConnection = saveButton.onClicked.add(&logger, &Logger::onButtonClicked);
+    saveButton.onClicked.add(&constLogger, &Logger::onButtonClickedConst);
+
+    saveButton.click();
+
+    saveButton.onClicked.remove(loggerConnection);
+    std::cout << "after removing the non-const listener:\n";
+    saveButton.click();
 }
 
 int main() {
@@ -229,8 +284,9 @@ int main() {
     demoSenderWithExtraArgs();
     demoSyncCallFirst();
     demoPostCall();
-    demoAnonymousFunction();
-    demoMemberFunction();
+    demoLambdaListener();
+    demoBoundMemberFunction();
+    demoConstMemberAndRemoval();
 
     return 0;
 }

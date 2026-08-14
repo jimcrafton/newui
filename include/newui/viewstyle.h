@@ -1142,6 +1142,103 @@ namespace newui {
         }
     };
 
+    // ThemedViewStyle plus a trackbar/slider's tick marks (TRACKBAR/
+    // TKP_TICS or TKP_TICSVERT) - same "orientation picks the part" shape
+    // as ThemedTrackbarTrackStyle/ThemedTrackbarThumbStyle above, and
+    // like ThemedTrackbarTrackStyle, neither part has any real state
+    // variants (TICSSTATES/TICSVERTSTATES each define only *_NORMAL), so
+    // stateId() ignores highlighted. uxtheme draws the *whole* row/column
+    // of tick marks as one part (there's no per-tick theme part, and no
+    // tickCount/spacing this style tracks) - positioning this style's own
+    // bounds alongside the track (typically a thin strip the track's full
+    // length) is the caller's job via ordinary bounds/Layout, same as
+    // ThemedTrackbarThumbStyle's thumb positioning.
+    class ThemedTrackbarTicksStyle : public ThemedViewStyle {
+    public:
+        ThemedTrackbarTicksStyle() : ThemedViewStyle(L"TRACKBAR") {}
+
+        bool horizontal = true;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
+    protected:
+        int partId() const override { return horizontal ? TKP_TICS : TKP_TICSVERT; }
+        int stateId(bool /*highlighted*/) const override { return horizontal ? TSS_NORMAL : TSVS_NORMAL; }
+    };
+
+    // ThemedViewStyle plus a progress bar's track/background (PROGRESS/
+    // PP_BAR or PP_BARVERT) - horizontal/vertical are two entirely
+    // separate theme parts (same "orientation picks the part" shape as
+    // ThemedTrackbarTrackStyle above). Unlike PP_TRANSPARENTBAR/
+    // PP_TRANSPARENTBARVERT (a different, out-of-scope part with its own
+    // TRANSPARENTBARSTATES: PBBS_NORMAL/PBBS_PARTIAL), the plain PP_BAR/
+    // PP_BARVERT parts this class uses have no state enum in the real
+    // theme data at all, so stateId() always returns 0 - same shape as
+    // ThemedTabPaneStyle.
+    class ThemedProgressBarTrackStyle : public ThemedViewStyle {
+    public:
+        ThemedProgressBarTrackStyle() : ThemedViewStyle(L"PROGRESS") {}
+
+        bool horizontal = true;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
+    protected:
+        int partId() const override { return horizontal ? PP_BAR : PP_BARVERT; }
+        int stateId(bool /*highlighted*/) const override { return 0; }
+    };
+
+    // ThemedViewStyle plus a progress bar's fill (PROGRESS/PP_FILL or
+    // PP_FILLVERT). How much of the bar is filled isn't a field here -
+    // that's the caller's job via ordinary bounds/Layout (a narrower
+    // SubView than the track, same as ThemedTrackbarThumbStyle's thumb
+    // positioning). What this tracks instead is the fill's *state* - maps
+    // to FILLSTATES/FILLVERTSTATES' PBFS_NORMAL/ERROR/PAUSED, the same
+    // green/red/yellow coloring a real Win32 progress bar control shows
+    // for PBM_SETSTATE(PBST_NORMAL/PBST_ERROR/PBST_PAUSED). highlighted
+    // has no effect here, unlike most other Themed*Style classes - a
+    // progress bar isn't interactive, so stateId() ignores it. Two things
+    // deliberately out of scope, same "no real animation logic" trim as
+    // ThemedSpinButtonStyle: PBFS_PARTIAL (an indeterminate-marquee-only
+    // state), and the animated PP_PULSEOVERLAY/PP_MOVEOVERLAY parts
+    // (marquee mode itself, which needs a timer to look right).
+    class ThemedProgressBarFillStyle : public ThemedViewStyle {
+    public:
+        enum class FillState {
+            Normal,
+            Error,
+            Paused
+        };
+
+        ThemedProgressBarFillStyle() : ThemedViewStyle(L"PROGRESS") {}
+
+        bool horizontal = true;
+        FillState state = FillState::Normal;
+
+        void writeFields(json5::builder& w) const override;
+        void readFields(const json5::value& obj) override;
+
+    protected:
+        int partId() const override { return horizontal ? PP_FILL : PP_FILLVERT; }
+
+        int stateId(bool /*highlighted*/) const override {
+            if (horizontal) {
+                switch (state) {
+                    case FillState::Error: return PBFS_ERROR;
+                    case FillState::Paused: return PBFS_PAUSED;
+                    case FillState::Normal: default: return PBFS_NORMAL;
+                }
+            }
+            switch (state) {
+                case FillState::Error: return PBFVS_ERROR;
+                case FillState::Paused: return PBFVS_PAUSED;
+                case FillState::Normal: default: return PBFVS_NORMAL;
+            }
+        }
+    };
+
     // ThemedViewStyle plus a scrollbar's draggable thumb (SCROLLBAR/
     // SBP_THUMBBTNHORZ or SBP_THUMBBTNVERT) - same shape as
     // ThemedTrackbarThumbStyle above, different theme class/parts.

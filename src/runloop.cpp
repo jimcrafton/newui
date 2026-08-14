@@ -23,6 +23,7 @@ namespace newui {
             started_ = true;
         }
         startedCv_.notify_all();
+		onStart(*this);
 
         MSG msg;
         BOOL getMessageResult;
@@ -43,7 +44,6 @@ namespace newui {
 			do {
 				bool doTranslateAndDispatch = true;
 
-				bool ESCkeyPressed = false;
 				if (GetMessage(&msg, NULL, 0, 0)) {
 					switch (msg.message) {
 
@@ -54,48 +54,16 @@ namespace newui {
 						break;
 
 						case WM_KEYDOWN:  case WM_SYSKEYDOWN: {
-							int scanCode = ((BYTE*)&msg.lParam)[2]; //gets bits 16-23
-							int VKeyCode = 0;
-							bool altKeyDown = false;
-							int isExtendedKey = 0;
-							int keyMask = 0;
-							WORD character = 0;
-							memset(keyState, 0, sizeof(keyState));
 
-							if (GetKeyboardState(&keyState[0])) {
-								altKeyDown = (msg.lParam & KB_CONTEXT_CODE) != 0;
-								isExtendedKey = (msg.lParam & KB_IS_EXTENDED_KEY) != 0;
-								character = 0;
+							KeyboardEventInfo keyData = {};
+							translateKeyEventInfo(msg.hwnd, msg.message, msg.wParam, msg.lParam, keyData);
 
-								VKeyCode = MapVirtualKey(scanCode, 1);
+							int  keyCharVal = 0;
+							int eventType = keUndefined;
+							auto keyMask = translateKeyMask(keyData.keyMask);
 
-							}
+							keyData.VKeyCode = translateVirtualKey(msg.wParam, 0);
 
-							HKL keyboardLayout = GetKeyboardLayout(GetWindowThreadProcessId(msg.hwnd, NULL));
-
-							ToAsciiEx(VKeyCode, scanCode, &keyState[0], &character, 1, keyboardLayout);
-							std::bitset<16> keyBits;
-							keyBits = GetAsyncKeyState(VK_SHIFT);
-							if (keyBits[15] == 1) {
-								keyMask |= kmShift;
-							}
-
-							keyBits = GetAsyncKeyState(VK_CONTROL);
-							if (keyBits[15] == 1) {
-								keyMask |= kmCtrl;
-							}
-
-							keyBits = GetAsyncKeyState(VK_MENU);
-							if (keyBits[15] == 1) {
-								altKeyDown = true;
-								keyMask |= kmAlt;
-							}
-
-
-							VirtualKeyCode vkCode = (VirtualKeyCode)translateVirtualKey(msg.wParam, character);
-
-							ESCkeyPressed = (vkCode == vkEscape);
-							
 							auto [frameTarget,viewTarget] = Application::instance().getFrame()->getTarget(msg.hwnd);
 
 							bool msgConsumed = false;
@@ -105,7 +73,7 @@ namespace newui {
 							}
 							else if (viewTarget != nullptr) {
 								//figure out if the view or sub view handles things
-								//if they process the msg then 
+								//if they process the msg then
 								//msgConsumed = true
 							}
 
@@ -114,6 +82,14 @@ namespace newui {
 								doTranslateAndDispatch = false;
 							}
 						}
+						break;
+
+						case WM_SYSCOMMAND: {
+							if (SC_CLOSE == msg.wParam) {
+								PostQuitMessage(0);
+							}
+						}
+						break;
 					}
 					if (doTranslateAndDispatch) {
 						if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg)) {
@@ -123,28 +99,22 @@ namespace newui {
 					}
 				}
 				else {
+					// GetMessage() returns FALSE (0) only when it
+					// retrieves WM_QUIT - this is the only place that
+					// ever happens (msg.message can never actually equal
+					// WM_QUIT past this point - see onEnding's own doc
+					// comment), so it's where onEnding fires. canQuit
+					// lets a subscriber veto ending the loop; the WM_QUIT
+					// itself is already consumed - there's no way to put
+					// it back on the queue - so "vetoing" just means
+					// keep pumping as if nothing happened, not that the
+					// quit request is retried later.
+					bool canQuit = true;
+					onEnding(*this, canQuit);
+					if (!canQuit) {
+						continue;
+					}
 					done = true;
-					break;
-				}
-
-				switch (msg.message) {
-					case WM_KEYDOWN: {
-						if (ESCkeyPressed) {
-							
-						}
-					}
-					break;
-
-					case WM_SYSCOMMAND: {
-						if (SC_CLOSE == msg.wParam) {							
-							PostQuitMessage(0);
-						}
-					}
-					break;
-
-					case WM_QUIT: {
-						done = true;
-					}
 					break;
 				}
 
@@ -165,7 +135,7 @@ namespace newui {
 
         OleUninitialize();
 
-        
+		onEnd(*this);
     }
 
     void RunLoop::postTaskMsg() const
@@ -176,6 +146,92 @@ namespace newui {
     void RunLoop::postQuitMsg() const
     {
         ::PostThreadMessage(threadId_, WM_QUIT, 0, 0);
+    }
+
+    bool RunLoop::runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!started_) {
+                throw std::runtime_error("newui::RunLoop::runModal called before run()");
+            }
+        }
+        if (::GetCurrentThreadId() != threadId_) {
+            throw std::runtime_error("newui::RunLoop::runModal called from a different thread than run()");
+        }
+
+        onModalStart(*this);
+
+        if (ownerHandle != nullptr) {
+            ::EnableWindow(ownerHandle, FALSE);
+        }
+
+        bool quitSeen = false;
+        MSG msg;
+        while (!isDone()) {
+            BOOL got = ::GetMessage(&msg, nullptr, 0, 0);
+            if (got == 0 || got == -1) {
+                // WM_QUIT reached this thread (or GetMessage itself
+                // failed) - stop waiting rather than swallow it; re-post
+                // so the outer run() still sees WM_QUIT once this call
+                // returns and unwinds back to it.
+                if (got == 0) {
+                    ::PostQuitMessage(static_cast<int>(msg.wParam));
+                }
+                quitSeen = true;
+                break;
+            }
+
+            bool doTranslateAndDispatch = true;
+
+            if (modalHandle != nullptr) {
+                if (msg.hwnd == modalHandle && msg.message == WM_CLOSE) {
+                    bool canClose = true;
+                    onModalEnding(*this, canClose);
+                    if (!canClose) {
+                        // Swallow it - never reaches modalHandle's own
+                        // WndProc, so it doesn't actually close.
+                        doTranslateAndDispatch = false;
+                    }
+                }
+                else if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE
+                         && ::GetAncestor(msg.hwnd, GA_ROOT) == modalHandle) {
+                    // Escape arrives targeting whichever control actually
+                    // has keyboard focus, not necessarily modalHandle
+                    // itself - e.g. a Dialog's RootView is a child window
+                    // that grabs focus on its own (see
+                    // RootView::initialize()'s SetFocus() call), so msg.hwnd
+                    // here is that child, never the top-level frame. Walk
+                    // up to the owning top-level window before comparing,
+                    // so this still fires regardless of which of
+                    // modalHandle's descendants currently has focus.
+                    //
+                    // Translate Escape into the same close request a
+                    // native titlebar X click sends, so the WM_CLOSE
+                    // handling above - veto included - is the one and
+                    // only place that decides whether a close request
+                    // actually goes through, for either trigger, instead
+                    // of firing onModalEnding twice with two different
+                    // ways to answer it.
+                    ::PostMessage(modalHandle, WM_CLOSE, 0, 0);
+                    doTranslateAndDispatch = false;
+                }
+            }
+
+            if (doTranslateAndDispatch) {
+                ::TranslateMessage(&msg);
+                ::DispatchMessage(&msg);
+            }
+        }
+
+        if (ownerHandle != nullptr) {
+            ::EnableWindow(ownerHandle, TRUE);
+            ::SetForegroundWindow(ownerHandle);
+        }
+
+        onModalEnd(*this);
+
+        return !quitSeen;
     }
 
 	void RunLoop::idleProcessing()

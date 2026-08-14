@@ -13,11 +13,42 @@ namespace newui {
 		rootView_ = new RootView(this, bounds_, "rootview");
 	}
 
-	Frame::~Frame() 
+	bool Frame::renderAllViewsToFile(const std::string& path) {
+		rootView_->markDirty();
+
+		BLImage& buffer = rootView_->getImageBuffer();
+		if (buffer.is_empty()) {
+			return false;
+		}
+
+		return buffer.write_to_file(path.c_str()) == BL_SUCCESS;
+	}
+
+	Frame::~Frame()
 	{
 		if (nullptr != rootView_) {
-			throw std::runtime_error("root view not destroyed!!!");
-		}		
+			if (nullptr != frameHandle_) {
+				// A live native window still exists and was never torn
+				// down through the normal WM_CLOSE/WM_DESTROY path (see
+				// destroy()) - that's a real leak (both the HWND and
+				// rootView_ still alive), so keep failing loudly instead
+				// of silently leaking it.
+				throw std::runtime_error("root view not destroyed!!!");
+			}
+
+			// initialize() was never called (or never got as far as
+			// creating frameHandle_) - there's no live window and never
+			// will be, so there's nothing for the normal WM_DESTROY-driven
+			// teardown (destroy()) to wait for. Free rootView_ directly
+			// instead - safe even if the caller already built content on
+			// it via getView() (View::destroy()/SubView::destroy() need
+			// no live HWND). Skips destroy()'s onDestroyed(*this) - this
+			// Frame was never actually shown, so nothing was "destroyed"
+			// in the sense any onDestroyed listener would expect.
+			rootView_->destroy();
+			delete rootView_;
+			rootView_ = nullptr;
+		}
 	}
 
 
@@ -153,6 +184,88 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 
 			::PostQuitMessage(0);
 			result = true;
+		}
+		break;
+
+		case WM_QUERYENDSESSION: {
+			// wParam is reserved/unused; lParam carries ENDSESSION_*
+			// reason flags (Vista+). We answer this ourselves (outLRESULT),
+			// so no fall-through to DefWindowProcA needed.
+			bool canEnd = true;
+			Application::instance().onQueryEndSession(Application::instance(), canEnd,
+				static_cast<std::uint32_t>(lParam));
+			outLRESULT = canEnd ? TRUE : FALSE;
+			result = true;
+		}
+		break;
+
+		case WM_ENDSESSION: {
+			Application::instance().onEndSession(Application::instance(), wParam != 0,
+				static_cast<std::uint32_t>(lParam));
+			result = true;
+		}
+		break;
+
+		case WM_THEMECHANGED: {
+			// Drop every ThemedViewStyle's cached HTHEME across this
+			// Frame's whole view tree and redraw before anyone gets
+			// notified, so onThemeChanged subscribers already see the new
+			// look reflected if they query anything view-related. Still
+			// falls through to DefWindowProcA afterward (result stays
+			// false) - it does its own default WM_THEMECHANGED handling
+			// for the window's native non-client chrome, which this
+			// doesn't touch.
+			if (nullptr != rootView_) {
+				rootView_->refreshThemes();
+			}
+			Application::instance().onThemeChanged(Application::instance());
+		}
+		break;
+
+		case WM_DWMCOLORIZATIONCOLORCHANGED: {
+			// Same "refresh then notify" ordering as WM_THEMECHANGED above -
+			// an accent-color change affects themed chrome just as much as
+			// an actual theme switch does.
+			if (nullptr != rootView_) {
+				rootView_->refreshThemes();
+			}
+			// wParam is already exactly the 0xAARRGGBB layout Color's
+			// (uint32_t, hasAlpha) constructor expects - see
+			// ColorizationColorChangedDelegate's doc comment in
+			// application.h for why this isn't a Win32 COLORREF.
+			Application::instance().onColorizationColorChanged(Application::instance(),
+				Color(static_cast<std::uint32_t>(wParam), true), lParam != 0);
+		}
+		break;
+
+		case WM_SETTINGCHANGE: {
+			// lParam is an ANSI string pointer here (not wide) - Frame's
+			// window class was registered via RegisterClassExA, so Windows
+			// has already thunked this message to the ANSI form by the
+			// time it reaches this WndProc, same as every other string-ish
+			// Win32 API this codebase calls with an explicit "A" suffix.
+			std::string settingName;
+			if (lParam != 0) {
+				settingName = reinterpret_cast<const char*>(lParam);
+			}
+
+			// "ImmersiveColorSet" is what Windows actually sends for a
+			// light/dark mode toggle (Settings > Personalization > Colors),
+			// with wParam always 0 - it's a string-only, undocumented
+			// notification, not one of the SPI_*-coded settings changes
+			// that use wParam for an action code. WM_THEMECHANGED is a
+			// different, less common setting (switching between whole
+			// .theme files) and isn't guaranteed to fire from a light/
+			// dark flip, which is why this needs its own check rather
+			// than relying on that case alone. See
+			// RootView::refreshThemes()'s doc comment for what this
+			// does and does not actually change visually.
+			if (nullptr != rootView_ && settingName == "ImmersiveColorSet") {
+				rootView_->refreshThemes();
+			}
+
+			Application::instance().onSettingChange(Application::instance(),
+				static_cast<std::uint32_t>(wParam), settingName);
 		}
 		break;
 

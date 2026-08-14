@@ -39,6 +39,9 @@ namespace newui {
         registerTypeOnSelf<ThemedTabPaneStyle>();
         registerTypeOnSelf<ThemedTrackbarTrackStyle>();
         registerTypeOnSelf<ThemedTrackbarThumbStyle>();
+        registerTypeOnSelf<ThemedTrackbarTicksStyle>();
+        registerTypeOnSelf<ThemedProgressBarTrackStyle>();
+        registerTypeOnSelf<ThemedProgressBarFillStyle>();
         registerTypeOnSelf<ThemedScrollbarThumbStyle>();
         registerTypeOnSelf<ThemedScrollbarArrowStyle>();
         registerTypeOnSelf<ThemedScrollbarTrackStyle>();

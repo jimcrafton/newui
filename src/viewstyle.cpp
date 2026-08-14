@@ -8,11 +8,115 @@
 #include "newui/view.h"
 #include "newui/rootview.h"
 #include "newui/json5_helpers.h"
+#include "newui/color.h"
+#include "newui/uicolormanager.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_builder.hpp>
 
 namespace {
+
+	// Approximates a dark-mode look for a theme part uxtheme has no real
+	// dark visual for at all (see RootView::refreshThemes()'s doc comment)
+	// by inverting each pixel's HSL lightness in place - the same "smart
+	// invert" heuristic some browsers use to dark-ify content with no real
+	// dark asset. Hue and alpha are left untouched, so e.g. a red glyph
+	// stays recognizably red, just lighter against a lighter background
+	// instead of darker against a darker one - not a real dark-mode asset,
+	// just a fake approximation of one.
+	//
+	// Unpremultiplies each pixel before doing the HSL math, then
+	// re-premultiplies the result - these bytes are premultiplied BGRA
+	// (see the call site), so px.rgbRed/Green/Blue already equal
+	// straightRGB * alpha. An earlier version of this function skipped
+	// that step, inverting the premultiplied bytes directly on the
+	// (mistaken) assumption that only the thin anti-aliased edge of a
+	// partially-transparent part (a glow, a rounded corner) would ever
+	// see a nonzero-RGB/low-alpha pixel. That's wrong for a part whose
+	// "normal" state is *entirely* transparent - e.g. MENU_BARITEM's
+	// MBI_NORMAL (ThemedMenuBarItemStyle) draws nothing at all for an
+	// unhighlighted top-level menu item - where inverting straight black
+	// (alpha=0) in premultiplied space produced RGB=white still tagged
+	// alpha=0, an invalid premultiplied pixel. blend2d's premultiplied
+	// "over" compositing (Result = SrcRGB + DstRGB*(1-SrcA)) then adds
+	// that leftover white directly on top of whatever's behind it
+	// regardless of alpha, showing up as a solid opaque white box exactly
+	// where nothing should have been drawn - reported live as the
+	// MenuBar's own top-level items looking wrong in Dark mode (their
+	// label text, itself correctly dark-mode-colored via UIColorManager,
+	// then invisible against that same-color white ghost box).
+	//
+	// highlighted (threaded straight through from paint()'s own parameter)
+	// applies a much stronger boost specifically for a hot/pressed state's
+	// own bitmap. Measured live against MENU_BARITEM's MBI_HOT
+	// (ThemedMenuBarItemStyle, hovering "File"): the *plain* kGammaNormal
+	// boost above only reached RGB(10,10,10) against an unhovered
+	// RGB(0,0,0) background - because this visual style's native hot fill
+	// is itself only barely lighter than its own normal-state white
+	// background (l ~ 0.995 vs. 1.0) to begin with. A gamma curve can only
+	// re-shape an *existing* numeric gap, not manufacture one that was
+	// never really there in relative terms - kGammaNormal's 0.6 simply
+	// isn't steep enough near zero to pull a ~0.005 gap up to anything
+	// visible. kGammaHighlighted is deliberately much smaller (steeper
+	// near 0) so that same near-invisible gap lands somewhere clearly
+	// perceptible instead - reserved for the highlighted case specifically
+	// (rather than lowering kGammaNormal for everything) so static chrome
+	// elsewhere doesn't get the same aggressive, washed-out treatment.
+	void invertLightnessInPlace(RGBQUAD* bits, int width, int height, int strideInPixels, bool highlighted) {
+		for (int y = 0; y < height; ++y) {
+			RGBQUAD* row = bits + intptr_t(y) * strideInPixels;
+			for (int x = 0; x < width; ++x) {
+				RGBQUAD& px = row[x];
+				if (px.rgbReserved == 0) {
+					continue;  // fully transparent - no straight-alpha color to unpremultiply/invert, and premultiplied RGB must stay 0 too
+				}
+
+				float alpha = float(px.rgbReserved) / 255.0f;
+				newui::Color color(
+					float(px.rgbRed) / 255.0f / alpha,
+					float(px.rgbGreen) / 255.0f / alpha,
+					float(px.rgbBlue) / 255.0f / alpha,
+					alpha);
+
+				newui::HSLColor hsl = color.toHSL();
+
+				// Plain complement (1-l) preserves the *numeric* lightness
+				// gap between two colors, but not the *perceived* one: a
+				// hot/pressed highlight that's normally much lighter than
+				// its surrounding chrome (e.g. MBI_HOT vs. MBI_NORMAL,
+				// ThemedMenuBarItemStyle) inverts to something only
+				// slightly less black than that same chrome's own
+				// inverted-to-black background - human contrast
+				// sensitivity is much lower down near black than up near
+				// white, so the same 0.15-ish delta reads as "barely
+				// highlighted" post-invert even though it was clearly
+				// visible pre-invert. kGamma<1 counters this by expanding
+				// the low end of the inverted range while leaving both
+				// ends fixed (0^kGamma=0, 1^kGamma=1) - a true white
+				// background still inverts to true black, but anything
+				// that inverts to only-slightly-off-black gets pulled
+				// noticeably lighter instead.
+				constexpr float kGammaNormal = 0.6f;
+				constexpr float kGammaHighlighted = 0.2f;
+				hsl.l = std::pow(1.0f - hsl.l, highlighted ? kGammaHighlighted : kGammaNormal);
+
+				// toBGRA32() writes exactly RGBQUAD's own B,G,R,A byte
+				// order (see its doc comment in color.h), clamping/
+				// rounding each channel the same way every other Color
+				// byte-packing call in this codebase does - straightBytes
+				// is therefore still straight (unpremultiplied) alpha,
+				// same as color/hsl above; re-premultiply by its own
+				// (unchanged) alpha byte before writing back to px.
+				uint8_t straightBytes[4];
+				newui::Color::fromHSL(hsl).toBGRA32(straightBytes);
+				float straightAlpha = float(straightBytes[3]) / 255.0f;
+				px.rgbBlue = uint8_t(std::lround(straightBytes[0] * straightAlpha));
+				px.rgbGreen = uint8_t(std::lround(straightBytes[1] * straightAlpha));
+				px.rgbRed = uint8_t(std::lround(straightBytes[2] * straightAlpha));
+				px.rgbReserved = straightBytes[3];
+			}
+		}
+	}
 
 	const char* edge3DStyleToString(newui::Edge3DStyle s) {
 		switch (s) {
@@ -97,6 +201,22 @@ namespace {
 	newui::ThemedScrollbarTrackStyle::Position scrollbarTrackPositionFromString(const std::string& s, newui::ThemedScrollbarTrackStyle::Position defaultValue) {
 		if (s == "Lower") return newui::ThemedScrollbarTrackStyle::Position::Lower;
 		if (s == "Upper") return newui::ThemedScrollbarTrackStyle::Position::Upper;
+		return defaultValue;
+	}
+
+	const char* progressBarFillStateToString(newui::ThemedProgressBarFillStyle::FillState s) {
+		switch (s) {
+			case newui::ThemedProgressBarFillStyle::FillState::Normal: return "Normal";
+			case newui::ThemedProgressBarFillStyle::FillState::Error: return "Error";
+			case newui::ThemedProgressBarFillStyle::FillState::Paused: return "Paused";
+		}
+		return "Normal";
+	}
+
+	newui::ThemedProgressBarFillStyle::FillState progressBarFillStateFromString(const std::string& s, newui::ThemedProgressBarFillStyle::FillState defaultValue) {
+		if (s == "Normal") return newui::ThemedProgressBarFillStyle::FillState::Normal;
+		if (s == "Error") return newui::ThemedProgressBarFillStyle::FillState::Error;
+		if (s == "Paused") return newui::ThemedProgressBarFillStyle::FillState::Paused;
 		return defaultValue;
 	}
 
@@ -328,6 +448,10 @@ namespace newui {
 			                          // stride below - not the buffer's actual
 			                          // width/height, which are just rect's.
 			if (SUCCEEDED(::GetBufferedPaintBits(paintBuffer, &bits, &rowWidthPixels)) && bits != nullptr) {
+				if (newui::UIColorManager::instance().isDarkMode()) {
+					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted);
+				}
+
 				// Premultiplied, top-down BGRA - exactly BL_FORMAT_PRGB32,
 				// so no channel/premultiplication conversion is needed
 				// before wrapping these bits directly as a BLImage.
@@ -606,6 +730,38 @@ namespace newui {
 		horizontal = obj["horizontal"].get_bool(horizontal);
 		pressed = obj["pressed"].get_bool(pressed);
 		enabled = obj["enabled"].get_bool(enabled);
+	}
+
+	void ThemedTrackbarTicksStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+	}
+
+	void ThemedTrackbarTicksStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+	}
+
+	void ThemedProgressBarTrackStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+	}
+
+	void ThemedProgressBarTrackStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+	}
+
+	void ThemedProgressBarFillStyle::writeFields(json5::builder& w) const {
+		ViewStyle::writeFields(w);
+		w["horizontal"] = horizontal;
+		w["state"] = w.new_string(progressBarFillStateToString(state));
+	}
+
+	void ThemedProgressBarFillStyle::readFields(const json5::value& obj) {
+		ViewStyle::readFields(obj);
+		horizontal = obj["horizontal"].get_bool(horizontal);
+		state = progressBarFillStateFromString(obj["state"].get_c_str(""), state);
 	}
 
 	void ThemedScrollbarThumbStyle::writeFields(json5::builder& w) const {

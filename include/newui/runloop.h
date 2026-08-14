@@ -2,6 +2,8 @@
 
 #include "newui/newui.h"
 #include "newui/custom_message_constants.h"
+#include "newui/delegate.h"
+
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -20,6 +22,9 @@ namespace newui {
 // Call waitUntilStarted() from another thread to block until that's true.
 class RunLoop {
 public:
+
+    typedef Delegate<RunLoop> RunLoopDelegate;
+    typedef Delegate<RunLoop, bool&> RunLoopEndingDelegate;
 
     void run();
 
@@ -60,6 +65,74 @@ public:
         postQuitMsg();
     }
 
+    // Runs a nested modal message loop directly on the calling thread -
+    // the same reentrant-pump technique any native Win32 modal dialog
+    // uses internally - blocking until isDone() returns true. modalHandle
+    // is the window actually being shown modally: WM_CLOSE targeting it
+    // (whether from its own titlebar X, or Escape - see onModalEnding
+    // below) is what onModalEnding fires for and what a subscriber can
+    // veto; may be nullptr for a modal loop with no single window to
+    // watch (isDone() is then the only way it ever ends, short of
+    // WM_QUIT). ownerHandle (may independently be nullptr) is a
+    // *different* window - typically modalHandle's conceptual owner -
+    // disabled for the duration via ::EnableWindow() so it can't be
+    // interacted with, then re-enabled and refocused before this
+    // returns, regardless of how the loop ended.
+    //
+    // Meant for any modal-UI scenario, not just Dialog::showModal() (its
+    // original motivating use) - e.g. a custom confirmation popup, a
+    // blocking progress window, anything that needs to pump messages (so
+    // the UI stays responsive/repaints) while still not returning control
+    // to its caller until dismissed.
+    //
+    // Must be called from the same thread already running this RunLoop's
+    // own run() - GetMessage()/DispatchMessage() below always operate on
+    // "whichever thread calls them"'s message queue, so calling this
+    // before run() has started pumping, or from a different thread than
+    // the one running it, would silently drive an unrelated queue
+    // instead of this loop's real one rather than the nested loop anyone
+    // actually wants. Throws std::runtime_error in either case.
+    //
+    // Returns true if the loop ended because isDone() returned true, or
+    // false if it ended early because WM_QUIT reached this thread (the
+    // app itself is shutting down) - re-posted via ::PostQuitMessage() so
+    // the outer run() still sees it once this call returns and unwinds
+    // back to it. Callers that track their own "why did this end" result
+    // (e.g. Dialog::showModal()'s DialogResult) should treat a false
+    // return as an implicit cancel/abort, since isDone() never actually
+    // agreed the loop was done.
+    bool runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone);
+
+    // Fired right as run()'s own message pump starts/ends - see run().
+    RunLoopDelegate onStart;
+
+    // Fired exactly once, the one place run() ever sees WM_QUIT (see
+    // run()'s comment on why every other "quit" path funnels through
+    // there too). canQuit starts true; a subscriber that sets it false
+    // vetoes ending run() - since WM_QUIT itself is already consumed by
+    // the time this fires, "vetoing" just means run() keeps pumping as
+    // if nothing happened, not that the quit request is somehow retried
+    // later.
+    RunLoopEndingDelegate onEnding;
+
+    // Fired right before run() returns, once its pump has actually ended.
+    RunLoopDelegate onEnd;
+
+    // Fired right as runModal() starts/ends - see runModal().
+    RunLoopDelegate onModalStart;
+
+    // Fired when modalHandle is about to receive a WM_CLOSE runModal()
+    // is watching for (see runModal()'s modalHandle parameter) - covers
+    // both a real titlebar X click and Escape (translated into the same
+    // WM_CLOSE). canClose starts true; a subscriber that sets it false
+    // vetoes it: the WM_CLOSE is swallowed before ever reaching
+    // modalHandle's own WndProc, so nothing closes and the modal loop
+    // keeps running.
+    RunLoopEndingDelegate onModalEnding;
+
+    // Fired right before runModal() returns, once its loop has actually
+    // ended and owner has been re-enabled.
+    RunLoopDelegate onModalEnd;
 private:
 
     void drainTasks() {

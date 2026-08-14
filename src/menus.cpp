@@ -5,6 +5,8 @@
 #include "newui/layout.h"
 #include "newui/fontmanager.h"
 #include "newui/font.h"
+#include "newui/uicolormanager.h"
+#include "newui/graphics.h"
 
 #include <blend2d/blend2d.h>
 
@@ -106,8 +108,15 @@ public:
         float textHeight = shaped.ascent + shaped.descent;
         float baselineY = bounds.top() + (bounds.size().height - textHeight) * 0.5f + shaped.ascent;
 
-        COLORREF textColor = ::GetSysColor(COLOR_MENUTEXT);
-        ctx.set_fill_style(BLRgba32(GetRValue(textColor), GetGValue(textColor), GetBValue(textColor), 255));
+        // GetSysColor(COLOR_MENUTEXT) doesn't track Light/Dark mode at
+        // all (see UIColorManager's own class comment in
+        // uicolormanager.h for why) - the item's background (drawn via
+        // ThemedMenuBarItemStyle, i.e. paintStyle(), which runs before
+        // this paint() override) already follows it through
+        // ThemedViewStyle::paint()'s dark-mode fake, so the label needs
+        // its own theme-aware color to match instead of staying fixed.
+        newui::Color textColor = newui::UIColorManager::instance().colorFor(newui::UIColorRole::ControlText);
+        ctx.set_fill_style(textColor.toBLRgba32());
         ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text.c_str());
     }
 };
@@ -175,7 +184,7 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
         MENUITEMINFOA mii = {};
         mii.cbSize = sizeof(mii);
         mii.fMask = MIIM_FTYPE | MIIM_STATE;
-        mii.fState = (item.enabled ? MFS_ENABLED : MFS_DISABLED)
+        mii.fState = (item.state.isEnabled() ? MFS_ENABLED : MFS_DISABLED)
             | (item.checked ? MFS_CHECKED : MFS_UNCHECKED);
 
         std::string label;  // must outlive the InsertMenuItemA() call below
@@ -194,6 +203,11 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
                 mii.fMask |= MIIM_STRING;
                 mii.dwTypeData = const_cast<char*>(label.c_str());
                 mii.cch = static_cast<UINT>(label.size());
+
+                if (item.bitmap != nullptr) {
+                    mii.fMask |= MIIM_BITMAP;
+                    mii.hbmpItem = item.bitmap;
+                }
             }
 
             if (item.hasChildren()) {
@@ -231,6 +245,13 @@ void ContextMenu::buildNativeMenu(MenuItem& parentItem) {
 
 bool ContextMenu::show(HWND owner, MenuItem& parentItem, int screenX, int screenY) {
     buildNativeMenu(parentItem);
+
+    // Opts owner into real native dark chrome (uicolormanager.h) right
+    // before showing the popup - TrackPopupMenuEx() below reads dark-mode
+    // eligibility off its owner window, not off hmenu_ itself, and this
+    // is cheap/idempotent enough to just redo on every show() rather than
+    // caching whether some particular owner has already been opted in.
+    enableDarkModeForWindow(owner);
 
     ::SetForegroundWindow(owner);
     UINT id = UINT(::TrackPopupMenuEx(hmenu_, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
@@ -280,7 +301,7 @@ void ContextMenu::setChecked(MenuItem& item, bool checked) {
 }
 
 void ContextMenu::setEnabled(MenuItem& item, bool enabled) {
-    item.enabled = enabled;
+    item.state.setEnabled(enabled);
     if (item.ownerMenu_ != nullptr) {
         ::EnableMenuItem(item.ownerMenu_, item.commandId_,
             MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
@@ -313,7 +334,38 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
         return false;
     }
 
-    item->onDraw.syncCall(*item, dis.hDC, Rect(dis.rcItem), dis.itemAction, dis.itemState);
+    int width = int(dis.rcItem.right - dis.rcItem.left);
+    int height = int(dis.rcItem.bottom - dis.rcItem.top);
+    if (width <= 0 || height <= 0) {
+        return true;
+    }
+
+    // The "trap" itself: build a private, blank Image (graphics.h) sized
+    // to the real item rect, hand the handler a BLContext over it (so it
+    // draws with Blend2D, never touching an HDC), then blit the result
+    // onto dis.hDC via the Image's own memDC() - the exact
+    // Image+BLContext+BitBlt pattern this class's own doc comment already
+    // described as the "Blend2D-quality" option, now done once here
+    // instead of duplicated by every onDraw handler.
+    Image itemImage(width, height);
+    if (!itemImage.isValid()) {
+        return true;  // couldn't allocate a DIB-backed buffer - draw nothing rather than crash
+    }
+
+
+    item->state.setDisabled((dis.itemState & ODS_DISABLED) == ODS_DISABLED);
+    item->state.setInactive((dis.itemState & ODS_INACTIVE) == ODS_INACTIVE);
+    item->state.setGreyedOut((dis.itemState & ODS_GRAYED) == ODS_GRAYED);
+    item->state.setFocused((dis.itemState & ODS_FOCUS) == ODS_FOCUS);
+    item->state.setHighlighted((dis.itemState & ODS_HOTLIGHT) == ODS_HOTLIGHT);
+    //item->state.setSelected((dis.itemState & ODS_SELECTED) == ODS_SELECTED);
+
+
+    BLContext ctx(itemImage.blImage());
+    item->onDraw.syncCall(*item, ctx, Rect(0.0f, 0.0f, float(width), float(height)));
+    ctx.end();
+
+    ::BitBlt(dis.hDC, dis.rcItem.left, dis.rcItem.top, width, height, itemImage.memDC(), 0, 0, SRCCOPY);
     return true;
 }
 

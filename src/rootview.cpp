@@ -4,8 +4,22 @@
 #include "newui/subview.h"
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
+#include "newui/viewstyle.h"
 
 namespace {
+
+	// Recurses view and every descendant SubView, dropping the cached
+	// HTHEME on whichever ones are actually ThemedViewStyle - a plain
+	// ViewStyle has nothing theme-related to drop, so dynamic_cast simply
+	// skips it. Used by RootView::refreshThemes() below.
+	void closeThemedStyles(newui::View& view) {
+		if (auto* themed = dynamic_cast<newui::ThemedViewStyle*>(&view.style())) {
+			themed->closeTheme();
+		}
+		for (newui::SubView* child : view.childViews()) {
+			closeThemedStyles(*child);
+		}
+	}
 
 	// True if candidate is subtreeRoot itself, or a descendant of it -
 	// walks candidate's own parent() chain upward (each SubView's parent_
@@ -93,6 +107,11 @@ namespace newui {
 
 	void RootView::markDirty() {
 		notifyRedrawNeeded();
+	}
+
+	void RootView::refreshThemes() {
+		closeThemedStyles(*this);
+		markDirty();
 	}
 
 	void RootView::notifyRedrawNeeded() {
@@ -672,7 +691,19 @@ namespace newui {
 
 				int  keyCharVal = 0;
 				int eventType = keUndefined;
-				auto keyMask = translateKeyMask(keyData.keyMask);
+
+				// keyData.keyMask is already newui's own kmShift/kmCtrl/
+				// kmAlt bits (translateKeyEventInfo() builds it straight
+				// from GetAsyncKeyState(), not a raw Win32 MK_* mask) - do
+				// NOT re-run it through translateKeyMask(), which expects
+				// the mouse-message MK_CONTROL/MK_SHIFT encoding instead.
+				// Doing so used to corrupt it: kmCtrl (0x4) collides with
+				// MK_SHIFT (0x4), so a real Ctrl press got reported as
+				// Shift while Ctrl itself never registered (only Alt
+				// happened to still work, since translateKeyMask()
+				// re-queries VK_MENU directly rather than trusting its own
+				// argument for that bit).
+				auto keyMask = static_cast<std::uint32_t>(keyData.keyMask);
 
 				switch (message) {
 					case WM_CHAR: {

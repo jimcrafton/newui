@@ -5,6 +5,8 @@
 #include "newui/geometry.h"
 #include "newui/subview.h"
 
+#include <blend2d/blend2d.h>
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -12,6 +14,75 @@
 
 
 namespace newui {
+    enum MenuStateFlags {
+        Disabled = 0x01,
+        Focused = 0x02,
+        GreyedOut = 0x04,
+        Highlighted = 0x08,
+        Inactive = 0x10,
+        Selected = 0x20
+    };
+
+    class MenuState {
+    public:
+        MenuState() {}
+
+        MenuState(const std::uint32_t& v):state_(v){ }
+
+        bool isEnabled() const { return !isDisabled(); }
+        bool isDisabled() const { return (state_ & Disabled) == Disabled; }
+        bool isFocused() const { return (state_ & Focused) == Focused; }
+        bool isGreyedOut() const { return (state_ & GreyedOut) == GreyedOut; }
+        bool isHighlighted() const { return (state_ & Highlighted) == Highlighted; }
+        bool isInactive() const { return (state_ & Inactive) == Inactive; }
+        bool isSelected() const { return (state_ & Selected) == Selected; }
+
+
+        void setEnabled(bool v) {
+            setDisabled(!v);
+        }
+
+        void setDisabled(bool v) {
+            if (v) { state_ |= Disabled; }
+            else { state_ &= ~Disabled; }
+        }
+
+        void setFocused(bool v) {
+            if (v) { state_ |= Focused; }
+            else { state_ &= ~Focused; }
+        }
+
+        void setGreyedOut(bool v) {
+            if (v) { state_ |= GreyedOut; }
+            else { state_ &= ~GreyedOut; }
+        }
+
+        void setHighlighted(bool v) {
+            if (v) { state_ |= Highlighted; }
+            else { state_ &= ~Highlighted; }
+        }
+
+        void setInactive(bool v) {
+            if (v) { state_ |= Inactive; }
+            else { state_ &= ~Inactive; }
+        }
+
+        void setSelected(bool v) {
+            if (v) { state_ |= Selected; }
+            else { state_ &= ~Selected; }
+        }
+
+        operator std::uint32_t () const {
+            return state_;
+        }
+
+        MenuState& operator=(const std::uint32_t& rhs) {
+            state_ = rhs;
+            return *this;
+        }
+    private:
+        std::uint32_t state_ = 0;
+    };
 
     // A single menu item - either a leaf (fires onClick when clicked), a
     // separator, or a parent (has children_, opens a submenu and never
@@ -32,8 +103,12 @@ namespace newui {
         typedef Delegate<MenuItem> ClickDelegate;
         ClickDelegate onClick;
 
+
+        
+        MenuState state;
+
         std::string text;
-        bool enabled = true;
+        
         bool isSeparator = false;
         bool checked = false;
 
@@ -56,7 +131,27 @@ namespace newui {
         // Windows' own native rendering - see onMeasure/onDraw below.
         // Ignored on a separator (isSeparator always wins - a native
         // separator is cheap and rarely worth owner-drawing).
+        //
+        // Known limitation, confirmed live: Windows falls back to legacy,
+        // non-dark-themed popup compositing for the *whole* menu the
+        // moment any one of its items is MFT_OWNERDRAW - a plain
+        // (non-owner-drawn) sibling item still renders fine, but the
+        // popup's own frame/background around an owner-drawn item stays
+        // stuck in light chrome even when enableDarkModeForWindow()
+        // (uicolormanager.h) has been applied to its owner. No known
+        // workaround short of not owner-drawing at all - see bitmap
+        // below for a native alternative (an icon next to plain text)
+        // that doesn't hit this.
         bool ownerDrawn = false;
+
+        // Native MIIM_BITMAP icon shown to the left of a plain
+        // (non-owner-drawn) item's text - caller-owned, borrowed only
+        // (this MenuItem never creates/destroys it, same as every other
+        // Win32 handle this class avoids owning - see the class
+        // comment). nullptr (default) = no icon, plain MFT_STRING as
+        // before. The way to get a "colored glyph next to a label" look
+        // without MFT_OWNERDRAW's dark-mode caveat above.
+        HBITMAP bitmap = nullptr;
 
         // Fired from Frame's WM_MEASUREITEM (via DispatchMenuMeasureItem())
         // only when ownerDrawn is set. outSize arrives pre-filled with a
@@ -67,16 +162,17 @@ namespace newui {
         MeasureDelegate onMeasure;
 
         // Fired from Frame's WM_DRAWITEM (via DispatchMenuDrawItem()) only
-        // when ownerDrawn is set. hdc/itemRect are exactly what Windows
-        // handed over (itemRect already translated to newui's own Rect);
-        // odAction/odState are DRAWITEMSTRUCT::itemAction/itemState passed
-        // through raw (ODA_DRAWENTIRE/ODA_SELECT/ODA_FOCUS,
-        // ODS_SELECTED/ODS_CHECKED/ODS_DISABLED/ODS_GRAYED/...) rather than
-        // wrapped - draw with plain GDI against hdc, or (for a
-        // Blend2D-drawn look) create a newui::Image (graphics.h) sized to
-        // itemRect, paint into its blImage() via BLContext, and BitBlt
-        // image.memDC() onto hdc.
-        typedef Delegate<MenuItem, HDC, const Rect&, UINT, UINT> DrawDelegate;
+        // when ownerDrawn is set - draw with Blend2D against ctx, not raw
+        // GDI. DispatchMenuDrawItem() builds ctx itself: a private
+        // newui::Image (graphics.h) sized to the real WM_DRAWITEM rect,
+        // wrapped in a BLContext, BitBlt (via the Image's own memDC()) onto
+        // the real HDC after this delegate returns - so itemRect is
+        // (0,0)-(width,height) local to that private image, not a
+        // DC-relative rect, and there's no HDC for a handler to touch at
+        // all. odAction/odState are DRAWITEMSTRUCT::itemAction/itemState
+        // passed through raw (ODA_DRAWENTIRE/ODA_SELECT/ODA_FOCUS,
+        // ODS_SELECTED/ODS_CHECKED/ODS_DISABLED/ODS_GRAYED/...).
+        typedef Delegate<MenuItem, BLContext&, const Rect&> DrawDelegate;
         DrawDelegate onDraw;
 
         static std::unique_ptr<MenuItem> Separator() {

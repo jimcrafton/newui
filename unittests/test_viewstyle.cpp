@@ -168,6 +168,24 @@ public:
     using newui::ThemedTrackbarThumbStyle::stateId;
 };
 
+class TestableThemedTrackbarTicksStyle : public newui::ThemedTrackbarTicksStyle {
+public:
+    using newui::ThemedTrackbarTicksStyle::partId;
+    using newui::ThemedTrackbarTicksStyle::stateId;
+};
+
+class TestableThemedProgressBarTrackStyle : public newui::ThemedProgressBarTrackStyle {
+public:
+    using newui::ThemedProgressBarTrackStyle::partId;
+    using newui::ThemedProgressBarTrackStyle::stateId;
+};
+
+class TestableThemedProgressBarFillStyle : public newui::ThemedProgressBarFillStyle {
+public:
+    using newui::ThemedProgressBarFillStyle::partId;
+    using newui::ThemedProgressBarFillStyle::stateId;
+};
+
 class TestableThemedScrollbarThumbStyle : public newui::ThemedScrollbarThumbStyle {
 public:
     using newui::ThemedScrollbarThumbStyle::partId;
@@ -1041,9 +1059,11 @@ TEST(ThemedEditStyle, StateIdPrecedence) {
 // Batch 2: ThemedListItemStyle / ThemedHeaderItemStyle /
 // ThemedHeaderSortArrowStyle / ThemedTreeItemStyle / ThemedTreeGlyphStyle /
 // ThemedTabItemStyle / ThemedTabPaneStyle / ThemedTrackbarTrackStyle /
-// ThemedTrackbarThumbStyle / ThemedScrollbarThumbStyle /
-// ThemedScrollbarArrowStyle / ThemedScrollbarTrackStyle - same live-HWND
-// constraint/scope as batch 1 above.
+// ThemedTrackbarThumbStyle / ThemedTrackbarTicksStyle /
+// ThemedProgressBarTrackStyle / ThemedProgressBarFillStyle /
+// ThemedScrollbarThumbStyle / ThemedScrollbarArrowStyle /
+// ThemedScrollbarTrackStyle - same live-HWND constraint/scope as batch 1
+// above.
 // ---------------------------------------------------------------------------
 
 TEST(ThemedListItemStyle, PaintWithNoAttachedViewDoesNotCrash) {
@@ -1296,6 +1316,78 @@ TEST(ThemedTrackbarThumbStyle, PartIdReflectsOrientationAndStateIdPrecedence) {
 
     style.horizontal = false;
     EXPECT_EQ(style.partId(), TKP_THUMBVERT);
+}
+
+TEST(ThemedTrackbarTicksStyle, PaintWithNoAttachedViewDoesNotCrash) {
+    newui::ThemedTrackbarTicksStyle style;
+
+    newui::Rect clientBounds;
+    style.paint(SharedContext(), newui::Size(120, 6), false, clientBounds);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 120.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 6.0f);
+}
+
+TEST(ThemedTrackbarTicksStyle, PartIdAndStateIdReflectOrientation) {
+    TestableThemedTrackbarTicksStyle style;
+
+    EXPECT_EQ(style.partId(), TKP_TICS);
+    EXPECT_EQ(style.stateId(false), TSS_NORMAL);
+    EXPECT_EQ(style.stateId(true), TSS_NORMAL);  // highlighted has no effect
+
+    style.horizontal = false;
+    EXPECT_EQ(style.partId(), TKP_TICSVERT);
+    EXPECT_EQ(style.stateId(false), TSVS_NORMAL);
+}
+
+TEST(ThemedProgressBarTrackStyle, PaintWithNoAttachedViewDoesNotCrash) {
+    newui::ThemedProgressBarTrackStyle style;
+
+    newui::Rect clientBounds;
+    style.paint(SharedContext(), newui::Size(160, 16), false, clientBounds);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 160.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 16.0f);
+}
+
+TEST(ThemedProgressBarTrackStyle, PartIdAndStateIdReflectOrientation) {
+    TestableThemedProgressBarTrackStyle style;
+
+    EXPECT_EQ(style.partId(), PP_BAR);
+    EXPECT_EQ(style.stateId(false), 0);
+    EXPECT_EQ(style.stateId(true), 0);  // highlighted has no effect
+
+    style.horizontal = false;
+    EXPECT_EQ(style.partId(), PP_BARVERT);
+    EXPECT_EQ(style.stateId(false), 0);
+}
+
+TEST(ThemedProgressBarFillStyle, PaintWithNoAttachedViewDoesNotCrash) {
+    newui::ThemedProgressBarFillStyle style;
+
+    newui::Rect clientBounds;
+    style.paint(SharedContext(), newui::Size(80, 16), false, clientBounds);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 80.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 16.0f);
+}
+
+TEST(ThemedProgressBarFillStyle, PartIdAndStateIdReflectOrientationAndState) {
+    TestableThemedProgressBarFillStyle style;
+
+    EXPECT_EQ(style.partId(), PP_FILL);
+    EXPECT_EQ(style.stateId(false), PBFS_NORMAL);
+    EXPECT_EQ(style.stateId(true), PBFS_NORMAL);  // highlighted has no effect
+
+    style.state = newui::ThemedProgressBarFillStyle::FillState::Error;
+    EXPECT_EQ(style.stateId(false), PBFS_ERROR);
+
+    style.state = newui::ThemedProgressBarFillStyle::FillState::Paused;
+    EXPECT_EQ(style.stateId(false), PBFS_PAUSED);
+
+    style.horizontal = false;
+    EXPECT_EQ(style.partId(), PP_FILLVERT);
+    EXPECT_EQ(style.stateId(false), PBFVS_PAUSED);
 }
 
 TEST(ThemedScrollbarThumbStyle, PaintWithNoAttachedViewDoesNotCrash) {

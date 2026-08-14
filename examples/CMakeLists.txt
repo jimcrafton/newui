@@ -39,6 +39,12 @@ add_executable(layout1
 
 target_link_libraries(layout1 PRIVATE newui)
 
+add_executable(themes1
+    themes1.cpp
+)
+
+target_link_libraries(themes1 PRIVATE newui)
+
 add_executable(reflection1
     reflection1.cpp
 )
