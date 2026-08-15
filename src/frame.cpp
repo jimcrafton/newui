@@ -2,6 +2,7 @@
 #include "newui/application.h"
 #include "newui/json5_helpers.h"
 #include "newui/menus.h"
+#include "newui/uicolormanager.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_builder.hpp>
@@ -260,8 +261,16 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			// than relying on that case alone. See
 			// RootView::refreshThemes()'s doc comment for what this
 			// does and does not actually change visually.
-			if (nullptr != rootView_ && settingName == "ImmersiveColorSet") {
-				rootView_->refreshThemes();
+			if (settingName == "ImmersiveColorSet") {
+				// Un-stick native ContextMenu popups from whichever mode
+				// was cached at first use - see
+				// refreshNativeMenuDarkModePolicy()'s own doc comment
+				// (uicolormanager.h) for why refreshThemes() alone
+				// (app-drawn chrome only) doesn't reach them.
+				refreshNativeMenuDarkModePolicy();
+				if (nullptr != rootView_) {
+					rootView_->refreshThemes();
+				}
 			}
 
 			Application::instance().onSettingChange(Application::instance(),

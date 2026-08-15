@@ -103,13 +103,13 @@ newui::SubView* g_demoToolbarRow = nullptr;
 
 void ApplyThemeColors() {
     if (g_demoRootView != nullptr) {
-        newui::Color background = newui::UIColorManager::instance().colorFor(newui::UIColorRole::WindowBackground);
+        newui::Color background = newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground);
         g_demoRootView->style().backgroundFill = background.toBLRgba32();
         g_demoRootView->markDirty();
     }
 
     if (g_demoToolbarRow != nullptr) {
-        newui::Color background = newui::UIColorManager::instance().colorFor(newui::UIColorRole::ControlBackground);
+        newui::Color background = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground);
         g_demoToolbarRow->style().backgroundFill = background.toBLRgba32();
         g_demoToolbarRow->style().markDirty();
     }
@@ -303,7 +303,7 @@ void AddToolbarDemo(newui::RootView& root) {
     toolbarRow->setName("toolbarRow");
     toolbarRow->setVisible(true);
     toolbarRow->style().backgroundFill =
-        newui::UIColorManager::instance().colorFor(newui::UIColorRole::ControlBackground).toBLRgba32();
+        newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32();
     g_demoToolbarRow = toolbarRow;
     toolbarRow->setDesiredSize(newui::Size(0.0f, 32.0f));
     toolbarRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));

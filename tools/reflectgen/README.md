@@ -9,11 +9,28 @@ v1 status: standalone script, run manually. Not wired into the CMake
 build yet. Handles: public/private data members as properties,
 `newui::Delegate<SenderT, Args...>` members (typedef'd or not) as
 delegates, non-overloaded-or-disambiguated public methods, public
-non-copy/move constructors, and enums (namespace-scope or public nested -
-a private/protected nested enum's name isn't spellable from the free
-`register...Enum()` function reflectgen emits, so those are skipped).
-Static methods, templates, and operator overloads are explicitly out of
-scope for now.
+non-copy/move constructors, base classes (see below), and enums
+(namespace-scope or public nested - a private/protected nested enum's name
+isn't spellable from the free `register...Enum()` function reflectgen
+emits, so those are skipped). Static methods, templates, and operator
+overloads are explicitly out of scope for now.
+
+**Base classes:** a class with exactly one *public* base gets a
+`.base<BaseClass>()` call emitted (first in the chain, before any
+`.property()`/`.method()`/etc.) - the same call
+`ClassBuilder<T>::base<BaseT>()` in `reflection.h` expects, which links
+`Class::parentClass()` to `BaseClass`'s own already-registered `Class`. As
+with hand-written registration, **the base's own `register...Reflection()`
+function must be called before the derived class's** - reflectgen has no
+way to enforce or automate that ordering across (possibly separately
+generated) registration functions; get it wrong and `base<BaseT>()` throws
+`std::logic_error` at the call site, not silently. A class with only a
+private/protected base (or no base at all but some other real C++
+inheritance reflectgen can see) gets a plain `.derived(true)` instead -
+there's nothing for `base<BaseT>()` to usefully link to, but `isDerived()`
+still reflects the truth. Multiple public bases aren't representable
+(`Class::parentClass()` is a single pointer) - only the first is reflected,
+with a warning on stderr naming the ones that were dropped.
 
 ## Setup
 

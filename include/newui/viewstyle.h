@@ -1354,8 +1354,19 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
+        // Hot/pressed highlight geometry - see paint()'s own comment
+        // (viewstyle.cpp) for why this is hand-drawn instead of relying
+        // on DrawThemeBackground's plain square MBI_HOT/MBI_PUSHED fill.
+        float highlightInset = 2.0f;
+        float highlightCornerRadius = 4.0f;
+
         void writeFields(json5::builder& w) const override;
         void readFields(const json5::value& obj) override;
+
+        // Overrides the base ThemedViewStyle::paint() entirely (no native
+        // DrawThemeBackground call at all for this style) - see its own
+        // doc comment in viewstyle.cpp.
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
     protected:
         int partId() const override { return MENU_BARITEM; }

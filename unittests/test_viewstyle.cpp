@@ -1515,6 +1515,66 @@ TEST(ThemedMenuBarItemStyle, PaintWithNoAttachedViewDoesNotCrash) {
     EXPECT_FLOAT_EQ(clientBounds.size().height, 32.0f);
 }
 
+// paint() hand-draws the hot/pressed highlight itself (see its own doc
+// comment in viewstyle.cpp) rather than calling DrawThemeBackground, so -
+// unlike every other ThemedViewStyle subclass - this is fully verifiable
+// headlessly, no live HWND/HTHEME needed at all: paints into its own image
+// (same "read pixels back afterward" pattern LabelStyle's
+// TextIsCenteredWithinClientBounds test already uses) and checks the
+// corner is untouched (inset + rounded corner clip away MENU_BARITEM's own
+// square edge) while the center is filled.
+TEST(ThemedMenuBarItemStyle, PaintDrawsInsetRoundedHighlightWhenHot) {
+    const int size = 40;
+    BLImage image(size, size, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    // BLImage's own buffer starts uninitialized, not transparent - clear
+    // it explicitly first (same pattern themes1.cpp's WriteDotCursorPNG()
+    // already uses) so an untouched pixel reads as alpha 0, not leftover
+    // garbage.
+    ctx.set_comp_op(BL_COMP_OP_SRC_COPY);
+    ctx.fill_all(BLRgba32(0, 0, 0, 0));
+    ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+
+    newui::ThemedMenuBarItemStyle style;
+    newui::Rect clientBounds;
+    style.paint(ctx, newui::Size(float(size), float(size)), /*highlighted=*/true, clientBounds);
+    ctx.end();
+
+    BLImageData data;
+    image.get_data(&data);
+    const uint8_t* base = static_cast<const uint8_t*>(data.pixel_data);
+    auto alphaAt = [&](int x, int y) {
+        const uint32_t* row = reinterpret_cast<const uint32_t*>(base + y * data.stride);
+        return uint8_t(row[x] >> 24);
+    };
+
+    EXPECT_EQ(alphaAt(0, 0), 0) << "top-left corner should be clipped away by the inset + rounded corner";
+    EXPECT_GT(alphaAt(size / 2, size / 2), 0) << "center should be filled by the hot highlight";
+}
+
+// MBI_NORMAL (not highlighted, not pressed) draws nothing at all - same
+// native look DrawThemeBackground's own MBI_NORMAL already had (see
+// invertLightnessInPlace()'s doc comment in viewstyle.cpp).
+TEST(ThemedMenuBarItemStyle, PaintDrawsNothingWhenNotHighlighted) {
+    const int size = 40;
+    BLImage image(size, size, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.set_comp_op(BL_COMP_OP_SRC_COPY);
+    ctx.fill_all(BLRgba32(0, 0, 0, 0));
+    ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+
+    newui::ThemedMenuBarItemStyle style;
+    newui::Rect clientBounds;
+    style.paint(ctx, newui::Size(float(size), float(size)), /*highlighted=*/false, clientBounds);
+    ctx.end();
+
+    BLImageData data;
+    image.get_data(&data);
+    const uint8_t* base = static_cast<const uint8_t*>(data.pixel_data);
+    const uint32_t* centerRow = reinterpret_cast<const uint32_t*>(base + (size / 2) * data.stride);
+    EXPECT_EQ(uint8_t(centerRow[size / 2] >> 24), 0);
+}
+
 TEST(ThemedMenuBarItemStyle, StateIdPrecedenceIsDisabledThenPressedThenHotThenNormal) {
     TestableThemedMenuBarItemStyle style;
 

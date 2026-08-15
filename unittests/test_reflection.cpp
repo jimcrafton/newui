@@ -157,6 +157,75 @@ TEST(Reflection, MapPropertyKeyAndPositionalAccess) {
     EXPECT_EQ((scoresProp->getAs<std::map<std::string, int>>(&g)).at("bob"), 85);
 }
 
+// ---------------------------------------------------------------------
+// ClassBuilder<T>::base<BaseT>() / Class::parentClass() - see
+// reflection.h's own doc comments on both for the full contract
+// (registration-order requirement, throw-on-unregistered-base, non-
+// ownership of the stored pointer).
+// ---------------------------------------------------------------------
+
+namespace {
+
+class ReflectedBase {
+public:
+    int baseValue = 1;
+};
+
+class ReflectedDerived : public ReflectedBase {
+public:
+    int derivedValue = 2;
+};
+
+const Class* RegisterAndGetReflectedBaseClass() {
+    static const Class* registered = [] {
+        ClassBuilder<ReflectedBase> builder;
+        builder.clazz().property("baseValue", Scope::Public, &ReflectedBase::baseValue);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ReflectedBase));
+    }();
+    return registered;
+}
+
+const Class* RegisterAndGetReflectedDerivedClass() {
+    RegisterAndGetReflectedBaseClass();  // base<ReflectedBase>() below needs this registered first
+    static const Class* registered = [] {
+        ClassBuilder<ReflectedDerived> builder;
+        builder.clazz()
+            .base<ReflectedBase>()
+            .property("derivedValue", Scope::Public, &ReflectedDerived::derivedValue);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ReflectedDerived));
+    }();
+    return registered;
+}
+
+}  // namespace
+
+TEST(Reflection, BaseLinksDerivedClassToParentClass) {
+    const Class* baseClass = RegisterAndGetReflectedBaseClass();
+    const Class* derivedClass = RegisterAndGetReflectedDerivedClass();
+
+    EXPECT_TRUE(derivedClass->isDerived());
+    ASSERT_NE(derivedClass->parentClass(), nullptr);
+    EXPECT_EQ(derivedClass->parentClass(), baseClass);
+    EXPECT_EQ(derivedClass->parentClass()->name(), "ReflectedBase");
+}
+
+TEST(Reflection, ClassWithNoBaseCallHasNullParentClass) {
+    const Class* gadgetClass = RegisterAndGetGadgetClass();
+
+    EXPECT_FALSE(gadgetClass->isDerived());
+    EXPECT_EQ(gadgetClass->parentClass(), nullptr);
+}
+
+TEST(Reflection, BaseThrowsIfBaseClassNotYetRegistered) {
+    struct UnregisteredBase {};
+    struct UnregisteredDerived : UnregisteredBase {};
+
+    ClassBuilder<UnregisteredDerived> builder;
+    EXPECT_THROW(builder.clazz().base<UnregisteredBase>(), std::logic_error);
+}
+
 TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
     PropertyFlags flags = PropertyFlags::Collection | PropertyFlags::Associative;
     EXPECT_TRUE((flags & PropertyFlags::Collection) != PropertyFlags::None);

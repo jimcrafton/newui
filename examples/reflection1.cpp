@@ -113,6 +113,26 @@ void registerWidgetReflection() {
     ReflectionRegistry::registerClass(builder);
 }
 
+// A small derived-class demo for ClassBuilder<T>::base<BaseT>() - adds one
+// field of its own on top of everything Widget already has. Widget must
+// already be registered before this runs (base<Widget>() looks it up in
+// ReflectionRegistry immediately) - registerWidgetReflection() is called by
+// demoRegisterAndLookup() below, before demoInheritance().
+class SuperWidget : public Widget {
+public:
+    int priority = 0;
+};
+
+void registerSuperWidgetReflection() {
+    ClassBuilder<SuperWidget> builder;
+
+    builder.clazz()
+        .base<Widget>()
+        .property("priority", Scope::Public, &SuperWidget::priority);
+
+    ReflectionRegistry::registerClass(builder);
+}
+
 // ---------------------------------------------------------------------
 // Demos - everything below only talks to Widget through the reflection API
 // (Class/Property/Method), never Widget's own members/methods directly,
@@ -290,6 +310,36 @@ void demoCollectionProperties() {
                << std::any_cast<float>(ratingsCollection->get(confirmBoxed, std::any(std::string("value")))) << "\n";
 }
 
+void demoInheritance() {
+    std::cout << "\n== Demo 7: base<BaseT>() links a derived class to its parent's Class ==\n";
+
+    registerSuperWidgetReflection();
+
+    const Class* widgetClass = classinfo(typeid(Widget));
+    const Class* superWidgetClass = classinfo(typeid(SuperWidget));
+
+    std::cout << "  SuperWidget isDerived(): " << std::boolalpha << superWidgetClass->isDerived() << "\n";
+    std::cout << "  SuperWidget parentClass() is Widget's own Class: "
+               << std::boolalpha << (superWidgetClass->parentClass() == widgetClass) << "\n";
+    std::cout << "  parentClass()->name(): " << superWidgetClass->parentClass()->name() << "\n";
+    std::cout << "  Widget itself has no parentClass() (never linked to one): "
+               << std::boolalpha << (widgetClass->parentClass() == nullptr) << "\n";
+
+    // base<BaseT>() throws if BaseT hasn't been registered yet - demonstrated
+    // here against a plain local struct that's never gone through
+    // ClassBuilder/registerClass() at all, rather than risking disturbing
+    // real registration order above.
+    struct NeverRegistered {};
+    struct AlsoNeverRegistered : NeverRegistered {};
+    try {
+        ClassBuilder<AlsoNeverRegistered> unregisteredBuilder;
+        unregisteredBuilder.clazz().base<NeverRegistered>();
+        std::cout << "  (unexpected: base<BaseT>() didn't throw for an unregistered base)\n";
+    } catch (const std::logic_error& e) {
+        std::cout << "  base<BaseT>() on an unregistered base threw as expected: " << e.what() << "\n";
+    }
+}
+
 int main() {
     std::cout << "newui " << newui::version() << " - reflection examples\n";
 
@@ -299,6 +349,7 @@ int main() {
     demoInvokeMethods();
     demoCreateInstance();
     demoCollectionProperties();
+    demoInheritance();
 
     return 0;
 }

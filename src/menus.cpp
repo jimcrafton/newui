@@ -115,7 +115,7 @@ public:
         // this paint() override) already follows it through
         // ThemedViewStyle::paint()'s dark-mode fake, so the label needs
         // its own theme-aware color to match instead of staying fixed.
-        newui::Color textColor = newui::UIColorManager::instance().colorFor(newui::UIColorRole::ControlText);
+        newui::Color textColor = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText);
         ctx.set_fill_style(textColor.toBLRgba32());
         ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text.c_str());
     }

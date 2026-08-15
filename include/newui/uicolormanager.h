@@ -38,6 +38,13 @@ namespace newui {
     // registration/uniqueness constraint to guard, unlike Application.
     class UIColorManager {
     public:
+        // Meyer's singleton (see the class comment above) with no real
+        // per-instance state of its own - isDarkMode()/colorFor() below
+        // are static for that reason, so a caller can reach either
+        // directly (UIColorManager::isDarkMode()) without going through
+        // instance() first; instance() itself is kept only for source
+        // compatibility with existing UIColorManager::instance().foo()
+        // call sites.
         static UIColorManager& instance();
 
         UIColorManager(const UIColorManager&) = delete;
@@ -54,7 +61,7 @@ namespace newui {
         // browser/Electron app reads this same key. 0 = dark; missing
         // key/value, or 1, = light - matches Microsoft's own default for
         // a system that's never had the setting touched.
-        bool isDarkMode() const;
+        static bool isDarkMode();
 
         // HighlightBackground/HighlightText follow the user's actual
         // Windows accent color (DwmGetColorizationColor(), a real,
@@ -63,7 +70,7 @@ namespace newui {
         // better contrast against it (see Color::luminosity()). Falls
         // back to a fixed Windows-blue accent if DWM isn't available.
         // Every other role is a fixed hand-picked light/dark pair.
-        Color colorFor(UIColorRole role) const;
+        static Color colorFor(UIColorRole role);
 
     private:
         UIColorManager() = default;
@@ -106,7 +113,30 @@ namespace newui {
     // in <uxtheme.h>). enableProcessDarkModeSupport() must already have
     // run once in this process for this to have any visible effect. Call
     // on a popup menu's owner window before TrackPopupMenuEx() - see
-    // ContextMenu::show() (menus.cpp).
+    // ContextMenu::show() (menus.cpp). Idempotent and cheap to call on
+    // every show() - actual work only happens the first time a given
+    // HWND is seen (SetWindowTheme() sends that window a real
+    // WM_THEMECHANGED every time it runs, so redoing it on every call
+    // would re-trigger Frame's own WM_THEMECHANGED handling, including
+    // Application::onThemeChanged(), on every single call - see its own
+    // doc comment in uicolormanager.cpp for the full story).
     void enableDarkModeForWindow(HWND hwnd);
+
+    // Un-sticks native TrackPopupMenuEx() popups (ContextMenu, menus.h)
+    // from whichever Light/Dark mode was active the first time this
+    // process ever showed one. uxtheme.dll caches its own "is the system
+    // in dark mode" policy flag plus a set of pre-built menu theme
+    // handles internally, separate from (and not invalidated by) either
+    // AllowDarkModeForWindow/SetWindowTheme above or this toolkit's own
+    // RootView::refreshThemes() - so without this, every app-drawn/
+    // uxtheme-part control updates live on a theme toggle but a native
+    // popup menu keeps rendering stale until the process restarts.
+    // RefreshImmersiveColorPolicyState (ordinal 104) refreshes that
+    // cached policy flag; FlushMenuThemes (ordinal 136) forces cached
+    // menu theme handles to be rebuilt from it. Call on
+    // WM_SETTINGCHANGE("ImmersiveColorSet") - see Frame::handleMessage().
+    // Same "degrade silently if resolving fails" convention as the two
+    // functions above.
+    void refreshNativeMenuDarkModePolicy();
 
 }

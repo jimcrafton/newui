@@ -37,7 +37,6 @@ namespace newui {
         bool isInactive() const { return (state_ & Inactive) == Inactive; }
         bool isSelected() const { return (state_ & Selected) == Selected; }
 
-
         void setEnabled(bool v) {
             setDisabled(!v);
         }

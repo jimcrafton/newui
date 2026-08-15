@@ -448,7 +448,7 @@ namespace newui {
 			                          // stride below - not the buffer's actual
 			                          // width/height, which are just rect's.
 			if (SUCCEEDED(::GetBufferedPaintBits(paintBuffer, &bits, &rowWidthPixels)) && bits != nullptr) {
-				if (newui::UIColorManager::instance().isDarkMode()) {
+				if (newui::UIColorManager::isDarkMode()) {
 					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted);
 				}
 
@@ -812,12 +812,64 @@ namespace newui {
 		ViewStyle::writeFields(w);
 		w["pressed"] = pressed;
 		w["enabled"] = enabled;
+		w["highlightInset"] = highlightInset;
+		w["highlightCornerRadius"] = highlightCornerRadius;
 	}
 
 	void ThemedMenuBarItemStyle::readFields(const json5::value& obj) {
 		ViewStyle::readFields(obj);
 		pressed = obj["pressed"].get_bool(pressed);
 		enabled = obj["enabled"].get_bool(enabled);
+		highlightInset = obj["highlightInset"].get<float>(highlightInset);
+		highlightCornerRadius = obj["highlightCornerRadius"].get<float>(highlightCornerRadius);
+	}
+
+	// Hand-drawn rounded highlight for MBI_HOT/MBI_PUSHED, replacing
+	// DrawThemeBackground entirely for this style (unlike every other
+	// ThemedViewStyle subclass in this file, which all rely on the base
+	// class's native rendering) - the classic uxtheme skin's MENU_BARITEM
+	// part has no rounded-corner variant at all, just a plain square fill,
+	// so there's no theme part to ask for the look a modern Fluent-style
+	// menu-bar hover highlight has (a rounded "pill" inset a couple pixels
+	// from the item's own edge) - reported live: "the highlight should be
+	// drawn with a rectangle with rounded edges, inset by 1 or 2 pixels".
+	// MBI_NORMAL/MBI_DISABLED both draw nothing (see
+	// invertLightnessInPlace()'s own doc comment above for why that's the
+	// correct native look too), so paint() only ever needs to draw
+	// anything for the pressed/highlighted case - no live HWND, no HTHEME,
+	// no dark-mode invert-lightness approximation needed at all: unlike
+	// DrawThemeBackground's flat classic-skin fill, UIColorManager's own
+	// accent color (colorFor(UIColorRole::HighlightBackground)) already
+	// tracks the user's real Windows accent color and Light/Dark mode
+	// directly. theme_ (ThemedViewStyle's own cached HTHEME) is therefore
+	// never opened by this style at all - computeClientBounds() always
+	// falls back to the full rect (see its own "no theme cached yet"
+	// comment), which is exactly right here: MENU_BARITEM has no border
+	// content-rect deflation of its own for a client to need anyway.
+	void ThemedMenuBarItemStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f || !enabled || (!pressed && !highlighted)) {
+			return;
+		}
+
+		Rect r = Rect(0.0f, 0.0f, size.width, size.height).deflated(highlightInset);
+		if (r.size().width <= 0.0f || r.size().height <= 0.0f) {
+			return;
+		}
+
+		Color accent = UIColorManager::colorFor(UIColorRole::HighlightBackground);
+
+		ctx.save();
+		ctx.set_comp_op(compositingOp);
+		ctx.set_fill_style(accent.toBLRgba32());
+		// Pressed reads as a stronger fill than a plain hover - same
+		// "pressed is more emphatic than hot" precedence stateId() already
+		// encodes for the native part this replaces.
+		ctx.set_fill_alpha(opacity * (pressed ? 0.55f : 0.30f));
+		ctx.fill_round_rect(double(r.left()), double(r.top()),
+			double(r.size().width), double(r.size().height), double(highlightCornerRadius));
+		ctx.restore();
 	}
 
 	void ThemedRebarChevronStyle::writeFields(json5::builder& w) const {

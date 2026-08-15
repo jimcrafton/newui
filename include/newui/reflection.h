@@ -16,6 +16,7 @@
 
 #include <newui/delegate.h>
 #include <newui/uicomponent.h>
+#include <newui/utils.h>
 
 namespace newui::reflection {
 
@@ -729,6 +730,14 @@ namespace newui::reflection {
         bool isStruct() const { return isStruct_; }
         bool isSingleton() const { return isSingleton_; }
 
+        // The reflected base class this class was registered against (see
+        // ClassBuilder<T>::base<BaseT>()), or nullptr if none was given -
+        // either because T has no base at all, or because it does but that
+        // base was never itself run through ClassBuilder/registerClass()
+        // (isDerived() can still be true in that case; parentClass() just
+        // has nothing to point at).
+        const Class* parentClass() const { return parentClass_; }
+
         std::type_index type() const { return type_; }
         const std::string& name() const { return name_; }
         const std::string& namespaceName() const { return namespaceName_; }
@@ -765,6 +774,17 @@ namespace newui::reflection {
     private:
         template<typename T> friend class ClassBuilder;
 
+        // Raw, non-owning pointer into the registry's own copy of the base
+        // class's Class (set by ClassBuilder<T>::base<BaseT>(), never by
+        // this class itself) - ~Class() must never delete this, unlike
+        // properties_/fields_/methods_/delegates_/constructors_ below.
+        // Stays valid as long as the base's Class isn't later replaced in
+        // ReflectionRegistry (see ReflectionRegistry::registerClass()'s
+        // replace-on-re-register behavior) - fine for the intended "register
+        // every base before its derived classes, once, at startup" usage;
+        // re-registering an already-linked-to base after the fact would
+        // leave this dangling.
+        const Class* parentClass_ = nullptr;
         std::type_index type_;
         std::string name_;
         std::string namespaceName_;
@@ -862,6 +882,41 @@ namespace newui::reflection {
         ClassBuilder& abstract(bool value = true) { class_->isAbstract_ = value; return *this; }
         ClassBuilder& isStruct(bool value = true) { class_->isStruct_ = value; return *this; }
         ClassBuilder& singleton(bool value = true) { class_->isSingleton_ = value; return *this; }
+
+        // Links this class to its base class BaseT's already-registered
+        // Class (Class::parentClass()) and marks this class derived() -
+        // BaseT must have gone through its own ClassBuilder<BaseT> +
+        // ReflectionRegistry::registerClass() call *before* this one runs,
+        // same "register base classes before their derived classes"
+        // ordering every hand-written (and, eventually, reflectgen-
+        // generated - the intended future shape here is a plain
+        // `.base<BaseClass>()` call alongside `.constructor<Args...>()`)
+        // registration function is responsible for getting right itself;
+        // nothing in ReflectionRegistry enforces or defers this. Throws
+        // std::logic_error rather than silently leaving parentClass_ null
+        // if BaseT isn't registered yet - same "fail loud, not silently
+        // wrong" convention as Method::invoke()/Property::getAs<T>().
+        //
+        // For a class derived from a base that isn't (and never will be)
+        // itself reflected, call derived(true) alone instead - there's
+        // nothing for base<BaseT>() to usefully link to in that case.
+        template<typename BaseT>
+        ClassBuilder& base() {
+            static_assert(std::is_base_of_v<BaseT, T>,
+                "ClassBuilder<T>::base<BaseT>(): BaseT must actually be a base class of T");
+
+            const Class* baseClass = ReflectionRegistry::getClass(std::type_index(typeid(BaseT)));
+            if (!baseClass) {
+                throw std::logic_error(
+                    "ClassBuilder<" + demangleTypeName(typeid(T)) + ">::base<" + demangleTypeName(typeid(BaseT)) +
+                    ">(): base class is not yet registered in ReflectionRegistry - register base classes "
+                    "before their derived classes.");
+            }
+
+            class_->parentClass_ = baseClass;
+            class_->isDerived_ = true;
+            return *this;
+        }
 
         ClassBuilder& property(std::string name, std::type_index type, Scope scope,
                                    Property::AddressFn address, Property::GetFn get, Property::SetFn set) {

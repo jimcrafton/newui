@@ -12,6 +12,8 @@ namespace {
 	enum class PreferredAppMode { Default, AllowDark, ForceDark, ForceLight, Max };
 	using SetPreferredAppModeFn = PreferredAppMode(WINAPI*)(PreferredAppMode);
 	using AllowDarkModeForWindowFn = BOOL(WINAPI*)(HWND, BOOL);
+	using RefreshImmersiveColorPolicyStateFn = void(WINAPI*)();
+	using FlushMenuThemesFn = void(WINAPI*)();
 
 	// Resolved once, lazily - loaded (never freed; this DLL is already
 	// permanently mapped into every themed process via comctl32/uxtheme's
@@ -24,6 +26,56 @@ namespace {
 		static HMODULE mod = ::LoadLibraryW(L"uxtheme.dll");
 		return mod;
 	}
+
+	// One GetProcAddress() per ordinal for the whole process, not one per
+	// call - each of these four functions used to re-resolve its own
+	// ordinal from scratch on every single call (GetProcAddress() against
+	// an already-loaded module is cheap, but still real work: a name/
+	// ordinal table walk inside uxtheme.dll every time). Worst offender
+	// was AllowDarkModeForWindowFn, previously re-resolved on every
+	// single ContextMenu::show() - i.e. every top-level menu-bar click.
+	// Same "resolve lazily, once, via a function-local static" idiom
+	// uxthemeModule() itself already uses just above - each of these
+	// piggybacks on it rather than loading the module a second time.
+	SetPreferredAppModeFn setPreferredAppModeFn() {
+		static SetPreferredAppModeFn fn = (uxthemeModule() != nullptr)
+			? reinterpret_cast<SetPreferredAppModeFn>(::GetProcAddress(uxthemeModule(), MAKEINTRESOURCEA(135)))
+			: nullptr;
+		return fn;
+	}
+
+	AllowDarkModeForWindowFn allowDarkModeForWindowFn() {
+		static AllowDarkModeForWindowFn fn = (uxthemeModule() != nullptr)
+			? reinterpret_cast<AllowDarkModeForWindowFn>(::GetProcAddress(uxthemeModule(), MAKEINTRESOURCEA(133)))
+			: nullptr;
+		return fn;
+	}
+
+	RefreshImmersiveColorPolicyStateFn refreshImmersiveColorPolicyStateFn() {
+		static RefreshImmersiveColorPolicyStateFn fn = (uxthemeModule() != nullptr)
+			? reinterpret_cast<RefreshImmersiveColorPolicyStateFn>(::GetProcAddress(uxthemeModule(), MAKEINTRESOURCEA(104)))
+			: nullptr;
+		return fn;
+	}
+
+	FlushMenuThemesFn flushMenuThemesFn() {
+		static FlushMenuThemesFn fn = (uxthemeModule() != nullptr)
+			? reinterpret_cast<FlushMenuThemesFn>(::GetProcAddress(uxthemeModule(), MAKEINTRESOURCEA(136)))
+			: nullptr;
+		return fn;
+	}
+
+	// Marks an HWND as already opted into dark chrome - see
+	// enableDarkModeForWindow()'s own comment for why this needs to
+	// happen at most once per real window rather than on every call. A
+	// window property rather than e.g. a static std::unordered_set<HWND>:
+	// Windows discards a window's whole property list for free when it's
+	// destroyed, so the marker's lifetime is automatically tied to the
+	// real HWND's own - a std::unordered_set would instead need its own
+	// explicit cleanup on WM_DESTROY (nothing currently hooks that here)
+	// to avoid stale entries wrongly "skipping" a later, genuinely
+	// different window that happens to reuse the same HWND value.
+	constexpr wchar_t kDarkModeEnabledPropName[] = L"newui.DarkModeEnabledForWindow";
 
 	// Queries propId from themeClassName's partId/stateId via a
 	// throwaway HTHEME (OpenThemeData(NULL, ...) works fine without a
@@ -105,7 +157,7 @@ namespace newui {
 		return instance;
 	}
 
-	bool UIColorManager::isDarkMode() const {
+	bool UIColorManager::isDarkMode() {
 		DWORD value = 1;
 		DWORD size = sizeof(value);
 		LONG status = ::RegGetValueW(
@@ -119,7 +171,7 @@ namespace newui {
 		return status == ERROR_SUCCESS && value == 0;
 	}
 
-	Color UIColorManager::colorFor(UIColorRole role) const {
+	Color UIColorManager::colorFor(UIColorRole role) {
 		if (role == UIColorRole::HighlightBackground || role == UIColorRole::HighlightText) {
 			DWORD colorizationColor = 0;
 			BOOL opaqueBlend = FALSE;
@@ -188,15 +240,8 @@ namespace newui {
 	}
 
 	void enableProcessDarkModeSupport() {
-		HMODULE mod = uxthemeModule();
-		if (mod == nullptr) {
-			return;
-		}
-
-		auto setPreferredAppMode = reinterpret_cast<SetPreferredAppModeFn>(
-			::GetProcAddress(mod, MAKEINTRESOURCEA(135)));
-		if (setPreferredAppMode != nullptr) {
-			setPreferredAppMode(PreferredAppMode::AllowDark);
+		if (setPreferredAppModeFn() != nullptr) {
+			setPreferredAppModeFn()(PreferredAppMode::AllowDark);
 		}
 	}
 
@@ -205,16 +250,38 @@ namespace newui {
 			return;
 		}
 
-		HMODULE mod = uxthemeModule();
-		if (mod != nullptr) {
-			auto allowDarkModeForWindow = reinterpret_cast<AllowDarkModeForWindowFn>(
-				::GetProcAddress(mod, MAKEINTRESOURCEA(133)));
-			if (allowDarkModeForWindow != nullptr) {
-				allowDarkModeForWindow(hwnd, TRUE);
-			}
+		// Idempotent per HWND, not per call - see kDarkModeEnabledPropName's
+		// own comment for why a window property. SetWindowTheme() below is
+		// documented to send WM_THEMECHANGED to hwnd every time it runs,
+		// which Frame::handleMessage() answers by refreshing every themed
+		// style *and* firing Application::onThemeChanged() - fine once, but
+		// ContextMenu::show() (menus.cpp) calls this on every single
+		// top-level menu-bar click, so onThemeChanged used to fire on every
+		// click too (reported live). Once opted in, Windows keeps a window
+		// following the live system Light/Dark setting on its own from then
+		// on (see refreshNativeMenuDarkModePolicy() for the process-wide
+		// half of that) - a second AllowDarkModeForWindow/SetWindowTheme
+		// call against the same HWND has nothing further to change.
+		if (::GetPropW(hwnd, kDarkModeEnabledPropName) != nullptr) {
+			return;
+		}
+
+		if (allowDarkModeForWindowFn() != nullptr) {
+			allowDarkModeForWindowFn()(hwnd, TRUE);
 		}
 
 		::SetWindowTheme(hwnd, L"DarkMode_Explorer", nullptr);
+		::SetPropW(hwnd, kDarkModeEnabledPropName, reinterpret_cast<HANDLE>(1));
+	}
+
+	void refreshNativeMenuDarkModePolicy() {
+		if (refreshImmersiveColorPolicyStateFn() != nullptr) {
+			refreshImmersiveColorPolicyStateFn()();
+		}
+
+		if (flushMenuThemesFn() != nullptr) {
+			flushMenuThemesFn()();
+		}
 	}
 
 }

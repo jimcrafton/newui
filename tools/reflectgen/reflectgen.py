@@ -214,6 +214,12 @@ class Ctor:
         self.arg_types = arg_types
 
 
+class BaseInfo:
+    def __init__(self, name, access):
+        self.name = name  # fully qualified, e.g. "newui::Widget"
+        self.access = access  # AccessSpecifier - PUBLIC/PROTECTED/PRIVATE inheritance
+
+
 class ClassInfo:
     def __init__(self, name, has_friend):
         self.name = name
@@ -222,6 +228,7 @@ class ClassInfo:
         self.delegates = []
         self.methods = []
         self.ctors = []
+        self.bases = []
 
 
 class EnumValue:
@@ -306,7 +313,40 @@ def collect_class(cursor):
             arg_types = [a.type.spelling for a in child.get_arguments()]
             info.ctors.append(Ctor(arg_types))
 
+        elif kind == CursorKind.CXX_BASE_SPECIFIER:
+            # child.type is the base *as named in the specifier* (e.g. could
+            # itself be a typedef) - get_declaration() resolves through to
+            # the real class/struct cursor, same reasoning
+            # is_delegate_field_type() already applies via get_canonical()
+            # for a delegate field's type.
+            base_decl = child.type.get_declaration()
+            info.bases.append(BaseInfo(qualified_name(base_decl), access))
+
     return info
+
+
+def choose_base(info):
+    # Class::parentClass() is a single pointer (see reflection.h) - only one
+    # base can ever be reflected, so multiple inheritance is only partially
+    # supported: the first *public* base found is used, everything else is
+    # silently un-representable beyond a stderr warning. A private/protected-
+    # only base can't usefully be linked at all (ClassBuilder<T>::base<BaseT>()
+    # would compile - std::is_base_of_v doesn't care about accessibility -
+    # but reflecting a relationship the class itself hides from the outside
+    # would be misleading), so those are reported via plain .derived(true)
+    # instead, by the caller (emit_register_function) checking info.bases
+    # directly when this returns None.
+    public_bases = [b for b in info.bases if b.access == AccessSpecifier.PUBLIC]
+    if not public_bases:
+        return None
+    if len(public_bases) > 1:
+        names = ", ".join(b.name for b in public_bases)
+        sys.stderr.write(
+            f"reflectgen: '{info.name}' has {len(public_bases)} public base classes ({names}) - "
+            f"only the first ('{public_bases[0].name}') is reflected via base<BaseT>(); multiple "
+            "inheritance isn't representable through Class::parentClass() (a single pointer).\n"
+        )
+    return public_bases[0].name
 
 
 def collect_enum(cursor):
@@ -391,6 +431,22 @@ def emit_register_function(info):
     lines.append("    builder.clazz()")
 
     chain = []
+
+    # First in the chain, same position examples/reflection1.cpp's own
+    # hand-written registerSuperWidgetReflection() uses - base<BaseT>()
+    # requires BaseT to already be registered in ReflectionRegistry (see
+    # its doc comment in reflection.h), which this generated function
+    # itself doesn't (can't, in general) enforce; that's the caller's
+    # responsibility, same as for hand-written registration.
+    base_name = choose_base(info)
+    if base_name:
+        chain.append(f".base<{base_name}>()")
+    elif info.bases:
+        # Has a real C++ base, but not a (single) public one base<BaseT>()
+        # could link to - still record isDerived() for introspection, same
+        # as a hand-written registration function would via derived(true).
+        chain.append(".derived(true)")
+
     for f in info.fields:
         if f.is_static:
             chain.append(f'.field("{f.name}", &{info.name}::{f.name})')
