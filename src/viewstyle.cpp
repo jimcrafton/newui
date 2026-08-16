@@ -14,6 +14,8 @@
 #include <json5/json5.hpp>
 #include <json5/json5_builder.hpp>
 
+#include <array>
+
 namespace {
 
 	// Approximates a dark-mode look for a theme part uxtheme has no real
@@ -62,7 +64,40 @@ namespace {
 	// perceptible instead - reserved for the highlighted case specifically
 	// (rather than lowering kGammaNormal for everything) so static chrome
 	// elsewhere doesn't get the same aggressive, washed-out treatment.
+	constexpr float kGammaNormal = 0.6f;
+	constexpr float kGammaHighlighted = 0.2f;
+
+	// pow(x/255, gamma) precomputed for every possible byte input - avoids
+	// a std::pow() call (profiled hotspot: invertLightnessInPlace() runs
+	// this per pixel of every themed control's paint() call in dark mode,
+	// and a themed control can repaint at 30-60fps - see Progress's "Live"
+	// demo row) for each of the (at most, in practice exactly two -
+	// kGammaNormal/kGammaHighlighted) gamma values actually used. Safe to
+	// quantize to byte precision: the input is itself derived from 8-bit
+	// RGB channels via toHSL(), so it never had more than byte-level
+	// precision to begin with - a lookup can't lose anything std::pow()
+	// was actually preserving.
+	const std::array<float, 256>& gammaLUT(bool highlighted) {
+		static const std::array<float, 256> normalTable = [] {
+			std::array<float, 256> t{};
+			for (int i = 0; i < 256; ++i) {
+				t[i] = std::pow(float(i) / 255.0f, kGammaNormal);
+			}
+			return t;
+		}();
+		static const std::array<float, 256> highlightedTable = [] {
+			std::array<float, 256> t{};
+			for (int i = 0; i < 256; ++i) {
+				t[i] = std::pow(float(i) / 255.0f, kGammaHighlighted);
+			}
+			return t;
+		}();
+		return highlighted ? highlightedTable : normalTable;
+	}
+
 	void invertLightnessInPlace(RGBQUAD* bits, int width, int height, int strideInPixels, bool highlighted) {
+		const std::array<float, 256>& lut = gammaLUT(highlighted);
+
 		for (int y = 0; y < height; ++y) {
 			RGBQUAD* row = bits + intptr_t(y) * strideInPixels;
 			for (int x = 0; x < width; ++x) {
@@ -95,10 +130,11 @@ namespace {
 				// ends fixed (0^kGamma=0, 1^kGamma=1) - a true white
 				// background still inverts to true black, but anything
 				// that inverts to only-slightly-off-black gets pulled
-				// noticeably lighter instead.
-				constexpr float kGammaNormal = 0.6f;
-				constexpr float kGammaHighlighted = 0.2f;
-				hsl.l = std::pow(1.0f - hsl.l, highlighted ? kGammaHighlighted : kGammaNormal);
+				// noticeably lighter instead. Table lookup instead of a
+				// direct std::pow() call - see gammaLUT()'s own comment.
+				int gammaIndex = int(std::lround((1.0f - hsl.l) * 255.0f));
+				gammaIndex = gammaIndex < 0 ? 0 : (gammaIndex > 255 ? 255 : gammaIndex);
+				hsl.l = lut[gammaIndex];
 
 				// toBGRA32() writes exactly RGBQUAD's own B,G,R,A byte
 				// order (see its doc comment in color.h), clamping/
@@ -237,7 +273,7 @@ namespace newui {
 		// gracefully instead of crashing, same "do nothing without a live
 		// window" convention ThemedViewStyle::paint() already uses.
 		if (nullptr != view_ && nullptr != view_->rootView()) {
-			view_->rootView()->markDirty();
+			view_->redraw();
 		}
 	}
 
@@ -371,6 +407,25 @@ namespace newui {
 
 		return Rect(float(contentRect.left), float(contentRect.top),
 			float(contentRect.right - contentRect.left), float(contentRect.bottom - contentRect.top));
+	}
+
+	Size ThemedViewStyle::partSize(const Size& fallback) const {
+		// Same "no theme cached yet" fallback as computeClientBounds()
+		// above, same reason.
+		if (theme_ == nullptr) {
+			return fallback;
+		}
+
+		SIZE sz{};
+		// hdc/prc both null - fine for TS_TRUE (the natural size the
+		// current visual style draws this part/state at), which unlike
+		// TS_DRAW doesn't need a real device context or bounding rect to
+		// answer against.
+		if (FAILED(::GetThemePartSize(theme_, nullptr, partId(), stateId(false), nullptr, TS_TRUE, &sz))) {
+			return fallback;
+		}
+
+		return Size(static_cast<float>(sz.cx), static_cast<float>(sz.cy));
 	}
 
 	void ThemedViewStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
@@ -735,11 +790,45 @@ namespace newui {
 	void ThemedTrackbarTicksStyle::writeFields(json5::builder& w) const {
 		ViewStyle::writeFields(w);
 		w["horizontal"] = horizontal;
+		w["tickCount"] = tickCount;
 	}
 
 	void ThemedTrackbarTicksStyle::readFields(const json5::value& obj) {
 		ViewStyle::readFields(obj);
 		horizontal = obj["horizontal"].get_bool(horizontal);
+		tickCount = obj["tickCount"].get<int>(tickCount);
+	}
+
+	void ThemedTrackbarTicksStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		ThemedViewStyle::paint(ctx, size, highlighted, clientBounds);
+
+		if (size.width <= 0.0f || size.height <= 0.0f || tickCount <= 0) {
+			return;
+		}
+
+		Color tickColor = UIColorManager::colorFor(UIColorRole::ControlBorder);
+		ctx.save();
+		ctx.set_comp_op(compositingOp);
+		ctx.set_fill_style(tickColor.toBLRgba32());
+		ctx.set_fill_alpha(opacity);
+
+		// tickCount+1 marks (both ends included), evenly spaced across the
+		// strip's own full extent - a close approximation of the real
+		// thumb-travel-inset positions without this style needing to know
+		// the thumb's own size (see the paint() declaration's doc comment,
+		// viewstyle.h, for why this draws the lines itself at all).
+		for (int i = 0; i <= tickCount; ++i) {
+			double t = double(i) / double(tickCount);
+			if (horizontal) {
+				double x = t * double(size.width);
+				ctx.fill_rect(BLRect(x - 0.5, 0.0, 1.0, double(size.height)));
+			} else {
+				double y = t * double(size.height);
+				ctx.fill_rect(BLRect(0.0, y - 0.5, double(size.width), 1.0));
+			}
+		}
+
+		ctx.restore();
 	}
 
 	void ThemedProgressBarTrackStyle::writeFields(json5::builder& w) const {

@@ -104,7 +104,7 @@ TEST(ViewDesiredSize, SetDesiredSizeOverridesRegardlessOfCurrentBounds) {
     EXPECT_EQ(view->desiredSize(), newui::Size(120, 40));
     // Setting a desired size never moves/resizes the view on its own -
     // something else (a Layout) has to consult it.
-    EXPECT_EQ(view->getBounds(), newui::Rect(0, 0, 80, 24));
+    EXPECT_EQ(view->bounds(), newui::Rect(0, 0, 80, 24));
 
     delete view;
 }

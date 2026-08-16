@@ -231,6 +231,28 @@ namespace newui {
 				}
 				break;
 
+			// COLOR_HOTLIGHT via queryThemeSysColor() - the real system
+			// hyperlink color (what Explorer/native dialogs use for a
+			// link), same "ask the current theme's own [SysMetrics], not
+			// a hand-picked guess" approach WindowBackground/
+			// ControlBackground above already use, and the documented-
+			// preferred way to source colors from uxtheme generally.
+			case UIColorRole::LinkText:
+				base = queryThemeSysColor(L"WINDOW", COLOR_HOTLIGHT);
+				break;
+
+			case UIColorRole::LinkHoverText: {
+				// COLOR_HOTLIGHT itself, lightened - there's no separate
+				// system "hyperlink hover" slot to query (the classic
+				// system color table only has the one COLOR_HOTLIGHT),
+				// so this derives a hover-distinguishable variant from
+				// the same real value instead of an unrelated color.
+				HSLColor hsl = queryThemeSysColor(L"WINDOW", COLOR_HOTLIGHT).toHSL();
+				hsl.l = hsl.l + 0.15f > 1.0f ? 1.0f : hsl.l + 0.15f;
+				base = Color::fromHSL(hsl);
+				break;
+			}
+
 			default:
 				base = Color(0x1B1B1Bu, false);
 				break;

@@ -8,6 +8,8 @@
 // documented against utils.h (feedback_no_std_minmax memory/HANDOFF.md
 // Part 6) for exactly what skipping that sequencing once already broke.
 #include "newui/newui.h"
+#include <blend2d/blend2d.h>
+
 
 namespace newui {
 
@@ -89,6 +91,10 @@ public:
         return RECT{ LONG(left()), LONG(top()), LONG(right()), LONG(bottom()) };
     }
 
+    operator BLRect() const {
+        return BLRect{ left(), top(), width(), height() };
+    }
+
 
 
     Point pos() const {
@@ -123,6 +129,16 @@ public:
         return pos_.y + size_.height;
     }
 
+
+    float width() const {
+        return size_.width;
+    }
+
+    float height() const {
+        return size_.height;
+    }
+
+
     bool contains(const Point& point) const {
         return point.x >= left() && point.x < right()
             && point.y >= top() && point.y < bottom();
@@ -148,6 +164,14 @@ public:
 
     bool operator!=(const Rect& other) const {
         return !(*this == other);
+    }
+
+    void clear() {
+        pos_.x = pos_.y = size_.height = size_.width = 0;
+    }
+
+    bool empty() const {
+        return pos_.x == 0.0 && pos_.y == 0.0 && size_.width == 0.0 && size_.height == 0.0;
     }
 
 private:

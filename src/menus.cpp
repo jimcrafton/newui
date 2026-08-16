@@ -149,7 +149,7 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
     }
 
     newui::Point screenPt = root->localToScreen(
-        root->accumulatedOffset(&button) + newui::Point(0.0f, button.getBounds().size().height));
+        root->accumulatedOffset(&button) + newui::Point(0.0f, button.bounds().size().height));
 
     newui::ContextMenu popup;
     popup.show(frame->frameHandle(), *button.menuItem, int(screenPt.x), int(screenPt.y));

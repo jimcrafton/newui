@@ -59,8 +59,8 @@ TEST(TabControl, AddTabBuildsOneButtonAndOnePageEach) {
     ASSERT_NE(tabs->tabButton(1), nullptr);
     ASSERT_NE(tabs->page(0), nullptr);
     ASSERT_NE(tabs->page(1), nullptr);
-    EXPECT_EQ(tabs->page(0)->getName(), "page1");
-    EXPECT_EQ(tabs->page(1)->getName(), "page2");
+     EXPECT_EQ(tabs->page(0)->name(), "page1");
+     EXPECT_EQ(tabs->page(1)->name(), "page2");
     EXPECT_EQ(tabs->tabButton(2), nullptr);
     EXPECT_EQ(tabs->page(2), nullptr);
 
@@ -181,13 +181,13 @@ TEST(TabControl, TopBottomUseVerticalOuterLayoutAndHorizontalStrip) {
     // Bottom-aligned: pages come before the strip in the outer layout's
     // child order (pages rendered above the strip, per the class comment).
     ASSERT_EQ(bottomTabs->childViews().size(), 2u);
-    EXPECT_EQ(bottomTabs->childViews()[0]->getName(), "TabControlPages");
-    EXPECT_EQ(bottomTabs->childViews()[1]->getName(), "TabControlStrip");
+     EXPECT_EQ(bottomTabs->childViews()[0]->name(), "TabControlPages");
+     EXPECT_EQ(bottomTabs->childViews()[1]->name(), "TabControlStrip");
 
     // Top-aligned: strip first.
     ASSERT_EQ(topTabs->childViews().size(), 2u);
-    EXPECT_EQ(topTabs->childViews()[0]->getName(), "TabControlStrip");
-    EXPECT_EQ(topTabs->childViews()[1]->getName(), "TabControlPages");
+     EXPECT_EQ(topTabs->childViews()[0]->name(), "TabControlStrip");
+     EXPECT_EQ(topTabs->childViews()[1]->name(), "TabControlPages");
 
     topTabs->destroy();
     delete topTabs;

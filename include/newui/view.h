@@ -44,7 +44,7 @@ namespace newui {
 		typedef Delegate<View> FocusDelegate;
 
 
-        const Rect& getBounds() const {
+        const Rect& bounds() const {
             return bounds_;
         }
 
@@ -56,7 +56,7 @@ namespace newui {
             name_ = name;
         }
 
-        std::string getName() const {
+        std::string name() const {
             return name_;
         }
 
@@ -177,6 +177,11 @@ namespace newui {
             return bounds_.size();
         }
 
+        //repaint this views clientBounds
+        //typically 0,0 to bounds_.size().width, bounds_.size().height
+        //but it could be less than this
+        virtual void redraw();
+
         // Draws this view's own content. Default is a no-op; SubView
         // subclasses override it to draw themselves. ctx is already
         // translated so (0,0) is this view's top-left corner and clipped to
@@ -187,6 +192,15 @@ namespace newui {
         // child's bounds before calling its paint() and recursing into its
         // own children, so children draw on top of whatever's already in
         // the buffer in bounds-relative local coordinates.
+        //
+        // Deliberately no dirty-rect pruning (skipping a child whose
+        // bounds don't intersect the region being repainted) - tried and
+        // reverted, see HANDOFF.md: the geometry math checked out but it
+        // produced real visual corruption live (wrong colors/stale
+        // content on siblings that should have been left alone),
+        // confirmed via a controlled test - removing it, and nothing
+        // else, fixed the corruption immediately. Every visible child is
+        // always walked unconditionally.
         void paintChildren(BLContext& ctx);
 
         // Finds the deepest visible descendant SubView whose bounds
@@ -274,6 +288,14 @@ namespace newui {
             rootView_ = val;
         }
 
+        View* parent() const {
+            return parent_;
+        }
+
+        void setParent(View* newParent) {
+            parent_ = newParent;
+        }
+
         // Sets rootView() on this View and recurses into every descendant
         // already in childViews_ - so attaching/detaching a SubView (sub)
         // tree that was built before (or after) it had a RootView still
@@ -309,6 +331,8 @@ namespace newui {
         std::unique_ptr<Layout> layout_;
 
         std::vector<SubView*> childViews_;
+
+        View* parent_ = nullptr;
 
         RootView* rootView_ = nullptr;
     };

@@ -23,6 +23,17 @@ namespace newui {
         DisabledText,
         HighlightBackground,
         HighlightText,
+
+        // A hyperlink-style Control's (Label::setHotLink(true), controls.h)
+        // text color - LinkText at rest, LinkHoverText while hovered.
+        // LinkText is the real system hyperlink color (COLOR_HOTLIGHT,
+        // queried via GetThemeSysColor() - what Explorer/native dialogs
+        // use for a link); LinkHoverText is that same value lightened,
+        // since there's no separate system "hover" slot to query -
+        // automatically dark-mode-adapted the same way every other role
+        // is (see colorFor()'s own comment).
+        LinkText,
+        LinkHoverText,
     };
 
     // Tracks Windows' system-wide Light/Dark mode setting and hands back

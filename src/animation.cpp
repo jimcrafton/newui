@@ -91,11 +91,33 @@ bool AnimationManager::processIdle() {
         return false;
     }
 
+    std::uint64_t previousFrame = inst.currentFrame_.value();
     inst.currentFrame_ = next;
 
     for (const auto& animation : inst.animations_) {
-        if (animation->isActiveAt(inst.currentFrame_.value())) {
-            animation->processFrame(inst.currentFrame_.value());
+        // Normally isActiveAt() alone is enough - currentFrame_ advances
+        // one (or a few) whole frames per call, so a still-running
+        // animation is simply active on the next call, same as always.
+        // But if the gap between idle passes is large enough (e.g.
+        // RunLoop is correctly *not* spinning as fast as possible between
+        // calls - see RunLoop::run()'s idle-loop comment) relative to a
+        // short animation's whole duration, this step's elapsed time can
+        // jump clean over the animation's entire [startTime, endTime]
+        // window in one call, and isActiveAt(currentFrame_.value()) would
+        // then be false *every* time this animation is ever checked again
+        // - it would simply never get another processFrame() call, and
+        // silently stay stuck wherever it was (its initial state, if this
+        // was its first-ever check) forever. justFinished catches exactly
+        // that transition (was not yet past endTime() as of the previous
+        // step, is now) and gives it one settling call, clamped to its
+        // own endTime() - Animation::processFrame() already holds/clamps
+        // correctly for a frame past its last Key, so this reaches the
+        // same real end value a normal frame-by-frame advance would have.
+        bool active = animation->isActiveAt(inst.currentFrame_.value());
+        bool justFinished = previousFrame < animation->endTime() && inst.currentFrame_.value() > animation->endTime();
+        if (active || justFinished) {
+            std::uint64_t frameToApply = active ? inst.currentFrame_.value() : animation->endTime();
+            animation->processFrame(frameToApply);
         }
     }
 

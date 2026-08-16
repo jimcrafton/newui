@@ -35,7 +35,7 @@ TEST(AnchorLayout, LeavesChildWithoutParamsUntouched) {
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(10, 10, 30, 30));
+    EXPECT_EQ(child->bounds(), newui::Rect(10, 10, 30, 30));
 
     delete child;
     delete container;
@@ -57,7 +57,7 @@ TEST(AnchorLayout, SkipsInvisibleChildren) {
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(1, 2, 3, 4));
+    EXPECT_EQ(child->bounds(), newui::Rect(1, 2, 3, 4));
 
     delete child;
     delete container;
@@ -78,7 +78,7 @@ TEST(AnchorLayout, LeftTopPositionsAtMarginWithOwnSize) {
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(5.0f, 8.0f, 40.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(5.0f, 8.0f, 40.0f, 20.0f));
 
     delete child;
     delete container;
@@ -100,7 +100,7 @@ TEST(AnchorLayout, RightBottomPositionsFromFarEdge) {
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
     // x = 200 - 10 - 30 = 160, y = 100 - 5 - 20 = 75
-    EXPECT_EQ(child->getBounds(), newui::Rect(160.0f, 75.0f, 30.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(160.0f, 75.0f, 30.0f, 20.0f));
 
     delete child;
     delete container;
@@ -123,7 +123,7 @@ TEST(AnchorLayout, OpposingAnchorsStretchThatAxis) {
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
     // width = 200 - 10 - 20 = 170
-    EXPECT_EQ(child->getBounds(), newui::Rect(10.0f, 5.0f, 170.0f, 15.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(10.0f, 5.0f, 170.0f, 15.0f));
 
     delete child;
     delete container;
@@ -143,7 +143,7 @@ TEST(AnchorLayout, CenterXCenterYCentersChild) {
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
     // x = (200-50)/2 = 75, y = (100-20)/2 = 40
-    EXPECT_EQ(child->getBounds(), newui::Rect(75.0f, 40.0f, 50.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(75.0f, 40.0f, 50.0f, 20.0f));
 
     delete child;
     delete container;
@@ -167,7 +167,7 @@ TEST(AnchorLayout, ArrangesWithinStyledContainersClientBounds) {
 
     // client bounds = (10,10)-(180,80): Left|Top with no margin sits at
     // the client area's origin, not the container's raw (0,0).
-    EXPECT_EQ(child->getBounds(), newui::Rect(10.0f, 10.0f, 20.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(10.0f, 10.0f, 20.0f, 20.0f));
 
     delete child;
     delete container;
@@ -187,7 +187,7 @@ TEST(AnchorLayout, OpposingAnchorsStretchWithinStyledContainersClientBounds) {
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
     // Fully-stretched child fills the 180x80 client area starting at (10,10).
-    EXPECT_EQ(child->getBounds(), newui::Rect(10.0f, 10.0f, 180.0f, 80.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(10.0f, 10.0f, 180.0f, 80.0f));
 
     delete child;
     delete container;
@@ -210,8 +210,8 @@ TEST(FlexLayout, VerticalStacksNaturalSizesWithSpacing) {
 
     // Default CrossAxisAlignment::Stretch fills the cross axis (width)
     // to the container's own width.
-    EXPECT_EQ(childA->getBounds(), newui::Rect(0.0f, 0.0f, 100.0f, 20.0f));
-    EXPECT_EQ(childB->getBounds(), newui::Rect(0.0f, 30.0f, 100.0f, 30.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(0.0f, 0.0f, 100.0f, 20.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(0.0f, 30.0f, 100.0f, 30.0f));
 
     delete childA;
     delete childB;
@@ -229,8 +229,8 @@ TEST(FlexLayout, HorizontalStacksNaturalSizesWithSpacing) {
     layout->setSpacing(10.0f);
     container->setLayout(std::move(layout));
 
-    EXPECT_EQ(childA->getBounds(), newui::Rect(0.0f, 0.0f, 40.0f, 100.0f));
-    EXPECT_EQ(childB->getBounds(), newui::Rect(50.0f, 0.0f, 60.0f, 100.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(0.0f, 0.0f, 40.0f, 100.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(50.0f, 0.0f, 60.0f, 100.0f));
 
     delete childA;
     delete childB;
@@ -254,9 +254,9 @@ TEST(FlexLayout, WeightedChildAbsorbsLeftoverSpace) {
     // fixed keeps its natural 50 height; flexible has flex-basis 0 (see
     // FlexLayout::arrange()) so it claims all 250 leftover (300 - 50,
     // no spacing) regardless of the 20 its bounds started at.
-    EXPECT_EQ(fixed->getBounds().size().height, 50.0f);
-    EXPECT_EQ(flexible->getBounds().size().height, 250.0f);
-    EXPECT_EQ(flexible->getBounds().top(), 50.0f);
+    EXPECT_EQ(fixed->bounds().size().height, 50.0f);
+    EXPECT_EQ(flexible->bounds().size().height, 250.0f);
+    EXPECT_EQ(flexible->bounds().top(), 50.0f);
 
     delete fixed;
     delete flexible;
@@ -279,13 +279,13 @@ TEST(FlexLayout, WeightedChildShrinksAcrossRepeatedArranges) {
     container->addChild(flexible);
 
     container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
-    ASSERT_EQ(flexible->getBounds().size().width, 500.0f);
+    ASSERT_EQ(flexible->bounds().size().width, 500.0f);
 
     // Shrink the container - same trigger RootView::setBounds() uses on
     // a real window resize (SubView::setBounds() -> updateLayout()).
     container->setBounds(newui::Rect(0, 0, 120, 100));
 
-    EXPECT_EQ(flexible->getBounds().size().width, 120.0f);
+    EXPECT_EQ(flexible->bounds().size().width, 120.0f);
 
     delete flexible;
     delete container;
@@ -302,8 +302,8 @@ TEST(FlexLayout, MainAxisAlignmentCenterCentersUnweightedChildren) {
     container->setLayout(std::move(layout));
 
     // leftover = 100 - 20 = 80, centered => top = 40
-    EXPECT_EQ(child->getBounds().top(), 40.0f);
-    EXPECT_EQ(child->getBounds().size().height, 20.0f);
+    EXPECT_EQ(child->bounds().top(), 40.0f);
+    EXPECT_EQ(child->bounds().size().height, 20.0f);
 
     delete child;
     delete container;
@@ -319,7 +319,7 @@ TEST(FlexLayout, CrossAxisAlignmentStartKeepsNaturalCrossSize) {
     layout->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     container->setLayout(std::move(layout));
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(0.0f, 0.0f, 50.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(0.0f, 0.0f, 50.0f, 20.0f));
 
     delete child;
     delete container;
@@ -338,8 +338,8 @@ TEST(FlexLayout, SkipsInvisibleChildren) {
 
     container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
 
-    EXPECT_EQ(hidden->getBounds(), newui::Rect(1, 2, 3, 4));  // untouched
-    EXPECT_EQ(visible->getBounds().top(), 0.0f);  // laid out as if alone
+    EXPECT_EQ(hidden->bounds(), newui::Rect(1, 2, 3, 4));  // untouched
+    EXPECT_EQ(visible->bounds().top(), 0.0f);  // laid out as if alone
 
     delete hidden;
     delete visible;
@@ -361,8 +361,8 @@ TEST(FlexLayout, ArrangesWithinStyledContainersClientBounds) {
     // Client bounds = (10,10)-(80,280): Stretch fills the deflated cross
     // axis (width 80, not the raw 100), and both children start offset by
     // the 10px border on every side.
-    EXPECT_EQ(childA->getBounds(), newui::Rect(10.0f, 10.0f, 80.0f, 20.0f));
-    EXPECT_EQ(childB->getBounds(), newui::Rect(10.0f, 30.0f, 80.0f, 30.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(10.0f, 10.0f, 80.0f, 20.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(10.0f, 30.0f, 80.0f, 30.0f));
 
     delete childA;
     delete childB;
@@ -386,10 +386,10 @@ TEST(FlexLayoutWrap, WrapsOntoASecondLineWhenMainAxisOverflows) {
     layout->setWrap(true);
     container->setLayout(std::move(layout));
 
-    EXPECT_EQ(childA->getBounds(), newui::Rect(0.0f, 0.0f, 60.0f, 20.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(0.0f, 0.0f, 60.0f, 20.0f));
     // Second line starts at cross-axis offset = line 1's thickness (20,
     // the max cross size on that line) - no lineSpacing set (default 0).
-    EXPECT_EQ(childB->getBounds(), newui::Rect(0.0f, 20.0f, 60.0f, 30.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(0.0f, 20.0f, 60.0f, 30.0f));
 
     delete childA;
     delete childB;
@@ -408,7 +408,7 @@ TEST(FlexLayoutWrap, LineSpacingGapsBetweenLines) {
     layout->setLineSpacing(5.0f);
     container->setLayout(std::move(layout));
 
-    EXPECT_EQ(childB->getBounds().top(), 25.0f);  // 20 (line 1 thickness) + 5 (lineSpacing)
+    EXPECT_EQ(childB->bounds().top(), 25.0f);  // 20 (line 1 thickness) + 5 (lineSpacing)
 
     delete childA;
     delete childB;
@@ -445,10 +445,10 @@ TEST(FlexLayoutWrap, WeightedChildAbsorbsLeftoverWithinItsOwnLineOnly) {
     container->setLayout(std::move(layout));
 
     // Line 1 leftover = 100 - 60 = 40, entirely claimed by weighted1.
-    EXPECT_FLOAT_EQ(weighted1->getBounds().size().width, 40.0f);
+    EXPECT_FLOAT_EQ(weighted1->bounds().size().width, 40.0f);
     // Line 2 leftover = 100 - 70 = 30, entirely claimed by weighted2 -
     // unaffected by line 1's own leftover/weighted child.
-    EXPECT_FLOAT_EQ(weighted2->getBounds().size().width, 30.0f);
+    EXPECT_FLOAT_EQ(weighted2->bounds().size().width, 30.0f);
 
     delete fixed1;
     delete weighted1;
@@ -472,8 +472,8 @@ TEST(FlexLayoutWrap, AlignContentCentersLinesWithinLeftoverCrossSpace) {
     container->setLayout(std::move(layout));
 
     // startOffset = 60 leftover / 2 = 30
-    EXPECT_FLOAT_EQ(childA->getBounds().top(), 30.0f);
-    EXPECT_FLOAT_EQ(childB->getBounds().top(), 50.0f);  // 30 + 20 (line 1 thickness)
+    EXPECT_FLOAT_EQ(childA->bounds().top(), 30.0f);
+    EXPECT_FLOAT_EQ(childB->bounds().top(), 50.0f);  // 30 + 20 (line 1 thickness)
 
     delete childA;
     delete childB;
@@ -496,8 +496,8 @@ TEST(FlexLayoutWrap, DefaultWrapFalseMatchesNonWrappingBehavior) {
     // Default CrossAxisAlignment::Stretch fills the *whole container's*
     // cross size (200) when not wrapped - unlike wrap mode, where Stretch
     // fills only each line's own thickness (see the wrap tests above).
-    EXPECT_EQ(childA->getBounds(), newui::Rect(0.0f, 0.0f, 60.0f, 200.0f));
-    EXPECT_EQ(childB->getBounds(), newui::Rect(60.0f, 0.0f, 60.0f, 200.0f));  // spills past the container, not wrapped
+    EXPECT_EQ(childA->bounds(), newui::Rect(0.0f, 0.0f, 60.0f, 200.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(60.0f, 0.0f, 60.0f, 200.0f));  // spills past the container, not wrapped
 
     delete childA;
     delete childB;
@@ -519,7 +519,7 @@ TEST(CardLayout, OnlyActiveChildIsVisibleAndFillsContainer) {
 
     EXPECT_TRUE(childA->isVisible());
     EXPECT_FALSE(childB->isVisible());
-    EXPECT_EQ(childA->getBounds(), newui::Rect(0.0f, 0.0f, 200.0f, 100.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(0.0f, 0.0f, 200.0f, 100.0f));
 
     delete childA;
     delete childB;
@@ -540,7 +540,7 @@ TEST(CardLayout, ShowByIndexSwitchesImmediately) {
 
     EXPECT_FALSE(childA->isVisible());
     EXPECT_TRUE(childB->isVisible());
-    EXPECT_EQ(childB->getBounds(), newui::Rect(0.0f, 0.0f, 200.0f, 100.0f));
+    EXPECT_EQ(childB->bounds(), newui::Rect(0.0f, 0.0f, 200.0f, 100.0f));
     EXPECT_EQ(cardLayout->activeIndex(), 1u);
 
     delete childA;
@@ -623,7 +623,7 @@ TEST(CardLayout, ActiveChildFillsStyledContainersClientBounds) {
 
     container->setLayout(std::make_unique<newui::CardLayout>());
 
-    EXPECT_EQ(childA->getBounds(), newui::Rect(10.0f, 10.0f, 180.0f, 80.0f));
+    EXPECT_EQ(childA->bounds(), newui::Rect(10.0f, 10.0f, 180.0f, 80.0f));
 
     delete childA;
     delete childB;
@@ -648,7 +648,7 @@ TEST(GridLayout, FixedColumnsPlaceChildrenAtExactPixelOffsets) {
     child->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 1));
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(50.0f, 0.0f, 70.0f, 30.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(50.0f, 0.0f, 70.0f, 30.0f));
 
     delete child;
     delete container;
@@ -672,8 +672,8 @@ TEST(GridLayout, StarColumnsSplitLeftoverProportionalToWeight) {
     childInStar3->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 2));
     container->updateLayout();
 
-    EXPECT_EQ(childInStar1->getBounds(), newui::Rect(20.0f, 0.0f, 25.0f, 50.0f));
-    EXPECT_EQ(childInStar3->getBounds(), newui::Rect(45.0f, 0.0f, 75.0f, 50.0f));
+    EXPECT_EQ(childInStar1->bounds(), newui::Rect(20.0f, 0.0f, 25.0f, 50.0f));
+    EXPECT_EQ(childInStar3->bounds(), newui::Rect(45.0f, 0.0f, 75.0f, 50.0f));
 
     delete childInStar1;
     delete childInStar3;
@@ -715,9 +715,9 @@ TEST(GridLayout, AutoColumnSizesToLargestDesiredSizeIgnoringSpanningChildren) {
     container->updateLayout();
 
     // Auto column 0 = max(25, 40) = 40, ignoring spanning's 1000.
-    EXPECT_FLOAT_EQ(wide->getBounds().size().width, 40.0f);
-    EXPECT_FLOAT_EQ(spanning->getBounds().left(), 0.0f);
-    EXPECT_FLOAT_EQ(spanning->getBounds().size().width, 70.0f);  // 40 (auto) + 30 (fixed)
+    EXPECT_FLOAT_EQ(wide->bounds().size().width, 40.0f);
+    EXPECT_FLOAT_EQ(spanning->bounds().left(), 0.0f);
+    EXPECT_FLOAT_EQ(spanning->bounds().size().width, 70.0f);  // 40 (auto) + 30 (fixed)
 
     delete narrow;
     delete wide;
@@ -742,7 +742,7 @@ TEST(GridLayout, ColumnSpanUnionsTrackExtents) {
     child->setLayoutParams(std::move(params));
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(0.0f, 0.0f, 50.0f, 20.0f));  // 20 + 30
+    EXPECT_EQ(child->bounds(), newui::Rect(0.0f, 0.0f, 50.0f, 20.0f));  // 20 + 30
 
     delete child;
     delete container;
@@ -767,7 +767,7 @@ TEST(GridLayout, NonStretchAlignmentKeepsDesiredSizeAndCentersWithinCell) {
     container->addChild(child);
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(30.0f, 15.0f, 40.0f, 20.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(30.0f, 15.0f, 40.0f, 20.0f));
 
     delete child;
     delete container;
@@ -786,7 +786,7 @@ TEST(GridLayout, StretchDefaultFillsTheCell) {
     child->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 0));
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(0.0f, 0.0f, 100.0f, 50.0f));
+    EXPECT_EQ(child->bounds(), newui::Rect(0.0f, 0.0f, 100.0f, 50.0f));
 
     delete child;
     delete container;
@@ -804,7 +804,7 @@ TEST(GridLayout, ChildWithNoParamsIsLeftUntouched) {
     auto* child = NewChild(container, newui::Rect(5, 5, 1, 1));
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(5, 5, 1, 1));
+    EXPECT_EQ(child->bounds(), newui::Rect(5, 5, 1, 1));
 
     delete child;
     delete container;
@@ -823,7 +823,7 @@ TEST(GridLayout, OutOfRangeRowOrColumnIsLeftUntouched) {
     child->setLayoutParams(std::make_unique<newui::GridLayoutParams>(3, 0));  // no row 3
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(5, 5, 1, 1));
+    EXPECT_EQ(child->bounds(), newui::Rect(5, 5, 1, 1));
 
     delete child;
     delete container;
@@ -844,7 +844,7 @@ TEST(GridLayout, ColumnAndRowSpacingOffsetTracks) {
     child->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 1));
     container->updateLayout();
 
-    EXPECT_EQ(child->getBounds().left(), 25.0f);  // 20 (column 0) + 5 (columnSpacing)
+    EXPECT_EQ(child->bounds().left(), 25.0f);  // 20 (column 0) + 5 (columnSpacing)
 
     delete child;
     delete container;
@@ -866,11 +866,11 @@ TEST(ViewLayout, ResizingContainerReRunsLayout) {
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
-    ASSERT_EQ(child->getBounds().left(), 80.0f);  // 100 - 20
+    ASSERT_EQ(child->bounds().left(), 80.0f);  // 100 - 20
 
     container->setBounds(newui::Rect(0, 0, 300, 100));
 
-    EXPECT_EQ(child->getBounds().left(), 280.0f);  // 300 - 20, re-arranged automatically
+    EXPECT_EQ(child->bounds().left(), 280.0f);  // 300 - 20, re-arranged automatically
 
     delete child;
     delete container;
@@ -884,8 +884,8 @@ TEST(ViewLayout, AddingChildReRunsLayout) {
     auto* childA = NewChild(container, newui::Rect(0, 0, 50, 20));
     auto* childB = NewChild(container, newui::Rect(0, 0, 50, 30));
 
-    EXPECT_EQ(childA->getBounds().top(), 0.0f);
-    EXPECT_EQ(childB->getBounds().top(), 20.0f);
+    EXPECT_EQ(childA->bounds().top(), 0.0f);
+    EXPECT_EQ(childB->bounds().top(), 20.0f);
 
     delete childA;
     delete childB;
@@ -898,12 +898,12 @@ TEST(ViewLayout, NullLayoutStopsAutomaticArranging) {
     container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
 
     auto* child = NewChild(container, newui::Rect(5, 5, 50, 20));
-    ASSERT_EQ(child->getBounds().top(), 0.0f);  // arranged by the FlexLayout
+    ASSERT_EQ(child->bounds().top(), 0.0f);  // arranged by the FlexLayout
 
     container->setLayout(nullptr);
     child->setBounds(newui::Rect(5, 5, 50, 20));  // manual positioning again
 
-    EXPECT_EQ(child->getBounds(), newui::Rect(5, 5, 50, 20));
+    EXPECT_EQ(child->bounds(), newui::Rect(5, 5, 50, 20));
 
     delete child;
     delete container;

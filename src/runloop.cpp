@@ -38,6 +38,23 @@ namespace newui {
 				idleProcessing();
 				if (!hasIdleTasks()) {
 					isIdle = false;
+				} else {
+					// There's still idle work pending (e.g. AnimationManager,
+					// or any other permanent postIdle() task - see
+					// RunLoop::postIdle()'s doc comment on "never returns
+					// true" tasks) but nothing new happened just now -
+					// without this wait, this loop spins re-checking
+					// PeekMessage as fast as the CPU allows, pegging a full
+					// core the entire time any such task is registered,
+					// even completely untouched (confirmed live: an idle
+					// newui app showing ~5% CPU in Task Manager - see
+					// HANDOFF.md). MsgWaitForMultipleObjects blocks for at
+					// most 1ms (in practice however long the system's timer
+					// resolution actually grants, typically ~15ms - still
+					// far more than enough headroom for 30-60fps idle work)
+					// but wakes immediately if a real message arrives, so
+					// this doesn't add latency to normal message handling.
+					::MsgWaitForMultipleObjects(0, nullptr, FALSE, 1, QS_ALLINPUT);
 				}
 			}
 

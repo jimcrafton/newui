@@ -354,7 +354,7 @@ TEST(MenuBar, SetMenuItemsBuildsOneThemedButtonPerTopLevelItem) {
         EXPECT_TRUE(button->isVisible());
         EXPECT_NE(dynamic_cast<const newui::ThemedMenuBarItemStyle*>(&button->style()), nullptr);
         EXPECT_GT(button->desiredSize().width, 0.0f);
-        EXPECT_EQ(button->getName(), bar->root().children()[i]->text);
+        EXPECT_EQ(button->name(), bar->root().children()[i]->text);
     }
 
     bar->destroy();
@@ -376,7 +376,7 @@ TEST(MenuBar, SetMenuItemsCalledAgainReplacesButtons) {
     bar->setMenuItems(std::move(secondItems));
     ASSERT_EQ(bar->root().children().size(), 1u);
     ASSERT_EQ(bar->childViews().size(), 1u);
-    EXPECT_EQ(bar->childViews()[0]->getName(), "Help");
+    EXPECT_EQ(bar->childViews()[0]->name(), "Help");
 
     bar->destroy();
     delete bar;

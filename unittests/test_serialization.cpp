@@ -47,7 +47,7 @@ TEST(Serialization, RoundTripsSubViewTree) {
     auto* loadedRoot = new newui::SubView();
     ASSERT_TRUE(newui::loadViewTree(*loadedRoot, json));
 
-    EXPECT_EQ(loadedRoot->getBounds(), root->getBounds());
+    EXPECT_EQ(loadedRoot->bounds(), root->bounds());
 
     auto* loadedLayout = dynamic_cast<newui::FlexLayout*>(loadedRoot->layout());
     ASSERT_NE(loadedLayout, nullptr);
@@ -55,8 +55,8 @@ TEST(Serialization, RoundTripsSubViewTree) {
 
     ASSERT_EQ(loadedRoot->childViews().size(), 1u);
     auto* loadedChild = loadedRoot->childViews()[0];
-    EXPECT_EQ(loadedChild->getName(), "sidebar");
-    EXPECT_EQ(loadedChild->getBounds(), child->getBounds());
+    EXPECT_EQ(loadedChild->name(), "sidebar");
+    EXPECT_EQ(loadedChild->bounds(), child->bounds());
     EXPECT_TRUE(loadedChild->isVisible());
     EXPECT_EQ(loadedChild->cursorKind(), newui::CursorKind::Hand);
 

@@ -272,7 +272,7 @@ namespace newui {
                 continue;  // unconfigured child - left exactly where it was
             }
 
-            const Rect current = child->getBounds();
+            const Rect current = child->bounds();
             float x = current.left();
             float y = current.top();
             float width = current.size().width;
@@ -472,7 +472,7 @@ namespace newui {
 
         const auto& children = container_->childViews();
         for (std::size_t i = 0; i < children.size(); ++i) {
-            if (children[i]->getName() == name) {
+            if (children[i]->name() == name) {
                 show(i);
                 return;
             }

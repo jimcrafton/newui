@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include <blend2d/blend2d.h>
@@ -40,6 +41,7 @@ namespace newui {
         RedrawNeededDelegate onRedrawNeeded;
 
         void markDirty();
+        void markDirty(const View* fromView, const newui::Rect& rect);
 
         // Drops every ThemedViewStyle's cached HTHEME across this
         // RootView's whole tree (itself plus every descendant SubView) -
@@ -98,6 +100,12 @@ namespace newui {
         }
 
         void invalidate();
+
+        void invalidate(const newui::Rect* invalidArea);
+
+        //convert the invalidArea, which is in coordinate system of fromView
+        //into the coordinate system of root view
+        void invalidate(View* fromView, const newui::Rect* invalidArea);
 
         std::tuple<RootView*, SubView*> getTarget(HWND hwnd);
 
@@ -205,20 +213,72 @@ namespace newui {
         // GetCursorPos()/ScreenToClient().
         View* cursorTargetAt(const Point& pt);
 
+
+        newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);
+
     private:
 	    Frame* parentFrame_ = nullptr;
 		HWND viewHwnd_ = nullptr;
 
-        // imageBuffer_ wraps imagePixels_ directly (via BLImage::create_from_data)
-        // rather than using BLImage::create(), because blend2d pads its own
-        // allocations to a 16-byte stride for SIMD, which would not match the
-        // stride StretchDIBits infers from biWidth. Owning the buffer keeps
-        // the stride at exactly width * 4 so both sides agree on layout.
+        // imageBuffer_ wraps a CreateDIBSection()-allocated buffer directly
+        // (via BLImage::create_from_data(), not BLImage::create() - blend2d
+        // pads its own allocations to a 16-byte stride for SIMD, which
+        // wouldn't match the stride a DIB section infers from biWidth) -
+        // memDC_/dibSection_ below, not a plain heap buffer, so
+        // paintImageBufferToWindow() can BitBlt() from an already-realized
+        // GDI bitmap object instead of re-describing a raw pointer via
+        // StretchDIBits() on every WM_PAINT. Owning the buffer this way
+        // keeps the stride at exactly width * 4 so Blend2D and GDI agree on
+        // layout (guaranteed DWORD-aligned for 32bpp regardless of width,
+        // so no padding to account for).
         BLImage imageBuffer_;
-        std::vector<uint8_t> imagePixels_;
+        HDC memDC_ = nullptr;
+        HBITMAP dibSection_ = nullptr;
+        // Whatever memDC_ had selected before dibSection_ - re-selected
+        // before deleting dibSection_ (see releaseImageBuffer()), since
+        // deleting a bitmap while it's still selected into a DC is
+        // undefined behavior.
+        HBITMAP dibSectionOldBitmap_ = nullptr;
+
+        newui::Rect dirtyRect_;
+
+        // markDirty()/markDirty(fromView, rect) no longer call
+        // notifyRedrawNeeded() (the actual, expensive Blend2D repaint())
+        // directly - they union into dirtyRect_ as before, then call
+        // scheduleRepaint(), which posts a single one-shot RunLoop idle
+        // task (does nothing if one is already pending) instead. Idle
+        // tasks only run once the message queue is fully drained (see
+        // RunLoop::run()'s own idle loop), so a burst of markDirty()
+        // calls within the same processing pass - e.g. several
+        // WM_MOUSEMOVE events from one fast Slider drag - collapses into
+        // exactly one real repaint() covering their unioned dirtyRect_,
+        // instead of one full repaint per call. Still same-thread,
+        // synchronous-from-the-UI-thread's-perspective - just deferred
+        // to "the next idle opportunity" rather than "immediately inline" -
+        // Blend2D's own rendering into imageBuffer_ isn't thread-safe, so
+        // this is deliberately not a background-thread/async mechanism.
+        bool repaintScheduled_ = false;
+        // Set false in the destructor, checked by the queued idle task
+        // before it touches this RootView - a task posted via
+        // scheduleRepaint() can still be sitting in RunLoop's idle queue
+        // after this RootView itself is destroyed (e.g. its window
+        // closing while a repaint is still pending), and idleTasks_ has
+        // no mechanism to cancel a specific already-queued task. The
+        // lambda captures this shared_ptr by value (extending its own
+        // lifetime independently of *this*), so checking *aliveFlag_ is
+        // always safe even if the RootView behind the raw `this` capture
+        // is long gone.
+        std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
+        void scheduleRepaint();
 
         void resizeImageBuffer(int width, int height);
-        void paintImageBufferToWindow(HDC hdc);
+        // Frees memDC_/dibSection_ (and resets imageBuffer_, which points
+        // into dibSection_'s memory) - called at the start of
+        // resizeImageBuffer() before allocating the new size, and from
+        // the destructor for final cleanup. Safe to call when already
+        // released (both members already null).
+        void releaseImageBuffer();
+        void paintImageBufferToWindow(HDC hdc, const newui::Rect& paintRect );
         void notifyRedrawNeeded();
         void repaint();
 

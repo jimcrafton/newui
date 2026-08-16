@@ -2,6 +2,7 @@
 
 #include <newui/view.h>
 #include <newui/rootview.h>
+#include <deque>
 
 namespace newui {
 
@@ -12,13 +13,7 @@ public:
     SubView();
     virtual ~SubView();
 
-	View* parent() const {
-		return parent_;
-	}
-
-	void setParent(View* newParent) {
-		parent_ = newParent;
-	}
+	
 
 	void setBounds(const Rect& bounds);
 	void setVisible(bool visible);
@@ -52,11 +47,10 @@ public:
 
 	virtual void addChild(SubView* child);
 	virtual void removeChild(SubView* child);
-
 private:
     RootView* parentView_ = nullptr;
 
-	View* parent_ = nullptr;
+	
 
 	std::unique_ptr<LayoutParams> layoutParams_;
 };

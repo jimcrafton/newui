@@ -267,6 +267,27 @@ namespace newui {
     // ViewStyle::font resolves the BLFont to draw with (see FontManager);
     // textColor is null (nothing drawn) by default, like the other
     // optional fills in this file - set it to actually see text.
+    //
+    // Strongly consider also setting backgroundFill to an opaque color
+    // matching whatever's actually behind this view (see ViewStyle::paint()'s
+    // own base implementation, which this delegates to first). This
+    // codebase's paint pipeline doesn't (currently) skip redrawing a view
+    // whose own area wasn't part of what actually changed - RootView's own
+    // background fill is scoped to the dirty region on each repaint, but
+    // View::paintChildren() still walks and redraws every descendant
+    // unconditionally regardless of whether *its* area was included (see
+    // RootView::repaint()'s comment) - so a text view with no
+    // backgroundFill of its own gets its anti-aliased glyph edges
+    // alpha-blended directly onto whatever was already there on every
+    // unrelated repaint anywhere in the tree, not just onto a fresh
+    // backdrop. That's not idempotent: repeated re-blending of the same
+    // translucent edge pixels darkens/thickens them a little further each
+    // time instead of reproducing the same result, which reads as subtly
+    // "fuzzy" or "bolder than it should be" text after enough unrelated
+    // repaints have happened - confirmed live, not just reasoned about
+    // (see HANDOFF.md). An opaque backgroundFill makes every redraw
+    // self-correcting again, the same way every themed control's own
+    // track/fill chrome already is.
     class LabelStyle : public ViewStyle {
     public:
         std::string text;
@@ -311,6 +332,21 @@ namespace newui {
             ctx.set_fill_style(textColor);
             ctx.set_fill_alpha(opacity);
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
+
+            if (font.underlined()) {
+                // Same fill_style/alpha already set above for the text
+                // itself - the underline is meant to look like part of
+                // the same stroke of "color", not a separate element.
+                // Positioned/sized from the font's own underline_position/
+                // underline_thickness (BLFontMetrics) so it tracks
+                // whatever font is actually in use rather than a guessed
+                // fixed offset.
+                double thickness = fontMetrics.underline_thickness > 0.0f
+                    ? double(fontMetrics.underline_thickness) : 1.0;
+                double underlineY = y + fontMetrics.underline_position;
+                ctx.fill_rect(BLRect(x, underlineY, textWidth, thickness));
+            }
+
             ctx.restore();
         }
 
@@ -438,6 +474,19 @@ namespace newui {
         // too-generous clientBounds the very first time - resolves itself
         // once paint() has run once and cached the theme.
         Rect computeClientBounds(const Size& size) const override;
+
+        // Queries GetThemePartSize() (TS_TRUE - the size the current
+        // visual style actually draws this part/state at, not TS_MIN's
+        // smallest-legible-size or TS_DRAW's needs-a-real-rect variant)
+        // for partId()/stateId(false)'s own natural size - e.g.
+        // ThemedTrackbarThumbStyle's real thumb dimensions, or
+        // ThemedTrackbarTicksStyle's real strip thickness, instead of a
+        // guessed fixed pixel constant. Same "only if a theme is already
+        // cached" fallback computeClientBounds() above already has, for
+        // the same reason - returns fallback unchanged if nothing has
+        // painted this style through a live HWND yet (resolves itself
+        // once paint() has run once).
+        Size partSize(const Size& fallback) const;
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
@@ -1159,8 +1208,23 @@ namespace newui {
 
         bool horizontal = true;
 
+        // Number of tick *intervals* to draw (tickCount+1 marks, including
+        // both ends) - Slider keeps this in sync with its own range/step
+        // (see Slider::updateTickCount(), controls.cpp). 0 draws nothing.
+        int tickCount = 10;
+
         void writeFields(json5::builder& w) const override;
         void readFields(const json5::value& obj) override;
+
+        // TKP_TICS/TKP_TICSVERT's own theme asset draws as a flat,
+        // featureless fill in current Windows visual styles - real
+        // trackbar tick *marks* are drawn by comctl32's own non-themed
+        // control code, not by uxtheme (confirmed empirically: sampling
+        // DrawThemeBackground's output pixels for this part showed zero
+        // variation across the whole strip - a solid color, no lines).
+        // This draws the actual tick lines itself with Blend2D on top of
+        // that (harmless, still-themed) background fill.
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
     protected:
         int partId() const override { return horizontal ? TKP_TICS : TKP_TICSVERT; }

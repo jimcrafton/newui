@@ -72,12 +72,22 @@ namespace newui {
 	}
 
 	void View::paintChildren(BLContext& ctx) {
+		// Deliberately no dirty-rect pruning here (tried and reverted -
+		// see HANDOFF.md): skipping a child whose bounds don't intersect
+		// the region being repainted looked correct on paper (the
+		// translate/intersect math checks out) but produced real visual
+		// corruption live - wrong colors and stale content on siblings
+		// that should have been left untouched. Confirmed via a controlled
+		// test: removing pruning while keeping everything else (including
+		// RootView's own narrow top-level clip) fixed it immediately, so
+		// every visible child is always walked unconditionally - the
+		// original, safe behavior.
 		for (SubView* child : childViews_) {
 			if (!child->isVisible()) {
 				continue;
 			}
 
-			const Rect& bounds = child->getBounds();
+			const Rect& bounds = child->bounds();
 
 			ctx.save();
 			ctx.translate(bounds.left(), bounds.top());
@@ -98,7 +108,7 @@ namespace newui {
 				continue;
 			}
 
-			const Rect& bounds = child->getBounds();
+			const Rect& bounds = child->bounds();
 			if (!bounds.contains(localPt)) {
 				continue;
 			}
@@ -122,6 +132,14 @@ namespace newui {
 		if (style_) {
 			Rect unused;
 			style_->paint(ctx, bounds_.size(), highlighted_, unused);
+		}
+	}
+
+	void View::redraw()
+	{
+		if (nullptr != rootView_) {
+			newui::Rect r = this->getClientBounds();
+			rootView_->markDirty(this, r);
 		}
 	}
 
