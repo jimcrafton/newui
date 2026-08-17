@@ -447,8 +447,18 @@ namespace newui {
 			if (sv == nullptr) {
 				break;
 			}
-			offset = offset + sv->bounds().pos();
-			cur = sv->parent();
+			offset += sv->bounds().pos();
+			// sv's immediate parent may itself have scrolled its children
+			// (View::origin() - a ScrollView's viewport, say) - undo that
+			// same shift here so this stays the exact inverse of
+			// paintChildren()'s -origin() translate at every level
+			// crossed, not just sv's own bounds().pos(). See origin()'s
+			// own doc comment (view.h).
+			View* parent = sv->parent();
+			if (parent != nullptr) {
+				offset -= parent->origin();
+			}
+			cur = parent;
 		}
 		return offset;
 	}
@@ -589,14 +599,38 @@ namespace newui {
 		}
 	}
 
-	void RootView::mouseWheel(const Point& pt, float mouseDelta, std::uint32_t btnMask, std::uint32_t keyMask)
+	void RootView::mouseWheel(const Point& pt, float mouseDelta, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
 	{
 		onMouseWheel(*this, pt, mouseDelta);
 
 		Point localPt;
 		SubView* target = hitTestChildren(pt, localPt);
-		if (target != nullptr) {
-			target->onMouseWheel(*target, localPt, mouseDelta);
+
+		// Bubbles from the deepest hit-tested view up through its
+		// ancestors (mirroring accumulatedOffset()'s own per-level walk -
+		// see its own comment on why parent->origin() has to come out at
+		// each step) until one actually handles it (syncCallFirst -
+		// delegate.h - stops at the first Handled result) or there are no
+		// more SubView ancestors. Unlike onMouseDown/onMouseMove/onMouseUp
+		// (which only ever fire once, on whatever's directly under the
+		// cursor), wheel is the one event every real GUI routes to "the
+		// nearest ancestor that wants it" - this is what lets a
+		// ScrollView (controls.h) catch a wheel event over any of its
+		// nested content without that content needing to know scrolling
+		// exists above it.
+		for (View* cur = target; cur != nullptr; ) {
+			SubView* sv = dynamic_cast<SubView*>(cur);
+			if (sv == nullptr) {
+				break;
+			}
+			if (sv->onMouseWheel.syncCallFirst(*sv, localPt, mouseDelta).handled()) {
+				return;
+			}
+			View* parent = sv->parent();
+			if (parent != nullptr) {
+				localPt = localPt + sv->bounds().pos() - parent->origin();
+			}
+			cur = parent;
 		}
 	}
 

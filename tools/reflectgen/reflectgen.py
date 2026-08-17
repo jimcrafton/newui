@@ -8,6 +8,8 @@ Usage:
 See README.md for setup and details on what's (not yet) supported.
 """
 
+
+
 import argparse
 import glob
 import os
@@ -19,6 +21,9 @@ import zipfile
 
 import clang.cindex as cindex
 from clang.cindex import AccessSpecifier, CursorKind
+
+#use cmake to set a version number here, should match what is in VERSION.state
+__version__ = "0.1.0.383"
 
 # The `clang` PyPI package only ships bindings, not a native library - point
 # it at the system LLVM install (LIBCLANG_PATH env var overrides). The
@@ -156,9 +161,17 @@ def has_reflect_friend(class_cursor):
     return False
 
 
-# Matches one "key=value" pair inside a "@reflect key=value[,key=value...]"
-# annotation - see reflect_annotations() below.
-REFLECT_ANNOTATION_PAIR_RE = re.compile(r"([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([A-Za-z_][A-Za-z_0-9]*)")
+# Matches one "key" or "key=value" token inside a "@reflect key[=value]
+# [key[=value]...]" annotation - see reflect_annotations() below. The
+# "=value" half is optional: "@reflect property" (bare, no value at all,
+# same as "@reflect ignore=true" but without spelling out "=true") is the
+# documented, common-case form (README.md's own examples use it for both
+# "@reflect ignore=true" and "@reflect property"/"@reflect collection") -
+# a bare key's captured value is None, mapped to "true" by
+# reflect_annotations() below, same as an explicit "=true" would be.
+REFLECT_ANNOTATION_PAIR_RE = re.compile(
+    r"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*([A-Za-z_][A-Za-z_0-9]*))?"
+)
 
 
 def reflect_annotations(cursor):
@@ -176,7 +189,10 @@ def reflect_annotations(cursor):
         return {}
 
     annotation_text = raw_comment[pos + len(marker):]
-    return {m.group(1): m.group(2) for m in REFLECT_ANNOTATION_PAIR_RE.finditer(annotation_text)}
+    return {
+        m.group(1): (m.group(2) if m.group(2) is not None else "true")
+        for m in REFLECT_ANNOTATION_PAIR_RE.finditer(annotation_text)
+    }
 
 
 def is_reflect_ignored(cursor):
@@ -220,6 +236,48 @@ class BaseInfo:
         self.access = access  # AccessSpecifier - PUBLIC/PROTECTED/PRIVATE inheritance
 
 
+# A property whose value is reached through an accessor method (or pair of
+# them) rather than a raw data member - see collect_property_accessors()
+# for how getter_name/setter_name are found and README.md's "@reflect
+# property[=name]" section for why this only ever happens when the getter
+# is explicitly marked, never from bare naming-convention guessing.
+class PropertyAccessor:
+    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, setter_name):
+        self.key = key  # the property's own name, e.g. "name", "visible", "bounds"
+        self.scope = scope
+        self.getter_name = getter_name  # real C++ method name, e.g. "getName", "isVisible", "style"
+        self.getter_return_type = getter_return_type  # clang spelling, e.g. "ViewStyle &"
+        self.getter_is_const = getter_is_const
+        # True when another overload of getter_name also exists (almost
+        # always a const/non-const pair) - emit_property_getter_expr()
+        # then wraps the chosen overload in selectOverload<>() instead of
+        # a bare &Class::method, which is ambiguous for an overloaded name.
+        self.ambiguous = ambiguous
+        self.setter_name = setter_name  # real C++ method name, or None (get-only)
+
+
+# A collection reachable only through a whole-container-returning accessor
+# plus (optionally) real add()/remove() methods - ClassBuilder::
+# propertyCollection()'s accessor-based overload (reflection.h), e.g.
+# View::childViews()/addChild()/removeChild(). See collect_collection_
+# accessors() for how getter_name/add_name/remove_name are found and
+# README.md's "@reflect collection" section for why this only ever
+# happens when the getter is explicitly marked, same "opt-in, never
+# guessed from naming conventions" reasoning as PropertyAccessor above -
+# a getter/add/remove triple can't be told apart from three unrelated
+# methods by shape alone.
+class CollectionAccessor:
+    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, add_name, remove_name):
+        self.key = key  # the collection's own name, e.g. "childViews"
+        self.scope = scope
+        self.getter_name = getter_name  # real C++ method name, e.g. "childViews"
+        self.getter_return_type = getter_return_type  # clang spelling, e.g. "const std::vector<SubView *> &"
+        self.getter_is_const = getter_is_const
+        self.ambiguous = ambiguous  # see PropertyAccessor.ambiguous - same selectOverload<>() reasoning
+        self.add_name = add_name  # real C++ method name, or None (enumerate-only, no add)
+        self.remove_name = remove_name  # real C++ method name, or None (enumerate-only, no remove)
+
+
 class ClassInfo:
     def __init__(self, name, has_friend):
         self.name = name
@@ -227,6 +285,8 @@ class ClassInfo:
         self.fields = []
         self.delegates = []
         self.methods = []
+        self.property_accessors = []
+        self.collection_accessors = []
         self.ctors = []
         self.bases = []
 
@@ -251,6 +311,192 @@ class EnumInfo:
         return self.name.rsplit("::", 1)[-1]
 
 
+def is_getter_shaped(cursor):
+    # A property getter: takes nothing, returns something. Deliberately
+    # not checking is_const_method() here - View::style() (mutable, no
+    # const-only alternative used for reflection) is exactly the kind of
+    # getter this needs to accept.
+    if cursor.result_type.spelling == "void":
+        return False
+    return sum(1 for _ in cursor.get_arguments()) == 0
+
+
+def is_setter_shaped(cursor):
+    # A property setter: takes exactly the one new value, returns nothing.
+    # (A fluent setter returning T& for chaining isn't recognized in v1 -
+    # ClassBuilder::property()'s Setter shape is void(SourceT&,const
+    # ValueT&) anyway, so a fluent one would need wrapping regardless.)
+    if cursor.result_type.spelling != "void":
+        return False
+    return sum(1 for _ in cursor.get_arguments()) == 1
+
+
+# "getName"->"Name", "isVisible"->"Visible", "bounds"->"Bounds" (no
+# get/is prefix - just capitalized as-is). This is the shared stem used
+# both to derive a property's default key (lowercase first letter) and to
+# guess its setter's name ("set" + this).
+def getter_stem(method_name):
+    if method_name.startswith("get") and len(method_name) > 3 and method_name[3].isupper():
+        return method_name[3:]
+    if method_name.startswith("is") and len(method_name) > 2 and method_name[2].isupper():
+        return method_name[2:]
+    return method_name[0:1].upper() + method_name[1:]
+
+
+def derive_property_key(method_name):
+    stem = getter_stem(method_name)
+    return stem[0:1].lower() + stem[1:]
+
+
+# Finds every public, explicitly-@reflect-property-annotated getter and
+# pairs it with a same-named-by-convention setter, if one exists -
+# ClassInfo.property_accessors, consumed by emit_register_function()'s
+# ".property(...)" chain entries. Every cursor involved (both the chosen
+# overload and, if ambiguous, its const/non-const siblings, plus a paired
+# setter) is added to `consumed` so collect_class()'s later .method()
+# pass skips them - a getter already driving a property shouldn't also
+# show up as a separately-invocable Method for the same accessor.
+#
+# Deliberately opt-in only (the "@reflect property[=name]" annotation),
+# never inferred purely from a method's name/shape - a bare heuristic
+# ("any public zero-arg non-void method is a property") would just as
+# happily flag View::computeDesiredSize() or View::cursor() as
+# "properties", which they aren't. Established reflection libraries
+# (RTTR, see tools/reflectgen/README.md's own note) don't try to guess
+# this from naming conventions either - they always take an explicit
+# property() registration. The annotation is reflectgen's equivalent:
+# cheap for a human to add to the one real accessor pair that matters,
+# and impossible to get by accident.
+def collect_property_accessors(method_cursors_by_name, consumed):
+    accessors = []
+
+    for getter_name, cursors in method_cursors_by_name.items():
+        annotated = [
+            c for c in cursors
+            if c.access_specifier == AccessSpecifier.PUBLIC
+            and is_getter_shaped(c)
+            and reflect_annotations(c).get("property")
+        ]
+        if not annotated:
+            continue
+
+        # Prefer a non-const overload - needed for an addressable/mutable
+        # property (e.g. View::style()); a const-only accessor still
+        # works fine, it just falls through to the by-value get-only
+        # shape ClassBuilder::property() picks for a const-returning
+        # getter (see reflection.h's own comment on that).
+        getter_cursor = next((c for c in annotated if not c.is_const_method()), annotated[0])
+
+        annotation_value = reflect_annotations(getter_cursor).get("property", "true")
+        key = derive_property_key(getter_name) if annotation_value.lower() == "true" else annotation_value
+
+        setter_cursor = next(
+            (c for c in method_cursors_by_name.get("set" + getter_stem(getter_name), [])
+             if c.access_specifier == AccessSpecifier.PUBLIC and is_setter_shaped(c)),
+            None,
+        )
+
+        accessors.append(PropertyAccessor(
+            key=key,
+            scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
+            getter_name=getter_name,
+            getter_return_type=getter_cursor.result_type.spelling,
+            getter_is_const=getter_cursor.is_const_method(),
+            ambiguous=len(cursors) > 1,
+            setter_name=setter_cursor.spelling if setter_cursor else None,
+        ))
+
+        # Every overload sharing getter_name (not just the annotated
+        # one/the chosen one) - a const sibling nobody annotated
+        # separately would otherwise still leak into .method() as a
+        # redundant read-only view of the same accessor.
+        consumed.update(cursors)
+        if setter_cursor is not None:
+            consumed.add(setter_cursor)
+
+    return accessors
+
+
+# A member that takes exactly one argument and returns nothing - the shape
+# both an add() and a remove() need (see ClassBuilder::propertyCollection()'s
+# AddFnT/RemoveFnT in reflection.h). Deliberately not checking the argument's
+# type against the collection's own element type - reflectgen has no cheap
+# way to compute that from a bare accessor's return type (`const
+# std::vector<SubView*>&` needs real template-argument extraction, not just
+# string comparison) without more libclang plumbing than v1's other
+# heuristics use elsewhere; a real mismatch surfaces as an ordinary compile
+# error in the generated .cpp, same as a hand-written registration mistake
+# would.
+def is_add_remove_shaped(cursor):
+    if cursor.result_type.spelling != "void":
+        return False
+    return sum(1 for _ in cursor.get_arguments()) == 1
+
+
+# Finds every public, "@reflect collection[=name] add=... remove=..."-
+# annotated getter and pairs it with the named add()/remove() methods (both
+# optional - either or neither may be given, for a read-only, enumerate-only
+# collection) - ClassInfo.collection_accessors, consumed by
+# emit_register_function()'s ".propertyCollection(...)" chain entries.
+# Mirrors collect_property_accessors() throughout (same opt-in-only
+# reasoning, same consumed-set bookkeeping so a getter/add/remove trio
+# already driving a collection doesn't also leak into .method() as three
+# separately-invocable methods) - kept as a distinct function rather than
+# folded into it since the annotation vocabulary (collection vs. property)
+# and the shape being assembled (getter+add+remove vs. getter+setter) are
+# different enough that sharing the loop body would need as much branching
+# as just writing two loops.
+def collect_collection_accessors(method_cursors_by_name, consumed):
+    accessors = []
+
+    for getter_name, cursors in method_cursors_by_name.items():
+        annotated = [
+            c for c in cursors
+            if c.access_specifier == AccessSpecifier.PUBLIC
+            and is_getter_shaped(c)
+            and reflect_annotations(c).get("collection")
+        ]
+        if not annotated:
+            continue
+
+        getter_cursor = next((c for c in annotated if not c.is_const_method()), annotated[0])
+        annotations = reflect_annotations(getter_cursor)
+
+        annotation_value = annotations.get("collection", "true")
+        key = derive_property_key(getter_name) if annotation_value.lower() == "true" else annotation_value
+
+        def find_method(method_name):
+            if not method_name:
+                return None
+            return next(
+                (c for c in method_cursors_by_name.get(method_name, [])
+                 if c.access_specifier == AccessSpecifier.PUBLIC and is_add_remove_shaped(c)),
+                None,
+            )
+
+        add_cursor = find_method(annotations.get("add"))
+        remove_cursor = find_method(annotations.get("remove"))
+
+        accessors.append(CollectionAccessor(
+            key=key,
+            scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
+            getter_name=getter_name,
+            getter_return_type=getter_cursor.result_type.spelling,
+            getter_is_const=getter_cursor.is_const_method(),
+            ambiguous=len(cursors) > 1,
+            add_name=add_cursor.spelling if add_cursor else None,
+            remove_name=remove_cursor.spelling if remove_cursor else None,
+        ))
+
+        consumed.update(cursors)
+        if add_cursor is not None:
+            consumed.add(add_cursor)
+        if remove_cursor is not None:
+            consumed.add(remove_cursor)
+
+    return accessors
+
+
 def collect_class(cursor):
     name = qualified_name(cursor)
     has_friend = has_reflect_friend(cursor)
@@ -258,6 +504,7 @@ def collect_class(cursor):
 
     method_name_counts = {}
     method_cursors = []
+    method_cursors_by_name = {}
 
     for child in cursor.get_children():
         if child.kind == CursorKind.CXX_METHOD:
@@ -269,6 +516,11 @@ def collect_class(cursor):
                 continue
             method_cursors.append(child)
             method_name_counts[child.spelling] = method_name_counts.get(child.spelling, 0) + 1
+            method_cursors_by_name.setdefault(child.spelling, []).append(child)
+
+    consumed_by_accessors = set()
+    info.property_accessors = collect_property_accessors(method_cursors_by_name, consumed_by_accessors)
+    info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors)
 
     for child in cursor.get_children():
         kind = child.kind
@@ -289,6 +541,12 @@ def collect_class(cursor):
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=True))
 
         elif kind == CursorKind.CXX_METHOD and child in method_cursors:
+            if child in consumed_by_accessors:
+                # Already driving a .property(...) or .propertyCollection(...)
+                # entry (see collect_property_accessors()/
+                # collect_collection_accessors()) - not also registered as
+                # a separately-invocable Method for the same accessor.
+                continue
             if access != AccessSpecifier.PUBLIC:
                 # Only publicly-invocable methods get a real accessor in v1
                 # (see Method::invoke()'s doc comment in reflection.h).
@@ -423,6 +681,22 @@ def emit_method_expr(info, m):
     return f"static_cast<{m.return_type} ({info.name}::*)({args}){const_suffix}>({target})"
 
 
+# A bare &Class::getter is ambiguous whenever getter is overloaded (almost
+# always a const/non-const pair, e.g. ViewStyle& View::style() vs. const
+# ViewStyle& View::style() const) - there's no target type at the point of
+# '&' for the compiler to pick an overload against, since
+# ClassBuilder::property()'s GetterT is a deduced template parameter, not
+# a fixed one. selectOverload<Signature>() (reflection.h) supplies that
+# missing target type explicitly - same idiom as Qt's qOverload<>() or
+# RTTR's select_overload<>() (see reflection.h's own comment on it).
+def emit_property_getter_expr(info, pa):
+    target = f"&{info.name}::{pa.getter_name}"
+    if not pa.ambiguous:
+        return target
+    const_suffix = " const" if pa.getter_is_const else ""
+    return f"selectOverload<{pa.getter_return_type}({info.name}::*)(){const_suffix}>({target})"
+
+
 def emit_register_function(info):
     fn_name = f"register_{info.name.replace('::', '')}Reflection"
     lines = [f"void {fn_name}() {{"]
@@ -447,19 +721,54 @@ def emit_register_function(info):
         # as a hand-written registration function would via derived(true).
         chain.append(".derived(true)")
 
+    # A plain member variable with no accessor methods at all - static or
+    # not - is a Field, never a Property (see Field's own "raw access,
+    # never through a method" comment in reflection.h) - `&Class::name`
+    # already resolves to the right shape either way (a plain ValueT* for
+    # a static VAR_DECL, a ValueT T::* pointer-to-member for a non-static
+    # FIELD_DECL - see ClassBuilder::field()'s own overloads), so static-
+    # ness doesn't change which method reflectgen emits here at all
+    # anymore, only is_static's value (kept on Field for anyone reading
+    # collect_class()'s output, unused in codegen past this point).
     for f in info.fields:
-        if f.is_static:
-            chain.append(f'.field("{f.name}", &{info.name}::{f.name})')
-        elif f.scope == "Scope::Public":
-            chain.append(f'.property("{f.name}", {f.scope}, &{info.name}::{f.name})')
+        if f.scope == "Scope::Public":
+            chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
         else:
-            chain.append(f'.property("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
+            chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
 
     for d in info.delegates:
         if d.scope == "Scope::Public":
             chain.append(f'.delegate("{d.name}", {d.scope}, &{info.name}::{d.name})')
         else:
             chain.append(f'.delegate("{d.name}", {d.scope}, detail::ClassAccess<{info.name}>::{d.name}())')
+
+    for pa in info.property_accessors:
+        getter_expr = emit_property_getter_expr(info, pa)
+        if pa.setter_name:
+            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr}, &{info.name}::{pa.setter_name})')
+        else:
+            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr})')
+
+    # add_name without remove_name (or vice versa) is legal - a read-only
+    # add, or an enumerate-only collection with neither - so args is built
+    # up incrementally rather than assuming both are always present
+    # together; ClassBuilder::propertyCollection()'s own AddFnT/RemoveFnT
+    # default to nullptr independently (reflection.h), which is exactly
+    # what an omitted trailing argument here falls back to.
+    for ca in info.collection_accessors:
+        getter_expr = emit_property_getter_expr(info, ca)
+        args = [f'"{ca.key}"', ca.scope, getter_expr]
+        if ca.add_name:
+            args.append(f"&{info.name}::{ca.add_name}")
+        if ca.remove_name:
+            if not ca.add_name:
+                # ClassBuilder::propertyCollection()'s remove parameter
+                # comes after add positionally - a remove-only collection
+                # (no add_name) still has to fill that slot with an
+                # explicit nullptr to reach remove.
+                args.append("nullptr")
+            args.append(f"&{info.name}::{ca.remove_name}")
+        chain.append(f".propertyCollection({', '.join(args)})")
 
     for m in info.methods:
         chain.append(f'.method("{m.name}", {m.scope}, {emit_method_expr(info, m)})')
@@ -562,6 +871,12 @@ def main():
     parser.add_argument("--no-recursive", action="store_true",
                          help="when an input is a directory, only scan its top level "
                               "instead of walking subdirectories")
+
+    parser.add_argument( "-v", "--version", 
+                        action="version",
+                        version=f"%(prog)s {__version__}" )
+
+
     args = parser.parse_args(argv)
 
     extensions = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in (args.ext or [".h"])}

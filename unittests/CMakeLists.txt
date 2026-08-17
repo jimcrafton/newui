@@ -19,12 +19,14 @@ add_executable(newui_tests
     test_tabcontrol.cpp
     test_rootview.cpp
     test_layout.cpp
-    test_serialization.cpp
     test_bundle.cpp
     test_reflection.cpp
+    test_reflectionio.cpp
     test_dialogs.cpp
     test_controllers.cpp
     test_documents.cpp
+    test_controls.cpp
+    test_themedata.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

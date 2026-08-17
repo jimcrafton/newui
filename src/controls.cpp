@@ -1,7 +1,10 @@
 #include "newui/controls.h"
+#include "newui/application.h"
 #include "newui/color.h"
+#include "newui/runloop.h"
 #include "newui/uicolormanager.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -234,7 +237,7 @@ namespace newui {
         double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
         ctx.save();
-        ctx.set_comp_op(buttonStyle_->compositingOp);
+        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
         ctx.set_fill_style(textColor_);
         ctx.set_fill_alpha(buttonStyle_->opacity);
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
@@ -749,6 +752,616 @@ namespace newui {
             thumbStyle_->pressed = false;
         }
         style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    ScrollBar::ScrollBar() {
+        setVisible(true);
+
+        auto trackStyle = std::make_unique<ThemedScrollbarTrackStyle>();
+        trackStyle->horizontal = horizontal_;
+        trackStyle_ = trackStyle.get();
+        setStyle(std::move(trackStyle));  // setStyle() sets trackStyle_'s view() to this
+
+        upArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+        upArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Left
+                                                : ThemedScrollbarArrowStyle::Direction::Up;
+        upArrowStyle_->setView(this);
+
+        downArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+        downArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Right
+                                                  : ThemedScrollbarArrowStyle::Direction::Down;
+        downArrowStyle_->setView(this);
+
+        thumbStyle_ = std::make_unique<ThemedScrollbarThumbStyle>();
+        thumbStyle_->horizontal = horizontal_;
+        thumbStyle_->setView(this);
+
+        onSizeChanged.add(this, &ScrollBar::handleSizeChanged);
+        onStateChanged.add(this, &ScrollBar::handleStateChanged);
+
+        onMouseDown.add(this, &ScrollBar::handleMouseDown);
+        onMouseMove.add(this, &ScrollBar::handleMouseMove);
+        onMouseUp.add(this, &ScrollBar::handleMouseUp);
+
+        updateChildBounds();
+    }
+
+    ScrollBar::~ScrollBar() {
+        // See startRepeat()'s own doc comment (controls.h) - a repeat
+        // task still queued/running past this point becomes a safe no-op
+        // instead of touching a dangling this.
+        *aliveFlag_ = false;
+    }
+
+    void ScrollBar::setValue(float value) {
+        float effMax = std::max(min_, max_ - pageSize_);
+        value = value < min_ ? min_ : (value > effMax ? effMax : value);
+        if (value_ == value) {
+            return;
+        }
+        value_ = value;
+        updateChildBounds();
+        onValueChanged(*this);
+    }
+
+    void ScrollBar::setRange(float minValue, float maxValue) {
+        min_ = minValue;
+        max_ = maxValue;
+        setPageSize(pageSize_);  // re-clamps pageSize_ into the new range, then value_/child rects via the calls below it makes
+        setValue(value_);
+        // Unconditional, same reasoning as Slider::setRange(): value_'s
+        // fraction-of-track depends on min_/max_ too, even when setValue()
+        // above correctly no-ops because value_ itself is still in range.
+        updateChildBounds();
+    }
+
+    void ScrollBar::setPageSize(float pageSize) {
+        float maxPage = max_ - min_;
+        pageSize = pageSize > 0.0f ? pageSize : 0.0f;
+        if (maxPage > 0.0f && pageSize > maxPage) {
+            pageSize = maxPage;
+        }
+        pageSize_ = pageSize;
+        setValue(value_);  // effective max (max_-pageSize_) may have moved
+        updateChildBounds();  // thumb length depends on pageSize_ too
+    }
+
+    void ScrollBar::setLineStep(float lineStep) {
+        lineStep_ = lineStep > 0.0f ? lineStep : 0.0f;
+    }
+
+    void ScrollBar::setHorizontal(bool value) {
+        if (horizontal_ == value) {
+            return;
+        }
+        horizontal_ = value;
+        trackStyle_->horizontal = value;
+        thumbStyle_->horizontal = value;
+        upArrowStyle_->direction = value ? ThemedScrollbarArrowStyle::Direction::Left
+                                          : ThemedScrollbarArrowStyle::Direction::Up;
+        downArrowStyle_->direction = value ? ThemedScrollbarArrowStyle::Direction::Right
+                                            : ThemedScrollbarArrowStyle::Direction::Down;
+        updateChildBounds();
+    }
+
+    void ScrollBar::paint(BLContext& ctx) {
+        // isHighlighted() (View's own, driven by RootView's ordinary
+        // hover tracking - "is the cursor anywhere over this ScrollBar")
+        // passed to every sub-part uniformly - a real scrollbar
+        // highlights as a unit, thumb and both arrows together, not per
+        // region. See this class's own doc comment for why that's a
+        // single bool here instead of the finer-grained regionAt() used
+        // for hit-testing below.
+        //
+        // dragging_/repeating_ also keep it lit even once the cursor
+        // strays outside these bounds mid-gesture - isHighlighted() alone
+        // would flip false the instant hitTestChildren() (hover-driven,
+        // rootview.cpp) no longer finds this ScrollBar under the cursor,
+        // even though mouse capture keeps routing the drag/repeat here
+        // regardless of where the cursor actually is - the interaction
+        // (and the scroll position it's still changing) is very much
+        // still live, so the highlight shouldn't drop out from under it.
+        bool hot = isHighlighted() || dragging_ || repeating_;
+        Rect unused;
+
+        ctx.save();
+        ctx.translate(upArrowRect_.left(), upArrowRect_.top());
+        upArrowStyle_->paint(ctx, upArrowRect_.size(), hot, unused);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(downArrowRect_.left(), downArrowRect_.top());
+        downArrowStyle_->paint(ctx, downArrowRect_.size(), hot, unused);
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(thumbRect_.left(), thumbRect_.top());
+        thumbStyle_->paint(ctx, thumbRect_.size(), hot, unused);
+        ctx.restore();
+    }
+
+    ScrollBar::Region ScrollBar::regionAt(const Point& localPt) const {
+        if (upArrowRect_.contains(localPt)) {
+            return Region::UpArrow;
+        }
+        if (downArrowRect_.contains(localPt)) {
+            return Region::DownArrow;
+        }
+        if (thumbRect_.contains(localPt)) {
+            return Region::Thumb;
+        }
+        if (!localRect().contains(localPt)) {
+            return Region::None;
+        }
+        if (horizontal_) {
+            return localPt.x < thumbRect_.left() ? Region::TrackBefore : Region::TrackAfter;
+        }
+        return localPt.y < thumbRect_.top() ? Region::TrackBefore : Region::TrackAfter;
+    }
+
+    Rect ScrollBar::localRect() const {
+        return Rect(0.0f, 0.0f, bounds().size().width, bounds().size().height);
+    }
+
+    Size ScrollBar::resolvedArrowSize() const {
+        // Neutralize pressed/enabled for the query, same reasoning as
+        // Slider::resolvedThumbSize() - a stable layout size regardless
+        // of live interaction state. Only upArrowStyle_ is queried - both
+        // arrows share the same SBP_ARROWBTN part, just a different
+        // direction/state, and a visual style's natural size for that
+        // part doesn't vary by which of the four directions is asked.
+        bool wasPressed = upArrowStyle_->pressed;
+        bool wasEnabled = upArrowStyle_->enabled;
+        upArrowStyle_->pressed = false;
+        upArrowStyle_->enabled = true;
+        Size resolved = upArrowStyle_->partSize(Size(kArrowFallbackSize, kArrowFallbackSize));
+        upArrowStyle_->pressed = wasPressed;
+        upArrowStyle_->enabled = wasEnabled;
+        return resolved;
+    }
+
+    float ScrollBar::resolvedThumbLength(float trackLength) const {
+        float range = max_ - min_;
+        if (range <= 0.0f || trackLength <= 0.0f) {
+            return trackLength > 0.0f ? trackLength : 0.0f;
+        }
+        float proportional = trackLength * (pageSize_ / range);
+        if (proportional < kMinThumbLength) {
+            proportional = kMinThumbLength;
+        }
+        if (proportional > trackLength) {
+            proportional = trackLength;
+        }
+        return proportional;
+    }
+
+    Rect ScrollBar::trackRect() const {
+        Rect client = localRect();
+        Size arrowSize = resolvedArrowSize();
+        if (horizontal_) {
+            float width = client.size().width - 2.0f * arrowSize.width;
+            return Rect(client.left() + arrowSize.width, client.top(),
+                width > 0.0f ? width : 0.0f, client.size().height);
+        }
+        float height = client.size().height - 2.0f * arrowSize.height;
+        return Rect(client.left(), client.top() + arrowSize.height,
+            client.size().width, height > 0.0f ? height : 0.0f);
+    }
+
+    void ScrollBar::updateChildBounds() {
+        Rect client = localRect();
+        Size arrowSize = resolvedArrowSize();
+        Rect track = trackRect();
+
+        // Position fraction is over the *effective* range
+        // [min_, max_-pageSize_], not the full [min_, max_] -
+        // resolvedThumbLength() already reserves the track length its
+        // own proportional footprint needs, so mapping value_ through the
+        // effective range is what actually lands the thumb flush against
+        // the far end of the track when value_ is at its maximum - see
+        // updateValueFromLocalPoint()'s own comment for the matching
+        // inverse mapping.
+        float effMax = std::max(min_, max_ - pageSize_);
+        float denom = effMax - min_;
+        float fraction = denom > 0.0f ? (value_ - min_) / denom : 0.0f;
+        fraction = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+
+        if (horizontal_) {
+            upArrowRect_ = Rect(client.left(), client.top(), arrowSize.width, client.size().height);
+            downArrowRect_ = Rect(client.right() - arrowSize.width, client.top(),
+                arrowSize.width, client.size().height);
+
+            float trackLen = track.size().width;
+            float thumbLen = resolvedThumbLength(trackLen);
+            float usable = trackLen - thumbLen;
+            float thumbX = track.left() + fraction * (usable > 0.0f ? usable : 0.0f);
+            thumbRect_ = Rect(thumbX, track.top(), thumbLen, track.size().height);
+        } else {
+            upArrowRect_ = Rect(client.left(), client.top(), client.size().width, arrowSize.height);
+            downArrowRect_ = Rect(client.left(), client.bottom() - arrowSize.height,
+                client.size().width, arrowSize.height);
+
+            float trackLen = track.size().height;
+            float thumbLen = resolvedThumbLength(trackLen);
+            float usable = trackLen - thumbLen;
+            float thumbY = track.top() + fraction * (usable > 0.0f ? usable : 0.0f);
+            thumbRect_ = Rect(track.left(), thumbY, track.size().width, thumbLen);
+        }
+
+        style().markDirty();
+    }
+
+    void ScrollBar::updateValueFromLocalPoint(const Point& localPt) {
+        Rect track = trackRect();
+        float effMax = std::max(min_, max_ - pageSize_);
+        float fraction;
+        if (horizontal_) {
+            float trackLen = track.size().width;
+            float thumbLen = resolvedThumbLength(trackLen);
+            float usable = trackLen - thumbLen;
+            fraction = usable > 0.0f ? (localPt.x - track.left() - thumbLen * 0.5f) / usable : 0.0f;
+        } else {
+            float trackLen = track.size().height;
+            float thumbLen = resolvedThumbLength(trackLen);
+            float usable = trackLen - thumbLen;
+            fraction = usable > 0.0f ? (localPt.y - track.top() - thumbLen * 0.5f) / usable : 0.0f;
+        }
+        fraction = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+        setValue(min_ + fraction * (effMax - min_));
+    }
+
+    void ScrollBar::pageTowardLocalPoint(const Point& localPt) {
+        bool forward;
+        if (horizontal_) {
+            float thumbCenter = thumbRect_.left() + thumbRect_.size().width * 0.5f;
+            forward = localPt.x > thumbCenter;
+        } else {
+            float thumbCenter = thumbRect_.top() + thumbRect_.size().height * 0.5f;
+            forward = localPt.y > thumbCenter;
+        }
+        float amount = pageSize_ > 0.0f ? pageSize_ : (max_ - min_);
+        amount = forward ? amount : -amount;
+        setValue(value_ + amount);
+        startRepeat(amount, /*isTrackRepeat=*/true, localPt);
+    }
+
+    void ScrollBar::startRepeat(float amount, bool isTrackRepeat, const Point& trackClickPt) {
+        repeating_ = true;
+        trackRepeat_ = isTrackRepeat;
+        repeatAmount_ = amount;
+        trackClickPt_ = trackClickPt;
+        repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
+
+        std::shared_ptr<bool> alive = aliveFlag_;
+        Application::instance().runLoop().postIdle([this, alive]() {
+            if (!*alive || !repeating_) {
+                return true;  // destroyed, or the press already ended - stop
+            }
+
+            auto now = std::chrono::steady_clock::now();
+            if (now < repeatNextTime_) {
+                return false;  // not time for the next tick yet - keep polling
+            }
+            repeatNextTime_ = now + kRepeatInterval;
+
+            if (trackRepeat_ && thumbRect_.contains(trackClickPt_)) {
+                // The thumb has caught up to (or passed) the original
+                // click point - real Win32 track-click paging stops here
+                // on its own, without needing a release.
+                repeating_ = false;
+                return true;
+            }
+
+            setValue(value_ + repeatAmount_);
+            return false;
+        });
+    }
+
+    void ScrollBar::stopRepeat() {
+        repeating_ = false;
+    }
+
+    SyncReturn ScrollBar::handleSizeChanged(View& /*sender*/, const Size& /*size*/) {
+        updateChildBounds();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollBar::handleMouseDown(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!isEnabled()) {
+            return SyncReturn::Ignored;
+        }
+
+        Region region = regionAt(pt);
+        switch (region) {
+            case Region::Thumb:
+                dragging_ = true;
+                thumbStyle_->pressed = true;
+                style().markDirty();
+                break;
+
+            case Region::UpArrow:
+            case Region::DownArrow: {
+                bool isUp = (region == Region::UpArrow);
+                ThemedScrollbarArrowStyle* arrowStyle = isUp ? upArrowStyle_.get() : downArrowStyle_.get();
+                arrowStyle->pressed = true;
+                style().markDirty();
+
+                float amount = isUp ? -lineStep_ : lineStep_;
+                setValue(value_ + amount);
+                startRepeat(amount, /*isTrackRepeat=*/false, Point());
+                break;
+            }
+
+            case Region::TrackBefore:
+            case Region::TrackAfter:
+                pageTowardLocalPoint(pt);
+                break;
+
+            case Region::None:
+                return SyncReturn::Ignored;
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollBar::handleMouseMove(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (dragging_ || repeating_) {
+            // RootView's own hover tracking (updateHoveredSubView(),
+            // rootview.cpp) already ran for this same mouse-move just
+            // before this handler fires, and will have already cleared
+            // isHighlighted() the instant the cursor left this
+            // ScrollBar's bounds - correct that back here. A real
+            // scrollbar keeps reading as hot for as long as a drag/
+            // repeat it started is still live, cursor position
+            // notwithstanding - mouse capture keeps routing the gesture
+            // here regardless of where the cursor actually is (see
+            // RootView::mouseDown()'s capturedSubView_ handling), so the
+            // interaction - and the highlight showing it's still live -
+            // shouldn't drop out just because the cursor briefly strayed
+            // outside these bounds.
+            setHighlighted(true);
+        }
+        if (!dragging_) {
+            return SyncReturn::Ignored;
+        }
+        updateValueFromLocalPoint(pt);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollBar::handleMouseUp(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        dragging_ = false;
+        thumbStyle_->pressed = false;
+        upArrowStyle_->pressed = false;
+        downArrowStyle_->pressed = false;
+        // Idempotent no-op if nothing was actually repeating (e.g. this
+        // release ends a plain thumb drag, not an arrow/track-click page
+        // repeat) - always safe to call.
+        stopRepeat();
+        // The gesture is over - isHighlighted() should now reflect
+        // whether the release actually happened within these bounds, not
+        // stay forced on (handleMouseMove()'s own override, above) until
+        // some future mouse move happens to correct it.
+        setHighlighted(regionAt(pt) != Region::None);
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollBar::handleStateChanged(Control& /*sender*/) {
+        bool enabled = isEnabled();
+        thumbStyle_->enabled = enabled;
+        upArrowStyle_->enabled = enabled;
+        downArrowStyle_->enabled = enabled;
+        if (!enabled) {
+            dragging_ = false;
+            thumbStyle_->pressed = false;
+            upArrowStyle_->pressed = false;
+            downArrowStyle_->pressed = false;
+            stopRepeat();
+        }
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    ScrollView::ScrollView() {
+        setVisible(true);
+
+        viewport_ = new SubView();
+        viewport_->setVisible(true);
+        // SubView::addChild() explicitly (not this->addChild(), which
+        // virtual-dispatches to ScrollView::addChild() below and routes
+        // into viewport_ itself instead) - viewport_ is ScrollView's own
+        // chrome, not user content, but still needs SubView::addChild()'s
+        // real linkage (setParent()/propagateRootView()), not just
+        // View::addChild()'s plain childViews_.push_back() - skipping
+        // that linkage was a real bug caught live: parent()-walking code
+        // (RootView::accumulatedOffset(), the mouse-wheel bubbling in
+        // RootView::mouseWheel()) silently stopped dead at viewport_/
+        // vBar_/hBar_ since their parent() stayed null, even though
+        // painting/rootView() propagation both still worked (those walk
+        // childViews_, not parent()) - masking the bug until wheel
+        // scrolling was actually tried live.
+        SubView::addChild(viewport_);
+
+        vBar_ = new ScrollBar();
+        vBar_->setVisible(true);
+        vBar_->setHorizontal(false);
+        vBar_->onValueChanged.add(this, &ScrollView::handleVBarValueChanged);
+        SubView::addChild(vBar_);
+
+        hBar_ = new ScrollBar();
+        hBar_->setVisible(true);
+        hBar_->setHorizontal(true);
+        hBar_->onValueChanged.add(this, &ScrollView::handleHBarValueChanged);
+        SubView::addChild(hBar_);
+
+        onSizeChanged.add(this, &ScrollView::handleSizeChanged);
+        onMouseWheel.add(this, &ScrollView::handleMouseWheel);
+
+        updateLayout();
+    }
+
+    void ScrollView::addChild(SubView* child) {
+        viewport_->addChild(child);
+    }
+
+    void ScrollView::removeChild(SubView* child) {
+        // viewport_/vBar_/hBar_ themselves route to the real base
+        // behavior (removing from *this* ScrollView's own childViews_),
+        // not into viewport_ - real user content (routed into viewport_
+        // by addChild() above) is the only thing that should ever be
+        // redirected there. Without this check, View::destroy()'s own
+        // child-teardown cascade - which calls parent_->removeChild(this)
+        // polymorphically on each of *this* ScrollView's own direct
+        // children, viewport_ included, via SubView::destroy() - would
+        // call ScrollView::removeChild(viewport_) while destroying
+        // viewport_ itself, redirecting into viewport_->removeChild(viewport_):
+        // searches viewport_'s own (unrelated) child list for itself,
+        // finds nothing, and leaves viewport_ never actually removed from
+        // *this* ScrollView's childViews_ - so destroy()'s loop, which
+        // trusts that removal to shrink the list, keeps re-visiting the
+        // same already-destroyed front() entry forever - a real
+        // use-after-free crash, caught live by this class's own tests
+        // (ScrollView.BarsHiddenWhenContentFitsViewport et al., all
+        // called destroy() and crashed before this fix).
+        if (child == viewport_ || child == vBar_ || child == hBar_) {
+            SubView::removeChild(child);
+            return;
+        }
+        viewport_->removeChild(child);
+    }
+
+    void ScrollView::setContentSize(const Size& size) {
+        if (contentSize_ == size) {
+            return;
+        }
+        contentSize_ = size;
+        updateLayout();
+    }
+
+    Point ScrollView::contentOrigin() const {
+        return viewport_->origin();
+    }
+
+    void ScrollView::updateLayout() {
+        Rect client = getClientBounds();
+        // Natural thickness of each bar - queried from its own arrow part
+        // the same way ScrollBar::resolvedArrowSize() does internally;
+        // reuse partSize() through a throwaway-free path isn't available
+        // here (that helper is private to ScrollBar), so this asks each
+        // bar's own current bounds' cross-axis size once one exists, or
+        // falls back to the bar's own arrow fallback constant's rough
+        // equivalent for the very first layout pass before either bar has
+        // ever been sized. Good enough - this only ever misjudges by a
+        // couple pixels on the first frame, self-corrects immediately
+        // once GetThemePartSize() is available (see ThemedViewStyle::
+        // partSize()'s own "no theme cached yet" fallback, viewstyle.h).
+        constexpr float kBarThicknessFallback = 16.0f;
+        float vBarWidth = vBar_->bounds().size().width > 0.0f ? vBar_->bounds().size().width : kBarThicknessFallback;
+        float hBarHeight = hBar_->bounds().size().height > 0.0f ? hBar_->bounds().size().height : kBarThicknessFallback;
+
+        // Two-pass: whether one bar is needed can change whether the
+        // other is (showing a vertical bar narrows the viewport, which
+        // can newly make a horizontal bar necessary, and vice versa) -
+        // check both against the full client first, then re-check each
+        // against the space actually left after the other is reserved.
+        bool needV = contentSize_.height > client.size().height;
+        bool needH = contentSize_.width > client.size().width;
+        if (needV && !needH && contentSize_.width > (client.size().width - vBarWidth)) {
+            needH = true;
+        }
+        if (needH && !needV && contentSize_.height > (client.size().height - hBarHeight)) {
+            needV = true;
+        }
+
+        float viewportWidth = client.size().width - (needV ? vBarWidth : 0.0f);
+        float viewportHeight = client.size().height - (needH ? hBarHeight : 0.0f);
+        viewportWidth = viewportWidth > 0.0f ? viewportWidth : 0.0f;
+        viewportHeight = viewportHeight > 0.0f ? viewportHeight : 0.0f;
+
+        viewport_->setBounds(Rect(client.left(), client.top(), viewportWidth, viewportHeight));
+
+        vBar_->setVisible(needV);
+        if (needV) {
+            vBar_->setBounds(Rect(client.left() + viewportWidth, client.top(), vBarWidth, viewportHeight));
+            vBar_->setRange(0.0f, contentSize_.height);
+            vBar_->setPageSize(viewportHeight);
+        }
+
+        hBar_->setVisible(needH);
+        if (needH) {
+            hBar_->setBounds(Rect(client.left(), client.top() + viewportHeight, viewportWidth, hBarHeight));
+            hBar_->setRange(0.0f, contentSize_.width);
+            hBar_->setPageSize(viewportWidth);
+        }
+
+        Point origin = viewport_->origin();
+        viewport_->setOrigin(Point(needH ? hBar_->value() : 0.0f, needV ? vBar_->value() : 0.0f));
+        if (origin != viewport_->origin()) {
+            viewport_->redraw();
+        }
+    }
+
+    SyncReturn ScrollView::handleSizeChanged(View& /*sender*/, const Size& /*size*/) {
+        updateLayout();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleVBarValueChanged(ScrollBar& /*sender*/) {
+        Point origin = viewport_->origin();
+        origin.y = vBar_->value();
+        viewport_->setOrigin(origin);
+        viewport_->redraw();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleHBarValueChanged(ScrollBar& /*sender*/) {
+        Point origin = viewport_->origin();
+        origin.x = hBar_->value();
+        viewport_->setOrigin(origin);
+        viewport_->redraw();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleMouseWheel(View& /*sender*/, const Point& /*pt*/, float delta) {
+        if (!vBar_->isVisible()) {
+            return SyncReturn::Ignored;
+        }
+        // delta follows WM_MOUSEWHEEL convention (WHEEL_DELTA == 120.0f
+        // per notch, positive = away from the user/scroll up) - see
+        // RootView's own WM_MOUSEWHEEL handling (rootview.cpp). Scrolls
+        // opposite the wheel's sign (wheel up -> content moves up ->
+        // vBar_'s value decreases), same direction convention every
+        // desktop scroll area uses.
+        float notches = delta / 120.0f;
+        vBar_->setValue(vBar_->value() - notches * wheelLines_ * vBar_->lineStep());
+        return SyncReturn::Handled;
+    }
+
+
+    Image::Image()
+    {
+        setVisible(true);
+
+        onImagePathChanged.add(this, &Image::updateImage);
+    }
+
+    void Image::setImagePath(const std::string& val)
+    {
+        if (imagePath_ != val) {
+            imagePath_ = val;
+            onImagePathChanged(*this, this->imagePath_);
+        }
+    }
+
+    SyncReturn Image::updateImage(Image&, const std::string& newPath)
+    {
+        auto& curStyle = style();
+        curStyle.setBackgroundImage(newPath);
+        curStyle.markDirty();        
+        
         return SyncReturn::Handled;
     }
 

@@ -1,11 +1,8 @@
 #include "newui/frame.h"
 #include "newui/application.h"
-#include "newui/json5_helpers.h"
 #include "newui/menus.h"
+#include "newui/themedata.h"
 #include "newui/uicolormanager.h"
-
-#include <json5/json5.hpp>
-#include <json5/json5_builder.hpp>
 
 namespace newui {
 
@@ -268,6 +265,13 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 				// (uicolormanager.h) for why refreshThemes() alone
 				// (app-drawn chrome only) doesn't reach them.
 				refreshNativeMenuDarkModePolicy();
+				// Picks up the matching Themes/light.theme or dark.theme
+				// (themedata.h) live - before refreshThemes() below
+				// triggers the actual repaint, so that repaint already
+				// sees the newly-loaded data instead of needing a second
+				// toggle to catch up. A no-op (isLoaded() stays whatever
+				// it already was) if neither file exists.
+				ThemeData::instance().reloadForCurrentMode();
 				if (nullptr != rootView_) {
 					rootView_->refreshThemes();
 				}
@@ -393,71 +397,6 @@ std::tuple<Frame*, RootView*> Frame::getTarget(HWND hwnd)
 	}
 
 	return std::make_tuple(targetFrame, targetView);
-}
-
-void Frame::writeFields(json5::builder& w) const {
-	w["title"] = w.new_string(title_);
-
-	// Maximized/minimized isn't a stored member - queried live from
-	// frameHandle_ (if the window exists yet) via WINDOWPLACEMENT, which
-	// also gives the correct "restored" rect to write instead of bounds_
-	// while maximized/minimized (bounds_ itself would just be whatever
-	// the maximized/minimized rect currently is, not useful to restore).
-	Rect boundsToWrite = bounds_;
-	const char* showState = "Normal";
-
-	if (frameHandle_ != nullptr) {
-		WINDOWPLACEMENT wp = {};
-		wp.length = sizeof(wp);
-		if (::GetWindowPlacement(frameHandle_, &wp)) {
-			if (wp.showCmd == SW_SHOWMAXIMIZED) {
-				showState = "Maximized";
-			} else if (wp.showCmd == SW_SHOWMINIMIZED) {
-				showState = "Minimized";
-			}
-
-			boundsToWrite = Rect(
-				float(wp.rcNormalPosition.left), float(wp.rcNormalPosition.top),
-				float(wp.rcNormalPosition.right - wp.rcNormalPosition.left),
-				float(wp.rcNormalPosition.bottom - wp.rcNormalPosition.top));
-		}
-	}
-
-	writeRect(w, "bounds", boundsToWrite);
-	w["showState"] = w.new_string(showState);
-}
-
-void Frame::readFields(const json5::value& obj) {
-	title_ = obj["title"].get_c_str(title_.c_str());
-	bounds_ = readRect(obj["bounds"], bounds_);
-
-	if (frameHandle_ == nullptr) {
-		// Not live yet - bounds_/title_ above take effect once
-		// initialize() runs (see its CreateWindowExA call); show-state
-		// needs a live window and can't be applied here. See
-		// Frame::onCreated for the recommended way to call readFields()
-		// again once frameHandle_ exists.
-		return;
-	}
-
-	std::string showState = obj["showState"].get_c_str("Normal");
-	WORD showCmd = SW_SHOWNORMAL;
-	if (showState == "Maximized") {
-		showCmd = SW_SHOWMAXIMIZED;
-	} else if (showState == "Minimized") {
-		showCmd = SW_SHOWMINIMIZED;
-	}
-
-	WINDOWPLACEMENT wp = {};
-	wp.length = sizeof(wp);
-	if (::GetWindowPlacement(frameHandle_, &wp)) {
-		wp.showCmd = showCmd;
-		wp.rcNormalPosition.left = LONG(bounds_.left());
-		wp.rcNormalPosition.top = LONG(bounds_.top());
-		wp.rcNormalPosition.right = LONG(bounds_.right());
-		wp.rcNormalPosition.bottom = LONG(bounds_.bottom());
-		::SetWindowPlacement(frameHandle_, &wp);
-	}
 }
 
 }

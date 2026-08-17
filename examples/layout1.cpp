@@ -50,7 +50,7 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
     auto* panel = new newui::SubView();
     panel->setName(name);
     panel->setVisible(true);
-    panel->style().backgroundFill = newui::Color::fromName(backgroundColorName).toBLRgba32();
+    panel->style().setBackgroundColor( newui::Color::fromName(backgroundColorName) );
     panel->style().borderFill = newui::Color::fromName(borderColorName).toBLRgba32();
     panel->style().borderWidth = borderWidth;
     return panel;
@@ -111,7 +111,7 @@ int main() {
     frame.onClosed += FrameClosed;
 
     newui::RootView& root = frame.getView();
-    root.style().backgroundFill = newui::Color::fromName("white").toBLRgba32();
+    root.style().setBackgroundColor(newui::Color::fromName("white"));
 
     auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
     rootLayout->setSpacing(12.0f);

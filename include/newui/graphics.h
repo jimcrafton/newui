@@ -6,7 +6,7 @@
 
 #include <string>
 
-namespace newui {
+namespace newui::gfx {
 
     // Wraps a BLImage backed by a real Win32 DIB section, so the exact
     // same pixel buffer blend2d reads/writes via blImage() can also be

@@ -302,6 +302,95 @@ TEST(RootViewMouseEvents, MouseWheelRoutesToHitTestTargetIgnoringCapture) {
     delete root;
 }
 
+// A wheel event over a leaf with no handler of its own bubbles up through
+// its ancestor chain (mirroring accumulatedOffset()'s own per-level walk)
+// until one actually handles it - what lets a ScrollView (controls.h)
+// catch a wheel event over any of its nested content without that content
+// needing to know scrolling exists above it. leaf itself has no
+// onMouseWheel subscriber, so this only passes if RootView::mouseWheel()
+// actually climbs past it to container.
+TEST(RootViewMouseEvents, MouseWheelBubblesToNearestAncestorThatHandlesIt) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(20, 20, 100, 100));
+    container->setVisible(true);
+    container->onMouseWheel += RecordWheel;
+    root->addChild(container);
+
+    auto* leaf = new newui::SubView();
+    leaf->setBounds(newui::Rect(5, 5, 30, 30));  // local to container
+    leaf->setVisible(true);
+    container->addChild(leaf);
+
+    // root-local (30,30) -> container-local (10,10) -> leaf-local (5,5).
+    root->mouseWheel(newui::Point(30, 30), 120.0f, 0, 0);
+
+    EXPECT_EQ(g_wheelEvent.count, 1);
+    EXPECT_EQ(g_wheelEvent.sender, container);
+    // container's own local space - container's (20,20) undone, not
+    // leaf's - see handler placement above.
+    EXPECT_FLOAT_EQ(g_wheelEvent.pt.x, 10.0f);
+    EXPECT_FLOAT_EQ(g_wheelEvent.pt.y, 10.0f);
+
+    root->destroy();
+    delete root;
+}
+
+// A container whose origin() is nonzero (View::origin() - view.h) shifts
+// where its *children* paint/hit-test, not the container's own position -
+// mouseDown routing (which walks through hitTestChildren()) has to land on
+// the child at its origin-shifted position, and the dispatched localPt has
+// to already have that shift undone (matching where the child was actually
+// drawn) - both exercised together since they're the same accumulatedOffset()-
+// vs-hitTestChildren() relationship a real ScrollView's viewport relies on.
+TEST(RootViewMouseEvents, MouseDownAccountsForAncestorOrigin) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* viewport = new newui::SubView();
+    viewport->setBounds(newui::Rect(0, 0, 100, 100));
+    viewport->setVisible(true);
+    root->addChild(viewport);
+
+    auto* content = new newui::SubView();
+    content->setBounds(newui::Rect(0, 0, 80, 80));  // content-space, not viewport-local
+    content->setVisible(true);
+    content->onMouseDown += RecordDown;
+    viewport->addChild(content);
+
+    // Scrolled down/right by (40,40): viewport-local (0,0) now shows
+    // content-space (40,40) - content's own (0,0)-(80,80) footprint
+    // shifts to viewport-local (-40,-40)-(40,40), so only its bottom-
+    // right quadrant remains within the viewport's own (0,0)-(100,100)
+    // bounds.
+    viewport->setOrigin(newui::Point(40.0f, 40.0f));
+
+    // viewport-local (20,20) -> content-space (60,60): still inside
+    // content's (0,0)-(80,80) - should hit, with content's own dispatched
+    // localPt reflecting content-space (60,60), not the raw click point.
+    root->mouseDown(newui::Point(20, 20), 1, 0);
+    EXPECT_EQ(g_downEvent.count, 1);
+    EXPECT_EQ(g_downEvent.sender, content);
+    EXPECT_FLOAT_EQ(g_downEvent.pt.x, 60.0f);
+    EXPECT_FLOAT_EQ(g_downEvent.pt.y, 60.0f);
+    EXPECT_EQ(root->capturedSubView(), content);
+
+    // viewport-local (90,90) -> content-space (130,130): past content's
+    // far edge, so content itself isn't hit (no second RecordDown call) -
+    // hitTestChildren() falls back to viewport (the click is still within
+    // *its* own bounds, just not within any of its children's), not
+    // nullptr - same "no deeper match - this View itself is the target"
+    // behavior hitTestChildren() always has.
+    root->mouseDown(newui::Point(90, 90), 1, 0);
+    EXPECT_EQ(g_downEvent.count, 1);  // unchanged - no second hit on content
+    EXPECT_EQ(root->capturedSubView(), viewport);
+
+    root->destroy();
+    delete root;
+}
+
 TEST(RootViewMouseEvents, MouseLeftClearsHoverAndFiresLeaveButKeepsCapture) {
     ResetMouseEvents();
     auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");

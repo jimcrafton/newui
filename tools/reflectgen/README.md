@@ -6,7 +6,10 @@ registers each class it finds against `newui::reflection` (see
 `examples/reflection1.cpp` writes by hand for `Widget`.
 
 v1 status: standalone script, run manually. Not wired into the CMake
-build yet. Handles: public/private data members as properties,
+build yet. Handles: public/private data members (static or not) as
+fields, explicitly-annotated getter/setter method pairs as properties
+(see below), explicitly-annotated whole-container-accessor/add/remove
+method groups as collection properties (see below),
 `newui::Delegate<SenderT, Args...>` members (typedef'd or not) as
 delegates, non-overloaded-or-disambiguated public methods, public
 non-copy/move constructors, base classes (see below), and enums
@@ -14,6 +17,82 @@ non-copy/move constructors, base classes (see below), and enums
 isn't spellable from the free `register...Enum()` function reflectgen
 emits, so those are skipped). Static methods, templates, and operator
 overloads are explicitly out of scope for now.
+
+**Getter/setter properties:** a public, zero-argument, non-`void`-returning
+method marked `// @reflect property` (or `// @reflect property=someName`
+to pick the property's name explicitly, instead of deriving one from the
+method name - see below) directly above it becomes a `.property(...)`
+entry instead of a `.method(...)` one - e.g.
+
+```cpp
+// @reflect property
+ViewStyle& style() { return *style_; }
+const ViewStyle& style() const { return *style_; }
+```
+
+emits `.property("style", Scope::Public, selectOverload<ViewStyle&(View::*)()>(&View::style))`.
+reflectgen looks for a same-named-by-convention setter automatically
+(`style()`/`setStyle(...)`, `getTitle()`/`setTitle(...)`, `isVisible()`/
+`setVisible(...)`) and wires it in as a real setter if one exists (public,
+exactly one argument, `void`-returning) - `.property(name, scope, getter)`
+without one otherwise, matching `ClassBuilder::property()`'s own get-only
+shape. An overloaded getter (almost always a const/non-const pair, as
+above) is wrapped in `selectOverload<Signature>(...)` automatically -
+`&Class::getter` on its own doesn't compile there (see reflection.h's own
+comment on `selectOverload`), and every overload of that name is
+excluded from `.method(...)` registration, not just the annotated one, so
+the same accessor doesn't end up double-registered under both.
+
+This is opt-in **on purpose**, not inferred from a method's name/shape
+alone - a plain "any public zero-arg non-`void` method is a property"
+heuristic would just as happily flag `View::computeDesiredSize()` or
+`View::cursor()` as "properties", which they aren't. Established
+reflection libraries handle the same const/non-const-overload problem
+this way too - RTTR's `select_overload()` (the direct inspiration for
+`reflection::selectOverload()` here - see
+[rttr.org](https://www.rttr.org/doc/master/register_classes_page.html))
+and Qt's `qOverload()` are the same idiom, and RTTR's own property
+registration is always an explicit `.property(name, getter, setter)`
+call naming both accessors by hand, never inferred from scanning a
+class's methods.
+
+**Plain data members - fields, not properties:** a member variable with
+no accessor methods at all (static or not) becomes a `.field(...)` entry,
+never `.property(...)` - `ClassBuilder<T>::field()`'s pointer-to-member
+overload (`reflection.h`) covers both a real static `ValueT*` and a
+non-static `ValueT T::*` the same way, so reflectgen emits the identical
+`&Class::name` expression either way and lets the C++ type system pick
+the right overload. Only a member actually reached *through* a getter/
+setter method (see above) is a `.property(...)`.
+
+**Collection properties:** a public, zero-argument, non-`void`-returning
+method marked `// @reflect collection` (or `// @reflect
+collection=someName`, same naming rule as `@reflect property`) directly
+above it becomes a `.propertyCollection(...)` entry - the accessor-based
+overload, for a class with one real method that returns the whole
+container (e.g. `const std::vector<SubView*>& View::childViews() const`).
+`add=methodName`/`remove=methodName` (either, both, or neither) name the
+real add/remove methods (each public, one argument, `void`-returning) to
+wire in - e.g.
+
+```cpp
+// @reflect collection add=addChild remove=removeChild
+const std::vector<SubView*>& childViews() const { return childViews_; }
+```
+
+emits `.propertyCollection("childViews", Scope::Public, &View::childViews,
+&View::addChild, &View::removeChild)`. Same opt-in-only reasoning as
+`@reflect property` above - a getter/add/remove trio can't be told apart
+from three unrelated methods by shape alone - and every method involved
+(getter, add, remove) is excluded from `.method(...)` registration, same
+"don't double-register the same accessor" rule.
+
+Not currently generated: the no-single-accessor shape
+`ClassBuilder<T>::propertyCollectionByCountAndIndex()` covers (a class with
+only independent `count()`/`getAt(index)` methods and no method that
+returns the whole container at all, e.g. `test_reflectionio.cpp`'s
+`Sprocket`) - real, hand-writable, just not something reflectgen detects
+yet; nothing in the real (non-test) codebase needs it generated today.
 
 **Base classes:** a class with exactly one *public* base gets a
 `.base<BaseClass>()` call emitted (first in the chain, before any

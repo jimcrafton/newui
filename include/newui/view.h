@@ -10,7 +10,6 @@
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
-#include <newui/uicomponent.h>
 #include <newui/viewstyle.h>
 
 namespace newui {
@@ -27,7 +26,7 @@ namespace newui {
     // owns via a raw pointer (a parent's childViews_, PropertyManager's
     // properties_, Frame's rootView_, ...) and frees explicitly - see
     // View::destroy().
-    class View : public UIComponent {
+    class View {
     public:
         virtual ~View() = default;
 
@@ -182,6 +181,26 @@ namespace newui {
         //but it could be less than this
         virtual void redraw();
 
+        // How far this view's own children are shifted when painted/hit-
+        // tested - a scroll offset, not this view's own position (that's
+        // still bounds()/setBounds(), untouched). (0,0) (the default) is a
+        // no-op: every child paints/hit-tests exactly where its own
+        // bounds() already say. paintChildren() translates by -origin()
+        // before walking children; hitTestChildren() tests against
+        // localPt + origin() instead of raw localPt, so the two stay
+        // consistent with each other - see their own doc comments. A
+        // ScrollView-style container sets this on whichever child actually
+        // hosts scrollable content (see controls.h's ScrollView), not on
+        // itself, so its own always-visible chrome (scrollbars) stays put
+        // regardless of scroll position.
+        const Point& origin() const {
+            return origin_;
+        }
+
+        void setOrigin(const Point& origin) {
+            origin_ = origin;
+        }
+
         // Draws this view's own content. Default is a no-op; SubView
         // subclasses override it to draw themselves. ctx is already
         // translated so (0,0) is this view's top-left corner and clipped to
@@ -306,13 +325,6 @@ namespace newui {
         // plain setRootView() for exactly that reason.
         void propagateRootView(RootView* root);
 
-        // UIComponent: covers name_/bounds_/visible_ only - style_/layout_/
-        // childViews_ are nested UIComponents of their own, composed by
-        // the tree-walker in serialization.cpp, not written here. See
-        // SubView/RootView for the typeName()-relevant subclass overrides.
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
-
     protected:
         Rect bounds_;
         bool visible_ = false;
@@ -331,6 +343,8 @@ namespace newui {
         std::unique_ptr<Layout> layout_;
 
         std::vector<SubView*> childViews_;
+
+        Point origin_;
 
         View* parent_ = nullptr;
 

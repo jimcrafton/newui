@@ -69,7 +69,7 @@ newui::SubView* MakeLabel(const std::string& text) {
     // backgroundFill re-establishes a clean backdrop before each redraw,
     // same as every other control in this demo already has via its own
     // track/fill chrome.
-    style->backgroundFill = newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground).toBLRgba32();
+    style->setBackgroundColor( newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground) );
     label->setStyle(std::move(style));
     label->setDesiredSize(newui::Size(150.0f, 24.0f));
     return label;
@@ -121,7 +121,7 @@ int main() {
     // hardcoded white background here, with the OS in Dark mode, produced
     // an unreadable near-black-on-near-black Button - its native chrome
     // correctly went dark to match the OS, its text color didn't).
-    root.style().backgroundFill = newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground).toBLRgba32();
+    root.style().setBackgroundColor( newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground) );
 
     /*
     root.onMouseMove += [](newui::View&, const newui::Point& pt, std::uint32_t, std::uint32_t) -> newui::SyncReturn { 
@@ -376,6 +376,25 @@ int main() {
             return newui::SyncReturn::Handled;
         }));
     floatSliderRow->addChild(floatSlider);
+
+
+
+    auto* imageRow = new newui::SubView();
+    imageRow->setVisible(true);
+    imageRow->setDesiredSize(newui::Size(0.0f, 100.0f));
+    auto imageRowRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    imageRowRowLayout->setSpacing(12.0f);
+    imageRow->setLayout(std::move(imageRowRowLayout));
+    
+    root.addChild(imageRow);
+
+    auto* imgCtrl = new newui::Image();
+    imgCtrl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    imgCtrl->setImagePath("C:\\Users\\jim\\Pictures\\Screenshots\\Screenshot 2026-08-14 175923.png");
+
+    imageRow->addChild(imgCtrl);
+
+    
 
     app.run();
 

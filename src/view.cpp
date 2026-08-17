@@ -1,9 +1,5 @@
 #include "newui/view.h"
 #include "newui/subview.h"
-#include "newui/json5_helpers.h"
-
-#include <json5/json5.hpp>
-#include <json5/json5_builder.hpp>
 
 namespace newui {
 	bool View::initialize()
@@ -82,6 +78,17 @@ namespace newui {
 		// RootView's own narrow top-level clip) fixed it immediately, so
 		// every visible child is always walked unconditionally - the
 		// original, safe behavior.
+		//
+		// origin_ shifts all children uniformly (a scroll offset - see its
+		// own doc comment, view.h) via one translate before the loop,
+		// rather than per-child - the outer clip a parent already
+		// established on *this* view before calling paintChildren() (the
+		// ctx.clip_to_rect() below, one level up the call stack) stays in
+		// effect through the translate, so scrolled content is still
+		// correctly clipped to this view's own bounds without needing a
+		// second, redundant clip here.
+		ctx.save();
+		ctx.translate(-origin_.x, -origin_.y);
 		for (SubView* child : childViews_) {
 			if (!child->isVisible()) {
 				continue;
@@ -99,9 +106,15 @@ namespace newui {
 
 			ctx.restore();
 		}
+		ctx.restore();
 	}
 
 	SubView* View::hitTestChildren(const Point& localPt, Point& outLocalPt) const {
+		// Undoes paintChildren()'s -origin_ shift, so a point in this
+		// view's own (unscrolled) local space maps onto its children's
+		// bounds exactly the way they were actually drawn - see origin()'s
+		// own doc comment (view.h).
+		Point contentPt = localPt + origin_;
 		for (auto it = childViews_.rbegin(); it != childViews_.rend(); ++it) {
 			SubView* child = *it;
 			if (!child->isVisible()) {
@@ -109,11 +122,11 @@ namespace newui {
 			}
 
 			const Rect& bounds = child->bounds();
-			if (!bounds.contains(localPt)) {
+			if (!bounds.contains(contentPt)) {
 				continue;
 			}
 
-			Point childLocalPt(localPt.x - bounds.left(), localPt.y - bounds.top());
+			Point childLocalPt(contentPt.x - bounds.left(), contentPt.y - bounds.top());
 
 			Point deeperLocalPt;
 			if (SubView* deeper = child->hitTestChildren(childLocalPt, deeperLocalPt)) {
@@ -138,56 +151,17 @@ namespace newui {
 	void View::redraw()
 	{
 		if (nullptr != rootView_) {
-			newui::Rect r = this->getClientBounds();
+			// The view's own full local bounds, not getClientBounds() -
+			// that's deliberately deflated by style()'s border/3D-edge/
+			// theme-content-rect chrome (ViewStyle::computeClientBounds()),
+			// which is exactly the part a scoped repaint still needs to
+			// cover. Invalidating only the client rect leaves that chrome
+			// band's on-screen pixels stale (e.g. a themed control's edge
+			// never gets its "unhover" repaint), visible as leftover
+			// artifacts while hovering across bordered/themed controls.
+			newui::Rect r(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
 			rootView_->markDirty(this, r);
 		}
 	}
 
-	void View::writeFields(json5::builder& w) const {
-		w["name"] = w.new_string(name_);
-		w["visible"] = visible_;
-		writeRect(w, "bounds", bounds_);
-		if (desiredSizeOverride_.has_value()) {
-			writeSize(w, "desiredSize", *desiredSizeOverride_);
-		}
-		// A Custom cursor with no path() (built via cursor().setImage() -
-		// an in-memory image has no stable, file-portable representation,
-		// same reasoning as BLPattern/BLGradient fills - viewstyle.cpp/
-		// HANDOFF.md) is skipped entirely. A Custom cursor loaded from a
-		// file (setPath()) *is* portable via that same path, so it
-		// round-trips as both fields below instead of being skipped.
-		if (cursor_.kind() != CursorKind::Custom) {
-			w["cursor"] = w.new_string(Cursor::cursorKindToString(cursor_.kind()));
-		} else if (!cursor_.path().empty()) {
-			w["cursor"] = w.new_string(Cursor::cursorKindToString(CursorKind::Custom));
-			w["cursorPath"] = w.new_string(cursor_.path());
-		}
-	}
-
-	void View::readFields(const json5::value& obj) {
-		name_ = obj["name"].get_c_str(name_.c_str());
-		visible_ = obj["visible"].get_bool(visible_);
-		bounds_ = readRect(obj["bounds"], bounds_);
-		if (json5::value v = obj["desiredSize"]; v.is_object()) {
-			desiredSizeOverride_ = readSize(v);
-		} else {
-			desiredSizeOverride_.reset();
-		}
-
-		std::string cursorKindStr = obj["cursor"].get_c_str("");
-		if (!cursorKindStr.empty()) {
-			CursorKind kind = Cursor::cursorKindFromString(cursorKindStr, cursor_.kind());
-			if (kind == CursorKind::Custom) {
-				std::string cursorPath = obj["cursorPath"].get_c_str("");
-				// setPath() failing (file missing/unreadable at load time)
-				// leaves cursor_ untouched, same "current cursor left as-is
-				// on failure" contract setPath() always has.
-				if (!cursorPath.empty()) {
-					cursor_.setPath(cursorPath);
-				}
-			} else {
-				cursor_.setCursorKind(kind);
-			}
-		}
-	}
 }

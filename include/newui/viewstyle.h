@@ -3,13 +3,13 @@
 #include <blend2d/blend2d.h>
 #include <newui/font.h>
 #include <newui/geometry.h>
-#include <newui/uicomponent.h>
+#include <newui/color.h>
 
-// <newui/uicomponent.h> already transitively includes <windows.h> (via
-// "newui/utils.h") without NOMINMAX defined first - see the
-// feedback_no_std_minmax memory if this file ever needs std::min/std::max;
-// use a ternary instead. <uxtheme.h>/<vssym32.h> need windows.h already
-// included, which by this point it is.
+// <newui/newui.h> already transitively includes <windows.h> with
+// NOMINMAX defined first - see the feedback_no_std_minmax memory if this
+// file ever needs std::min/std::max; use a ternary instead.
+// <uxtheme.h>/<vssym32.h> need windows.h already included, which by this
+// point it is.
 #include <uxtheme.h>
 #include <vssym32.h>
 
@@ -69,6 +69,59 @@ namespace newui {
         }
     }
 
+
+    enum FillStyle{
+        FillNone = 0,
+        FillColor,
+        FillImage,
+        FillGradient
+    };
+
+    enum StrokeStyle {
+        StrokeNone = 0,
+        StrokeColor,
+        StrokeImage,
+        StrokeGradient
+    };
+
+    //map these to BLCompOp, they could have been different but want to keep these separate
+    enum CompositingFlag {
+        CompNone = 0,
+        CompSrcOver = 101,        
+        CompSrcopy,        
+        CompSrcIn,        
+        CompSrcOut,        
+        CompSrcAtop,
+        CompDstOver,
+        CompDstCopy,
+        CompDstIn,
+        CompDstOut,
+        CompDstAtop,
+        CompXOR,
+        CompClear,
+        CompPlus,
+        CompMinus,
+        CompModulate,
+        CompMultiply,
+        CompScreen,
+        CompOverlay,
+        CompDarken,
+        CompLighten,
+        CompColorDodge,
+        CompColorBurn,
+        CompLinearBurn,
+        CompLinearLight,
+        CompPinLight,
+        CompHardLight,
+        CompSoftLight,
+        CompDifference,
+        CompExclusion
+    };
+
+
+    BLCompOp toBLCompOp(CompositingFlag f);
+    CompositingFlag toCompositingFlag(BLCompOp f);
+
     // Common appearance drawn by View::paintStyle() before a view's own
     // paint() runs. backgroundFill/borderFill/highlightFill are BLVar, so
     // each can independently hold a solid color (BLRgba32/BLRgba64), a
@@ -81,14 +134,43 @@ namespace newui {
     // (a 3D edge, a checkmark, ...) - paint() is the extension point;
     // override it, call ViewStyle::paint() first for the background/
     // border, then add whatever's specific to that widget kind.
-    class ViewStyle : public UIComponent {
+    class ViewStyle {
+    protected:
+        BLVar backgroundFill_;
     public:
         virtual ~ViewStyle() = default;
 
-        BLVar backgroundFill;
+        
+        const BLVar& backgroundFill() const { return backgroundFill_;  }
+
         BLVar borderFill;
         float borderWidth = 0.0f;
         BLVar highlightFill;
+        FillStyle bkgFillStyle = FillStyle::FillColor;
+        FillStyle hilightFillStyle = FillStyle::FillColor;
+        StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
+
+        float rectRadius = 0.0;
+
+        // Multiplies the alpha of whatever's set above (works uniformly for
+        // colors, gradients and images) - separate from any alpha already
+        // baked into a color/image itself.
+        float opacity = 1.0f;
+
+        // How background/border blend with whatever's already in the
+        // buffer; see BLCompOp. Defaults to normal alpha-blended painting.
+        CompositingFlag compositingOp = CompSrcOver;
+
+        // Font available for this style's own text-drawing needs - e.g. a
+        // LabelStyle subclass that draws text in its paint() override. See
+        // FontManager::createFont() to load one, by system font name or by
+        // file path. Default-constructed (invalid/empty) until set; the
+        // base ViewStyle::paint() doesn't draw text itself (this toolkit
+        // has no automatic text layout/drawing yet), so this is just
+        // storage for whoever paints text for this view.
+        Font font;
+
+
 
         // Sets backgroundFill to path's image (PNG/BMP/JPEG/QOI - decoded
         // via BLImage::read_from_file(), same codecs Bundle::loadImage()
@@ -118,23 +200,14 @@ namespace newui {
         // why this takes a plain BLImage rather than a newui::Image.
         void setBackgroundImage(const BLImage& image);
 
-        // Multiplies the alpha of whatever's set above (works uniformly for
-        // colors, gradients and images) - separate from any alpha already
-        // baked into a color/image itself.
-        float opacity = 1.0f;
+        void setBackgroundGradient(const BLGradient& gradient);
 
-        // How background/border blend with whatever's already in the
-        // buffer; see BLCompOp. Defaults to normal alpha-blended painting.
-        BLCompOp compositingOp = BL_COMP_OP_SRC_OVER;
+        void setBackgroundColor(const Color& color);
+        void setBackgroundColor(const BLRgba32& color);
 
-        // Font available for this style's own text-drawing needs - e.g. a
-        // LabelStyle subclass that draws text in its paint() override. See
-        // FontManager::createFont() to load one, by system font name or by
-        // file path. Default-constructed (invalid/empty) until set; the
-        // base ViewStyle::paint() doesn't draw text itself (this toolkit
-        // has no automatic text layout/drawing yet), so this is just
-        // storage for whoever paints text for this view.
-        Font font;
+        void setHilightColor(const Color& color);
+        
+        
 
         // The rect (local to a view of this size, (0,0) at its top-left) a
         // client should paint its own content/children in without
@@ -148,9 +221,7 @@ namespace newui {
         // checkbox glyph, ...) override this the same way they override
         // paint() - chain to the base first, then deflate further by
         // whatever they add; see ButtonStyle/CheckBoxStyle.
-        virtual Rect computeClientBounds(const Size& size) const {
-            return Rect(0.0f, 0.0f, size.width, size.height).deflated(borderWidth);
-        }
+        virtual Rect computeClientBounds(const Size& size) const;
 
         // Paints this style into ctx, which is already translated/clipped
         // to (0,0)-(size.width,size.height) for the view being styled;
@@ -166,34 +237,7 @@ namespace newui {
         // style before a subclass's own paint() override has drawn
         // anything further - see ButtonStyle/CheckBoxStyle, which rely on
         // this and don't need to touch clientBounds again themselves.
-        virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
-            clientBounds = computeClientBounds(size);
-
-            if (size.width <= 0.0f || size.height <= 0.0f) {
-                return;
-            }
-
-            const BLVar& background = (highlighted && !highlightFill.is_null()) ? highlightFill : backgroundFill;
-
-            ctx.save();
-            ctx.set_comp_op(compositingOp);
-
-            if (!background.is_null()) {
-                ctx.set_fill_style(background);
-                ctx.set_fill_alpha(opacity);
-                ctx.fill_rect(BLRect(0, 0, size.width, size.height));
-            }
-
-            if (borderWidth > 0.0f && !borderFill.is_null()) {
-                double inset = borderWidth * 0.5;
-                ctx.set_stroke_style(borderFill);
-                ctx.set_stroke_alpha(opacity);
-                ctx.set_stroke_width(borderWidth);
-                ctx.stroke_box(inset, inset, size.width - inset, size.height - inset);
-            }
-
-            ctx.restore();
-        }
+        virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const;
 
         View* view() {
             return view_;
@@ -208,14 +252,6 @@ namespace newui {
         }
 
         void markDirty();
-
-        // UIComponent: backgroundFill/borderFill/borderWidth/highlightFill/
-        // opacity/compositingOp/font. Defined out-of-line in viewstyle.cpp
-        // (unlike paint() above) since the json5 types writeFields()/
-        // readFields() take are only forward-declared here (see
-        // uicomponent.h) - keeps json5's real headers out of this one.
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     private:
         View* view_ = nullptr;
@@ -242,7 +278,7 @@ namespace newui {
                 return bounds;
             }
             bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
-            return bounds.deflated(doubled ? edgeWidth * 2.0f : edgeWidth);
+            return bounds.deflate(doubled ? edgeWidth * 2.0f : edgeWidth);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
@@ -253,13 +289,11 @@ namespace newui {
             }
 
             ctx.save();
-            ctx.set_comp_op(compositingOp);
+            ctx.set_comp_op(toBLCompOp(compositingOp));
             paintEdge3D(ctx, size, edgeStyle, edgeHighlightColor, edgeShadowColor, edgeWidth);
             ctx.restore();
         }
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
     };
 
     // ViewStyle plus a single line of text (background/border only besides
@@ -328,7 +362,7 @@ namespace newui {
             double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
             ctx.save();
-            ctx.set_comp_op(compositingOp);
+            ctx.set_comp_op(toBLCompOp(compositingOp));
             ctx.set_fill_style(textColor);
             ctx.set_fill_alpha(opacity);
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
@@ -350,8 +384,6 @@ namespace newui {
             ctx.restore();
         }
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),
@@ -381,7 +413,7 @@ namespace newui {
             if (boxSize <= 0.0f) {
                 return bounds;
             }
-            return bounds.deflated(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
+            return bounds.deflate(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
@@ -395,7 +427,7 @@ namespace newui {
             Size boxViewSize(boxSize, boxSize);
 
             ctx.save();
-            ctx.set_comp_op(compositingOp);
+            ctx.set_comp_op(toBLCompOp(compositingOp));
             ctx.translate(0.0, boxTop);
 
             if (!boxFill.is_null()) {
@@ -418,8 +450,6 @@ namespace newui {
             ctx.restore();
         }
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
     };
 
     // Base for a second family of styles alongside ViewStyle/ButtonStyle/
@@ -515,8 +545,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return BP_PUSHBUTTON; }
@@ -538,8 +566,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return BP_CHECKBOX; }
@@ -563,8 +589,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return BP_RADIOBUTTON; }
@@ -591,8 +615,6 @@ namespace newui {
 
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return BP_GROUPBOX; }
@@ -614,8 +636,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TP_BUTTON; }
@@ -643,8 +663,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TP_DROPDOWNBUTTON; }
@@ -670,8 +688,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TP_DROPDOWNBUTTONGLYPH; }
@@ -697,8 +713,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TP_SPLITBUTTON; }
@@ -723,8 +737,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TP_SPLITBUTTONDROPDOWN; }
@@ -753,8 +765,6 @@ namespace newui {
 
         bool horizontal = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? TP_SEPARATOR : TP_SEPARATORVERT; }
@@ -763,10 +773,7 @@ namespace newui {
 
     // ThemedViewStyle plus a native status bar pane background (STATUS/
     // SP_PANE). This part has no state variants at all - stateId()
-    // always returns 0 (same for ThemedRebarBandStyle below); no extra
-    // fields either, so no writeFields()/readFields() override is needed
-    // (ViewStyle's own, inherited via ThemedViewStyle, is already
-    // everything there is to save).
+    // always returns 0 (same for ThemedRebarBandStyle below).
     //
     // Real, expected uxtheme behavior worth knowing if this ever looks
     // "wrong": DrawThemeBackground() draws SP_PANE as just a thin one-
@@ -816,8 +823,6 @@ namespace newui {
         bool horizontal = true;
         bool pressed = false;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? RP_CHEVRON : RP_CHEVRONVERT; }
@@ -844,8 +849,6 @@ namespace newui {
 
         bool linked = false;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TTP_STANDARD; }
@@ -866,8 +869,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return isUpButton ? SPNP_UP : SPNP_DOWN; }
@@ -900,8 +901,6 @@ namespace newui {
         bool readOnly = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return EP_EDITTEXT; }
@@ -934,8 +933,6 @@ namespace newui {
         bool selected = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return LVP_LISTITEM; }
@@ -961,8 +958,6 @@ namespace newui {
         bool pressed = false;
         bool sorted = false;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return HP_HEADERITEM; }
@@ -988,8 +983,6 @@ namespace newui {
 
         bool sortedAscending = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return HP_HEADERSORTARROW; }
@@ -1009,8 +1002,6 @@ namespace newui {
         bool selected = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TVP_TREEITEM; }
@@ -1043,8 +1034,6 @@ namespace newui {
 
         bool expanded = false;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return TVP_GLYPH; }
@@ -1097,8 +1086,6 @@ namespace newui {
         bool selected = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override {
@@ -1152,8 +1139,6 @@ namespace newui {
 
         bool horizontal = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? TKP_TRACK : TKP_TRACKVERT; }
@@ -1177,8 +1162,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? TKP_THUMB : TKP_THUMBVERT; }
@@ -1213,8 +1196,6 @@ namespace newui {
         // (see Slider::updateTickCount(), controls.cpp). 0 draws nothing.
         int tickCount = 10;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
         // TKP_TICS/TKP_TICSVERT's own theme asset draws as a flat,
         // featureless fill in current Windows visual styles - real
@@ -1246,8 +1227,6 @@ namespace newui {
 
         bool horizontal = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? PP_BAR : PP_BARVERT; }
@@ -1281,8 +1260,6 @@ namespace newui {
         bool horizontal = true;
         FillState state = FillState::Normal;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? PP_FILL : PP_FILLVERT; }
@@ -1314,8 +1291,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return horizontal ? SBP_THUMBBTNHORZ : SBP_THUMBBTNVERT; }
@@ -1346,8 +1321,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override { return SBP_ARROWBTN; }
@@ -1382,8 +1355,6 @@ namespace newui {
         bool pressed = false;
         bool enabled = true;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
     protected:
         int partId() const override {
@@ -1424,8 +1395,6 @@ namespace newui {
         float highlightInset = 2.0f;
         float highlightCornerRadius = 4.0f;
 
-        void writeFields(json5::builder& w) const override;
-        void readFields(const json5::value& obj) override;
 
         // Overrides the base ThemedViewStyle::paint() entirely (no native
         // DrawThemeBackground call at all for this style) - see its own
@@ -1447,8 +1416,7 @@ namespace newui {
     // (MENU/MENU_BARBACKGROUND) - no real state to track (this toolkit
     // has no "inactive window" concept modeled anywhere), so stateId()
     // just hardcodes MB_ACTIVE - same "one sensible fixed value" shape as
-    // ThemedTabPaneStyle/ThemedStatusPaneStyle; no writeFields()/
-    // readFields() override needed for the same reason.
+    // ThemedTabPaneStyle/ThemedStatusPaneStyle.
     class ThemedMenuBarBackgroundStyle : public ThemedViewStyle {
     public:
         ThemedMenuBarBackgroundStyle() : ThemedViewStyle(L"MENU") {}

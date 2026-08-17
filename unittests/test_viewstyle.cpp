@@ -250,7 +250,7 @@ TEST(ViewStyle, MarkDirtyDoesNotCrashWithNoLiveRootView) {
 
 TEST(ViewStyle, BorderDeflatesClientBoundsByBorderWidth) {
     newui::ViewStyle style;
-    style.backgroundFill = BLRgba32(255, 0, 0);
+    style.setBackgroundColor( BLRgba32(255, 0, 0));
     style.borderFill = BLRgba32(0, 0, 255);
     style.borderWidth = 2.0f;
 
@@ -393,7 +393,7 @@ TEST(ViewStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
 
 TEST(ViewStyle, SetBackgroundImageFromBLImageSetsAPatternFill) {
     newui::ViewStyle style;
-    EXPECT_TRUE(style.backgroundFill.is_null());
+    EXPECT_TRUE(style.backgroundFill().is_null());
 
     BLImage image(4, 4, BL_FORMAT_PRGB32);
     {
@@ -405,8 +405,8 @@ TEST(ViewStyle, SetBackgroundImageFromBLImageSetsAPatternFill) {
 
     style.setBackgroundImage(image);
 
-    EXPECT_FALSE(style.backgroundFill.is_null());
-    EXPECT_TRUE(style.backgroundFill.is_pattern());
+    EXPECT_FALSE(style.backgroundFill().is_null());
+    EXPECT_TRUE(style.backgroundFill().is_pattern());
 }
 
 TEST(ViewStyle, SetBackgroundImageSurvivesTheSourceImageGoingOutOfScope) {
@@ -444,20 +444,20 @@ TEST(ViewStyle, SetBackgroundImageFromPathLoadsARealFile) {
     newui::ViewStyle style;
     EXPECT_TRUE(style.setBackgroundImage(path));
 
-    EXPECT_TRUE(style.backgroundFill.is_pattern());
+    EXPECT_TRUE(style.backgroundFill().is_pattern());
 
     ::DeleteFileA(path.c_str());
 }
 
 TEST(ViewStyle, SetBackgroundImageFromPathFailsForAMissingFileAndLeavesFillUnchanged) {
     newui::ViewStyle style;
-    style.backgroundFill = BLRgba32(1, 2, 3);
+    style.setBackgroundColor( BLRgba32(1, 2, 3) );
 
     EXPECT_FALSE(style.setBackgroundImage("NoSuchBackgroundImage.png"));
 
-    ASSERT_TRUE(style.backgroundFill.is_rgba32());
+    ASSERT_TRUE(style.backgroundFill().is_rgba32());
     BLRgba32 rgba;
-    style.backgroundFill.to_rgba32(&rgba);
+    style.backgroundFill().to_rgba32(&rgba);
     EXPECT_EQ(rgba.value, BLRgba32(1, 2, 3).value);
 }
 
@@ -612,9 +612,7 @@ TEST(LabelStyle, TextIsCenteredWithinClientBounds) {
 // RootView - see HANDOFF.md), so these only cover what's verifiable
 // headlessly: paint()'s graceful no-op with no live window behind it yet,
 // computeClientBounds()'s no-theme-cached fallback, and stateId()'s
-// precedence logic. Serialization round-tripping is covered in
-// test_serialization.cpp, matching how ButtonStyle/CheckBoxStyle's own
-// round-trip is tested there rather than here.
+// precedence logic.
 // ---------------------------------------------------------------------------
 
 TEST(ThemedButtonStyle, PaintWithNoAttachedViewDoesNotCrash) {
@@ -686,8 +684,7 @@ TEST(ThemedCheckBoxStyle, StateIdPrecedenceAndCheckedDoubling) {
 // ThemedStatusPaneStyle / ThemedRebarBandStyle / ThemedTooltipStyle /
 // ThemedSpinButtonStyle / ThemedEditStyle - same live-HWND constraint and
 // scope as ThemedButtonStyle/ThemedCheckBoxStyle above: paint()'s graceful
-// no-op, and stateId()/partId() precedence logic. Serialization round-
-// tripping is covered in test_serialization.cpp.
+// no-op, and stateId()/partId() precedence logic.
 // ---------------------------------------------------------------------------
 
 TEST(ThemedRadioButtonStyle, PaintWithNoAttachedViewDoesNotCrash) {
@@ -1634,7 +1631,7 @@ TEST(ThemedMenuBarBackgroundStyle, PartAndStateAreFixed) {
 
 TEST(RectDeflated, UniformInsetOnAllSides) {
     newui::Rect r(0.0f, 0.0f, 20.0f, 10.0f);
-    newui::Rect d = r.deflated(2.0f);
+    newui::Rect d = r.deflate(2.0f);
 
     EXPECT_FLOAT_EQ(d.left(), 2.0f);
     EXPECT_FLOAT_EQ(d.top(), 2.0f);
@@ -1644,7 +1641,7 @@ TEST(RectDeflated, UniformInsetOnAllSides) {
 
 TEST(RectDeflated, PerSideInset) {
     newui::Rect r(0.0f, 0.0f, 20.0f, 20.0f);
-    newui::Rect d = r.deflated(5.0f, 0.0f, 0.0f, 0.0f);
+    newui::Rect d = r.deflate(5.0f, 0.0f, 0.0f, 0.0f);
 
     EXPECT_FLOAT_EQ(d.left(), 5.0f);
     EXPECT_FLOAT_EQ(d.top(), 0.0f);
@@ -1654,7 +1651,7 @@ TEST(RectDeflated, PerSideInset) {
 
 TEST(RectDeflated, OverlappingInsetsClampToZeroNotNegative) {
     newui::Rect r(0.0f, 0.0f, 10.0f, 10.0f);
-    newui::Rect d = r.deflated(8.0f);
+    newui::Rect d = r.deflate(8.0f);
 
     EXPECT_GE(d.size().width, 0.0f);
     EXPECT_GE(d.size().height, 0.0f);
@@ -1662,7 +1659,7 @@ TEST(RectDeflated, OverlappingInsetsClampToZeroNotNegative) {
 
 TEST(RectDeflated, NegativeAmountInflates) {
     newui::Rect r(0.0f, 0.0f, 10.0f, 10.0f);
-    newui::Rect d = r.deflated(-2.0f);
+    newui::Rect d = r.deflate(-2.0f);
 
     EXPECT_FLOAT_EQ(d.left(), -2.0f);
     EXPECT_FLOAT_EQ(d.size().width, 14.0f);

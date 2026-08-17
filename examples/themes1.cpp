@@ -14,7 +14,8 @@
 //     drop-down/split-button/separator/chevron theme parts - see
 //     AddToolbarDemo()), then mainRow filling everything left over.
 //   - mainRow's own horizontal FlexLayout - a fixed-width sidebar plus
-//     three flexible content panels sharing the leftover width by weight.
+//     four flexible content panels sharing the leftover width by weight,
+//     the last (content4) a real ScrollView (controls.h).
 //   - AnchorLayout, nested inside one of those content panels, pins a
 //     small badge to its top-right corner - showing that a Layout
 //     arranges whatever View it's attached to, not just the root, and
@@ -42,12 +43,12 @@
 
 #include "newui/newui.h"
 #include "newui/application.h"
+#include "newui/controls.h"
 #include "newui/frame.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
 #include "newui/layout.h"
 #include "newui/color.h"
-#include "newui/serialization.h"
 #include "newui/cursor.h"
 #include "newui/menus.h"
 #include "newui/tabcontrol.h"
@@ -59,11 +60,10 @@
 
 #include <iostream>
 #include <memory>
+#include <string>
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
     printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
-
-    //saveFrameToFile(frame, "frame.json");
 
     return newui::SyncReturn::Handled;
 }
@@ -104,13 +104,13 @@ newui::SubView* g_demoToolbarRow = nullptr;
 void ApplyThemeColors() {
     if (g_demoRootView != nullptr) {
         newui::Color background = newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground);
-        g_demoRootView->style().backgroundFill = background.toBLRgba32();
+        g_demoRootView->style().setBackgroundColor( background);
         g_demoRootView->markDirty();
     }
 
     if (g_demoToolbarRow != nullptr) {
         newui::Color background = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground);
-        g_demoToolbarRow->style().backgroundFill = background.toBLRgba32();
+        g_demoToolbarRow->style().setBackgroundColor( background );
         g_demoToolbarRow->style().markDirty();
     }
 }
@@ -302,8 +302,8 @@ void AddToolbarDemo(newui::RootView& root) {
     auto* toolbarRow = new newui::SubView();
     toolbarRow->setName("toolbarRow");
     toolbarRow->setVisible(true);
-    toolbarRow->style().backgroundFill =
-        newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32();
+    toolbarRow->style().setBackgroundColor(
+        newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground) );
     g_demoToolbarRow = toolbarRow;
     toolbarRow->setDesiredSize(newui::Size(0.0f, 32.0f));
     toolbarRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
@@ -389,7 +389,7 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
     auto* panel = new newui::SubView();
     panel->setName(name);
     panel->setVisible(true);
-    panel->style().backgroundFill = newui::Color::fromName(backgroundColorName).toBLRgba32();
+    panel->style().setBackgroundColor( newui::Color::fromName(backgroundColorName) );
     panel->style().borderFill = newui::Color::fromName(borderColorName).toBLRgba32();
     panel->style().borderWidth = borderWidth;
     return panel;
@@ -890,50 +890,25 @@ int main() {
     themedProgressFill2->setLayoutParams(std::move(fill2Params));
     progressRow2->addChild(themedProgressFill2);
 
-    // Scrollbar: up arrow, thumb, track segment, down arrow - stacked
-    // vertically via their own nested FlexLayout.
-    auto* scrollbarColumn = new newui::SubView();
-    scrollbarColumn->setName("scrollbarColumn");
-    scrollbarColumn->setVisible(true);
-    scrollbarColumn->setDesiredSize(newui::Size(20.0f, 100.0f));
-    scrollbarColumn->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
-    content2->addChild(scrollbarColumn);
 
-    auto* scrollbarUpArrow = new newui::SubView();
-    scrollbarUpArrow->setName("scrollbarUpArrow");
-    scrollbarUpArrow->setVisible(true);
-    auto upArrowStyle = std::make_unique<newui::ThemedScrollbarArrowStyle>();
-    upArrowStyle->direction = newui::ThemedScrollbarArrowStyle::Direction::Up;
-    scrollbarUpArrow->setStyle(std::move(upArrowStyle));
-    scrollbarUpArrow->setDesiredSize(newui::Size(20.0f, 20.0f));
-    scrollbarColumn->addChild(scrollbarUpArrow);
-
-    auto* scrollbarThumb = new newui::SubView();
-    scrollbarThumb->setName("scrollbarThumb");
-    scrollbarThumb->setVisible(true);
-    auto scrollbarThumbStyle = std::make_unique<newui::ThemedScrollbarThumbStyle>();
-    scrollbarThumbStyle->horizontal = false;
-    scrollbarThumb->setStyle(std::move(scrollbarThumbStyle));
-    scrollbarThumb->setDesiredSize(newui::Size(20.0f, 30.0f));
-    scrollbarColumn->addChild(scrollbarThumb);
-
-    auto* scrollbarTrack = new newui::SubView();
-    scrollbarTrack->setName("scrollbarTrack");
-    scrollbarTrack->setVisible(true);
-    auto scrollbarTrackStyle = std::make_unique<newui::ThemedScrollbarTrackStyle>();
-    scrollbarTrackStyle->horizontal = false;
-    scrollbarTrack->setStyle(std::move(scrollbarTrackStyle));
-    scrollbarTrack->setDesiredSize(newui::Size(20.0f, 20.0f));
-    scrollbarColumn->addChild(scrollbarTrack);
-
-    auto* scrollbarDownArrow = new newui::SubView();
-    scrollbarDownArrow->setName("scrollbarDownArrow");
-    scrollbarDownArrow->setVisible(true);
-    auto downArrowStyle = std::make_unique<newui::ThemedScrollbarArrowStyle>();
-    downArrowStyle->direction = newui::ThemedScrollbarArrowStyle::Direction::Down;
-    scrollbarDownArrow->setStyle(std::move(downArrowStyle));
-    scrollbarDownArrow->setDesiredSize(newui::Size(20.0f, 20.0f));
-    scrollbarColumn->addChild(scrollbarDownArrow);
+    // A real, interactive ScrollBar (controls.h) - up/down arrow click
+    // (with auto-repeat), track-click paging, and thumb drag are all live
+    // here, unlike the loose hand-wired Themed*Style SubViews this used to
+    // be. content2Layout's own crossAxisAlignment is Stretch (its default,
+    // relied on by every other row above to fill content2's full width) -
+    // without an explicit override here, this ScrollBar would get
+    // stretched to that same full width instead of staying a narrow
+    // column.
+    auto* demoScrollBar = new newui::ScrollBar();
+    demoScrollBar->setName("demoScrollBar");
+    demoScrollBar->setDesiredSize(newui::Size(20.0f, 100.0f));
+    demoScrollBar->setRange(0.0f, 100.0f);
+    demoScrollBar->setPageSize(20.0f);
+    demoScrollBar->setLineStep(5.0f);
+    auto scrollBarParams = std::make_unique<newui::FlexLayoutParams>();
+    scrollBarParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    demoScrollBar->setLayoutParams(std::move(scrollBarParams));
+    content2->addChild(demoScrollBar);
 
     auto* content3 = MakePanel("content3", "mediumseagreen", "darkgreen");
     content3->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
@@ -945,6 +920,36 @@ int main() {
         std::cerr << "setBackgroundImage() failed for content3's background\n";
     }
     mainRow->addChild(content3);
+
+    // ScrollView demo (controls.h) - content taller and wider than the
+    // viewport, only reachable via the vertical/horizontal ScrollBars
+    // ScrollView wires up automatically, real mouse-wheel support
+    // (RootView::mouseWheel()'s bubbling - rootview.cpp - lets ScrollView
+    // catch a wheel event over any of its nested content, not just
+    // itself), and View::origin() (view.h) actually shifting where that
+    // content paints/hit-tests. Real content (scrollRows below) is added
+    // via ScrollView::addChild() exactly like any other container -
+    // ScrollView routes it into its own internal viewport SubView
+    // automatically.
+    auto* content4 = new newui::ScrollView();
+    content4->setName("content4");
+    content4->setVisible(true);
+    content4->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    mainRow->addChild(content4);
+
+    const newui::Size scrollContentSize(300.0f, 900.0f);
+    content4->setContentSize(scrollContentSize);
+
+    const char* scrollRowColors[] = {
+        "lightpink", "lightyellow", "lightgreen", "lightblue", "plum",
+        "khaki", "lightsalmon", "lightcyan", "wheat", "thistle",
+        "peachpuff", "palegreen", "lightsteelblue", "mistyrose", "honeydew",
+    };
+    for (int i = 0; i < 15; ++i) {
+        auto* scrollRow = MakePanel("scrollRow" + std::to_string(i), scrollRowColors[i], "dimgray", 1.0f);
+        scrollRow->setBounds(newui::Rect(8.0f, float(i) * 60.0f + 8.0f, scrollContentSize.width - 16.0f, 52.0f));
+        content4->addChild(scrollRow);
+    }
 
     // A small badge nested inside content1, pinned to its top-right
     // corner via a second, independent Layout - content1's own, not

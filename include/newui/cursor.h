@@ -152,9 +152,7 @@ namespace newui {
             return kind_ == CursorKind::Custom && handle_ != nullptr;
         }
 
-        // String <-> CursorKind, for View::writeFields()/readFields() (via
-        // Cursor) - same convention as viewstyle.cpp's edge3DStyleToString()/
-        // edge3DStyleFromString().
+        // String <-> CursorKind conversion.
         static std::string cursorKindToString(CursorKind kind);
         static CursorKind cursorKindFromString(const std::string& s, CursorKind defaultValue);
 

@@ -14,10 +14,8 @@
 namespace newui {
     class View;
 
-    // The M in MVC - deliberately not a UIComponent/not part of the View
-    // tree's own serialization system (serialization.h covers View/
-    // ViewStyle/Layout/LayoutParams/Frame/Application specifically - a
-    // Model is arbitrary application data, not a node in that tree).
+    // The M in MVC - deliberately not part of the View tree itself; a
+    // Model is arbitrary application data, not a node in that tree.
     //
     // A basic Control (controls.h) doesn't need one of these at all - it's
     // just a View that reacts to its own mouse/keyboard input. Model (and

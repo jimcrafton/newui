@@ -3,7 +3,7 @@
 #include <cstring>
 #include <utility>
 
-namespace newui {
+namespace newui::gfx {
 
     bool Image::createDibBackedImage(int width, int height, const void* copySrc, intptr_t copySrcStride) {
         if (width <= 0 || height <= 0) {

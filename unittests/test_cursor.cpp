@@ -53,10 +53,7 @@ TEST(Cursor, CursorKindStringRoundTripsThroughToStringFromString) {
 // Separate from the loop above (which uses Custom as every case's
 // "fallback if not recognized" default) - a defaultValue of Arrow here
 // means this only passes if "Custom" is genuinely recognized as its own
-// string, not by accidentally matching the fallback. Real usage: a
-// path-loaded Cursor round-tripping through View::writeFields()/
-// readFields() (see the Serialization.CustomCursorLoadedFromAFileRoundTripsViaItsPath
-// test in test_serialization.cpp), which writes "cursor": "Custom".
+// string, not by accidentally matching the fallback.
 TEST(Cursor, CursorKindFromStringRecognizesCustomItself) {
     EXPECT_EQ(newui::Cursor::cursorKindFromString(newui::Cursor::cursorKindToString(newui::CursorKind::Custom), newui::CursorKind::Arrow),
         newui::CursorKind::Custom);

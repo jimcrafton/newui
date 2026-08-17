@@ -53,6 +53,46 @@ public:
     Point operator*(float scalar) const {
         return Point(x * scalar, y * scalar);
     }
+
+    Point& operator+=(const Point& other) {
+        x += other.x;
+        y += other.y;
+        return *this;
+    }
+
+    Point& operator-=(const Point& other) {
+        x -= other.x;
+        y -= other.y;
+        return *this;
+    }
+
+    Point& operator+=(float scalar) {
+        x += scalar;
+        y += scalar;
+        return *this;
+    }
+
+    Point& operator-=(float scalar) {
+        x -= scalar;
+        y -= scalar;
+        return *this;
+    }
+
+    Point& operator*=(float scalar) {
+        x *= scalar;
+        y *= scalar;
+        return *this;
+    }
+
+    Point operator/(float scalar) const {
+        return Point(x / scalar, y / scalar);
+    }
+
+    Point& operator/=(float scalar) {
+        x /= scalar;
+        y /= scalar;
+        return *this;
+    }
 };
 
 class Size {
@@ -69,6 +109,42 @@ public:
 
     bool operator!=(const Size& other) const {
         return !(*this == other);
+    }
+
+    Size& operator+=(const Size& other) {
+        width += other.width;
+        height += other.height;
+        return *this;
+    }
+
+    Size& operator-=(const Size& other) {
+        width -= other.width;
+        height -= other.height;
+        return *this;
+    }
+
+    Size& operator+=(float scalar) {
+        width += scalar;
+        height += scalar;
+        return *this;
+    }
+
+    Size& operator-=(float scalar) {
+        width -= scalar;
+        height -= scalar;
+        return *this;
+    }
+
+    Size& operator*=(float scalar) {
+        width *= scalar;
+        height *= scalar;
+        return *this;
+    }
+
+    Size& operator/=(float scalar) {
+        width /= scalar;
+        height /= scalar;
+        return *this;
     }
 };
 
@@ -117,8 +193,19 @@ public:
         return pos_.x;
     }
 
+    // Moves this edge only - width()/height() (and the opposite edge's
+    // position) stay fixed, same "one component of pos_/size_ at a time"
+    // contract setPos()/setSize() already have for the whole Point/Size.
+    void setLeft(float value) {
+        pos_.x = value;
+    }
+
     float top() const {
         return pos_.y;
+    }
+
+    void setTop(float value) {
+        pos_.y = value;
     }
 
     float right() const {
@@ -134,8 +221,16 @@ public:
         return size_.width;
     }
 
+    void setWidth(float value) {
+        size_.width = value;
+    }
+
     float height() const {
         return size_.height;
+    }
+
+    void setHeight(float value) {
+        size_.height = value;
     }
 
 
@@ -147,15 +242,15 @@ public:
     // Returns a copy inset by the given amount on each side (a negative
     // amount inflates that side instead). Width/height are clamped to 0
     // rather than going negative if the insets overlap.
-    Rect deflated(float left, float top, float right, float bottom) const {
+    Rect deflate(float left, float top, float right, float bottom) const {
         float w = size_.width - left - right;
         float h = size_.height - top - bottom;
         return Rect(pos_.x + left, pos_.y + top, w < 0.0f ? 0.0f : w, h < 0.0f ? 0.0f : h);
     }
 
     // Uniform inset on all four sides.
-    Rect deflated(float amount) const {
-        return deflated(amount, amount, amount, amount);
+    Rect deflate(float amount) const {
+        return deflate(amount, amount, amount, amount);
     }
 
     bool operator==(const Rect& other) const {

@@ -9,13 +9,12 @@
 #include "newui/newui.h"
 #include "newui/delegate.h"
 #include "newui/runloop.h"
-#include "newui/uicomponent.h"
 
 namespace newui {
 
     class Frame; // Forward declaration of Frame class
 
-class Application : public UIComponent {
+class Application {
 public:
     static Application& instance();
 
@@ -93,11 +92,10 @@ public:
 	}
 
     // Open-ended bag for whatever app-specific data a caller wants to
-    // persist alongside window state - e.g. "lastOpenedFile". Written/
-    // read as a nested "custom" object of strings by writeFields()/
-    // readFields() below. name_ (the dummy-window Win32 class-name
-    // component) is deliberately not part of that - it's a startup
-    // identity set by app code (setName()), not restorable session state.
+    // persist alongside window state - e.g. "lastOpenedFile". name_ (the
+    // dummy-window Win32 class-name component) is deliberately not part
+    // of that - it's a startup identity set by app code (setName()), not
+    // restorable session state.
     void setCustomValue(const std::string& key, const std::string& value) {
         customValues_[key] = value;
     }
@@ -114,12 +112,6 @@ public:
     const std::unordered_map<std::string, std::string>& customValues() const {
         return customValues_;
     }
-
-    // UIComponent: just the custom-data bag above.
-    void writeFields(json5::builder& w) const override;
-    void readFields(const json5::value& obj) override;
-
-
 
     ApplicationDelegate onStartup;
     ApplicationConfigDelegate onConfigOption;

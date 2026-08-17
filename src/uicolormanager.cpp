@@ -1,4 +1,5 @@
 #include "newui/uicolormanager.h"
+#include "newui/themedata.h"
 
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -172,6 +173,24 @@ namespace newui {
 	}
 
 	Color UIColorManager::colorFor(UIColorRole role) {
+		// ThemeData (themedata.h) is a pre-generated snapshot of a real
+		// Windows install's actual theme (tools/themesgen/themesgen.py) -
+		// consulted first, ahead of every live query below, whenever
+		// something has actually been loaded. HighlightBackground/
+		// HighlightText are deliberately excluded from that snapshot (see
+		// themesgen.py's own doc comment - DwmGetColorizationColor is a
+		// live, dynamic accent-color setting, not a static per-visual-
+		// style value), so this check has to come after that pair's own
+		// early-return below, not before it - a themed file, unlike the
+		// switch further down, is already light-*or*-dark-correct on its
+		// own (see reloadForCurrentMode()), no separate invert step here.
+		if (role != UIColorRole::HighlightBackground && role != UIColorRole::HighlightText) {
+			Color themed;
+			if (ThemeData::instance().tryColorFor(role, themed)) {
+				return themed;
+			}
+		}
+
 		if (role == UIColorRole::HighlightBackground || role == UIColorRole::HighlightText) {
 			DWORD colorizationColor = 0;
 			BOOL opaqueBlend = FALSE;

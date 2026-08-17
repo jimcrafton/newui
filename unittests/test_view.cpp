@@ -416,8 +416,7 @@ TEST(HitTestChildren, PointOverParentButOutsideNestedChildReturnsParent) {
 // (SubView::destroy()'s parent_->removeChild(this)) - iterator
 // invalidation that happened to survive exactly one child (by luck) but
 // crashed/corrupted with two or more. Fixed by snapshotting childViews_
-// before iterating (view.cpp), same pattern serialization.cpp's
-// readViewNodeInto() already used for the same reason.
+// before iterating (view.cpp).
 // ---------------------------------------------------------------------------
 
 TEST(ViewDestroy, DestroysAllChildrenWithoutCorruptingIteration) {

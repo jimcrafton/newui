@@ -20,15 +20,13 @@ namespace newui {
     //   Resources/
     //     Fonts/
     //     Images/
-    //     UIs/             (saveViewTree()/saveViewTreeToFile() output)
     //
     // Sibling to Application, not a member of it - Application owns Win32
     // app/window lifecycle, Bundle is purely a path resolver. Simpler
     // singleton than Application's (no need for its std::atomic
     // single-instantiation guard - that exists because Application wraps a
     // genuinely unique-per-process Win32 registration; Bundle has no such
-    // constraint), matching SerializationRegistry's plain Meyer's-singleton
-    // style instead.
+    // constraint) - a plain Meyer's-singleton instead.
     class Bundle {
     public:
         static Bundle& instance();
@@ -49,8 +47,8 @@ namespace newui {
 
         // resourcesDir() + "\" + relativePath, if that file exists - else
         // "". Fails fast rather than throwing, matching this codebase's
-        // bool/empty-return error handling elsewhere (loadViewTree(), ...)
-        // rather than exceptions.
+        // bool/empty-return error handling elsewhere rather than
+        // exceptions.
         std::string resourcePath(const std::string& relativePath) const;
 
         // Loads relativePath (resolved via resourcePath()) as a BLImage.
@@ -66,8 +64,8 @@ namespace newui {
         std::string loadTextFile(const std::string& relativePath) const;
 
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
-        // JSON5 read, not a UIComponent - Bundle isn't part of the View
-        // hierarchy). appName() falls back to
+        // JSON5 read - Bundle isn't part of the View hierarchy).
+        // appName() falls back to
         // Application::instance().getName() if Info.json is missing or
         // has no "name" key - re-read live on every such call (not cached
         // itself, unlike the Info.json-provided value), so it tracks a

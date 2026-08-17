@@ -4,13 +4,12 @@
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/rootview.h>
-#include <newui/uicomponent.h>
 #include <tuple>
 
 
 namespace newui {
 
-class Frame : public UIComponent {
+class Frame {
 public:
     Frame();
     ~Frame();
@@ -64,23 +63,12 @@ public:
 	// change - e.g. a Light/Dark mode toggle) and dumps the result to
 	// path via BLImage::write_to_file() - codec picked from path's own
 	// extension (".png"/".bmp"/".qoi", whatever blend2d has a codec
-	// for), same inference saveViewTreeToFile() and friends leave to
-	// their own file extensions (serialization.h). Returns false if
-	// there's no live window yet (rootView_'s backing buffer is only
-	// created by RootView::resizeImageBuffer(), itself only reachable
-	// once a real HWND exists - see Frame::initialize()) or the encode/
-	// write itself fails (bad extension, unwritable path, ...).
+	// for). Returns false if there's no live window yet (rootView_'s
+	// backing buffer is only created by RootView::resizeImageBuffer(),
+	// itself only reachable once a real HWND exists - see
+	// Frame::initialize()) or the encode/write itself fails (bad
+	// extension, unwritable path, ...).
 	bool renderAllViewsToFile(const std::string& path);
-
-	// UIComponent: title_/bounds_ directly (plain data members, no live
-	// HWND needed - works even before initialize() creates frameHandle_).
-	// Also queries/restores the live show-state (normal/maximized/
-	// minimized) via WINDOWPLACEMENT - that half needs a live
-	// frameHandle_, so readFields() should only be called once
-	// initialize() has run; see Frame::onCreated for the recommended
-	// integration point.
-	void writeFields(json5::builder& w) const override;
-	void readFields(const json5::value& obj) override;
 
     private:
     std::string title_;

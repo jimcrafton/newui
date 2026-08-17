@@ -46,7 +46,7 @@ struct AnimatedLabelStyle : newui::LabelStyle {
 // even though this style happens to be attached directly to one.
 newui::SyncReturn BackgroundColorChanged(newui::ObservableProperty<AnimatedLabelStyle, newui::Color>& property,
         AnimatedLabelStyle* style, newui::Color* color) {
-	style->backgroundFill = color->toBLRgba32();
+	style->setBackgroundColor(*color);
 	// invalidate() alone would just re-blit the existing pixel buffer -
 	// markDirty() is what re-runs paintStyle()/paint() into it first.
 	style->markDirty();
@@ -79,7 +79,7 @@ int main() {
     //v.style().borderWidth = 2.0;
     auto labelStyle = std::make_unique<AnimatedLabelStyle>();
 
-    labelStyle->backgroundFill = newui::Color::fromSystemColor(newui::SystemColor::ButtonHighlight).toBLRgba32();
+    labelStyle->setBackgroundColor(newui::Color::fromSystemColor(newui::SystemColor::ButtonHighlight));
 
 	labelStyle->text = "Hello, World!";
     labelStyle->textColor = newui::Color::fromName("black").toBLRgba32();

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <memory>
 
 #include <newui/newui.h>
 #include <newui/delegate.h>
@@ -524,7 +526,291 @@ namespace newui {
         ThemedTrackbarTicksStyle* ticksStyle_ = nullptr;
     };
 
+    // A real, interactive scrollbar (SCROLLBAR/SBP_ARROWBTN +
+    // SBP_THUMBBTNHORZ|VERT + SBP_*TRACK*, via ThemedScrollbarArrowStyle/
+    // ThemedScrollbarThumbStyle/ThemedScrollbarTrackStyle - viewstyle.h,
+    // previously only ever hand-wired as loose demo SubViews, never a real
+    // control). value()/minValue()/maxValue()/setRange() borrow Slider's
+    // own shape (above), but two things are genuinely different, not just
+    // relabeled:
+    //  - value()/minValue()/maxValue() describe a *viewport into a larger
+    //    range*, not a single point on a track - pageSize() is how much of
+    //    [minValue(),maxValue()] is visible at once, so the effective
+    //    scrollable position range is [minValue(), maxValue()-pageSize()]
+    //    and the thumb is sized proportionally to pageSize()/(maxValue()-
+    //    minValue()), not fixed-size like Slider's thumb.
+    //  - two arrow buttons step by lineStep() on click, and a click
+    //    anywhere on the empty track pages by pageSize() toward the click
+    //    side. Both auto-repeat while held (see startRepeat() below).
+    //
+    // Unlike Slider, the arrows/thumb aren't separate child SubViews - see
+    // this class's own doc comment just above private: for why (a real,
+    // live-diagnosed bug with that shape, not a style preference).
+    //
+    // See ScrollView for the composite that actually wires a pair of these
+    // to a scrollable content view's origin() - a bare ScrollBar is just
+    // the generic range control, same "usable standalone, not just as
+    // scrolling plumbing" spirit as Slider.
+    // A single View, not four - up/down arrows and the thumb are plain
+    // Rects this ScrollBar tracks and hit-tests itself (regionAt()) rather
+    // than separate child SubViews, each drawn by calling its own
+    // Themed*Style::paint() directly (they still exist, just as plain
+    // owned style objects - never attached to a SubView via setStyle())
+    // translated to its own rect from this ScrollBar's own paint()
+    // override. Two real problems with an earlier per-part-SubView
+    // version drove this:
+    //  - each part's own ThemedViewStyle::computeClientBounds() queries
+    //    GetThemeBackgroundContentRect() for SBP_ARROWBTN/THUMBBTN* -
+    //    fine for a part sized like a real scrollbar, but a query against
+    //    a *cross-axis*-thin box (this ScrollBar's own short axis, e.g. a
+    //    horizontal bar's ~16px height) came back with a content-rect
+    //    deflation large enough to collapse arrows/thumb to a sliver -
+    //    confirmed live (screenshot showed arrows/thumb squashed to a
+    //    couple of pixels while the track background painted at full
+    //    size, since *that* still uses the un-deflated bounds_.size()).
+    //    A single View sidesteps the whole question - regionAt() and
+    //    updateChildBounds() below work in this ScrollBar's own plain
+    //    bounds, never asking uxtheme for a content rect at all.
+    //  - four independent SubViews meant four independent
+    //    RootView::hoveredSubView_ targets, each getting its own
+    //    isHighlighted() independently - hovering across arrow/thumb/
+    //    track read as hopping between separate controls rather than one
+    //    cohesive scrollbar. A real scrollbar highlights as a unit -
+    //    thumb and both arrows all read "hot" together the instant the
+    //    cursor is anywhere over the control, not per-region - which a
+    //    single View gets for free: isHighlighted() (View's own, driven
+    //    by RootView::updateHoveredSubView() same as any other View) is
+    //    passed as every sub-part's own "highlighted" paint() argument
+    //    below, uniformly. regionAt() still exists and still matters -
+    //    which region a *click* landed in still needs to be known,
+    //    for setValue() and startRepeat() to do the right thing - it's
+    //    only the hover *highlight* that's unified, not hit-testing.
+    class ScrollBar : public Control {
+    public:
+        ScrollBar();
+        ~ScrollBar() override;
 
+        typedef Delegate<ScrollBar> ValueChangedDelegate;
+        ValueChangedDelegate onValueChanged;
+
+        float value() const { return value_; }
+        void setValue(float value);
+
+        float minValue() const { return min_; }
+        float maxValue() const { return max_; }
+        // Re-clamps the current value() (and pageSize(), if it no longer
+        // fits) into the new range immediately.
+        void setRange(float minValue, float maxValue);
+
+        // How much of [minValue(),maxValue()] is visible at once - drives
+        // both the thumb's proportional size and how far a track-click
+        // pages. Clamped to (0, maxValue()-minValue()] - a zero or
+        // negative pageSize() would make the effective scrollable range
+        // and the thumb's own size both meaningless.
+        float pageSize() const { return pageSize_; }
+        void setPageSize(float pageSize);
+
+        // How far one arrow click moves value(). Clamped to > 0 - see
+        // pageSize()'s own reasoning.
+        float lineStep() const { return lineStep_; }
+        void setLineStep(float lineStep);
+
+        bool isHorizontal() const { return horizontal_; }
+        void setHorizontal(bool value);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        enum class Region { None, UpArrow, DownArrow, Thumb, TrackBefore, TrackAfter };
+
+        // Which of upArrowRect_/downArrowRect_/thumbRect_/neither a local
+        // point falls in - TrackBefore/TrackAfter is empty track on the
+        // near/far side of the thumb (main-axis position relative to
+        // thumbRect_, not just "not the thumb/an arrow") since a track
+        // click needs to know which direction to page.
+        Region regionAt(const Point& localPt) const;
+
+        // This ScrollBar's own plain bounds as a zero-origin Rect - what
+        // updateChildBounds()/regionAt() work in, deliberately *not*
+        // getClientBounds() - see this class's own doc comment above for
+        // why.
+        Rect localRect() const;
+        // localRect() minus both arrow buttons' reserved length along the
+        // main axis - what updateChildBounds()/updateValueFromLocalPoint()/
+        // pageTowardLocalPoint() all treat as "the track".
+        Rect trackRect() const;
+        // Natural arrow-button size, queried the same "neutralize
+        // pressed/enabled before asking" way Slider::resolvedThumbSize()
+        // does and for the same reason (stable layout size regardless of
+        // live interaction state).
+        Size resolvedArrowSize() const;
+        // Track length (main axis) the thumb has to travel in, and the
+        // thumb's own proportional length along it - factored out since
+        // both updateChildBounds() and updateValueFromLocalPoint() need
+        // them kept in exact agreement (a click has to map to the value
+        // that would actually put the thumb there).
+        float resolvedThumbLength(float trackLength) const;
+        // Recomputes upArrowRect_/downArrowRect_/thumbRect_ - called
+        // whenever this ScrollBar's own bounds or anything value_/min_/
+        // max_/pageSize_/horizontal_ depends on changes.
+        void updateChildBounds();
+        void updateValueFromLocalPoint(const Point& localPt);
+        // pageSize() applied in whichever direction localPt falls on the
+        // far side of thumbRect_ from - the direction a real track click
+        // pages toward.
+        void pageTowardLocalPoint(const Point& localPt);
+
+        // amount is signed (already includes direction) - added to
+        // value() again on every qualifying repeat tick (the *first* step
+        // is the caller's own immediate setValue() call, not this)
+        // until stopRepeat() (mouse released, disabled, or - for a
+        // track-click repeat only - the thumb has reached trackClickPt_,
+        // matching real Win32 auto-paging behavior that stops once the
+        // thumb catches up to the cursor without needing a release).
+        // Queues one postIdle task, guarded by aliveFlag_ the same way
+        // RootView::scheduleRepaint() guards its own postIdle task
+        // against outliving *this - safe to call again mid-repeat (e.g.
+        // never actually happens today since mouse capture serializes
+        // press/release, but doing so would just queue a second task
+        // alongside the first rather than corrupt state).
+        void startRepeat(float amount, bool isTrackRepeat, const Point& trackClickPt);
+        void stopRepeat();
+
+        SyncReturn handleSizeChanged(View& sender, const Size& size);
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleStateChanged(Control& sender);
+
+        static constexpr float kArrowFallbackSize = 16.0f;
+        static constexpr float kMinThumbLength = 16.0f;
+        static constexpr std::chrono::milliseconds kRepeatInitialDelay{400};
+        static constexpr std::chrono::milliseconds kRepeatInterval{60};
+
+        float value_ = 0.0f;
+        float min_ = 0.0f;
+        float max_ = 100.0f;
+        float pageSize_ = 10.0f;
+        float lineStep_ = 1.0f;
+        bool horizontal_ = false;
+        bool dragging_ = false;
+
+        bool repeating_ = false;
+        bool trackRepeat_ = false;
+        float repeatAmount_ = 0.0f;
+        Point trackClickPt_;
+        std::chrono::steady_clock::time_point repeatNextTime_;
+
+        // See startRepeat()'s own doc comment - flips false in ~ScrollBar()
+        // so a repeat task still queued/running past this control's
+        // destruction becomes a safe no-op instead of touching a dangling
+        // this.
+        std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
+
+        Rect upArrowRect_;
+        Rect downArrowRect_;
+        Rect thumbRect_;
+
+        ThemedScrollbarTrackStyle* trackStyle_ = nullptr;  // this ScrollBar's own style() - owned there, not here
+        std::unique_ptr<ThemedScrollbarThumbStyle> thumbStyle_;
+        std::unique_ptr<ThemedScrollbarArrowStyle> upArrowStyle_;
+        std::unique_ptr<ThemedScrollbarArrowStyle> downArrowStyle_;
+    };
+
+    // A scrollable container - bundles a content viewport with a vertical
+    // and/or horizontal ScrollBar and mouse-wheel support, wired together
+    // automatically. Real content goes in via the ordinary addChild()/
+    // removeChild() (overridden below to redirect into viewport_ instead
+    // of this ScrollView's own child list - see viewport_'s own doc
+    // comment for why) - nothing about using a ScrollView looks different
+    // from using a plain SubView as a container, it just also scrolls.
+    //
+    // contentSize() is caller-declared, not auto-measured from viewport_'s
+    // children - this toolkit has no intrinsic-content-size measurement
+    // (a Layout arranges children into whatever bounds it's given, it
+    // doesn't report how much room its content would *like*), and
+    // guessing from children's current bounds would silently misbehave
+    // for any content that uses its own internal Layout. Same "give
+    // hooks, not policy" spirit as DocumentController not dictating
+    // unsaved-changes UI - the caller (who actually knows their content's
+    // real size) sets it explicitly, once, whenever it changes.
+    class ScrollView : public Control {
+    public:
+        ScrollView();
+        ~ScrollView() override {}
+
+        void addChild(SubView* child) override;
+        void removeChild(SubView* child) override;
+
+        const Size& contentSize() const { return contentSize_; }
+        void setContentSize(const Size& size);
+
+        // How many lineStep()s of vBar() one mouse-wheel notch scrolls -
+        // see handleMouseWheel(). Default 3, the same convention most
+        // desktop toolkits use for "one notch" (Windows' own
+        // SPI_GETWHEELSCROLLLINES default).
+        int wheelLines() const { return wheelLines_; }
+        void setWheelLines(int lines) { wheelLines_ = lines; }
+
+        ScrollBar* vBar() const { return vBar_; }
+        ScrollBar* hBar() const { return hBar_; }
+
+        // Current scroll position - viewport_'s own origin() (view.h),
+        // exposed read-only since viewport_ itself isn't (it's internal
+        // chrome, not something a caller should add/remove children
+        // through directly - see viewport_'s own doc comment). Always
+        // matches (hBar()->value(), vBar()->value()) for whichever of the
+        // two is currently visible() (0 on the axis the other has no
+        // corresponding scrolling need on).
+        Point contentOrigin() const;
+
+    private:
+        // Recomputes which of vBar_/hBar_ are needed for the current
+        // contentSize_ vs. this ScrollView's own bounds, each visible
+        // bar's range()/pageSize(), and viewport_'s bounds (client area
+        // minus whichever bar(s) end up reserved) - called from both
+        // handleSizeChanged() and setContentSize(), the two things that
+        // can change the answer.
+        void updateLayout();
+
+        SyncReturn handleSizeChanged(View& sender, const Size& size);
+        SyncReturn handleVBarValueChanged(ScrollBar& sender);
+        SyncReturn handleHBarValueChanged(ScrollBar& sender);
+        SyncReturn handleMouseWheel(View& sender, const Point& pt, float delta);
+
+        Size contentSize_;
+        int wheelLines_ = 3;
+
+        // Real content lives here, not directly under this ScrollView -
+        // origin() (View's own scroll-offset primitive - see its doc
+        // comment, view.h) lives on viewport_, not on this ScrollView
+        // itself, so vBar_/hBar_ (this ScrollView's OWN direct children,
+        // its always-visible chrome) stay pinned in place regardless of
+        // scroll position instead of scrolling along with the content
+        // they control.
+        SubView* viewport_ = nullptr;
+        ScrollBar* vBar_ = nullptr;
+        ScrollBar* hBar_ = nullptr;
+    };
+
+    class Image : public Control {
+    public:
+        Image();
+        virtual ~Image() {}
+
+        typedef Delegate<Image, const std::string&> ImagePathChanged;
+
+
+        ImagePathChanged onImagePathChanged;
+
+        std::string imagePath() const { return imagePath_; }
+        void setImagePath(const std::string& val);
+
+
+    private:
+        std::string imagePath_;
+        SyncReturn updateImage(Image&, const std::string& newPath);
+    };
 
     class TextCaret {
 

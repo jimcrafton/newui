@@ -51,6 +51,12 @@ add_executable(reflection1
 
 target_link_libraries(reflection1 PRIVATE newui)
 
+add_executable(reflection2
+    reflection2.cpp
+)
+
+target_link_libraries(reflection2 PRIVATE newui)
+
 add_executable(controls1
     controls1.cpp
 )

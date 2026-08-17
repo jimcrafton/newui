@@ -18,7 +18,7 @@ void WriteTestPNG(const std::string& path, int width, int height) {
 }  // namespace
 
 TEST(Image, DefaultConstructedIsInvalid) {
-    newui::Image image;
+    newui::gfx::Image image;
 
     EXPECT_FALSE(image.isValid());
     EXPECT_EQ(image.width(), 0);
@@ -26,7 +26,7 @@ TEST(Image, DefaultConstructedIsInvalid) {
 }
 
 TEST(Image, BlankCanvasIsValidAndZeroFilled) {
-    newui::Image image(16, 8);
+    newui::gfx::Image image(16, 8);
 
     ASSERT_TRUE(image.isValid());
     EXPECT_EQ(image.width(), 16);
@@ -41,15 +41,15 @@ TEST(Image, BlankCanvasIsValidAndZeroFilled) {
 }
 
 TEST(Image, InvalidForZeroOrNegativeSize) {
-    newui::Image zero(0, 8);
-    newui::Image negative(8, -1);
+    newui::gfx::Image zero(0, 8);
+    newui::gfx::Image negative(8, -1);
 
     EXPECT_FALSE(zero.isValid());
     EXPECT_FALSE(negative.isValid());
 }
 
 TEST(Image, BlImageIsLiveReadWriteAndAffectsMemDCBits) {
-    newui::Image image(4, 4);
+    newui::gfx::Image image(4, 4);
     ASSERT_TRUE(image.isValid());
 
     {
@@ -66,7 +66,7 @@ TEST(Image, BlImageIsLiveReadWriteAndAffectsMemDCBits) {
 }
 
 TEST(Image, LoadFromFileFailsForAMissingFile) {
-    newui::Image image("NoSuchImageFile.png");
+    newui::gfx::Image image("NoSuchImageFile.png");
 
     EXPECT_FALSE(image.isValid());
 }
@@ -75,7 +75,7 @@ TEST(Image, LoadFromFileRoundTripsARealPNGFile) {
     const std::string path = "graphics_test_image.png";
     WriteTestPNG(path, 10, 6);
 
-    newui::Image image(path);
+    newui::gfx::Image image(path);
 
     ASSERT_TRUE(image.isValid());
     EXPECT_EQ(image.width(), 10);
@@ -93,7 +93,7 @@ TEST(Image, ConstructFromExistingBLImageCopiesItsPixels) {
         ctx.end();
     }
 
-    newui::Image image(source);
+    newui::gfx::Image image(source);
 
     ASSERT_TRUE(image.isValid());
     EXPECT_EQ(image.width(), 4);
@@ -108,19 +108,19 @@ TEST(Image, ConstructFromExistingBLImageCopiesItsPixels) {
 TEST(Image, ConstructFromEmptyBLImageIsInvalid) {
     BLImage source;  // never create()'d
 
-    newui::Image image(source);
+    newui::gfx::Image image(source);
 
     EXPECT_FALSE(image.isValid());
 }
 
 TEST(Image, MemDCReturnsNullptrWhenInvalid) {
-    newui::Image image;
+    newui::gfx::Image image;
 
     EXPECT_EQ(image.memDC(), nullptr);
 }
 
 TEST(Image, MemDCReturnsARealDCSelectedWithTheBackingDIB) {
-    newui::Image image(8, 8);
+    newui::gfx::Image image(8, 8);
     ASSERT_TRUE(image.isValid());
 
     HDC dc = image.memDC();
@@ -131,7 +131,7 @@ TEST(Image, MemDCReturnsARealDCSelectedWithTheBackingDIB) {
 }
 
 TEST(Image, GdiDrawingIntoMemDCIsVisibleThroughBlImage) {
-    newui::Image image(8, 8);
+    newui::gfx::Image image(8, 8);
     ASSERT_TRUE(image.isValid());
 
     HDC dc = image.memDC();
@@ -155,12 +155,12 @@ TEST(Image, GdiDrawingIntoMemDCIsVisibleThroughBlImage) {
 }
 
 TEST(Image, MoveConstructorTransfersStateAndLeavesSourceInvalid) {
-    newui::Image source(4, 4);
+    newui::gfx::Image source(4, 4);
     ASSERT_TRUE(source.isValid());
     HDC dc = source.memDC();
     ASSERT_NE(dc, nullptr);
 
-    newui::Image moved(std::move(source));
+    newui::gfx::Image moved(std::move(source));
 
     EXPECT_TRUE(moved.isValid());
     EXPECT_EQ(moved.width(), 4);
@@ -171,11 +171,11 @@ TEST(Image, MoveConstructorTransfersStateAndLeavesSourceInvalid) {
 }
 
 TEST(Image, MoveAssignmentReleasesTheTargetsOwnedResourcesFirst) {
-    newui::Image a(4, 4);
+    newui::gfx::Image a(4, 4);
     ASSERT_TRUE(a.isValid());
     ASSERT_NE(a.memDC(), nullptr);  // give a a live memDC_/dibSection_ pair to release
 
-    newui::Image b(6, 6);
+    newui::gfx::Image b(6, 6);
     ASSERT_TRUE(b.isValid());
     HDC bDC = b.memDC();
 

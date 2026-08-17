@@ -7,16 +7,14 @@
 #include "newui/viewstyle.h"
 #include "newui/view.h"
 #include "newui/rootview.h"
-#include "newui/json5_helpers.h"
 #include "newui/color.h"
+#include "newui/themedata.h"
 #include "newui/uicolormanager.h"
-
-#include <json5/json5.hpp>
-#include <json5/json5_builder.hpp>
 
 #include <array>
 
 namespace {
+	
 
 	// Approximates a dark-mode look for a theme part uxtheme has no real
 	// dark visual for at all (see RootView::refreshThemes()'s doc comment)
@@ -154,111 +152,86 @@ namespace {
 		}
 	}
 
-	const char* edge3DStyleToString(newui::Edge3DStyle s) {
-		switch (s) {
-			case newui::Edge3DStyle::Raised: return "Raised";
-			case newui::Edge3DStyle::Sunken: return "Sunken";
-			case newui::Edge3DStyle::Etched: return "Etched";
-			case newui::Edge3DStyle::Bump: return "Bump";
-		}
-		return "Raised";
-	}
-
-	newui::Edge3DStyle edge3DStyleFromString(const std::string& s, newui::Edge3DStyle defaultValue) {
-		if (s == "Raised") return newui::Edge3DStyle::Raised;
-		if (s == "Sunken") return newui::Edge3DStyle::Sunken;
-		if (s == "Etched") return newui::Edge3DStyle::Etched;
-		if (s == "Bump") return newui::Edge3DStyle::Bump;
-		return defaultValue;
-	}
-
-	const char* tabItemPositionToString(newui::ThemedTabItemStyle::Position p) {
-		switch (p) {
-			case newui::ThemedTabItemStyle::Position::Middle: return "Middle";
-			case newui::ThemedTabItemStyle::Position::Left: return "Left";
-			case newui::ThemedTabItemStyle::Position::Right: return "Right";
-			case newui::ThemedTabItemStyle::Position::Only: return "Only";
-		}
-		return "Middle";
-	}
-
-	newui::ThemedTabItemStyle::Position tabItemPositionFromString(const std::string& s, newui::ThemedTabItemStyle::Position defaultValue) {
-		if (s == "Middle") return newui::ThemedTabItemStyle::Position::Middle;
-		if (s == "Left") return newui::ThemedTabItemStyle::Position::Left;
-		if (s == "Right") return newui::ThemedTabItemStyle::Position::Right;
-		if (s == "Only") return newui::ThemedTabItemStyle::Position::Only;
-		return defaultValue;
-	}
-
-	const char* tabItemAlignmentToString(newui::ThemedTabItemStyle::TabAlignment a) {
-		switch (a) {
-			case newui::ThemedTabItemStyle::TabAlignment::Top: return "Top";
-			case newui::ThemedTabItemStyle::TabAlignment::Bottom: return "Bottom";
-			case newui::ThemedTabItemStyle::TabAlignment::Left: return "Left";
-			case newui::ThemedTabItemStyle::TabAlignment::Right: return "Right";
-		}
-		return "Top";
-	}
-
-	newui::ThemedTabItemStyle::TabAlignment tabItemAlignmentFromString(const std::string& s, newui::ThemedTabItemStyle::TabAlignment defaultValue) {
-		if (s == "Top") return newui::ThemedTabItemStyle::TabAlignment::Top;
-		if (s == "Bottom") return newui::ThemedTabItemStyle::TabAlignment::Bottom;
-		if (s == "Left") return newui::ThemedTabItemStyle::TabAlignment::Left;
-		if (s == "Right") return newui::ThemedTabItemStyle::TabAlignment::Right;
-		return defaultValue;
-	}
-
-	const char* scrollbarArrowDirectionToString(newui::ThemedScrollbarArrowStyle::Direction d) {
-		switch (d) {
-			case newui::ThemedScrollbarArrowStyle::Direction::Up: return "Up";
-			case newui::ThemedScrollbarArrowStyle::Direction::Down: return "Down";
-			case newui::ThemedScrollbarArrowStyle::Direction::Left: return "Left";
-			case newui::ThemedScrollbarArrowStyle::Direction::Right: return "Right";
-		}
-		return "Up";
-	}
-
-	newui::ThemedScrollbarArrowStyle::Direction scrollbarArrowDirectionFromString(const std::string& s, newui::ThemedScrollbarArrowStyle::Direction defaultValue) {
-		if (s == "Up") return newui::ThemedScrollbarArrowStyle::Direction::Up;
-		if (s == "Down") return newui::ThemedScrollbarArrowStyle::Direction::Down;
-		if (s == "Left") return newui::ThemedScrollbarArrowStyle::Direction::Left;
-		if (s == "Right") return newui::ThemedScrollbarArrowStyle::Direction::Right;
-		return defaultValue;
-	}
-
-	const char* scrollbarTrackPositionToString(newui::ThemedScrollbarTrackStyle::Position p) {
-		switch (p) {
-			case newui::ThemedScrollbarTrackStyle::Position::Lower: return "Lower";
-			case newui::ThemedScrollbarTrackStyle::Position::Upper: return "Upper";
-		}
-		return "Lower";
-	}
-
-	newui::ThemedScrollbarTrackStyle::Position scrollbarTrackPositionFromString(const std::string& s, newui::ThemedScrollbarTrackStyle::Position defaultValue) {
-		if (s == "Lower") return newui::ThemedScrollbarTrackStyle::Position::Lower;
-		if (s == "Upper") return newui::ThemedScrollbarTrackStyle::Position::Upper;
-		return defaultValue;
-	}
-
-	const char* progressBarFillStateToString(newui::ThemedProgressBarFillStyle::FillState s) {
-		switch (s) {
-			case newui::ThemedProgressBarFillStyle::FillState::Normal: return "Normal";
-			case newui::ThemedProgressBarFillStyle::FillState::Error: return "Error";
-			case newui::ThemedProgressBarFillStyle::FillState::Paused: return "Paused";
-		}
-		return "Normal";
-	}
-
-	newui::ThemedProgressBarFillStyle::FillState progressBarFillStateFromString(const std::string& s, newui::ThemedProgressBarFillStyle::FillState defaultValue) {
-		if (s == "Normal") return newui::ThemedProgressBarFillStyle::FillState::Normal;
-		if (s == "Error") return newui::ThemedProgressBarFillStyle::FillState::Error;
-		if (s == "Paused") return newui::ThemedProgressBarFillStyle::FillState::Paused;
-		return defaultValue;
-	}
-
 }
 
 namespace newui {
+	BLCompOp toBLCompOp(CompositingFlag f)
+	{
+		BLCompOp result = (BLCompOp)0;
+
+		switch (f) {
+		case CompSrcOver: { result = BL_COMP_OP_SRC_OVER; } break;
+			case CompSrcopy: { result = BL_COMP_OP_SRC_COPY; } break;
+			case CompSrcIn: { result = BL_COMP_OP_SRC_IN; } break;
+			case CompSrcOut: { result = BL_COMP_OP_SRC_OUT; } break;
+			case CompSrcAtop: { result = BL_COMP_OP_SRC_ATOP; } break;
+			case CompDstOver: { result = BL_COMP_OP_DST_OVER; } break;
+			case CompDstCopy: { result = BL_COMP_OP_DST_COPY; } break;
+			case CompDstIn: { result = BL_COMP_OP_DST_IN; } break;
+			case CompDstOut: { result = BL_COMP_OP_DST_OUT; } break;
+			case CompDstAtop: { result = BL_COMP_OP_DST_ATOP; } break;
+			case CompXOR: { result = BL_COMP_OP_XOR; } break;
+			case CompClear: { result = BL_COMP_OP_CLEAR; } break;
+			case CompPlus: { result = BL_COMP_OP_PLUS; } break;
+			case CompMinus: { result = BL_COMP_OP_MINUS; } break;
+			case CompModulate: { result = BL_COMP_OP_MODULATE; } break;
+			case CompMultiply: { result = BL_COMP_OP_MULTIPLY; } break;
+			case CompScreen: { result = BL_COMP_OP_SCREEN; } break;
+			case CompOverlay: { result = BL_COMP_OP_OVERLAY; } break;
+			case CompDarken: { result = BL_COMP_OP_DARKEN; } break;
+			case CompLighten: { result = BL_COMP_OP_LIGHTEN; } break;
+			case CompColorDodge: { result = BL_COMP_OP_COLOR_DODGE; } break;
+			case CompColorBurn: { result = BL_COMP_OP_COLOR_BURN; } break;
+			case CompLinearBurn: { result = BL_COMP_OP_LINEAR_BURN; } break;
+			case CompLinearLight: { result = BL_COMP_OP_LINEAR_LIGHT; } break;
+			case CompPinLight: { result = BL_COMP_OP_PIN_LIGHT; } break;
+			case CompHardLight: { result = BL_COMP_OP_HARD_LIGHT; } break;
+			case CompSoftLight: { result = BL_COMP_OP_SOFT_LIGHT; } break;
+			case CompDifference: { result = BL_COMP_OP_DIFFERENCE; } break;
+			case CompExclusion: { result = BL_COMP_OP_EXCLUSION; } break;
+		}
+
+		return result;
+	}
+
+	CompositingFlag toCompositingFlag(BLCompOp f)
+	{
+		CompositingFlag result = (CompositingFlag)0;
+
+		switch (f) {
+			case BL_COMP_OP_SRC_OVER: { result = CompSrcOver; } break;
+			case BL_COMP_OP_SRC_COPY: { result = CompSrcopy; } break;
+			case BL_COMP_OP_SRC_IN: { result = CompSrcIn; } break;
+			case BL_COMP_OP_SRC_OUT: { result = CompSrcOut; } break;
+			case BL_COMP_OP_SRC_ATOP: { result = CompSrcAtop; } break;
+			case BL_COMP_OP_DST_OVER: { result = CompDstOver; } break;
+			case BL_COMP_OP_DST_COPY: { result = CompDstCopy; } break;
+			case BL_COMP_OP_DST_IN: { result = CompDstIn; } break;
+			case BL_COMP_OP_DST_OUT: { result = CompDstOut; } break;
+			case BL_COMP_OP_DST_ATOP: { result = CompDstAtop; } break;
+			case BL_COMP_OP_XOR: { result = CompXOR; } break;
+			case BL_COMP_OP_CLEAR: { result = CompClear; } break;
+			case BL_COMP_OP_PLUS: { result = CompPlus; } break;
+			case BL_COMP_OP_MINUS: { result = CompMinus; } break;
+			case BL_COMP_OP_MODULATE: { result = CompModulate; } break;
+			case BL_COMP_OP_MULTIPLY: { result = CompMultiply; } break;
+			case BL_COMP_OP_SCREEN: { result = CompScreen; } break;
+			case BL_COMP_OP_OVERLAY: { result = CompOverlay; } break;
+			case BL_COMP_OP_DARKEN: { result = CompDarken; } break;
+			case BL_COMP_OP_LIGHTEN: { result = CompLighten; } break;
+			case BL_COMP_OP_COLOR_DODGE: { result = CompColorDodge; } break;
+			case BL_COMP_OP_COLOR_BURN: { result = CompColorBurn; } break;
+			case BL_COMP_OP_LINEAR_BURN: { result = CompLinearBurn; } break;
+			case BL_COMP_OP_LINEAR_LIGHT: { result = CompLinearLight; } break;
+			case BL_COMP_OP_PIN_LIGHT: { result = CompPinLight; } break;
+			case BL_COMP_OP_HARD_LIGHT: { result = CompHardLight; } break;
+			case BL_COMP_OP_SOFT_LIGHT: { result = CompSoftLight; } break;
+			case BL_COMP_OP_DIFFERENCE: { result = CompDifference; } break;
+			case BL_COMP_OP_EXCLUSION: { result = CompExclusion; } break;
+		}
+
+		return result;
+	}
 
 	void ViewStyle::markDirty()
 	{
@@ -288,86 +261,101 @@ namespace newui {
 	}
 
 	void ViewStyle::setBackgroundImage(const BLImage& image) {
-		backgroundFill = BLPattern(image);
+		backgroundFill_ = BLPattern(image);
+		bkgFillStyle = FillStyle::FillImage;
 	}
 
-	void ViewStyle::writeFields(json5::builder& w) const {
-		writeColor(w, "backgroundFill", backgroundFill);
-		writeColor(w, "borderFill", borderFill);
-		w["borderWidth"] = borderWidth;
-		writeColor(w, "highlightFill", highlightFill);
-		w["opacity"] = opacity;
-		// Raw int, not a name table: BLCompOp has ~30 blend2d composite-op
-		// values and this field is essentially always left at its
-		// SRC_OVER default - not worth a full string table for v1.
-		w["compositingOp"] = int(compositingOp);
-		writeFont(w, "font", font);
+	void ViewStyle::setBackgroundGradient(const BLGradient& gradient)
+	{
+		backgroundFill_ = gradient;
+		bkgFillStyle = FillStyle::FillGradient;
 	}
 
-	void ViewStyle::readFields(const json5::value& obj) {
-		readColor(obj, "backgroundFill", backgroundFill);
-		readColor(obj, "borderFill", borderFill);
-		borderWidth = obj["borderWidth"].get<float>(borderWidth);
-		readColor(obj, "highlightFill", highlightFill);
-		opacity = obj["opacity"].get<float>(opacity);
-		compositingOp = BLCompOp(obj["compositingOp"].get<int>(int(compositingOp)));
-		font = readFont(obj["font"], font);
+	void ViewStyle::setBackgroundColor(const Color& color)
+	{
+		backgroundFill_ = color.toBLRgba32();
+		bkgFillStyle = FillStyle::FillColor;
 	}
 
-	void ButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["edgeStyle"] = w.new_string(edge3DStyleToString(edgeStyle));
-		w["edgeWidth"] = edgeWidth;
-		writeColor(w, "edgeHighlightColor", edgeHighlightColor);
-		writeColor(w, "edgeShadowColor", edgeShadowColor);
+	void ViewStyle::setBackgroundColor(const BLRgba32& color)
+	{
+		backgroundFill_ = color;
+		bkgFillStyle = FillStyle::FillColor;
 	}
 
-	void ButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		edgeStyle = edge3DStyleFromString(obj["edgeStyle"].get_c_str(""), edgeStyle);
-		edgeWidth = obj["edgeWidth"].get<float>(edgeWidth);
-		readColor(obj, "edgeHighlightColor", edgeHighlightColor);
-		readColor(obj, "edgeShadowColor", edgeShadowColor);
+	void ViewStyle::setHilightColor(const Color& color)
+	{
+		highlightFill = color.toBLRgba32();;
+		hilightFillStyle = FillStyle::FillColor;		
 	}
 
-	void LabelStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["text"] = w.new_string(text);
-		writeColor(w, "textColor", textColor);
-	}
+	Rect ViewStyle::computeClientBounds(const Size& size) const
+	{
+		Rect result(0.0f, 0.0f, size.width, size.height);
 
-	void LabelStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		text = obj["text"].get_c_str(text.c_str());
-		readColor(obj, "textColor", textColor);
+		return result.deflate(borderWidth);
 	}
+	void ViewStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const
+	{
+		clientBounds = computeClientBounds(size);
 
-	void CheckBoxStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["boxSize"] = boxSize;
-		w["boxEdgeStyle"] = w.new_string(edge3DStyleToString(boxEdgeStyle));
-		w["boxEdgeWidth"] = boxEdgeWidth;
-		writeColor(w, "boxFill", boxFill);
-		writeColor(w, "boxEdgeHighlightColor", boxEdgeHighlightColor);
-		writeColor(w, "boxEdgeShadowColor", boxEdgeShadowColor);
-		writeColor(w, "checkColor", checkColor);
-		w["checkWidth"] = checkWidth;
-		w["boxLabelSpacing"] = boxLabelSpacing;
-	}
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
 
-	void CheckBoxStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		boxSize = obj["boxSize"].get<float>(boxSize);
-		boxEdgeStyle = edge3DStyleFromString(obj["boxEdgeStyle"].get_c_str(""), boxEdgeStyle);
-		boxEdgeWidth = obj["boxEdgeWidth"].get<float>(boxEdgeWidth);
-		readColor(obj, "boxFill", boxFill);
-		readColor(obj, "boxEdgeHighlightColor", boxEdgeHighlightColor);
-		readColor(obj, "boxEdgeShadowColor", boxEdgeShadowColor);
-		readColor(obj, "checkColor", checkColor);
-		checkWidth = obj["checkWidth"].get<float>(checkWidth);
-		boxLabelSpacing = obj["boxLabelSpacing"].get<float>(boxLabelSpacing);
+		bool useHighlight = highlighted && !highlightFill.is_null();
+		const BLVar& background = useHighlight ? highlightFill : backgroundFill_;
+		FillStyle fillStyle = useHighlight ? hilightFillStyle : bkgFillStyle;
+
+		ctx.save();
+		ctx.set_comp_op( toBLCompOp(compositingOp));
+
+
+
+		if (!background.is_null()) {
+
+			switch (fillStyle) {
+				case FillStyle::FillColor:
+				case FillStyle::FillImage: {
+					ctx.set_fill_style(background);
+					ctx.set_fill_alpha(opacity);
+
+					if (rectRadius != 0.0) {
+						ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+					}
+					else {
+						ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+					}
+
+				}
+				break;
+
+				case FillStyle::FillGradient: {
+					ctx.set_fill_style(background);
+					ctx.set_fill_alpha(opacity);
+					ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+				}
+				break;
+			}
+		}
+
+		if (borderWidth > 0.0f && !borderFill.is_null()) {
+			double inset = borderWidth * 0.5;
+			ctx.set_stroke_style(borderFill);
+			ctx.set_stroke_alpha(opacity);
+			ctx.set_stroke_width(borderWidth);
+
+			if (rectRadius != 0.0) {
+				ctx.stroke_round_rect(BLRoundRect(inset, inset, size.width - inset, size.height - inset, rectRadius));
+			}
+			else {
+				ctx.stroke_box(inset, inset, size.width - inset, size.height - inset);
+			}
+
+			
+		}
+
+		ctx.restore();
 	}
 
 	ThemedViewStyle::~ThemedViewStyle() {
@@ -383,6 +371,23 @@ namespace newui {
 
 	Rect ThemedViewStyle::computeClientBounds(const Size& size) const {
 		Rect fullRect(0.0f, 0.0f, size.width, size.height);
+
+		// ThemeData (themedata.h) first - a pre-generated snapshot
+		// (tools/themesgen/themesgen.py) of a real Windows install's
+		// actual content-rect deflation for this exact (class, part,
+		// state) triple, checked ahead of the live HTHEME query below so
+		// this answer is available even before this style has ever
+		// painted through a live window (theme_ still null at that
+		// point - see the "no theme cached yet" fallback right after).
+		// Neutral/normal state, same as the live query below - see its
+		// own comment for why.
+		if (const ThemePartData* data = ThemeData::instance().tryPartData(themeClassName_, partId(), stateId(false))) {
+			if (data->contentLeft && data->contentTop && data->contentRight && data->contentBottom) {
+				return Rect(*data->contentLeft, *data->contentTop,
+					size.width - *data->contentLeft - *data->contentRight,
+					size.height - *data->contentTop - *data->contentBottom);
+			}
+		}
 
 		// No theme cached yet - nothing has painted this style through a
 		// live HWND, so there's no HTHEME to query GetThemeBackgroundContentRect()
@@ -410,6 +415,15 @@ namespace newui {
 	}
 
 	Size ThemedViewStyle::partSize(const Size& fallback) const {
+		// ThemeData first - see computeClientBounds()'s own comment just
+		// above for why this check comes before the "no theme cached
+		// yet" live-query fallback, not after it.
+		if (const ThemePartData* data = ThemeData::instance().tryPartData(themeClassName_, partId(), stateId(false))) {
+			if (data->size) {
+				return *data->size;
+			}
+		}
+
 		// Same "no theme cached yet" fallback as computeClientBounds()
 		// above, same reason.
 		if (theme_ == nullptr) {
@@ -514,7 +528,7 @@ namespace newui {
 				themedImage.create_from_data(width, height, BL_FORMAT_PRGB32, bits, intptr_t(rowWidthPixels) * 4);
 
 				ctx.save();
-				ctx.set_comp_op(compositingOp);
+				ctx.set_comp_op(toBLCompOp(compositingOp));
 				ctx.blit_image(BLPoint(0, 0), themedImage);
 				ctx.restore();
 			}
@@ -523,280 +537,6 @@ namespace newui {
 		}
 
 		::DeleteDC(targetDC);
-	}
-
-	void ThemedButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedCheckBoxStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedCheckBoxStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedRadioButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedRadioButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedGroupBoxStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["enabled"] = enabled;
-	}
-
-	void ThemedGroupBoxStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedToolbarButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarDropDownButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedToolbarDropDownButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarDropDownButtonGlyphStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedToolbarDropDownButtonGlyphStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarSplitButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedToolbarSplitButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarSplitButtonDropDownStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["checked"] = checked;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedToolbarSplitButtonDropDownStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		checked = obj["checked"].get_bool(checked);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedToolbarSeparatorStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-	}
-
-	void ThemedToolbarSeparatorStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-	}
-
-	void ThemedTooltipStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["linked"] = linked;
-	}
-
-	void ThemedTooltipStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		linked = obj["linked"].get_bool(linked);
-	}
-
-	void ThemedSpinButtonStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["isUpButton"] = isUpButton;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedSpinButtonStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		isUpButton = obj["isUpButton"].get_bool(isUpButton);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedEditStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["focused"] = focused;
-		w["readOnly"] = readOnly;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedEditStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		focused = obj["focused"].get_bool(focused);
-		readOnly = obj["readOnly"].get_bool(readOnly);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedListItemStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["selected"] = selected;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedListItemStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		selected = obj["selected"].get_bool(selected);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedHeaderItemStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["pressed"] = pressed;
-		w["sorted"] = sorted;
-	}
-
-	void ThemedHeaderItemStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		pressed = obj["pressed"].get_bool(pressed);
-		sorted = obj["sorted"].get_bool(sorted);
-	}
-
-	void ThemedHeaderSortArrowStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["sortedAscending"] = sortedAscending;
-	}
-
-	void ThemedHeaderSortArrowStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		sortedAscending = obj["sortedAscending"].get_bool(sortedAscending);
-	}
-
-	void ThemedTreeItemStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["selected"] = selected;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedTreeItemStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		selected = obj["selected"].get_bool(selected);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedTreeGlyphStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["expanded"] = expanded;
-	}
-
-	void ThemedTreeGlyphStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		expanded = obj["expanded"].get_bool(expanded);
-	}
-
-	void ThemedTabItemStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["alignment"] = w.new_string(tabItemAlignmentToString(alignment));
-		w["position"] = w.new_string(tabItemPositionToString(position));
-		w["selected"] = selected;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedTabItemStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		alignment = tabItemAlignmentFromString(obj["alignment"].get_c_str(""), alignment);
-		position = tabItemPositionFromString(obj["position"].get_c_str(""), position);
-		selected = obj["selected"].get_bool(selected);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedTrackbarTrackStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-	}
-
-	void ThemedTrackbarTrackStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-	}
-
-	void ThemedTrackbarThumbStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedTrackbarThumbStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedTrackbarTicksStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["tickCount"] = tickCount;
-	}
-
-	void ThemedTrackbarTicksStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		tickCount = obj["tickCount"].get<int>(tickCount);
 	}
 
 	void ThemedTrackbarTicksStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
@@ -808,7 +548,7 @@ namespace newui {
 
 		Color tickColor = UIColorManager::colorFor(UIColorRole::ControlBorder);
 		ctx.save();
-		ctx.set_comp_op(compositingOp);
+		ctx.set_comp_op(toBLCompOp(compositingOp));
 		ctx.set_fill_style(tickColor.toBLRgba32());
 		ctx.set_fill_alpha(opacity);
 
@@ -829,88 +569,6 @@ namespace newui {
 		}
 
 		ctx.restore();
-	}
-
-	void ThemedProgressBarTrackStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-	}
-
-	void ThemedProgressBarTrackStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-	}
-
-	void ThemedProgressBarFillStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["state"] = w.new_string(progressBarFillStateToString(state));
-	}
-
-	void ThemedProgressBarFillStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		state = progressBarFillStateFromString(obj["state"].get_c_str(""), state);
-	}
-
-	void ThemedScrollbarThumbStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedScrollbarThumbStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedScrollbarArrowStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["direction"] = w.new_string(scrollbarArrowDirectionToString(direction));
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedScrollbarArrowStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		direction = scrollbarArrowDirectionFromString(obj["direction"].get_c_str(""), direction);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedScrollbarTrackStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["position"] = w.new_string(scrollbarTrackPositionToString(position));
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-	}
-
-	void ThemedScrollbarTrackStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		position = scrollbarTrackPositionFromString(obj["position"].get_c_str(""), position);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-	}
-
-	void ThemedMenuBarItemStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["pressed"] = pressed;
-		w["enabled"] = enabled;
-		w["highlightInset"] = highlightInset;
-		w["highlightCornerRadius"] = highlightCornerRadius;
-	}
-
-	void ThemedMenuBarItemStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		pressed = obj["pressed"].get_bool(pressed);
-		enabled = obj["enabled"].get_bool(enabled);
-		highlightInset = obj["highlightInset"].get<float>(highlightInset);
-		highlightCornerRadius = obj["highlightCornerRadius"].get<float>(highlightCornerRadius);
 	}
 
 	// Hand-drawn rounded highlight for MBI_HOT/MBI_PUSHED, replacing
@@ -942,7 +600,7 @@ namespace newui {
 			return;
 		}
 
-		Rect r = Rect(0.0f, 0.0f, size.width, size.height).deflated(highlightInset);
+		Rect r = Rect(0.0f, 0.0f, size.width, size.height).deflate(highlightInset);
 		if (r.size().width <= 0.0f || r.size().height <= 0.0f) {
 			return;
 		}
@@ -950,7 +608,7 @@ namespace newui {
 		Color accent = UIColorManager::colorFor(UIColorRole::HighlightBackground);
 
 		ctx.save();
-		ctx.set_comp_op(compositingOp);
+		ctx.set_comp_op(toBLCompOp(compositingOp));
 		ctx.set_fill_style(accent.toBLRgba32());
 		// Pressed reads as a stronger fill than a plain hover - same
 		// "pressed is more emphatic than hot" precedence stateId() already
@@ -959,18 +617,6 @@ namespace newui {
 		ctx.fill_round_rect(double(r.left()), double(r.top()),
 			double(r.size().width), double(r.size().height), double(highlightCornerRadius));
 		ctx.restore();
-	}
-
-	void ThemedRebarChevronStyle::writeFields(json5::builder& w) const {
-		ViewStyle::writeFields(w);
-		w["horizontal"] = horizontal;
-		w["pressed"] = pressed;
-	}
-
-	void ThemedRebarChevronStyle::readFields(const json5::value& obj) {
-		ViewStyle::readFields(obj);
-		horizontal = obj["horizontal"].get_bool(horizontal);
-		pressed = obj["pressed"].get_bool(pressed);
 	}
 
 }

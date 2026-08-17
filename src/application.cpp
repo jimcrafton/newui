@@ -3,12 +3,10 @@
 #include "newui/frame.h"
 #include "newui/newui.h"
 #include "newui/runloop.h"
+#include "newui/themedata.h"
 #include "newui/uicolormanager.h"
 
 #include <uxtheme.h>
-
-#include <json5/json5.hpp>
-#include <json5/json5_builder.hpp>
 
 #include <stdexcept>
 
@@ -237,6 +235,16 @@ void Application::run() {
 		// don't throw" convention as the DPI awareness call just above.
 		enableProcessDarkModeSupport();
 
+		// Loads Resources/Themes/light.theme or dark.theme (themedata.h),
+		// if either exists next to the .exe - a no-op (isLoaded() stays
+		// false) for an app that never ran tools/themesgen/themesgen.py,
+		// so this doesn't change behavior for anything that doesn't have
+		// one. Frame's own WM_SETTINGCHANGE("ImmersiveColorSet") handler
+		// re-runs this on every live Light/Dark toggle - this call is
+		// just what gets the very first paint already using it too,
+		// rather than only after the first live toggle.
+		ThemeData::instance().reloadForCurrentMode();
+
 		INITCOMMONCONTROLSEX icc{};
 		icc.dwSize = sizeof(icc);
 		icc.dwICC = ICC_WIN95_CLASSES;
@@ -318,27 +326,6 @@ SyncReturn Application::runLoopEnding(RunLoop&)
 SyncReturn Application::runLoopDone(RunLoop&)
 {
 	return newui::SyncReturn::Handled;
-}
-
-void Application::writeFields(json5::builder& w) const {
-	w.push_object();
-	for (const auto& kvp : customValues_) {
-		w[kvp.first] = w.new_string(kvp.second);
-	}
-	w["custom"] = w.pop();
-}
-
-void Application::readFields(const json5::value& obj) {
-	customValues_.clear();
-
-	json5::value customVal = obj["custom"];
-	if (!customVal.is_object()) {
-		return;
-	}
-
-	for (auto kvp : json5::object_view(customVal)) {
-		customValues_[kvp.first] = kvp.second.get_c_str("");
-	}
 }
 
 }

@@ -45,8 +45,8 @@ namespace newui {
     // first place, so a semantic color role can't help them - that part
     // still needs the pixel-level fake.
     //
-    // Meyer's singleton, like Bundle/SerializationRegistry - no Win32
-    // registration/uniqueness constraint to guard, unlike Application.
+    // Meyer's singleton, like Bundle - no Win32 registration/uniqueness
+    // constraint to guard, unlike Application.
     class UIColorManager {
     public:
         // Meyer's singleton (see the class comment above) with no real

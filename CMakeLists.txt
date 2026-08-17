@@ -50,8 +50,17 @@ add_subdirectory(3rdparty/blend2d)
 # json5 - Dependency
 # ==================
 # Vendored under 3rdparty/ as a permanent part of the project (P-i-N/json5,
-# MIT, header-only) - used by the UIComponent-based save/load format (see
-# include/newui/serialization.h).
+# MIT, header-only) - used by the reflection-driven save/load format (see
+# include/newui/reflection.h/reflectionio.h).
+
+# reflectgen build integration - see cmake/ReflectGen.cmake's own header
+# comment for the full two-stage (configure-time discovery, build-time
+# generation) design. include()'d before add_library(newui ...) below
+# purely so newui_add_reflectgen_output(newui) reads top-to-bottom next to
+# the target it's registering generated output for; the discovery/
+# execute_process() work this include() triggers doesn't depend on
+# `newui` existing yet either way.
+include(cmake/ReflectGen.cmake)
 
 add_library(newui STATIC
     src/newui.cpp
@@ -61,9 +70,6 @@ add_library(newui STATIC
     src/subview.cpp
     src/fontmanager.cpp
  "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp" "include/newui/layout.h" "src/layout.cpp"
-    "include/newui/uicomponent.h" "src/uicomponent.cpp"
-    "include/newui/json5_helpers.h" "src/json5_helpers.cpp"
-    "include/newui/serialization.h" "src/serialization.cpp"
     "include/newui/bundle.h" "src/bundle.cpp"
     "include/newui/reflection.h" "src/reflection.cpp"
     "include/newui/cursor.h" "src/cursor.cpp"
@@ -74,9 +80,18 @@ add_library(newui STATIC
     "include/newui/uicolormanager.h" "src/uicolormanager.cpp"
     "include/newui/models.h" "src/models.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
-    "include/newui/controls.h" "src/controls.cpp")
+    "include/newui/controls.h" "src/controls.cpp"
+    "include/newui/themedata.h" "src/themedata.cpp" "include/newui/reflectionio.h")
 
 add_dependencies(newui newui_version)
+
+# Adds this build's combined reflectgen-generated registration .cpp (see
+# cmake/ReflectGen.cmake) to newui's own sources - empty/placeholder today
+# (no real header under include/newui carries a reflectgen marker yet;
+# every class currently registered against newui::reflection is still
+# hand-written, see examples/reflection2.cpp), real generated content the
+# moment one does.
+newui_add_reflectgen_output(newui)
 
 target_include_directories(newui PUBLIC
     include
@@ -130,7 +145,7 @@ endfunction()
 
 add_executable(newui_app
     src/main.cpp
- "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color_constants.h" "include/newui/custom_message_constants.h" "src/viewstyle.cpp")
+ "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color_constants.h" "include/newui/custom_message_constants.h" "src/viewstyle.cpp" "include/newui/reflectionio.h")
 
 target_link_libraries(newui_app PRIVATE newui)
 

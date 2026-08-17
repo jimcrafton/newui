@@ -38,14 +38,19 @@ template<> struct newui::reflection::detail::ClassAccess<Gadget> {
 
 namespace {
 
+// count_/numbers_/weights_/scores_ are plain member variables with no
+// getter/setter methods of their own - Field/field() is the reflection
+// vocabulary for that (raw storage access), not Property/property() (which
+// is for members reached through real accessor methods) - see Field's own
+// "raw access, never through a method" comment in reflection.h.
 const Class* RegisterAndGetGadgetClass() {
     static const Class* registered = [] {
         ClassBuilder<Gadget> builder;
         builder.clazz()
-            .property("count_", Scope::Private, detail::ClassAccess<Gadget>::count_())
-            .property("numbers_", Scope::Private, detail::ClassAccess<Gadget>::numbers_())
-            .property("weights_", Scope::Private, detail::ClassAccess<Gadget>::weights_())
-            .property("scores_", Scope::Private, detail::ClassAccess<Gadget>::scores_());
+            .field("count_", Scope::Private, detail::ClassAccess<Gadget>::count_())
+            .field("numbers_", Scope::Private, detail::ClassAccess<Gadget>::numbers_())
+            .field("weights_", Scope::Private, detail::ClassAccess<Gadget>::weights_())
+            .field("scores_", Scope::Private, detail::ClassAccess<Gadget>::scores_());
         ReflectionRegistry::registerClass(builder);
         return classinfo(typeid(Gadget));
     }();
@@ -56,21 +61,22 @@ const Class* RegisterAndGetGadgetClass() {
 
 TEST(Reflection, ScalarPropertyIsNotCollection) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* countProp = gadgetClass->property("count_");
+    const Field* countField = gadgetClass->field("count_");
 
-    EXPECT_FALSE(countProp->isCollection());
-    EXPECT_FALSE(countProp->isAssociative());
-    EXPECT_EQ(dynamic_cast<const PropertyCollection*>(countProp), nullptr);
+    EXPECT_FALSE(countField->isCollection());
+    EXPECT_FALSE(countField->isAssociative());
+    EXPECT_FALSE(countField->isStatic());
+    EXPECT_EQ(dynamic_cast<const FieldCollection*>(countField), nullptr);
 }
 
 TEST(Reflection, VectorPropertyReportsSequentialCollectionFlags) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* numbersProp = gadgetClass->property("numbers_");
+    const Field* numbersField = gadgetClass->field("numbers_");
 
-    EXPECT_TRUE(numbersProp->isCollection());
-    EXPECT_FALSE(numbersProp->isAssociative());
+    EXPECT_TRUE(numbersField->isCollection());
+    EXPECT_FALSE(numbersField->isAssociative());
 
-    const auto* collection = dynamic_cast<const PropertyCollection*>(numbersProp);
+    const auto* collection = dynamic_cast<const FieldCollection*>(numbersField);
     ASSERT_NE(collection, nullptr);
     EXPECT_EQ(collection->elementType(), std::type_index(typeid(int)));
     EXPECT_EQ(collection->keyType(), std::type_index(typeid(std::size_t)));
@@ -78,23 +84,23 @@ TEST(Reflection, VectorPropertyReportsSequentialCollectionFlags) {
 
 TEST(Reflection, VectorPropertyCountAndIndexAccess) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* numbersProp = gadgetClass->property("numbers_");
-    const auto* collection = dynamic_cast<const PropertyCollection*>(numbersProp);
+    const Field* numbersField = gadgetClass->field("numbers_");
+    const auto* collection = dynamic_cast<const FieldCollection*>(numbersField);
     Gadget g;
 
-    std::any boxed = numbersProp->get(&g);
+    std::any boxed = numbersField->get(&g);
     ASSERT_EQ(collection->count(boxed), 3u);
     EXPECT_EQ(std::any_cast<int>(collection->get(boxed, 0)), 10);
     EXPECT_EQ(std::any_cast<int>(collection->get(boxed, 2)), 30);
 
     collection->set(boxed, 1, std::any(99));
-    numbersProp->set(&g, boxed);
+    numbersField->set(&g, boxed);
 
-    std::any confirm = numbersProp->get(&g);
+    std::any confirm = numbersField->get(&g);
     EXPECT_EQ(std::any_cast<int>(collection->get(confirm, 1)), 99);
 
     // Whole-container access still works unchanged.
-    EXPECT_EQ(numbersProp->getAs<std::vector<int>>(&g), (std::vector<int>{10, 99, 30}));
+    EXPECT_EQ(numbersField->getAs<std::vector<int>>(&g), (std::vector<int>{10, 99, 30}));
 
     // The any-key overload is index-based for a sequential collection.
     EXPECT_EQ(std::any_cast<int>(collection->get(confirm, std::any(std::size_t(0)))), 10);
@@ -102,33 +108,33 @@ TEST(Reflection, VectorPropertyCountAndIndexAccess) {
 
 TEST(Reflection, ArrayPropertyIsFixedSizeSequentialCollection) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* weightsProp = gadgetClass->property("weights_");
-    const auto* collection = dynamic_cast<const PropertyCollection*>(weightsProp);
+    const Field* weightsField = gadgetClass->field("weights_");
+    const auto* collection = dynamic_cast<const FieldCollection*>(weightsField);
     Gadget g;
 
-    EXPECT_TRUE(weightsProp->isCollection());
-    EXPECT_FALSE(weightsProp->isAssociative());
+    EXPECT_TRUE(weightsField->isCollection());
+    EXPECT_FALSE(weightsField->isAssociative());
 
-    std::any boxed = weightsProp->get(&g);
+    std::any boxed = weightsField->get(&g);
     ASSERT_EQ(collection->count(boxed), 3u);
     EXPECT_FLOAT_EQ(std::any_cast<float>(collection->get(boxed, 1)), 2.5f);
 
     collection->set(boxed, 2, std::any(9.5f));
-    weightsProp->set(&g, boxed);
+    weightsField->set(&g, boxed);
 
-    std::any confirm = weightsProp->get(&g);
+    std::any confirm = weightsField->get(&g);
     EXPECT_FLOAT_EQ(std::any_cast<float>(collection->get(confirm, 2)), 9.5f);
     EXPECT_EQ(collection->count(confirm), 3u);
 }
 
 TEST(Reflection, MapPropertyReportsAssociativeCollectionFlags) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* scoresProp = gadgetClass->property("scores_");
+    const Field* scoresField = gadgetClass->field("scores_");
 
-    EXPECT_TRUE(scoresProp->isCollection());
-    EXPECT_TRUE(scoresProp->isAssociative());
+    EXPECT_TRUE(scoresField->isCollection());
+    EXPECT_TRUE(scoresField->isAssociative());
 
-    const auto* collection = dynamic_cast<const PropertyCollection*>(scoresProp);
+    const auto* collection = dynamic_cast<const FieldCollection*>(scoresField);
     ASSERT_NE(collection, nullptr);
     EXPECT_EQ(collection->elementType(), std::type_index(typeid(int)));
     EXPECT_EQ(collection->keyType(), std::type_index(typeid(std::string)));
@@ -136,11 +142,11 @@ TEST(Reflection, MapPropertyReportsAssociativeCollectionFlags) {
 
 TEST(Reflection, MapPropertyKeyAndPositionalAccess) {
     const Class* gadgetClass = RegisterAndGetGadgetClass();
-    const Property* scoresProp = gadgetClass->property("scores_");
-    const auto* collection = dynamic_cast<const PropertyCollection*>(scoresProp);
+    const Field* scoresField = gadgetClass->field("scores_");
+    const auto* collection = dynamic_cast<const FieldCollection*>(scoresField);
     Gadget g;
 
-    std::any boxed = scoresProp->get(&g);
+    std::any boxed = scoresField->get(&g);
     ASSERT_EQ(collection->count(boxed), 2u);
     EXPECT_EQ(std::any_cast<int>(collection->get(boxed, std::any(std::string("alice")))), 90);
 
@@ -150,11 +156,11 @@ TEST(Reflection, MapPropertyKeyAndPositionalAccess) {
     EXPECT_EQ(std::any_cast<int>(collection->get(boxed, std::size_t(0))), 90);
 
     collection->set(boxed, std::any(std::string("bob")), std::any(85));
-    scoresProp->set(&g, boxed);
+    scoresField->set(&g, boxed);
 
-    std::any confirm = scoresProp->get(&g);
+    std::any confirm = scoresField->get(&g);
     EXPECT_EQ(std::any_cast<int>(collection->get(confirm, std::any(std::string("bob")))), 85);
-    EXPECT_EQ((scoresProp->getAs<std::map<std::string, int>>(&g)).at("bob"), 85);
+    EXPECT_EQ((scoresField->getAs<std::map<std::string, int>>(&g)).at("bob"), 85);
 }
 
 // ---------------------------------------------------------------------

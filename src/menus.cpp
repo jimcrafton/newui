@@ -347,7 +347,7 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
     // Image+BLContext+BitBlt pattern this class's own doc comment already
     // described as the "Blend2D-quality" option, now done once here
     // instead of duplicated by every onDraw handler.
-    Image itemImage(width, height);
+    gfx::Image itemImage(width, height);
     if (!itemImage.isValid()) {
         return true;  // couldn't allocate a DIB-backed buffer - draw nothing rather than crash
     }
