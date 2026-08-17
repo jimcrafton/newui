@@ -1,0 +1,2569 @@
+{
+    "roles": {
+        "WindowBackground": "#000000ff",
+        "ControlBackground": "#000000ff",
+        "WindowText": "#ffffffff",
+        "ControlText": "#ffffffff",
+        "ControlBorder": "#232323ff",
+        "DisabledText": "#7c7c7cff",
+        "LinkText": "#3399ffff"
+    },
+    "parts": {
+        "BUTTON": {
+            "BP_PUSHBUTTON": {
+                "PBS_NORMAL": {
+                    "size": {
+                        "width": 6,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 3,
+                        "top": 3,
+                        "right": 3,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "PBS_HOT": {
+                    "size": {
+                        "width": 6,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 3,
+                        "top": 3,
+                        "right": 3,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "PBS_PRESSED": {
+                    "size": {
+                        "width": 6,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 3,
+                        "top": 3,
+                        "right": 3,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "PBS_DISABLED": {
+                    "size": {
+                        "width": 6,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 3,
+                        "top": 3,
+                        "right": 3,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#7c7c7cff"
+                    }
+                }
+            },
+            "BP_CHECKBOX": {
+                "CBS_UNCHECKEDNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_UNCHECKEDHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_UNCHECKEDPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_UNCHECKEDDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "CBS_CHECKEDNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_CHECKEDHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_CHECKEDPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "CBS_CHECKEDDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                }
+            },
+            "BP_RADIOBUTTON": {
+                "RBS_UNCHECKEDNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_UNCHECKEDHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_UNCHECKEDPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_UNCHECKEDDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "RBS_CHECKEDNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_CHECKEDHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_CHECKEDPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "RBS_CHECKEDDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                }
+            },
+            "BP_GROUPBOX": {
+                "GBS_NORMAL": {
+                    "size": {
+                        "width": 4,
+                        "height": 5
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 2,
+                        "right": 2,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "GBS_DISABLED": {
+                    "size": {
+                        "width": 4,
+                        "height": 5
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 2,
+                        "right": 2,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            }
+        },
+        "TOOLBAR": {
+            "TP_BUTTON": {
+                "TS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "TS_CHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOTCHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "TP_DROPDOWNBUTTON": {
+                "TS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "TS_CHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOTCHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "TP_DROPDOWNBUTTONGLYPH": {
+                "TS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                }
+            },
+            "TP_SPLITBUTTON": {
+                "TS_NORMAL": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOT": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_PRESSED": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_DISABLED": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "TS_CHECKED": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOTCHECKED": {
+                    "size": {
+                        "width": 6,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "TP_SPLITBUTTONDROPDOWN": {
+                "TS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "TS_CHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "TS_HOTCHECKED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 1,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "TP_SEPARATOR": {
+                "TS_NORMAL": {
+                    "size": {
+                        "width": 5,
+                        "height": 4
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 2,
+                        "right": 1,
+                        "bottom": 2
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "TP_SEPARATORVERT": {
+                "TS_NORMAL": {
+                    "size": {
+                        "width": 4,
+                        "height": 5
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 4,
+                        "right": 2,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#0f0f0fff",
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            }
+        },
+        "STATUS": {
+            "SP_PANE": {
+                "DEFAULT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        },
+        "REBAR": {
+            "RP_BAND": {
+                "DEFAULT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "RP_CHEVRON": {
+                "CHEVS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "CHEVS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "CHEVS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            },
+            "RP_CHEVRONVERT": {
+                "CHEVSV_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "CHEVSV_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "CHEVSV_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                }
+            }
+        },
+        "TOOLTIP": {
+            "TTP_STANDARD": {
+                "TTSS_NORMAL": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#a8a8a8ff"
+                    }
+                },
+                "TTSS_LINK": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#a8a8a8ff"
+                    }
+                }
+            }
+        },
+        "SPIN": {
+            "SPNP_UP": {
+                "UPS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "UPS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "UPS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "UPS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                }
+            },
+            "SPNP_DOWN": {
+                "DNS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "DNS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "DNS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                },
+                "DNS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#1c1c1cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4f52ff"
+                    }
+                }
+            }
+        },
+        "EDIT": {
+            "EP_EDITTEXT": {
+                "ETS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4e54ff"
+                    }
+                },
+                "ETS_HOT": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4e54ff"
+                    }
+                },
+                "ETS_DISABLED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#122f4eff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4e54ff",
+                        "textColor": "#929292ff"
+                    }
+                },
+                "ETS_FOCUSED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4e54ff"
+                    }
+                },
+                "ETS_READONLY": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#4c4e54ff"
+                    }
+                }
+            }
+        },
+        "LISTVIEW": {
+            "LVP_LISTITEM": {
+                "LISS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "LISS_HOT": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "LISS_SELECTED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "LISS_DISABLED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "LISS_HOTSELECTED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                }
+            }
+        },
+        "HEADER": {
+            "HP_HEADERITEM": {
+                "HIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HIS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HIS_SORTEDNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HIS_SORTEDHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HIS_SORTEDPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "HP_HEADERSORTARROW": {
+                "HSAS_SORTEDUP": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "HSAS_SORTEDDOWN": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        },
+        "TREEVIEW": {
+            "TVP_TREEITEM": {
+                "TREIS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "TREIS_HOT": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "TREIS_SELECTED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "TREIS_DISABLED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "TREIS_HOTSELECTED": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                }
+            },
+            "TVP_GLYPH": {
+                "GLPS_CLOSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                },
+                "GLPS_OPENED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#000000ff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#6f747dff"
+                    }
+                }
+            }
+        },
+        "TAB": {
+            "TABP_TOPTABITEM": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TOPTABITEMLEFTEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TOPTABITEMRIGHTEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TOPTABITEMBOTHEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TABITEM": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TABITEMLEFTEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TABITEMRIGHTEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_TABITEMBOTHEDGE": {
+                "TIS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_SELECTED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "TIS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "TABP_PANE": {
+                "DEFAULT": {
+                    "size": {
+                        "width": 8,
+                        "height": 8
+                    },
+                    "contentRect": {
+                        "left": 4,
+                        "top": 4,
+                        "right": 4,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "fillColor": "#3871b3ff",
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        },
+        "TRACKBAR": {
+            "TKP_TRACK": {
+                "TRS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            },
+            "TKP_TRACKVERT": {
+                "TRVS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            },
+            "TKP_THUMB": {
+                "TUS_NORMAL": {
+                    "size": {
+                        "width": 5,
+                        "height": 18
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 9,
+                        "right": 3,
+                        "bottom": 9
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUS_HOT": {
+                    "size": {
+                        "width": 5,
+                        "height": 18
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 9,
+                        "right": 3,
+                        "bottom": 9
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUS_PRESSED": {
+                    "size": {
+                        "width": 5,
+                        "height": 18
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 9,
+                        "right": 3,
+                        "bottom": 9
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUS_DISABLED": {
+                    "size": {
+                        "width": 5,
+                        "height": 18
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 9,
+                        "right": 3,
+                        "bottom": 9
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            },
+            "TKP_THUMBVERT": {
+                "TUVS_NORMAL": {
+                    "size": {
+                        "width": 5,
+                        "height": 10
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 5,
+                        "right": 3,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUVS_HOT": {
+                    "size": {
+                        "width": 5,
+                        "height": 10
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 5,
+                        "right": 3,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUVS_PRESSED": {
+                    "size": {
+                        "width": 5,
+                        "height": 10
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 5,
+                        "right": 3,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                },
+                "TUVS_DISABLED": {
+                    "size": {
+                        "width": 5,
+                        "height": 10
+                    },
+                    "contentRect": {
+                        "left": 2,
+                        "top": 5,
+                        "right": 3,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            },
+            "TKP_TICS": {
+                "TSS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            },
+            "TKP_TICSVERT": {
+                "TSVS_NORMAL": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "fillColor": "#13171cff",
+                        "edgeFillColor": "#232323ff",
+                        "borderColor": "#13171cff"
+                    }
+                }
+            }
+        },
+        "PROGRESS": {
+            "PP_BAR": {
+                "DEFAULT": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "PP_BARVERT": {
+                "DEFAULT": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 1,
+                        "right": 1,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "PP_FILL": {
+                "PBFS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "PBFS_ERROR": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "PBFS_PAUSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 5
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "PP_FILLVERT": {
+                "PBFVS_NORMAL": {
+                    "contentRect": {
+                        "left": 5,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "PBFVS_ERROR": {
+                    "contentRect": {
+                        "left": 5,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "PBFVS_PAUSED": {
+                    "contentRect": {
+                        "left": 5,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        },
+        "SCROLLBAR": {
+            "SBP_THUMBBTNHORZ": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 4,
+                        "top": 1,
+                        "right": 4,
+                        "bottom": 1
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_THUMBBTNVERT": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 4
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_ARROWBTN": {
+                "ABS_UPNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_UPHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_UPPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_UPDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_DOWNNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_DOWNHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_DOWNPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_DOWNDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_LEFTNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_LEFTHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_LEFTPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_LEFTDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_RIGHTNORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_RIGHTHOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_RIGHTPRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "ABS_RIGHTDISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_LOWERTRACKHORZ": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_UPPERTRACKHORZ": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 0,
+                        "top": 4,
+                        "right": 0,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_LOWERTRACKVERT": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            },
+            "SBP_UPPERTRACKVERT": {
+                "SCRBS_NORMAL": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_HOT": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_PRESSED": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                },
+                "SCRBS_DISABLED": {
+                    "contentRect": {
+                        "left": 10,
+                        "top": 0,
+                        "right": 3,
+                        "bottom": 0
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        },
+        "MENU": {
+            "MENU_BARITEM": {
+                "MBI_NORMAL": {
+                    "size": {
+                        "width": 14,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 7,
+                        "top": 3,
+                        "right": 7,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "MBI_HOT": {
+                    "size": {
+                        "width": 14,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 7,
+                        "top": 3,
+                        "right": 7,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "MBI_PUSHED": {
+                    "size": {
+                        "width": 14,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 7,
+                        "top": 3,
+                        "right": 7,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#ffffffff"
+                    }
+                },
+                "MBI_DISABLED": {
+                    "size": {
+                        "width": 14,
+                        "height": 6
+                    },
+                    "contentRect": {
+                        "left": 7,
+                        "top": 3,
+                        "right": 7,
+                        "bottom": 3
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff",
+                        "textColor": "#929292ff"
+                    }
+                }
+            },
+            "MENU_BARBACKGROUND": {
+                "MB_ACTIVE": {
+                    "contentRect": {
+                        "left": 1,
+                        "top": 9,
+                        "right": 1,
+                        "bottom": 15
+                    },
+                    "colors": {
+                        "edgeFillColor": "#232323ff"
+                    }
+                }
+            }
+        }
+    }
+}

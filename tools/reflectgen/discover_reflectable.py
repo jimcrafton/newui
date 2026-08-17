@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """discover_reflectable.py - scans candidate header files for reflectgen
-markers (an "@reflect" annotation, or NEWUI_REFLECT_FRIEND()) and writes
+markers (an "@reflect" annotation, or NEWUI_REFLECT_PRIVATE()) and writes
 the matching subset out as a CMake variable, so CMakeLists.txt can build
 reflectgen.py's own input list without hand-maintaining it - see
 cmake/ReflectGen.cmake for how this fits into the two-stage build
@@ -27,7 +27,7 @@ import argparse
 import os
 import sys
 
-MARKERS = ("@reflect", "NEWUI_REFLECT_FRIEND")
+MARKERS = ("@reflect", "NEWUI_REFLECT_PRIVATE")
 
 # reflection.h/reflectionio.h define the reflection system itself, not
 # application classes meant to be auto-registered - every internal class

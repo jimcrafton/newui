@@ -78,7 +78,7 @@ namespace newui::reflection {
     };
     // Forward-declared, never given a generic body - referencing
     // ClassAccess<T> for a T nobody ever explicitly specialized is a hard
-    // "incomplete type" compile error, not silent UB. NEWUI_REFLECT_FRIEND()
+    // "incomplete type" compile error, not silent UB. NEWUI_REFLECT_PRIVATE()
     // (below) friends this template - friending a template (not one
     // specialization) grants friendship to every specialization, including
     // ones written later in a different translation unit, so a class only
@@ -200,7 +200,7 @@ namespace newui::reflection {
     // compiler (unlike a class-level annotation for an AST walk to find,
     // this has to actually take effect in the real build for generated/
     // hand-written accessor code to compile at all).
-#define NEWUI_REFLECT_FRIEND() \
+#define NEWUI_REFLECT_PRIVATE() \
     template<typename NewuiReflectT_> friend struct newui::reflection::detail::ClassAccess
 
     enum class Scope {
@@ -272,7 +272,7 @@ namespace newui::reflection {
     // RefGetter/PtrGetter/Getter+Setter modes); a plain member variable
     // with no accessors at all - static or not - is a Field. scope()
     // records the real C++ access level as metadata (see
-    // NEWUI_REFLECT_FRIEND()'s friend declaration for how a private one
+    // NEWUI_REFLECT_PRIVATE()'s friend declaration for how a private one
     // gets reached at all) - it doesn't gate address()/get()/set().
     //
     // instance is meaningless for a static field (TypedField's own
@@ -473,7 +473,7 @@ namespace newui::reflection {
     };
 
     // A member variable, reflected regardless of its real C++ access level
-    // (see NEWUI_REFLECT_FRIEND()'s friend declaration) - scope() records the
+    // (see NEWUI_REFLECT_PRIVATE()'s friend declaration) - scope() records the
     // real access level as metadata, it doesn't gate whether address()/get()/
     // set() work. address() is the zero-copy live pointer into instance;
     // get()/set() are a boxed convenience layer on top for callers that only
@@ -563,7 +563,7 @@ namespace newui::reflection {
     //     back a *live* ValueT&, e.g. `ViewStyle& View::style()` - for a
     //     nested sub-object reachable only through an accessor method, not
     //     a raw pointer-to-member (a protected/private member with no
-    //     NEWUI_REFLECT_FRIEND() on that class, or one that's genuinely
+    //     NEWUI_REFLECT_PRIVATE() on that class, or one that's genuinely
     //     computed-but-stable). Still addressable, same as MemberPtr -
     //     address() just hands back &refGetter_(*self) instead of
     //     &(self->*member_).
@@ -1015,7 +1015,7 @@ namespace newui::reflection {
     // reachable through a *const*-returning accessor, e.g.
     // `const std::vector<SubView*>& View::childViews()`, which can't
     // itself be exposed as a live mutable ContainerT& without reaching
-    // past real C++ access control the way NEWUI_REFLECT_FRIEND() does).
+    // past real C++ access control the way NEWUI_REFLECT_PRIVATE() does).
     // container_traits<ContainerT> (above) supplies every element-level
     // operation regardless of which mode built this instance.
     //@reflect ignore=true

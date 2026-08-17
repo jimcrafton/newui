@@ -10,7 +10,7 @@
 // Every class registered below is wired up using only EXISTING PUBLIC
 // accessors (View::name()/bounds()/isVisible()/style()/childViews(),
 // Frame::getTitle()/getBounds()/getView(), Application::getName()/
-// getFrame(), ViewStyle::borderWidth/opacity) - no NEWUI_REFLECT_FRIEND(),
+// getFrame(), ViewStyle::borderWidth/opacity) - no NEWUI_REFLECT_PRIVATE(),
 // no core header changes, nothing here reaches past real C++ access
 // control the way reflection1.cpp's Widget does for its private fields.
 //
@@ -23,7 +23,7 @@
 //     never via a generic Property::set().
 //   - "childViews": a polymorphic collection of SubView* - View has no
 //     real, gettable/addressable std::vector<SubView*> to expose (no
-//     NEWUI_REFLECT_FRIEND() on View to reach childViews_ itself), so
+//     NEWUI_REFLECT_PRIVATE() on View to reach childViews_ itself), so
 //     this is registered via ClassBuilder::propertyCollection() (see
 //     registerViewReflection()'s own comment): count/getAt enumerate for
 //     write(), and add/remove (the real View::addChild()/removeChild())
@@ -117,7 +117,7 @@ void registerViewReflection() {
         // never a generic Property::set().
         .property("style", Scope::Public, selectOverload<ViewStyle&(View::*)()>(&View::style))
         // Polymorphic collection of SubView* - View::childViews() only
-        // ever exposes a *const* reference (no NEWUI_REFLECT_FRIEND() on
+        // ever exposes a *const* reference (no NEWUI_REFLECT_PRIVATE() on
         // View to reach childViews_ itself), so there's no real, gettable/
         // addressable std::vector<SubView*> this could ever hand back -
         // propertyCollection() is exactly the mode for that: count/index

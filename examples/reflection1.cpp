@@ -19,7 +19,7 @@
 // public (their pointers-to-member need nothing special), label_/quantity_/
 // weight_ are private (matching this codebase's own trailing-'_'
 // convention for private members) and only reachable because Widget
-// declares NEWUI_REFLECT_FRIEND() once in its body - see reflection.h's
+// declares NEWUI_REFLECT_PRIVATE() once in its body - see reflection.h's
 // top comment for why that's enough to cover every field, not just one.
 
 #include "newui/newui.h"
@@ -36,7 +36,7 @@ using namespace newui::reflection;
 
 class Widget {
 public:
-    NEWUI_REFLECT_FRIEND();
+    NEWUI_REFLECT_PRIVATE();
 
     Widget() = default;
     Widget(std::string label, int quantity) : label_(std::move(label)), quantity_(quantity) {}
@@ -77,7 +77,7 @@ private:
 // comment. One friended ClassAccess<Widget> specialization exposes each
 // private field's pointer-to-member as a named static method - computing
 // &Widget::label_ is only legal inside this specialization's own body
-// (it's a friend of Widget, see NEWUI_REFLECT_FRIEND()), but reading the
+// (it's a friend of Widget, see NEWUI_REFLECT_PRIVATE()), but reading the
 // already-computed pointer-to-member value back out isn't privileged, so
 // registerWidgetReflection() below can use it freely. No index bookkeeping
 // needed - just one named method per field, in one block per class.

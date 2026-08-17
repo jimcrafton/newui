@@ -6,7 +6,7 @@
 #   1. Discovery (CONFIGURE time, execute_process() below) -
 #      discover_reflectable.py scans every header under
 #      NEWUI_REFLECTGEN_SCAN_DIRS for a reflectgen marker (an "@reflect"
-#      annotation, or NEWUI_REFLECT_FRIEND()) and writes the matching
+#      annotation, or NEWUI_REFLECT_PRIVATE()) and writes the matching
 #      subset to NEWUI_REFLECTGEN_HEADERS_CMAKE as the REFLECTGEN_HEADERS
 #      variable, which this file then include()s below. Re-runs
 #      automatically whenever the scanned directory's file *set* changes
@@ -115,7 +115,7 @@ function(newui_add_reflectgen_output target)
     else()
         # No reflectable headers found yet - discover_reflectable.py found
         # nothing under NEWUI_REFLECTGEN_SCAN_DIRS marked with "@reflect"/
-        # NEWUI_REFLECT_FRIEND() (true as of this comment - every real
+        # NEWUI_REFLECT_PRIVATE() (true as of this comment - every real
         # class in include/newui is still hand-registered, see
         # examples/reflection2.cpp). reflectgen.py itself requires at
         # least one input file (argparse nargs="+"), so it can't just be

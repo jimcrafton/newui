@@ -18,7 +18,7 @@ namespace {
 // plain scalar for regression coverage.
 class Gadget {
 public:
-    NEWUI_REFLECT_FRIEND();
+    NEWUI_REFLECT_PRIVATE();
 
 private:
     int count_ = 7;

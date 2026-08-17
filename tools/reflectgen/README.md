@@ -5,11 +5,14 @@ registers each class it finds against `newui::reflection` (see
 `include/newui/reflection.h`) - the same shape of code
 `examples/reflection1.cpp` writes by hand for `Widget`.
 
-v1 status: standalone script, run manually. Not wired into the CMake
-build yet. Handles: public/private data members (static or not) as
-fields, explicitly-annotated getter/setter method pairs as properties
-(see below), explicitly-annotated whole-container-accessor/add/remove
-method groups as collection properties (see below),
+v1 status: standalone script, run manually (also wired into the CMake
+build for headers under `include/newui` - see `cmake/ReflectGen.cmake`
+and `reflection.md`'s own "Automatic CMake integration" section at the
+repo root). Handles: public/private data members (static or not) as
+fields, getter/setter method pairs detected by naming convention as
+properties (see below; an explicit annotation still works as an override,
+just isn't required), explicitly-annotated whole-container-accessor/add/
+remove method groups as collection properties (see below),
 `newui::Delegate<SenderT, Args...>` members (typedef'd or not) as
 delegates, non-overloaded-or-disambiguated public methods, public
 non-copy/move constructors, base classes (see below), and enums
@@ -18,43 +21,64 @@ isn't spellable from the free `register...Enum()` function reflectgen
 emits, so those are skipped). Static methods, templates, and operator
 overloads are explicitly out of scope for now.
 
-**Getter/setter properties:** a public, zero-argument, non-`void`-returning
-method marked `// @reflect property` (or `// @reflect property=someName`
-to pick the property's name explicitly, instead of deriving one from the
-method name - see below) directly above it becomes a `.property(...)`
-entry instead of a `.method(...)` one - e.g.
+**Getter/setter properties (detected automatically):** a public
+getter-shaped method (zero args, non-`void` return) is registered as a
+`.property(...)` entry instead of a `.method(...)` one whenever it matches
+one of the naming conventions surveyed in `cpp_naming_conventions.md`
+(repo root) - case- and underscore-insensitive, so `getTitle`/`get_title`/
+`GETTITLE` all normalize to the same accessor:
+
+- **CamelCase** / **snake_case**: `getName()`/`setName(...)`,
+  `get_name()`/`set_name(...)`
+- **Boolean query prefixes**: `isActive()`, `hasPermission()` - get-only,
+  no setter expected
+- **Property-style** (no getter prefix): `title()` paired with
+  `setTitle(...)` or `set_title(...)`
+- **Overloaded** (same name, disambiguated by arity/const, e.g.
+  `int foobar() const` / `void foobar(int)`)
+
+A **bare, unprefixed getter with no setter** (`title()` alone) is the one
+shape that needs more than naming to trust - structurally identical to a
+computed method like `View::computeDesiredSize()` or `View::cursor()`.
+It's only registered as a read-only property if there's a matching
+private backing member of the same type (`title_`, `_title`, or
+`m_title`) - real evidence of storage, not just a query; no match, and it
+stays a plain `.method()` entry, silently (the expected outcome for most
+computed methods, not a failure). A `get`/`is`/`has`-prefixed getter needs
+no such check - the prefix is already the deliberate signal.
+
+`reflectgen` warns on stderr whenever it can't resolve something safely,
+rather than guessing: two distinct methods normalizing to the same stem
+(ambiguous which is "the" getter - neither becomes a property), a
+`set`/`set_`-prefixed method with no matching getter at all (can't become
+a `Property` - `ClassBuilder::property()` always needs a getter -
+registered as a plain method instead), or a matched setter that's itself
+ambiguously overloaded (property still registered, just read-only).
+
+An overloaded getter (a const/non-const pair, e.g. `ViewStyle& style()`
+vs. `const ViewStyle& style() const` - or the "same name" setter pattern
+above) is disambiguated automatically:
 
 ```cpp
-// @reflect property
 ViewStyle& style() { return *style_; }
 const ViewStyle& style() const { return *style_; }
 ```
 
-emits `.property("style", Scope::Public, selectOverload<ViewStyle&(View::*)()>(&View::style))`.
-reflectgen looks for a same-named-by-convention setter automatically
-(`style()`/`setStyle(...)`, `getTitle()`/`setTitle(...)`, `isVisible()`/
-`setVisible(...)`) and wires it in as a real setter if one exists (public,
-exactly one argument, `void`-returning) - `.property(name, scope, getter)`
-without one otherwise, matching `ClassBuilder::property()`'s own get-only
-shape. An overloaded getter (almost always a const/non-const pair, as
-above) is wrapped in `selectOverload<Signature>(...)` automatically -
-`&Class::getter` on its own doesn't compile there (see reflection.h's own
-comment on `selectOverload`), and every overload of that name is
-excluded from `.method(...)` registration, not just the annotated one, so
-the same accessor doesn't end up double-registered under both.
+emits `.property("style", Scope::Public, selectOverload<ViewStyle&(View::*)()>(&View::style))`
+- `&Class::getter` on its own doesn't compile there (see reflection.h's
+own comment on `selectOverload`). Every overload of a detected getter
+(and its setter, when it comes from the same overloaded name) is excluded
+from separate `.method(...)` registration, so the same accessor never
+ends up double-registered.
 
-This is opt-in **on purpose**, not inferred from a method's name/shape
-alone - a plain "any public zero-arg non-`void` method is a property"
-heuristic would just as happily flag `View::computeDesiredSize()` or
-`View::cursor()` as "properties", which they aren't. Established
-reflection libraries handle the same const/non-const-overload problem
-this way too - RTTR's `select_overload()` (the direct inspiration for
-`reflection::selectOverload()` here - see
-[rttr.org](https://www.rttr.org/doc/master/register_classes_page.html))
-and Qt's `qOverload()` are the same idiom, and RTTR's own property
-registration is always an explicit `.property(name, getter, setter)`
-call naming both accessors by hand, never inferred from scanning a
-class's methods.
+**`@reflect property`/`@reflect property=someName`** still work exactly
+as before, written directly above a getter - now as an *override* (force
+a method the heuristic wouldn't have picked up, e.g. a bare getter with no
+backing member, or rename the derived key) rather than a requirement.
+**`@reflect ignore=true` above a specific method** is new: the escape
+hatch for a heuristic false positive, opting that one method out of
+automatic detection without touching the rest of the class (`@reflect
+ignore=true` above a *class* still excludes the whole class, as before).
 
 **Plain data members - fields, not properties:** a member variable with
 no accessor methods at all (static or not) becomes a `.field(...)` entry,
@@ -199,7 +223,7 @@ header that really is on the path you passed. Fix is either quoting
 (`-Id:/code/newui/include`, which Clang accepts natively and PowerShell
 doesn't mangle).
 
-Only classes with a `NEWUI_REFLECT_FRIEND()` in their body get their
+Only classes with a `NEWUI_REFLECT_PRIVATE()` in their body get their
 private/protected members reflected; classes without it are still
 scanned, but only their public members are emitted.
 

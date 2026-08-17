@@ -108,16 +108,16 @@ all (only independent `count()`/`getAt(index)` methods, no method returning the 
 container), use `propertyCollectionByCountAndIndex()` instead — same shape, four separate
 methods instead of one accessor plus two.
 
-## Reflecting private members — `NEWUI_REFLECT_FRIEND()`
+## Reflecting private members — `NEWUI_REFLECT_PRIVATE()`
 
 `field()`/`property()`/`delegate()` all take a real pointer-to-member or method pointer,
 which only *compiles* for a public member from outside the class. To reflect a private or
-protected member, add `NEWUI_REFLECT_FRIEND()` once anywhere in the class body:
+protected member, add `NEWUI_REFLECT_PRIVATE()` once anywhere in the class body:
 
 ```cpp
 class Gadget {
 public:
-    NEWUI_REFLECT_FRIEND();
+    NEWUI_REFLECT_PRIVATE();
 private:
     int count_ = 7;
 };
@@ -130,7 +130,7 @@ template<> struct newui::reflection::detail::ClassAccess<Gadget> {
 .field("count_", Scope::Private, detail::ClassAccess<Gadget>::count_())
 ```
 
-`NEWUI_REFLECT_FRIEND()` grants access to `newui::reflection::detail::ClassAccess<T>` —
+`NEWUI_REFLECT_PRIVATE()` grants access to `newui::reflection::detail::ClassAccess<T>` —
 one specialization per class, one static method per private member you want reachable,
 each just returning `&Class::member`. `reflectgen` (below) generates this specialization
 automatically for every private member it finds in a friended class; you only need to
@@ -151,36 +151,67 @@ write it by hand when registering manually.
   type only ever reached as an already-live nested object).
 - `.abstract()` / `.isStruct()` / `.singleton()` — plain metadata flags, no behavioral effect.
 
-## Annotations (`@reflect ...`)
+## Properties are detected automatically
 
-Everything above is opt-in and explicit *on purpose* — reflection never infers a Property
-from a method's name/shape alone (a plain "any public zero-arg non-`void` method is a
-property" heuristic would just as happily flag `View::computeDesiredSize()` as one). The
-same opt-in philosophy carries into `reflectgen`'s annotations, written as a `//` (or
-`/* */`) comment directly above the declaration:
+`reflectgen` recognizes a getter/setter pair from naming convention alone — see
+`cpp_naming_conventions.md` for the full survey of styles this covers:
+
+- **CamelCase**: `getName()` / `setName()`
+- **snake_case**: `get_name()` / `set_name()`
+- **Boolean query prefixes**: `isActive()`, `hasPermission()` (get-only, no setter expected)
+- **Property-style** (no getter prefix): `title()` paired with `setTitle(...)` or `set_title(...)`
+- **Overloaded** (same name, disambiguated by arity/const): `int foobar() const` /
+  `void foobar(int)`
+
+All matching is case- and underscore-insensitive on the prefix, so `getTitle`/`get_title`/
+`GETTITLE` are recognized as the same accessor. No annotation is needed for any of this —
+plain data members are picked up automatically as `Field`s (see above) and accessor pairs
+matching one of these shapes are picked up automatically as `Property`s.
+
+A **bare, unprefixed getter with no setter** (`title()` alone, no `get`/`is`/`has` prefix
+and no `setTitle`) is the one case that needs more than shape to be trusted — a computed
+method like `View::computeDesiredSize()` looks structurally identical to a real accessor.
+`reflectgen` only registers it as a read-only property if there's a matching private
+backing member of the same type (`title_`, `_title`, or `m_title`) — real evidence the
+getter is backed by real storage, not just a query. No member, no property: it stays a
+plain `.method(...)` entry, silently (this is the expected, common case for most computed
+methods, not a failure worth flagging). A `get`/`is`/`has`-prefixed getter needs no such
+check — the prefix itself is already the deliberate signal a human gave it.
+
+`reflectgen` warns on stderr (and registers nothing as a property, or falls back to
+`.method(...)`) whenever it genuinely can't resolve something safely:
+- two distinct methods normalize to the same stem (e.g. both `title()` and `getTitle()`
+  exist) — ambiguous which one is "the" getter.
+- a `set`/`set_`-prefixed method has no matching getter at all — a `Property` always needs
+  a getter (`ClassBuilder::property()`'s own contract), so this can't become one.
+- a matched setter itself has multiple overloads — ambiguous which one to wire in; the
+  property is still registered, just read-only.
+
+## Annotations (`@reflect ...`) — overrides, not requirements
+
+Annotations are for the cases the heuristic can't (or shouldn't) resolve on its own — they
+are no longer required to opt a method in. Written as a `//` (or `/* */`) comment directly
+above the declaration:
 
 | Annotation | Where | Meaning |
 |---|---|---|
-| `// @reflect property` | above a getter method | Register as a `.property(...)`. Looks for a same-named-by-convention setter automatically (`style()`/`setStyle(...)`, `isVisible()`/`setVisible(...)`) and wires it in if found (public, one arg, `void`-returning) — get-only otherwise. |
+| `// @reflect property` | above a getter method | Force-register as a `.property(...)` even if the heuristic above wouldn't have picked it up (e.g. a bare getter with no backing member). |
 | `// @reflect property=someName` | above a getter method | Same, but names the property `someName` instead of deriving one from the method name. |
-| `// @reflect collection` | above a whole-container-returning getter | Register as a `.propertyCollection(...)`. |
+| `// @reflect ignore=true` | above a getter method | Opt a specific method **out** of automatic detection — the escape hatch for a heuristic false positive. |
+| `// @reflect collection` | above a whole-container-returning getter | Register as a `.propertyCollection(...)` — collections are still opt-in only (getter+add+remove can't be told apart from three unrelated methods by shape alone). |
 | `// @reflect collection=someName add=addMethod remove=removeMethod` | above a whole-container-returning getter | Same, with an explicit name and/or the real add/remove methods to wire in (either, both, or neither). |
-| `// @reflect ignore=true` | above a class/struct | Excludes it from generation entirely. |
+| `// @reflect ignore=true` | above a class/struct | Excludes the whole class from generation. |
 
 The bare forms (`@reflect property`, `@reflect collection`) and the `key=value` forms can
 be freely mixed on the same line (`@reflect collection add=addChild remove=removeChild`
 — `collection` bare, `add`/`remove` with values).
 
-An overloaded getter (almost always a const/non-const pair, e.g. `ViewStyle& style()` vs.
-`const ViewStyle& style() const`) is handled automatically — `reflectgen` prefers the
-non-const overload and wraps it in `selectOverload<Signature>(...)` for you; every overload
-of an annotated getter is excluded from separate `.method(...)` registration, so the same
-accessor never ends up double-registered.
-
-Plain data members need **no annotation at all** — a public member, or a private one in a
-class with `NEWUI_REFLECT_FRIEND()`, is picked up automatically as a `Field`. Annotations
-only matter for the accessor-method shapes (`Property`/collection) and for opting a whole
-class out.
+An overloaded getter (a const/non-const pair, e.g. `ViewStyle& style()` vs. `const
+ViewStyle& style() const` — or the "same name" setter pattern above) is disambiguated
+automatically — `reflectgen` prefers the non-const getter overload and wraps whichever
+side needs it in `selectOverload<Signature>(...)` for you; every overload of a detected
+getter (and its setter, if from the same overloaded name) is excluded from separate
+`.method(...)` registration, so the same accessor never ends up double-registered.
 
 ## Running `reflectgen` by hand
 
@@ -232,7 +263,7 @@ lives there. Two stages (`cmake/ReflectGen.cmake`):
 
 1. **Discovery** (CMake *configure* time) — `tools/reflectgen/discover_reflectable.py`
    scans every header under `include/newui` for an `@reflect` annotation or
-   `NEWUI_REFLECT_FRIEND()` (a cheap substring check, not a real parse) and writes the
+   `NEWUI_REFLECT_PRIVATE()` (a cheap substring check, not a real parse) and writes the
    matching subset to a generated `REFLECTGEN_HEADERS` CMake list. `reflection.h`/
    `reflectionio.h` themselves are excluded (they define the reflection system, not
    application classes to register). This re-runs automatically whenever a header is
@@ -248,7 +279,7 @@ lives there. Two stages (`cmake/ReflectGen.cmake`):
 Both stages need `tools/reflectgen/.venv` set up (the one-time setup above) — CMake
 configure fails with a clear error naming the missing venv if it isn't.
 
-**To make a real header participate**: add `NEWUI_REFLECT_FRIEND()` and/or `@reflect`
+**To make a real header participate**: add `NEWUI_REFLECT_PRIVATE()` and/or `@reflect`
 annotations to it as described above. The next build picks it up automatically (a fresh
 reconfigure first, if needed — see the Ninja/VS caveat above). Nothing calls the generated
 `register_*Reflection()` functions automatically, though — that's still up to application

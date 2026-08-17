@@ -238,22 +238,34 @@ class BaseInfo:
 
 # A property whose value is reached through an accessor method (or pair of
 # them) rather than a raw data member - see collect_property_accessors()
-# for how getter_name/setter_name are found and README.md's "@reflect
-# property[=name]" section for why this only ever happens when the getter
-# is explicitly marked, never from bare naming-convention guessing.
+# for how getter_name/setter_name are found: an explicit "@reflect
+# property[=name]" annotation always works, but the common get/set (or
+# same-name-overloaded) pair is now recognized automatically too - see
+# that function's own comment for the exact heuristic and its guardrails.
 class PropertyAccessor:
-    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, setter_name):
+    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous,
+                 setter_name, setter_arg_type=None, setter_ambiguous=False, setter_is_const=False):
         self.key = key  # the property's own name, e.g. "name", "visible", "bounds"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "getName", "isVisible", "style"
         self.getter_return_type = getter_return_type  # clang spelling, e.g. "ViewStyle &"
         self.getter_is_const = getter_is_const
         # True when another overload of getter_name also exists (almost
-        # always a const/non-const pair) - emit_property_getter_expr()
-        # then wraps the chosen overload in selectOverload<>() instead of
-        # a bare &Class::method, which is ambiguous for an overloaded name.
+        # always a const/non-const pair, or - for the "same name, overload
+        # on arity" pattern, e.g. `name() const` / `name(const string&)` -
+        # the setter itself) - emit_property_getter_expr() then wraps the
+        # chosen overload in selectOverload<>() instead of a bare
+        # &Class::method, which is ambiguous for an overloaded name.
         self.ambiguous = ambiguous
         self.setter_name = setter_name  # real C++ method name, or None (get-only)
+        self.setter_arg_type = setter_arg_type  # clang spelling of the setter's one argument, or None
+        # True when setter_name has other overloads too (see `ambiguous`'s
+        # own comment - same reasoning, mirrored for the setter side,
+        # needed for e.g. the same-name getter/setter pattern where
+        # setter_name == getter_name) - emit_property_setter_expr() wraps
+        # the setter reference in selectOverload<>() when this is true.
+        self.setter_ambiguous = setter_ambiguous
+        self.setter_is_const = setter_is_const  # vanishingly rare, checked for symmetry with getter_is_const
 
 
 # A collection reachable only through a whole-container-returning accessor
@@ -331,15 +343,42 @@ def is_setter_shaped(cursor):
     return sum(1 for _ in cursor.get_arguments()) == 1
 
 
-# "getName"->"Name", "isVisible"->"Visible", "bounds"->"Bounds" (no
-# get/is prefix - just capitalized as-is). This is the shared stem used
-# both to derive a property's default key (lowercase first letter) and to
-# guess its setter's name ("set" + this).
+# Strips a "get"/"is"/"set" prefix only at a real word boundary right
+# after it - CamelCase (next char uppercase, "getTitle") or snake_case
+# (next char "_", "get_title") - never a coincidental lowercase substring
+# ("isolate" is not "is" + "olate", "setup" is not "set" + "up"). Case-
+# insensitive on the prefix itself (matches "GETTITLE"/"gettitle" too),
+# case-preserving on the returned stem. Returns (stem, matched) - stem is
+# method_name unchanged and matched is False when no real prefix boundary
+# was found, so a caller can tell "no prefix" apart from "prefix stripped
+# down to nothing" (the latter never happens here - a boundary needs at
+# least one more character after it).
+def strip_accessor_prefix(method_name, prefix):
+    if not method_name.lower().startswith(prefix):
+        return method_name, False
+    rest = method_name[len(prefix):]
+    if rest[:1] == "_" and len(rest) > 1:
+        return rest[1:], True
+    if rest[:1].isupper():
+        return rest, True
+    return method_name, False
+
+
+# "has" alongside "get"/"is" - the same boolean-query convention "is"
+# covers (isActive()/hasPermission() - see cpp_naming_conventions.md).
+_GETTER_PREFIXES = ("get", "is", "has")
+_SETTER_PREFIXES = ("set",)
+
+
+# "getTitle"/"get_title"->"Title", "isVisible"->"Visible", "bounds"->
+# "Bounds" (no real get/is prefix - just capitalized as-is). This is the
+# shared stem used to derive a property's default key - see
+# strip_accessor_prefix()'s own comment for the word-boundary rule.
 def getter_stem(method_name):
-    if method_name.startswith("get") and len(method_name) > 3 and method_name[3].isupper():
-        return method_name[3:]
-    if method_name.startswith("is") and len(method_name) > 2 and method_name[2].isupper():
-        return method_name[2:]
+    for prefix in _GETTER_PREFIXES:
+        stem, matched = strip_accessor_prefix(method_name, prefix)
+        if matched:
+            return stem
     return method_name[0:1].upper() + method_name[1:]
 
 
@@ -348,53 +387,189 @@ def derive_property_key(method_name):
     return stem[0:1].lower() + stem[1:]
 
 
-# Finds every public, explicitly-@reflect-property-annotated getter and
-# pairs it with a same-named-by-convention setter, if one exists -
+# Lowercased, for *matching* different spellings of the same accessor
+# against each other (getTitle()/get_title()/GETTITLE() all normalize to
+# "title") - not for the property's own key, which derive_property_key()
+# derives separately with casing preserved.
+def accessor_stem(method_name, prefixes):
+    for prefix in prefixes:
+        stem, matched = strip_accessor_prefix(method_name, prefix)
+        if matched:
+            return stem.lower()
+    return method_name.lower()
+
+
+def has_accessor_prefix(method_name, prefixes):
+    return any(strip_accessor_prefix(method_name, p)[1] for p in prefixes)
+
+
+# Common "private backing member for a public getter" spellings - trailing
+# underscore is what newui's own classes actually use (Gadget::count_,
+# View::bounds_, ...); leading underscore and "m_" are common enough
+# elsewhere to recognize too. Matched case-insensitively against `stem`
+# (already normalized by accessor_stem()).
+_BACKING_MEMBER_PATTERNS = ("{stem}", "{stem}_", "_{stem}", "m_{stem}")
+
+# Strips const/volatile/reference/pointer qualifiers and whitespace so
+# `const std::string &` and `std::string` compare equal - a heuristic
+# normalization (string-level, not a real canonical-type comparison),
+# proportionate to everything else this pass guesses from shape/naming
+# rather than a full semantic analysis.
+_TYPE_NORMALIZE_RE = re.compile(r"\b(const|volatile)\b|[&*]|\s+")
+
+
+def normalize_type_spelling(spelling):
+    return _TYPE_NORMALIZE_RE.sub("", spelling)
+
+
+# True if `fields` (FIELD_DECL cursors, any access level - only existence
+# and type matter here, not reflecting the member itself) has one whose
+# name matches `stem` under a common backing-member convention and whose
+# type matches getter_return_type once qualifiers are stripped - e.g.
+# `int foobar() const` paired with `int foobar_;` or `int m_foobar;`.
+# This is what makes a *bare*, unprefixed getter (no "get"/"is") safe to
+# infer automatically without an annotation: a real storage-backed
+# accessor has a real member to match against, where a computed/derived
+# method (View::computeDesiredSize(), say) essentially never does -
+# see collect_property_accessors()'s own comment for where this is used.
+def has_matching_backing_member(stem, getter_return_type, fields):
+    candidate_names = {p.format(stem=stem) for p in _BACKING_MEMBER_PATTERNS}
+    normalized_return = normalize_type_spelling(getter_return_type)
+    for field in fields:
+        if field.spelling.lower() not in candidate_names:
+            continue
+        if normalize_type_spelling(field.type.spelling) == normalized_return:
+            return True
+    return False
+
+
+# Finds every public getter-shaped method that looks like a real property
+# accessor and pairs it with a same-stem setter, if one exists -
 # ClassInfo.property_accessors, consumed by emit_register_function()'s
-# ".property(...)" chain entries. Every cursor involved (both the chosen
+# ".property(...)" chain entries. Every cursor involved (the chosen
 # overload and, if ambiguous, its const/non-const siblings, plus a paired
-# setter) is added to `consumed` so collect_class()'s later .method()
-# pass skips them - a getter already driving a property shouldn't also
-# show up as a separately-invocable Method for the same accessor.
+# setter) is added to `consumed` so collect_class()'s later .method() pass
+# skips them - a getter already driving a property shouldn't also show up
+# as a separately-invocable Method for the same accessor.
 #
-# Deliberately opt-in only (the "@reflect property[=name]" annotation),
-# never inferred purely from a method's name/shape - a bare heuristic
-# ("any public zero-arg non-void method is a property") would just as
-# happily flag View::computeDesiredSize() or View::cursor() as
-# "properties", which they aren't. Established reflection libraries
-# (RTTR, see tools/reflectgen/README.md's own note) don't try to guess
-# this from naming conventions either - they always take an explicit
-# property() registration. The annotation is reflectgen's equivalent:
-# cheap for a human to add to the one real accessor pair that matters,
-# and impossible to get by accident.
-def collect_property_accessors(method_cursors_by_name, consumed):
+# Heuristic-driven, not annotation-gated - an explicit "@reflect
+# property[=name]" still works (to force-include something the heuristic
+# misses, or rename the key), but is no longer required:
+#   - a "get"/"is"-prefixed getter (getTitle/get_title/isVisible/GETTITLE,
+#     case- and underscore-insensitive via accessor_stem()) is always a
+#     property candidate - the prefix itself is the deliberate signal a
+#     human already gave it.
+#   - a bare, unprefixed getter (title(), no prefix at all) is only a
+#     candidate if it has a matching setter (setTitle/set_title - a real
+#     pair is strong evidence on its own) OR a matching private backing
+#     member of the same type (has_matching_backing_member()) - never
+#     from the bare name alone, which is indistinguishable from a
+#     computed/derived method (View::computeDesiredSize(), say) by shape.
+#     (Verified against a real, already-existing case: View::bounds() is
+#     exactly this pattern - bare getter, no setter on View itself,
+#     backed by a real `Rect bounds_;` member.)
+#   - "@reflect ignore=true" directly above a candidate getter opts it out
+#     of the heuristic entirely (same vocabulary the class-level opt-out
+#     already uses) - the escape hatch for a false positive.
+#   - two distinct method *names* normalizing to the same stem (a real
+#     collision, e.g. both title() and getTitle() existing) is genuinely
+#     ambiguous - warned about on stderr, neither registered as a
+#     property (both stay ordinary .method() entries); not the same thing
+#     as one name's own const/non-const overload pair, which is handled
+#     exactly as before via selectOverload<>().
+#   - a "set"-prefixed method with no matching getter stem at all can't
+#     become a Property at all (ClassBuilder::property() always needs a
+#     getter) - warned about on stderr, left as a plain .method().
+def collect_property_accessors(method_cursors_by_name, fields, consumed, class_name):
     accessors = []
 
-    for getter_name, cursors in method_cursors_by_name.items():
-        annotated = [
+    getter_names_by_stem = {}
+    setter_names_by_stem = {}
+
+    for name, cursors in method_cursors_by_name.items():
+        public_cursors = [c for c in cursors if c.access_specifier == AccessSpecifier.PUBLIC]
+        if not public_cursors:
+            continue
+        if any(is_getter_shaped(c) for c in public_cursors):
+            getter_names_by_stem.setdefault(accessor_stem(name, _GETTER_PREFIXES), []).append(name)
+        if any(is_setter_shaped(c) for c in public_cursors):
+            setter_names_by_stem.setdefault(accessor_stem(name, _SETTER_PREFIXES), []).append(name)
+
+    for stem, getter_names in getter_names_by_stem.items():
+        if len(getter_names) > 1:
+            sys.stderr.write(
+                f"reflectgen: '{class_name}' has {len(getter_names)} distinct methods "
+                f"({', '.join(getter_names)}) that all look like a getter for '{stem}' - "
+                "ambiguous, none registered as a property (still available via .method(...)). "
+                "Annotate the intended one with '@reflect property' to resolve.\n"
+            )
+            continue
+
+        getter_name = getter_names[0]
+        cursors = method_cursors_by_name[getter_name]
+        candidates = [
             c for c in cursors
             if c.access_specifier == AccessSpecifier.PUBLIC
             and is_getter_shaped(c)
-            and reflect_annotations(c).get("property")
+            and reflect_annotations(c).get("ignore", "").lower() != "true"
         ]
-        if not annotated:
-            continue
+        if not candidates:
+            continue  # every overload opted out via "@reflect ignore=true"
 
         # Prefer a non-const overload - needed for an addressable/mutable
         # property (e.g. View::style()); a const-only accessor still
         # works fine, it just falls through to the by-value get-only
         # shape ClassBuilder::property() picks for a const-returning
         # getter (see reflection.h's own comment on that).
-        getter_cursor = next((c for c in annotated if not c.is_const_method()), annotated[0])
+        getter_cursor = next((c for c in candidates if not c.is_const_method()), candidates[0])
+
+        setter_names = setter_names_by_stem.get(stem, [])
+        setter_cursor = None
+        if len(setter_names) == 1:
+            setter_candidates = [
+                c for c in method_cursors_by_name[setter_names[0]]
+                if c.access_specifier == AccessSpecifier.PUBLIC and is_setter_shaped(c)
+            ]
+            if len(setter_candidates) == 1:
+                setter_cursor = setter_candidates[0]
+            else:
+                sys.stderr.write(
+                    f"reflectgen: '{class_name}.{setter_names[0]}' has {len(setter_candidates)} "
+                    f"overloads - ambiguous which is the setter for '{stem}'; registered read-only.\n"
+                )
+        elif len(setter_names) > 1:
+            sys.stderr.write(
+                f"reflectgen: '{class_name}' has {len(setter_names)} distinct methods "
+                f"({', '.join(setter_names)}) that all look like a setter for '{stem}' - "
+                "ambiguous, none wired in; registered read-only.\n"
+            )
+
+        if not has_accessor_prefix(getter_name, _GETTER_PREFIXES) and setter_cursor is None:
+            if not has_matching_backing_member(stem, getter_cursor.result_type.spelling, fields):
+                continue  # not enough signal - stays a plain .method()
 
         annotation_value = reflect_annotations(getter_cursor).get("property", "true")
         key = derive_property_key(getter_name) if annotation_value.lower() == "true" else annotation_value
 
-        setter_cursor = next(
-            (c for c in method_cursors_by_name.get("set" + getter_stem(getter_name), [])
-             if c.access_specifier == AccessSpecifier.PUBLIC and is_setter_shaped(c)),
-            None,
-        )
+        # setter_ambiguous covers both the ordinary "this setter name also
+        # has other overloads" case and the same-name-as-the-getter
+        # pattern (`int foobar() const` / `void foobar(int)`, see
+        # cpp_naming_conventions.md's "Overloaded" style) - in the latter,
+        # setter_name == getter_name, so method_cursors_by_name[setter_name]
+        # is the *same* overload set the getter's own `cursors`/`ambiguous`
+        # already point at, and a bare &Class::setter_name would be just as
+        # ambiguous at the point of '&' as a bare &Class::getter_name is -
+        # emit_property_setter_expr() wraps it in selectOverload<>() too
+        # whenever this is true, using setter_arg_type (and the setter
+        # cursor's own const-ness, vanishingly rare but checked for
+        # symmetry with the getter's own handling) to build the signature.
+        setter_arg_type = None
+        setter_ambiguous = False
+        setter_is_const = False
+        if setter_cursor is not None:
+            setter_arg_type = next(setter_cursor.get_arguments()).type.spelling
+            setter_ambiguous = len(method_cursors_by_name[setter_cursor.spelling]) > 1
+            setter_is_const = setter_cursor.is_const_method()
 
         accessors.append(PropertyAccessor(
             key=key,
@@ -404,15 +579,28 @@ def collect_property_accessors(method_cursors_by_name, consumed):
             getter_is_const=getter_cursor.is_const_method(),
             ambiguous=len(cursors) > 1,
             setter_name=setter_cursor.spelling if setter_cursor else None,
+            setter_arg_type=setter_arg_type,
+            setter_ambiguous=setter_ambiguous,
+            setter_is_const=setter_is_const,
         ))
 
-        # Every overload sharing getter_name (not just the annotated
-        # one/the chosen one) - a const sibling nobody annotated
-        # separately would otherwise still leak into .method() as a
-        # redundant read-only view of the same accessor.
+        # Every overload sharing getter_name (not just the chosen one) - a
+        # const sibling nobody annotated separately would otherwise still
+        # leak into .method() as a redundant read-only view of the same
+        # accessor.
         consumed.update(cursors)
         if setter_cursor is not None:
             consumed.add(setter_cursor)
+
+    for stem, setter_names in setter_names_by_stem.items():
+        if stem in getter_names_by_stem:
+            continue
+        for setter_name in setter_names:
+            sys.stderr.write(
+                f"reflectgen: '{class_name}.{setter_name}' looks like a setter but no matching "
+                f"getter was found for '{stem}' - a Property always needs a getter "
+                "(ClassBuilder::property()); registered as a plain method instead.\n"
+            )
 
     return accessors
 
@@ -518,8 +706,14 @@ def collect_class(cursor):
             method_name_counts[child.spelling] = method_name_counts.get(child.spelling, 0) + 1
             method_cursors_by_name.setdefault(child.spelling, []).append(child)
 
+    # Every FIELD_DECL regardless of access level or NEWUI_REFLECT_PRIVATE()
+    # - has_matching_backing_member() only ever checks a member's name/type
+    # (never reflects it), so a private member is just as valid a signal
+    # as a public one even in a class that isn't friended at all.
+    field_cursors = [child for child in cursor.get_children() if child.kind == CursorKind.FIELD_DECL]
+
     consumed_by_accessors = set()
-    info.property_accessors = collect_property_accessors(method_cursors_by_name, consumed_by_accessors)
+    info.property_accessors = collect_property_accessors(method_cursors_by_name, field_cursors, consumed_by_accessors, name)
     info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors)
 
     for child in cursor.get_children():
@@ -697,6 +891,20 @@ def emit_property_getter_expr(info, pa):
     return f"selectOverload<{pa.getter_return_type}({info.name}::*)(){const_suffix}>({target})"
 
 
+# Same reasoning as emit_property_getter_expr() above, mirrored for the
+# setter - most commonly needed for the "same name, overload on arity"
+# pattern (cpp_naming_conventions.md's "Overloaded" style: `int foobar()
+# const` / `void foobar(int)`), where setter_name == getter_name and a
+# bare &Class::setter_name would be just as ambiguous as a bare
+# &Class::getter_name is in that case.
+def emit_property_setter_expr(info, pa):
+    target = f"&{info.name}::{pa.setter_name}"
+    if not pa.setter_ambiguous:
+        return target
+    const_suffix = " const" if pa.setter_is_const else ""
+    return f"selectOverload<void ({info.name}::*)({pa.setter_arg_type}){const_suffix}>({target})"
+
+
 def emit_register_function(info):
     fn_name = f"register_{info.name.replace('::', '')}Reflection"
     lines = [f"void {fn_name}() {{"]
@@ -745,7 +953,8 @@ def emit_register_function(info):
     for pa in info.property_accessors:
         getter_expr = emit_property_getter_expr(info, pa)
         if pa.setter_name:
-            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr}, &{info.name}::{pa.setter_name})')
+            setter_expr = emit_property_setter_expr(info, pa)
+            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr}, {setter_expr})')
         else:
             chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr})')
 
