@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
-"""discover_reflectable.py - scans candidate header files for reflectgen
-markers (an "@reflect" annotation, or NEWUI_REFLECT_PRIVATE()) and writes
-the matching subset out as a CMake variable, so CMakeLists.txt can build
-reflectgen.py's own input list without hand-maintaining it - see
-cmake/ReflectGen.cmake for how this fits into the two-stage build
-integration (this script runs at CMake *configure* time; reflectgen.py's
-own generation step runs at *build* time, incrementally, off this script's
-output).
+"""discover_reflectable.py - scans candidate header files and writes the
+result out as a CMake variable, so CMakeLists.txt can build reflectgen.py's
+own input list without hand-maintaining it - see cmake/ReflectGen.cmake
+for how this fits into the two-stage build integration (this script runs
+at CMake *configure* time; reflectgen.py's own generation step runs at
+*build* time, incrementally, off this script's output).
 
-This is a plain substring scan, not a real C++ parse (unlike reflectgen.py
-itself) - deliberately cheap, since its only job is "is this file even a
-candidate," not "what exactly is in it." A false positive here (a file
+Default mode scans every candidate header unconditionally - reflectgen.py
+no longer needs a per-getter/setter annotation to recognize a property
+(see collect_property_accessors() in reflectgen.py - naming-convention
+heuristics do that now), so there's nothing left for a *file-level*
+marker to gate here either; anything that genuinely shouldn't be
+reflected is excluded per-*class* via reflectgen.py's own
+"@reflect ignore=true", not by a human remembering to mark every file
+that should participate.
+
+--require-marker switches to the stricter, opt-in mode this script
+originally shipped with: only a file containing an "@reflect" annotation
+or NEWUI_REFLECT_PRIVATE() anywhere is included. This is a plain
+substring scan in that mode, not a real C++ parse (unlike reflectgen.py
+itself) - deliberately cheap, since its only job would be "is this file
+even a candidate," not "what exactly is in it." A false positive (a file
 that merely mentions the marker text without meaning it - a comment
-quoting this very docstring, say) just means reflectgen.py itself gets
-pointed at one extra file and finds nothing to generate from it; a false
-negative would silently drop a real class from the build without any
-error at all, which is the failure mode worth avoiding - hence "any
-marker substring anywhere in the file," not a stricter (and more easily
-wrong) per-line/per-class pattern match.
+quoting this very docstring, say) just means reflectgen.py gets pointed
+at one extra file and finds nothing to generate from it; a false negative
+would silently drop a real class from the build without any error at
+all, which is why the substring check (when used) matches anywhere in
+the file rather than a stricter, more easily wrong per-line/per-class
+pattern.
 
 Usage:
-    python discover_reflectable.py <header_or_dir...> -o <output.cmake> [--var NAME]
+    python discover_reflectable.py <header_or_dir...> -o <output.cmake> [--var NAME] [--require-marker]
 """
 
 import argparse
 import os
 import sys
+import time
 
 MARKERS = ("@reflect", "NEWUI_REFLECT_PRIVATE")
 
@@ -74,14 +85,22 @@ def main():
     parser.add_argument("--ext", action="append", default=[], metavar=".EXT",
                          help="file extension to scan for when an input is a directory "
                               "(repeatable; default .h)")
+    parser.add_argument("--require-marker", action="store_true",
+                         help="only include a file that contains an '@reflect' annotation or "
+                              "NEWUI_REFLECT_PRIVATE() somewhere (the original, stricter "
+                              "opt-in behavior) - default is to include every scanned file "
+                              "unconditionally, see this script's own docstring")
     args = parser.parse_args()
+
+    run_start = time.perf_counter()
 
     extensions = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in (args.ext or [".h"])}
     candidates = expand_inputs(args.inputs, extensions)
 
     reflectable = [
         f for f in candidates
-        if os.path.basename(f) not in EXCLUDED_BASENAMES and is_reflectable(f)
+        if os.path.basename(f) not in EXCLUDED_BASENAMES
+        and (not args.require_marker or is_reflectable(f))
     ]
 
     # Plain space-separated quoted arguments - CMake's set(VAR a b c)
@@ -102,8 +121,12 @@ def main():
             f"set({args.var} {cmake_args})\n"
         )
 
+    total_seconds = time.perf_counter() - run_start
+    avg_seconds = total_seconds / len(candidates) if candidates else 0.0
+    mode = "marker-required" if args.require_marker else "scan-all"
     print(f"discover_reflectable: found {len(reflectable)} reflectable header(s) "
-          f"among {len(candidates)} scanned -> {args.output}")
+          f"among {len(candidates)} scanned ({mode}) in {total_seconds:.2f}s total, "
+          f"{avg_seconds:.4f}s avg/file -> {args.output}")
 
 
 if __name__ == "__main__":

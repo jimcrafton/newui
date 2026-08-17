@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 
 import clang.cindex as cindex
@@ -1117,11 +1118,22 @@ def main():
     all_classes = []
     all_enums = []
 
+    # Per-file parse timing (libclang's own parse, not this script's
+    # comparatively cheap AST-walking on top of it, is the dominant and
+    # most variable cost here - a large/heavily-templated header can take
+    # noticeably longer than a small one) plus a total for the whole run,
+    # printed in the final summary below. Wall-clock (perf_counter), not
+    # CPU time - what actually matters for "how long did this make the
+    # build wait."
+    run_start = time.perf_counter()
+    parse_seconds_by_path = {}
+
     for path in input_files:
         if not os.path.isfile(path):
             sys.stderr.write(f"reflectgen: '{path}' does not exist - skipping\n")
             continue
 
+        parse_start = time.perf_counter()
         try:
             tu = index.parse(path, args=clang_args, options=cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
         except cindex.TranslationUnitLoadError:
@@ -1132,6 +1144,7 @@ def main():
             # letting a raw Python traceback abort the whole scan.
             sys.stderr.write(f"reflectgen: '{path}' could not be parsed at all - skipping\n")
             continue
+        parse_seconds_by_path[path] = time.perf_counter() - parse_start
 
         had_errors = False
         for diag in tu.diagnostics:
@@ -1158,9 +1171,19 @@ def main():
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(output)
 
+    total_seconds = time.perf_counter() - run_start
+
+    if parse_seconds_by_path:
+        parse_total = sum(parse_seconds_by_path.values())
+        parse_avg = parse_total / len(parse_seconds_by_path)
+        slowest = sorted(parse_seconds_by_path.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        slowest_str = ", ".join(f"{os.path.basename(p)}={s:.2f}s" for p, s in slowest)
+        print(f"reflectgen: parsed {len(parse_seconds_by_path)} file(s) in "
+              f"{parse_total:.2f}s total, {parse_avg:.2f}s avg/file (slowest: {slowest_str})")
+
     class_names = ", ".join(c.name for c in all_classes)
     enum_names = ", ".join(e.name for e in all_enums)
-    print(f"reflectgen: wrote {args.output} "
+    print(f"reflectgen: wrote {args.output} in {total_seconds:.2f}s "
           f"({len(all_classes)} class(es): {class_names}; {len(all_enums)} enum(s): {enum_names})")
 
 
