@@ -62,6 +62,12 @@ add_subdirectory(3rdparty/blend2d)
 # `newui` existing yet either way.
 include(cmake/ReflectGen.cmake)
 
+# reflectgen_sizeof_probe (tools/reflectgen/src) - built before
+# newui_add_reflectgen_output(newui) below so its DEPENDS on the probe
+# target resolves - see reflectgen.py's --sizeof-probe / that target's own
+# CMakeLists.txt for what it's for.
+add_subdirectory(tools/reflectgen/src)
+
 add_library(newui STATIC
     src/newui.cpp
     src/application.cpp
@@ -86,11 +92,12 @@ add_library(newui STATIC
 add_dependencies(newui newui_version)
 
 # Adds this build's combined reflectgen-generated registration .cpp (see
-# cmake/ReflectGen.cmake) to newui's own sources - empty/placeholder today
-# (no real header under include/newui carries a reflectgen marker yet;
-# every class currently registered against newui::reflection is still
-# hand-written, see examples/reflection2.cpp), real generated content the
-# moment one does.
+# cmake/ReflectGen.cmake) to newui's own sources - scan-all by default
+# (NEWUI_REFLECTGEN_REQUIRE_MARKER OFF), so this reflects every real class
+# under include/newui unless it opts out. Nothing calls the generated
+# register_*Reflection() functions yet - examples/reflection2.cpp still
+# registers its own small example classes by hand to demonstrate that path
+# deliberately - see reflection.md's "Automatic CMake integration".
 newui_add_reflectgen_output(newui)
 
 target_include_directories(newui PUBLIC

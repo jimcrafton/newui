@@ -52,6 +52,7 @@ def main():
                          help="forwarded to discover_reflectable.py - see its own --help")
     parser.add_argument("--clang-arg", action="append", default=[], dest="clang_args",
                          help="forwarded to reflectgen.py after its own '--' (repeatable)")
+    parser.add_argument("--sizeof-probe", help="forwarded to reflectgen.py - see its own --help")
     args = parser.parse_args()
 
     run_start = time.perf_counter()
@@ -93,6 +94,8 @@ def main():
         include_args += ["--include", h]
 
     reflectgen_cmd = [args.python, os.path.join(SCRIPT_DIR, "reflectgen.py"), *headers, "-o", args.output, *include_args]
+    if args.sizeof_probe:
+        reflectgen_cmd += ["--sizeof-probe", args.sizeof_probe]
     if args.clang_args:
         reflectgen_cmd.append("--")
         reflectgen_cmd += args.clang_args

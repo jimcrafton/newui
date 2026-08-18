@@ -180,6 +180,55 @@ install is still the more capable option (the bundled fallback is old
 enough to hit more MSVC-STL-compatibility errors than the system install
 does - see above).
 
+## Testing
+
+`unittests/test_reflectgen.py` covers the naming/type heuristics directly
+(accessor-prefix stripping, property-key derivation, type-spelling
+normalization/qualification, copy-constructibility, delegate sender/arg
+matching, the `NEWUI_REFLECT_PRIVATE()` detection, ...) - real clang
+parsing of small, self-contained snippets for anything that needs a real
+`Type`/`Cursor`, not mocks. Run from this directory (stdlib `unittest`, no
+extra dependency beyond the `.venv` set up above):
+
+```
+.venv\Scripts\python -m unittest unittests.test_reflectgen -v
+```
+
+Not wired into `ctest`/`enable_testing()` - this project runs
+`newui_tests.exe` directly rather than through `ctest`, so this stays a
+plain, separately-run command the same way.
+
+## Memory footprint estimate
+
+`src/sizeof_probe.cpp` (built as the `reflectgen_sizeof_probe` CMake
+target) prints `sizeof()` for every `newui::reflection` registry class
+(`Class`, `Property`, `PropertyCollection`, `Field`, `FieldCollection`,
+`Method`, `Delegate`, `Constructor`, `Enum`, `EnumValue`, `Argument`) -
+real, current numbers off whatever `include/newui/reflection.h`
+*presently* says, not anything hardcoded and left to drift. Build it like
+any other target:
+
+```
+cmake --build <build dir> --target reflectgen_sizeof_probe
+```
+
+or run the built exe directly for just the raw numbers. `reflectgen.py`'s
+own `--sizeof-probe <exe>` flag feeds those numbers into
+`estimate_memory_footprint()`, which combines them with what reflectgen
+itself already knows it's about to register (every class's fields/
+properties/methods/delegates/constructors, every name's real length) to
+print an estimated total heap footprint for the generated registry - real
+struct sizes, but rough heap-allocation-overhead/`std::string`-SSO
+assumptions (see that function's own comment for exactly what's measured
+vs. assumed). `cmake/ReflectGen.cmake`'s `newui_add_reflectgen_output()`
+already wires this in automatically (`reflectgen_sizeof_probe` is built
+and its path passed to every `generate_reflection.py`/`reflectgen.py`
+invocation) - the estimate just shows up in normal build output, nothing
+extra to run. Every registered `Field`/`Property`/`Method`/`Delegate`/
+`Constructor`/`Class`/`Enum` instance is a separate, permanent (never
+freed) heap allocation for the life of the process - this is what that
+actually costs.
+
 ## Usage
 
 ```

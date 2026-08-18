@@ -160,11 +160,13 @@ function(newui_add_reflectgen_output target)
             -o ${output}
             ${require_marker_arg}
             ${include_args}
+            --sizeof-probe $<TARGET_FILE:reflectgen_sizeof_probe>
         DEPENDS
             ${candidate_headers}
             ${NEWUI_REFLECTGEN_DIR}/generate_reflection.py
             ${NEWUI_REFLECTGEN_DIR}/discover_reflectable.py
             ${NEWUI_REFLECTGEN_DIR}/reflectgen.py
+            reflectgen_sizeof_probe
         COMMENT "reflectgen: discovering + regenerating ${output}"
         VERBATIM
     )

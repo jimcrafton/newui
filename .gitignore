@@ -4,3 +4,4 @@ out/
 CMakeUserPresets.json
 tools/reflectgen/.venv/
 tools/reflectgen/__pycache__/
+tools/reflectgen/unittests/__pycache__/

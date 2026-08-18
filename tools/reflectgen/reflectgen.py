@@ -1622,6 +1622,162 @@ def generate(classes, enums, sources, extra_includes):
     return "\n".join(out)
 
 
+# MSVC's std::string small-string-optimization capacity - a name this
+# long or shorter lives entirely inside the string object itself (already
+# counted in the owning struct's own sizeof() from the probe), never a
+# separate heap allocation for its character buffer; longer needs one.
+# Rough numbers used for that separate allocation's own cost, not
+# measured per-machine the way the probe's own sizeof()s are: a typical
+# small-allocation rounding granularity, and a typical per-allocation
+# bookkeeping overhead on Windows' default process heap (real overhead
+# varies by allocator/build - a debug heap's headers/footers/guard bytes
+# run larger still) - both deliberately round, conservative-ish numbers,
+# not measured facts the way everything from the probe is.
+_STRING_SSO_CAPACITY = 15
+_ALLOCATOR_GRANULARITY = 16
+_HEAP_ALLOC_OVERHEAD = 16
+
+
+def run_sizeof_probe(probe_path):
+    # Parses reflectgen_sizeof_probe's own fixed "Name=bytes" stdout
+    # format (tools/reflectgen/src/sizeof_probe.cpp) into the dict
+    # estimate_memory_footprint() needs - real, current numbers off
+    # whatever include/newui/reflection.h presently says, not anything
+    # hardcoded here.
+    result = subprocess.run([probe_path], capture_output=True, text=True, check=True)
+    sizes = {}
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        sizes[name] = int(value)
+    return sizes
+
+
+def _string_extra_storage_cost(name):
+    # (extra_allocations, extra_bytes) an out-of-line std::string buffer
+    # costs beyond what the owning struct's own sizeof() already counts -
+    # (0, 0) for a name that fits in std::string's own inline SSO buffer.
+    if len(name) <= _STRING_SSO_CAPACITY:
+        return 0, 0
+    size = len(name) + 1  # + null terminator
+    rounded = -(-size // _ALLOCATOR_GRANULARITY) * _ALLOCATOR_GRANULARITY
+    return 1, rounded + _HEAP_ALLOC_OVERHEAD
+
+
+# Every Field/Property/Method/Delegate/Constructor/Class/Enum instance
+# reflectgen's generated code causes is a separate `new` (ClassBuilder's
+# own field()/property()/method()/delegate()/constructor() all push_back a
+# freshly-`new`'d object - see reflection.h) that's never freed - real,
+# permanent, process-lifetime heap cost, not something a Release build
+# optimizes away. This estimates that cost from what reflectgen itself
+# already knows it emitted (classes/enums, each one's fields/properties/
+# methods/delegates/constructors, every name's real length) combined with
+# `sizes` (real, freshly-measured struct sizes from
+# reflectgen_sizeof_probe - see run_sizeof_probe()'s own comment) -
+# deliberately labeled an estimate, not a promise, in its own printed
+# output: Windows heap-allocation bookkeeping and allocator rounding are
+# round numbers, not measured; nothing here accounts for allocator
+# fragmentation.
+# A quick, string-only echo of reflectable_collection_element_type()'s own
+# std::vector/std::array/std::map check (that function needs a live clang
+# Type; by the time estimate_memory_footprint() runs, a PropertyAccessor
+# only has the type's *spelling* left - qualify_type_spelling() already
+# ran, so it's namespace-qualified where needed) - good enough for sizing
+# purposes: a getter shaped like this is what makes ClassBuilder::
+# property() auto-detect TypedPropertyCollection instead of TypedProperty
+# (see _COLLECTION_ELEMENT_ARG_INDEX's own comment for the exact
+# container list this mirrors, and why nothing further-removed than
+# vector/array/map needs to be recognized here either).
+def _looks_like_reflectable_collection(type_spelling):
+    normalized = normalize_type_spelling(type_spelling)
+    return any(normalized.startswith(f"std::{c}<") for c in _COLLECTION_ELEMENT_ARG_INDEX)
+
+
+def estimate_memory_footprint(classes, enums, sizes):
+    total_allocations = 0
+    total_bytes = 0
+
+    def add(size_key, name=None):
+        nonlocal total_allocations, total_bytes
+        total_allocations += 1
+        total_bytes += sizes[size_key] + _HEAP_ALLOC_OVERHEAD
+        if name is not None:
+            extra_allocs, extra_bytes = _string_extra_storage_cost(name)
+            total_allocations += extra_allocs
+            total_bytes += extra_bytes
+
+    def add_argument_buffer(arg_count):
+        nonlocal total_allocations, total_bytes
+        if arg_count:
+            total_allocations += 1
+            total_bytes += arg_count * sizes["Argument"] + _HEAP_ALLOC_OVERHEAD
+
+    num_fields = num_properties = num_methods = num_delegates = num_ctors = 0
+
+    for info in classes:
+        add("Class", info.name.rsplit("::", 1)[-1])
+        for f in info.fields:
+            # A collection-shaped field (TypedFieldCollection) measures
+            # identically to a plain one (TypedMemberField/TypedField) on
+            # this platform - both probed separately (reflectgen_sizeof_probe's
+            # own "FieldCollection"/"Field" lines) and confirmed equal
+            # rather than assumed so; "Field" stands in for both without
+            # needing reflectgen's own Field dataclass to track the
+            # field's type just for this estimate.
+            add("Field", f.name)
+            num_fields += 1
+        for d in info.delegates:
+            add("Delegate", d.name)
+            num_delegates += 1
+        for pa in info.property_accessors:
+            size_key = "PropertyCollection" if _looks_like_reflectable_collection(pa.getter_return_type) else "Property"
+            add(size_key, pa.key)
+            num_properties += 1
+        for ca in info.collection_accessors:
+            # Always a TypedPropertyCollection - that's the whole point of
+            # @reflect collection/ClassBuilder::propertyCollection(), not
+            # something detected from the getter's return type the way
+            # property_accessors above is.
+            add("PropertyCollection", ca.key)
+            num_properties += 1
+        for m in info.methods:
+            add("Method", m.name)
+            add_argument_buffer(len(m.arg_types))
+            num_methods += 1
+        for c in info.ctors:
+            add("Constructor")
+            add_argument_buffer(len(c.arg_types))
+            num_ctors += 1
+
+    num_enum_values = 0
+    for info in enums:
+        add("Enum", info.bare_name)
+        if info.values:
+            total_allocations += 1
+            total_bytes += len(info.values) * sizes["EnumValue"] + _HEAP_ALLOC_OVERHEAD
+            for v in info.values:
+                extra_allocs, extra_bytes = _string_extra_storage_cost(v.name)
+                total_allocations += extra_allocs
+                total_bytes += extra_bytes
+        num_enum_values += len(info.values)
+
+    lines = [
+        f"reflectgen: estimated reflection-registry memory footprint: "
+        f"~{total_bytes / 1024:.1f} KiB across ~{total_allocations} heap allocation(s) "
+        f"({len(classes)} class(es), {num_fields} field(s), {num_properties} "
+        f"propert{'y' if num_properties == 1 else 'ies'}, {num_methods} method(s), "
+        f"{num_delegates} delegate(s), {num_ctors} constructor(s), {len(enums)} "
+        f"enum(s)/{num_enum_values} enum value(s))",
+        "reflectgen: estimate only - real, current struct sizes (reflectgen_sizeof_probe) "
+        "but rough heap-allocation-overhead/std::string-SSO assumptions; this is the "
+        "*runtime registry's* own memory, permanent for the process lifetime (nothing "
+        "here is ever freed) - it does not include the generated .cpp's own code size.",
+    ]
+    return "\n".join(lines)
+
+
 def main():
     # Split "-- <clang args>" off manually before argparse ever sees it -
     # argparse.REMAINDER interacts badly with a preceding nargs="+"
@@ -1645,6 +1801,11 @@ def main():
     parser.add_argument("--no-recursive", action="store_true",
                          help="when an input is a directory, only scan its top level "
                               "instead of walking subdirectories")
+    parser.add_argument("--sizeof-probe", metavar="EXE",
+                         help="path to a built reflectgen_sizeof_probe executable "
+                              "(tools/reflectgen/src) - when given, prints an estimated "
+                              "memory footprint for the generated registry using real, "
+                              "freshly-measured sizeof() values; omitted entirely otherwise")
 
     parser.add_argument( "-v", "--version", 
                         action="version",
@@ -1785,6 +1946,16 @@ def main():
     enum_names = ", ".join(e.name for e in all_enums)
     print(f"reflectgen: wrote {args.output} in {total_seconds:.2f}s "
           f"({len(all_classes)} class(es): {class_names}; {len(all_enums)} enum(s): {enum_names})")
+
+    if args.sizeof_probe:
+        try:
+            sizes = run_sizeof_probe(args.sizeof_probe)
+            print(estimate_memory_footprint(all_classes, all_enums, sizes))
+        except (subprocess.CalledProcessError, OSError, KeyError) as exc:
+            # Not worth failing the whole generation step over - the
+            # estimate is diagnostic, not load-bearing for the actual
+            # generated .cpp, which is already written above by this point.
+            sys.stderr.write(f"reflectgen: --sizeof-probe failed ({exc}) - skipping memory estimate\n")
 
 
 if __name__ == "__main__":
