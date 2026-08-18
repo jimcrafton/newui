@@ -1,4 +1,5 @@
 #include "newui/reflection.h"
+#include "newui/controls.h"
 
 #include <array>
 #include <any>
@@ -9,6 +10,38 @@
 #include <gtest/gtest.h>
 
 using namespace newui::reflection;
+
+// Defined in the reflectgen-generated .cpp (cmake/ReflectGen.cmake's
+// newui_add_reflectgen_output(newui) - compiled into the `newui` target
+// this test binary links against, see unittests/CMakeLists.txt), same as
+// src/main.cpp's own forward declaration - no header declares it since
+// it's generated, not hand-written.
+extern void registerReflectionData();
+
+namespace {
+
+// Runs registerReflectionData() exactly once, before any TEST body in
+// this binary - GoogleTest's documented way to do expensive one-time
+// global setup (googletest/docs/advanced.md's "Global Set-Up and Tear-
+// Down"). Needed because every generated `register_*Reflection()`
+// function (there's one per real newui class - see reflectgen.py's
+// emit_register_function()) only actually runs once something calls
+// registerReflectionData() itself; nothing else in this test binary
+// does. Registering it via a file-scope static (so it runs during static
+// initialization, before gtest_main's own main() calls RUN_ALL_TESTS())
+// is what AddGlobalTestEnvironment's own contract requires - it must be
+// called before RUN_ALL_TESTS(), and there's no custom main() here to
+// call it from (this target links GTest::gtest_main, not a hand-written
+// main.cpp).
+class ReflectionDataEnvironment : public ::testing::Environment {
+public:
+    void SetUp() override { registerReflectionData(); }
+};
+
+::testing::Environment* const g_reflectionDataEnv =
+    ::testing::AddGlobalTestEnvironment(new ReflectionDataEnvironment());
+
+}  // namespace
 
 namespace {
 
@@ -237,4 +270,54 @@ TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
     EXPECT_TRUE((flags & PropertyFlags::Collection) != PropertyFlags::None);
     EXPECT_TRUE((flags & PropertyFlags::Associative) != PropertyFlags::None);
     EXPECT_TRUE((PropertyFlags::None & PropertyFlags::Collection) == PropertyFlags::None);
+}
+
+// ---------------------------------------------------------------------
+// registerReflectionData() (generated) - real classes/base chains, not
+// the hand-rolled ReflectedBase/ReflectedDerived pair above. Regression
+// coverage for reflectgen.py's order_registration_calls(): every
+// register_*Reflection() function it emits calls .base<BaseT>() (see
+// emit_register_function()), which throws std::logic_error if BaseT
+// hasn't been registered yet (ClassBuilder<T>::base<BaseT>(),
+// reflection.h) - registerReflectionData() itself used to just call
+// those functions in whatever order find_declarations() discovered the
+// classes in, which didn't guarantee a base ran before its own derived
+// class. ReflectionDataEnvironment above already calls
+// registerReflectionData() once for the whole binary (would fail *every*
+// test here via a caught exception in Environment::SetUp() if that
+// ordering broke again) - these tests additionally confirm the resulting
+// Class::parentClass() links are actually wired correctly, across two
+// independent, real multi-level chains (View->SubView->Control->Button;
+// ViewStyle->ThemedViewStyle->ThemedButtonStyle).
+// ---------------------------------------------------------------------
+
+TEST(Reflection, GeneratedDataLinksViewControlButtonChain) {
+    const Class* viewClass = classinfo(typeid(newui::View));
+    const Class* subViewClass = classinfo(typeid(newui::SubView));
+    const Class* controlClass = classinfo(typeid(newui::Control));
+    const Class* buttonClass = classinfo(typeid(newui::Button));
+
+    ASSERT_NE(viewClass, nullptr);
+    ASSERT_NE(subViewClass, nullptr);
+    ASSERT_NE(controlClass, nullptr);
+    ASSERT_NE(buttonClass, nullptr);
+
+    EXPECT_EQ(viewClass->parentClass(), nullptr);
+    EXPECT_EQ(subViewClass->parentClass(), viewClass);
+    EXPECT_EQ(controlClass->parentClass(), subViewClass);
+    EXPECT_EQ(buttonClass->parentClass(), controlClass);
+}
+
+TEST(Reflection, GeneratedDataLinksViewStyleThemedButtonStyleChain) {
+    const Class* viewStyleClass = classinfo(typeid(newui::ViewStyle));
+    const Class* themedViewStyleClass = classinfo(typeid(newui::ThemedViewStyle));
+    const Class* themedButtonStyleClass = classinfo(typeid(newui::ThemedButtonStyle));
+
+    ASSERT_NE(viewStyleClass, nullptr);
+    ASSERT_NE(themedViewStyleClass, nullptr);
+    ASSERT_NE(themedButtonStyleClass, nullptr);
+
+    EXPECT_EQ(viewStyleClass->parentClass(), nullptr);
+    EXPECT_EQ(themedViewStyleClass->parentClass(), viewStyleClass);
+    EXPECT_EQ(themedButtonStyleClass->parentClass(), themedViewStyleClass);
 }

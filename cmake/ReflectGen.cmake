@@ -109,10 +109,27 @@ somewhere, instead of scanning every header under its scan directories unconditi
 #   newui_add_reflectgen_output(<target>
 #       [SCAN_DIRS <dir>...]        # default: NEWUI_REFLECTGEN_SCAN_DIRS
 #                                   # (newui's own include/newui)
-#       [INCLUDE_DIRS <dir>...])   # extra -I paths beyond
+#       [INCLUDE_DIRS <dir>...]    # extra -I paths beyond
 #                                   # NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS
 #                                   # (newui's own headers + 3rdparty deps,
 #                                   # always included)
+#       [REGISTER_FUNCTION <name>]) # default: registerReflectionData -
+#                                   # name of the generated master function
+#                                   # (see reflectgen.py's own
+#                                   # DEFAULT_REGISTER_FUNCTION_NAME/
+#                                   # generate()) that calls every
+#                                   # individual register_*Reflection()/
+#                                   # register_*Enum() function once, base
+#                                   # classes before derived - override this
+#                                   # when a target needs more than one
+#                                   # newui_add_reflectgen_output() call of
+#                                   # its own (each generated .cpp still
+#                                   # only ever emits one master function,
+#                                   # per SCAN_DIRS - a target compiling
+#                                   # more than one such .cpp needs distinct
+#                                   # names to call each independently,
+#                                   # since two functions with the same
+#                                   # name in one binary won't link).
 #
 # Call once per target that wants generated registration functions
 # compiled in - newui's own top-level CMakeLists.txt calls this once for
@@ -122,10 +139,15 @@ somewhere, instead of scanning every header under its scan directories unconditi
 # own project" for the full walkthrough) - the two calls are completely
 # independent, each gets its own generated .cpp.
 function(newui_add_reflectgen_output target)
-    cmake_parse_arguments(ARG "" "" "SCAN_DIRS;INCLUDE_DIRS" ${ARGN})
+    cmake_parse_arguments(ARG "" "REGISTER_FUNCTION" "SCAN_DIRS;INCLUDE_DIRS" ${ARGN})
 
     if(NOT ARG_SCAN_DIRS)
         set(ARG_SCAN_DIRS ${NEWUI_REFLECTGEN_SCAN_DIRS})
+    endif()
+
+    set(register_function_args)
+    if(ARG_REGISTER_FUNCTION)
+        set(register_function_args --register-function ${ARG_REGISTER_FUNCTION})
     endif()
 
     set(output ${CMAKE_CURRENT_BINARY_DIR}/generated/${target}_reflection_generated.cpp)
@@ -161,6 +183,7 @@ function(newui_add_reflectgen_output target)
             -o ${output}
             ${require_marker_arg}
             ${include_args}
+            ${register_function_args}
             --sizeof-probe $<TARGET_FILE:reflectgen_sizeof_probe>
         DEPENDS
             ${candidate_headers}
