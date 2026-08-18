@@ -72,22 +72,35 @@ set(NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/blend2d
 )
 
-# Default ON - see this file's own HANDOFF.md entry for why: scanning
-# every real header under include/newui unconditionally, as of this
-# writing, produces a build-breaking cascade of real compile errors
-# (headers that don't parse standalone outside newui.h's aggregation,
-# has_reflect_friend() matching an unrelated friend declaration and
-# emitting an inaccessible private-member expression, ...) - real gaps
-# worth fixing, not yet fixed. Turn this OFF locally once those are
-# addressed, or to experiment on a class-by-class basis by adding markers
-# deliberately. Applies to every newui_add_reflectgen_output() call, not
-# just newui's own - a downstream project's classes may not have this
-# project's specific gaps, but the option is process-wide (simplest,
-# and consistent - see reflection.md if a call ever needs to differ).
+# Default OFF - scan-all is the real default (see reflection.md and this
+# file's own HANDOFF.md entry): every real header under include/newui is
+# reflectable unless explicitly opted out via "@reflect ignore=true" or
+# NEWUI_REFLECT_PRIVATE()'s own per-member opt-in, without requiring a
+# developer to go mark up every class by hand first. This used to default
+# ON because scan-all produced a build-breaking cascade of real compile
+# errors (headers that don't parse standalone outside newui.h's
+# aggregation, has_reflect_friend() matching an unrelated friend
+# declaration, unqualified nested-type spellings, inherited/mismatched
+# Delegate senders, non-copy-constructible getters/setters/collection
+# elements, abstract-class constructors, non-const-reference method
+# params, and - the last and most surprising one - MSVC's own
+# std::is_copy_constructible_v<T> being simply wrong for a T that holds a
+# std::vector<std::unique_ptr<T>> of itself, undermining reflection.h's
+# own if-constexpr safety guards) - every one of those is now either
+# fixed in reflectgen.py itself or worked around by skipping the specific
+# unsupported shape (still real, directly-callable C++, just not
+# reflected) - verified via a full scan + standalone compile of every
+# real header in this project. Set this back ON locally to return to the
+# old opt-in-only behavior, or to experiment on a class-by-class basis.
+# Applies to every newui_add_reflectgen_output() call, not just newui's
+# own - a downstream project's classes may hit a gap of their own reflectgen
+# doesn't cover yet, same as this project did (the option is process-wide,
+# simplest and consistent - see reflection.md if a call ever needs to
+# differ).
 option(NEWUI_REFLECTGEN_REQUIRE_MARKER
     "Only reflect a header that contains an '@reflect' annotation or NEWUI_REFLECT_PRIVATE() \
 somewhere, instead of scanning every header under its scan directories unconditionally"
-    ON)
+    OFF)
 
 # Registers a build-time custom command that discovers and generates in one
 # step (see this file's own header comment for why) and adds the resulting
@@ -157,4 +170,15 @@ function(newui_add_reflectgen_output target)
     )
 
     target_sources(${target} PRIVATE ${output})
+
+    if(MSVC)
+        # Scan-all's own generated .cpp - one registration function per
+        # reflected class/enum, all in a single translation unit - is
+        # large enough (114 classes across newui's own headers alone) to
+        # exceed MSVC's default per-object-file section count (C1128)
+        # well before it exceeds any real code-size concern. Scoped to
+        # just this one generated file rather than the whole target - no
+        # other source approaches that limit.
+        set_source_files_properties(${output} PROPERTIES COMPILE_OPTIONS "/bigobj")
+    endif()
 endfunction()

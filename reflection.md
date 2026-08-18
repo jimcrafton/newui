@@ -279,22 +279,33 @@ lives there. Two stages (`cmake/ReflectGen.cmake`):
 Both stages need `tools/reflectgen/.venv` set up (the one-time setup above) — CMake
 configure fails with a clear error naming the missing venv if it isn't.
 
-**`NEWUI_REFLECTGEN_REQUIRE_MARKER`** (CMake option, **default `ON`**) controls which
+**`NEWUI_REFLECTGEN_REQUIRE_MARKER`** (CMake option, **default `OFF`**) controls which
 headers discovery actually includes:
-- `ON` (default): only a header containing an `@reflect` annotation or
-  `NEWUI_REFLECT_PRIVATE()` anywhere is included — the safe, opt-in mode. Add either to a
-  header to make it participate; the next build (reconfigure first, if needed — see the
-  Ninja/VS caveat above) picks it up automatically.
-- `OFF`: every header under `include/newui` is scanned unconditionally, relying on
-  `reflectgen`'s own per-*class* `@reflect ignore=true` to exclude anything that shouldn't
-  be reflected, rather than a human remembering to mark every file that should
-  participate. **Verified not to work cleanly against this codebase's real headers yet** —
-  turning it on produces a cascade of real MSVC compile errors: several headers don't parse
-  as standalone translation units outside `newui.h`'s aggregation (missing transitive
-  includes), and `has_reflect_friend()` (`reflectgen.py`) currently matches *any* friend
-  declaration, not specifically a reflection-oriented one, so a class with an unrelated
-  `friend class X` gets private members emitted that the generated code then can't actually
-  access. Real, fixable gaps — just not fixed yet. Leave this `ON` until they are.
+- `OFF` (default, scan-all): every header under `include/newui` is scanned
+  unconditionally — a class is reflectable unless it explicitly opts out
+  (`@reflect ignore=true` on the class, or per-member) rather than a human remembering to
+  mark every file that should participate. This is the real default because opt-in-only
+  isn't very useful in practice: it requires going back and annotating every existing class
+  by hand before reflectgen does anything at all. Verified end-to-end against every real
+  header in this project — a full build (`newui`, `newui_tests`, every example) and the
+  full test suite (559/559) both succeed with this on. `reflectgen.py` itself independently
+  falls back to `.method()`/`.field()`/skips registration entirely (with a `reflectgen:`
+  warning on stderr, not a build failure) for any accessor shape it can't safely wire up —
+  see reflectgen.py's own comments on the non-copy-constructible-getter/setter/collection-
+  element cases, the abstract-class-constructor case, and the MSVC
+  `std::is_copy_constructible_v` reliability gap for a self-referential
+  `std::vector<std::unique_ptr<T>>`-holding `T`, all found and fixed by scanning this
+  project's own real headers.
+- `ON`: only a header containing an `@reflect` annotation or `NEWUI_REFLECT_PRIVATE()`
+  anywhere is included — the old opt-in-only mode. Add either to a header to make it
+  participate; the next build (reconfigure first, if needed — see the Ninja/VS caveat
+  above) picks it up automatically. Still available for a project that wants to reflect
+  only a deliberately-chosen subset of its classes.
+
+A generated `.cpp` this large (every real header, one registration function per class) can
+exceed MSVC's default per-object-file section count — `newui_add_reflectgen_output()`
+already compiles its own generated file with `/bigobj` (MSVC only) to cover this; nothing
+to configure on your end.
 
 `tools/reflectgen/reflectgen.py` itself has never required a marker to process a *class* —
 `discover_reflectable.py`'s check is a separate, additional gate that only exists for this
@@ -306,11 +317,14 @@ Nothing calls the generated `register_*Reflection()` functions automatically —
 still up to application setup code, the same way `examples/reflection1.cpp`/
 `reflection2.cpp` call their own hand-written ones.
 
-As of this writing, no real header under `include/newui` carries a reflectgen marker yet —
-every class currently registered against `newui::reflection` (`examples/reflection2.cpp`)
-is still hand-written. The pipeline is proven correct in marker-required mode (verified
-against a throwaway annotated header, added and removed, real CMake reconfigures both
-directions) and ready for whenever a real header opts in.
+As of this writing, every real header under `include/newui` is reflected automatically via
+scan-all (114 classes, 32 enums, across the 34 headers with anything reflectable) - `newui`,
+`newui_tests`, and every example all build clean against the generated output, and the full
+test suite passes. `examples/reflection2.cpp` still registers its own small example classes
+by hand (it predates scan-all and demonstrates the hand-written path deliberately) - nothing
+currently *calls* the auto-generated `register_*Reflection()` functions for `newui`'s own
+classes, same as ever (see the paragraph above); scan-all only means they exist and compile,
+not that anything invokes them yet.
 
 ## Using reflectgen in your own project
 
@@ -325,6 +339,16 @@ walks through doing that, end to end.
 `include()`d as part of `newui`'s own `CMakeLists.txt` processing — `newui_add_reflectgen_output()`
 and the `NEWUI_REFLECTGEN_REQUIRE_MARKER` option are already available in your own
 `CMakeLists.txt` once that call returns, no extra `include()` needed on your end.
+
+**A note on scan-all (the default) for your own headers:** every real class under your own
+`SCAN_DIRS` is reflected unless it opts out, same as `newui`'s own headers — the `@reflect`
+markers in the next step are for overriding the automatic property/name detection, not for
+opting a class in at all. If reflectgen's heuristics hit a shape they can't safely handle
+(the non-copy-constructible-return/argument cases `reflectgen.py`'s own comments describe,
+say), that one accessor falls back to a plain `.method()` (or is skipped, with a
+`reflectgen:` warning on stderr) rather than failing your build — still real, callable C++
+either way, just not reflected the way you might expect. Check the build output for these
+warnings after first enabling reflectgen against a new set of headers.
 
 **2. Make sure `tools/reflectgen/.venv` is set up** inside your copy of the `newui` source
 tree (the "One-time setup" steps above) — `newui_add_reflectgen_output()` resolves the
@@ -375,11 +399,9 @@ incremental (see "Automatic CMake integration" above for the mechanics) - that p
 `${CMAKE_CURRENT_BINARY_DIR}/generated/myapp_reflection_generated.cpp` and adds it straight
 to `myapp`'s sources. `myapp`'s own generated file is completely independent of `newui`'s
 own (`newui_reflection_generated.cpp`) - each target gets its own, scoped to its own
-`SCAN_DIRS`. `NEWUI_REFLECTGEN_REQUIRE_MARKER` (the `ON`/marker-required default, or
-`-DNEWUI_REFLECTGEN_REQUIRE_MARKER=OFF` for scan-all - see its own section above for the
-real caveats scan-all currently has against `newui`'s *own* headers, which may or may not
-apply to yours) applies to every `newui_add_reflectgen_output()` call process-wide, not per
-call.
+`SCAN_DIRS`. `NEWUI_REFLECTGEN_REQUIRE_MARKER` (`OFF`/scan-all by default, or
+`-DNEWUI_REFLECTGEN_REQUIRE_MARKER=ON` for the old opt-in-only mode - see its own section
+above) applies to every `newui_add_reflectgen_output()` call process-wide, not per call.
 
 **5. Call the generated registration function.** Nothing does this for you - add a call to
 `register_MyAppWidgetReflection()` (the name `reflectgen` derives from the class name, see

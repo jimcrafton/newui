@@ -137,6 +137,50 @@ def qualified_name(cursor):
     return "::".join(reversed(parts))
 
 
+def qualify_type_spelling(clang_type):
+    # clang's own type spelling names a nested class/struct/enum
+    # unqualified whenever it's visible without qualification from where
+    # it was used (e.g. "ReturnCode" for newui::SyncReturn::ReturnCode,
+    # spelled inside SyncReturn itself) - fine in the original source, but
+    # wrong once reflectgen re-emits that same spelling verbatim into a
+    # `.constructor<...>()`/selectOverload<...>() template argument at
+    # global scope. generate()'s "using namespace X;" fixes the sibling
+    # version of this problem (a type from another *namespace*), but
+    # can't help here at all - a class isn't a namespace, so
+    # "using namespace newui::SyncReturn;" doesn't compile (see that
+    # function's own comment on excluding class scopes for exactly this
+    # reason). Re-qualifying the spelling itself, in place, is the fix
+    # that works for both cases.
+    decl = clang_type.get_declaration()
+    if decl.kind not in (CursorKind.CLASS_DECL, CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL):
+        return clang_type.spelling
+    qualified = qualified_name(decl)
+    if not qualified:
+        return clang_type.spelling
+    spelling = clang_type.spelling
+
+    # clang's spelling may already carry *some* of the qualification (e.g.
+    # "ThemedTabItemStyle::TabAlignment" for a nested enum, only missing
+    # the outer "newui::") rather than only ever the bare name
+    # ("TabAlignment") - a naive bare-name substitution would then produce
+    # "ThemedTabItemStyle::newui::ThemedTabItemStyle::TabAlignment".
+    # Instead, walk from the fully-qualified chain down to the bare name
+    # and prepend only whatever prefix isn't already present - clang only
+    # ever omits a *leading* portion that's redundant from the point of
+    # use, never a scope from the middle without the tail.
+    parts = qualified.split("::")
+    for i in range(len(parts)):
+        suffix = "::".join(parts[i:])
+        pattern = rf"\b{re.escape(suffix)}\b"
+        if not re.search(pattern, spelling):
+            continue
+        if i == 0:
+            return spelling  # already fully qualified
+        missing_prefix = "::".join(parts[:i]) + "::"
+        return re.sub(pattern, missing_prefix + suffix, spelling, count=1)
+    return spelling
+
+
 def is_delegate_field_type(clang_type):
     # A newui::Delegate<SenderT, Args...> member is always declared through
     # a typedef (see delegate.h's own doc comment / frame.h's
@@ -150,9 +194,195 @@ def is_delegate_field_type(clang_type):
     return qualified_name(decl) in ("newui::Delegate", "Delegate")
 
 
+# ClassBuilder<T>::delegate()'s templated overload (reflection.h) only
+# matches `newui::Delegate<T, Args...> T::* member` - the Delegate's own
+# first template argument (its "Sender") has to be the exact class T
+# being registered, same as the member-pointer's class does. That's not
+# always true for a field a *derived* class redeclares using a typedef
+# whose Sender is hardcoded to some base class - e.g. View::
+# SizeChangedDelegate is `Delegate<View, const Size&>`, and RootView
+# redeclares `SizeChangedDelegate onSizeChanged;` verbatim (its own,
+# separate field - not inherited, genuinely shadows View's) without ever
+# re-typedef'ing SizeChangedDelegate with Sender=RootView. Emitting
+# `.delegate(...)` for that field against ClassBuilder<RootView> doesn't
+# compile (deduction failure: Args... can't be deduced when the fixed
+# first parameter doesn't match); this predicate lets collect_class()
+# fall back to plain .field() instead (see its own call site), which has
+# no such constraint - ValueT there is deduced freely off the member
+# pointer, independent of T.
+def delegate_sender_matches(clang_type, class_qualified_name):
+    canon = clang_type.get_canonical()
+    if canon.get_num_template_arguments() < 1:
+        return False
+    sender_decl = canon.get_template_argument_type(0).get_declaration()
+    return qualified_name(sender_decl) == class_qualified_name
+
+
+# ClassBuilder<T>::property()'s getter/setter overload (reflection.h)
+# auto-detects a "reflectable collection" return type
+# (detail::is_reflectable_collection_v<ValueT>) purely from ValueT itself
+# and, if it matches, always instantiates TypedPropertyCollection<T,
+# ElementT> - reflectgen has no say in that once it emits a bare
+# `.property(...)` call for a getter shaped like one (see
+# container_traits<>'s own specializations just below for exactly which
+# container shapes qualify: std::vector<T>/std::array<T,N> at template
+# arg 0, std::map<K,V,...> at arg 1 - nothing else). Mirrors
+# reflection.h's own set of specializations one-for-one rather than
+# trying to detect "anything container-shaped" generically - a
+# specialization reflection.h doesn't have wouldn't compile as a
+# TypedPropertyCollection anyway, so getting this list out of sync would
+# just mean a missed case, not a wrong one.
+_COLLECTION_ELEMENT_ARG_INDEX = {
+    "std::vector": 0,
+    "std::array": 0,
+    "std::map": 1,
+}
+
+
+def reflectable_collection_element_type(clang_type):
+    canon = clang_type.get_canonical()
+    if canon.kind in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE):
+        canon = canon.get_pointee().get_canonical()
+    decl = canon.get_declaration()
+    idx = _COLLECTION_ELEMENT_ARG_INDEX.get(qualified_name(decl))
+    if idx is None or canon.get_num_template_arguments() <= idx:
+        return None
+    return canon.get_template_argument_type(idx)
+
+
 def is_deleted(cursor):
     tokens = [t.spelling for t in cursor.get_tokens()]
     return "delete" in tokens[-3:]
+
+
+# TypedMethod<T, RetT, Args...>::invoke() and TypedConstructor<T,
+# Args...>::invoke() (reflection.h) both unpack every argument via
+# `std::any_cast<Args>(args.at(I))` against a `const std::vector<std::any>&`
+# - which only ever works for:
+#   - a const-reference parameter (any_cast<const X&> binds directly to
+#     the any's held object - always fine).
+#   - a *by-value* parameter, but only when X is copy-constructible
+#     (any_cast<X> has to copy the held object out) - fails hard
+#     (static_assert C2338, then a cascade of C2440s) for a move-only
+#     type, e.g. `void View::setCursor(Cursor)` (Cursor(const Cursor&) =
+#     delete, cursor.h) - same is_copy_constructible() check already used
+#     for a by-value *setter* pairing, just needed again here since a
+#     bare .method() reaches the identical any_cast, not just .property().
+#   - never a non-const reference (no live storage for any_cast to bind
+#     one to - e.g. ThemedMenuBarItemStyle::paint(BLContext&, ..., Rect&),
+#     viewstyle.h) or an rvalue reference (same reasoning).
+# A codegen-side heuristic fix can't paper over any of these - only
+# skipping registration can (still a real, directly-callable C++ method/
+# constructor, just not through reflection - same fallback used
+# throughout this file for every other shape ClassBuilder's templates
+# don't support).
+def invoke_arg_type_unsupported(t):
+    if t.kind == cindex.TypeKind.LVALUEREFERENCE:
+        return not t.get_pointee().is_const_qualified()
+    if t.kind == cindex.TypeKind.RVALUEREFERENCE:
+        return True
+    return not is_copy_constructible(t)
+
+
+def has_unsupported_invoke_arg(cursor):
+    return any(invoke_arg_type_unsupported(arg.type) for arg in cursor.get_arguments())
+
+
+# TypedMethod<T, RetT, Args...>::invokeImpl()'s non-void branch (reflection.h)
+# unconditionally does `std::any((self->*fn_)(...))` for its return value -
+# no `if constexpr(is_copy_constructible_v<RetT>)` guard the way
+# TypedProperty's own get()/set() have (see the getter-addressability
+# comment in collect_property_accessors() for the property side of this
+# same distinction). A by-value RetT is always fine regardless (the
+# function call is a prvalue; C++17 mandates it's constructed directly
+# into the std::any's storage, no extra copy/move needed at all) and a
+# pointer RetT is always fine too (std::any(ptr) just copies the pointer
+# itself) - only a *reference*-returning method (T&/const T&) whose T
+# isn't copy-constructible is a real problem: converting that live
+# reference into the std::any's own storage is a genuine, non-elidable
+# copy. Verified in practice: View::cursor() (returns `Cursor&`/`const
+# Cursor&`, cursor.h) got excluded from Property registration by an
+# unrelated ambiguity and fell back to plain .method() registration,
+# where this exact case isn't guarded.
+def method_return_type_unsupported(clang_type):
+    if clang_type.kind not in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE):
+        return False
+    return not is_copy_constructible(clang_type.get_pointee())
+
+
+# TypedDelegate<T, Args...>::invoke() (reflection.h) unpacks its Args the
+# same std::any_cast<Args>(args.at(I))... way TypedMethod/TypedConstructor
+# do (see has_unsupported_invoke_arg()'s own comment for the full
+# reasoning) - just reached from a Delegate<Sender, Args...> field's own
+# template arguments (index 0 is always Sender, never one of the
+# invoke-time Args - see is_delegate_field_type()) rather than a cursor's
+# get_arguments(), e.g. RunLoop's `Delegate<RunLoop, bool&> onIdle;`
+# (runloop.h - a real "should I keep going" out-parameter) hits the exact
+# same non-const-reference case a method parameter would.
+def delegate_args_unsupported(clang_type):
+    canon = clang_type.get_canonical()
+    return any(
+        invoke_arg_type_unsupported(canon.get_template_argument_type(i))
+        for i in range(1, canon.get_num_template_arguments())
+    )
+
+
+# True unless `clang_type` is a class/struct that can't be copy-
+# constructed - either directly (e.g. Cursor(const Cursor&) = delete;,
+# cursor.h) or *implicitly*, the ordinary C++ way: a class with no
+# user-declared copy constructor at all still doesn't get one if any of
+# its own members/bases aren't copy-constructible (e.g. MenuItem,
+# menus.h, never declares a copy constructor itself, but holds a
+# `std::vector<std::unique_ptr<MenuItem>> children_` - MenuItem is just
+# as uncopyable as unique_ptr is, only implicitly). Verified in practice:
+# MenuItem::root() (a bare `MenuItem&` getter, ContextMenu) got
+# auto-detected as a Property and its RefGetter shape's get() copies the
+# referent into a std::any - instantiating MenuItem's own (deleted, but
+# only diagnosed once actually odr-used) implicit copy constructor,
+# which cascades into copying children_'s whole vector.
+#
+# Class *template* instantiations (std::unique_ptr<Key>, not a concrete
+# project class like Cursor or MenuItem) are a separate, also verified-
+# in-practice blind spot for a direct constructor walk: clang only
+# lazily instantiates a template's member declarations when something in
+# the TU actually odr-uses them, so get_children() on an instantiation
+# nobody's copy-constructed yet comes back with *no* CONSTRUCTOR cursors
+# at all (not even an implicit one). std::unique_ptr's copy constructor
+# is deleted by the language standard itself (not an implementation
+# detail that could vary), so it's special-cased directly. The other
+# container_traits<>-supported containers (std::vector/std::array/
+# std::map - see reflectable_collection_element_type()) hit the same
+# lazy-instantiation blind spot *and* would give a wrong answer even if
+# they didn't: their own fields are just an implementation-detail buffer/
+# pointer (always trivially copyable), unrelated to whether their
+# element type actually is - so those recurse into the element type
+# specifically instead of falling through to the generic member walk
+# below.
+def is_copy_constructible(clang_type):
+    canon = clang_type.get_canonical()
+    decl = canon.get_declaration()
+    if decl.kind not in (CursorKind.CLASS_DECL, CursorKind.STRUCT_DECL):
+        return True
+    if qualified_name(decl) == "std::unique_ptr":
+        return False
+    element = reflectable_collection_element_type(canon)
+    if element is not None:
+        return is_copy_constructible(element)
+    for child in decl.get_children():
+        if child.kind == CursorKind.CONSTRUCTOR and child.is_copy_constructor():
+            return not is_deleted(child)
+    # No user-declared copy ctor found - the implicit one (the ordinary
+    # case for a ptr-to-project-class like MenuItem) is only as
+    # copy-constructible as every member/base is; recursing here also
+    # happens to be the right fallback for the lazy-instantiation blind
+    # spot above (a member/base's own type still needs to satisfy this
+    # same check, whichever branch actually answers it).
+    for child in decl.get_children():
+        if child.kind == CursorKind.FIELD_DECL and not is_copy_constructible(child.type):
+            return False
+        if child.kind == CursorKind.CXX_BASE_SPECIFIER and not is_copy_constructible(child.type):
+            return False
+    return True
 
 
 # Was: "does this class have ANY friend declaration at all" - a real bug,
@@ -553,6 +783,43 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
         # getter (see reflection.h's own comment on that).
         getter_cursor = next((c for c in candidates if not c.is_const_method()), candidates[0])
 
+        # ClassBuilder<T>::property()'s TypedProperty<T, ValueT> machinery
+        # (reflection.h) needs a real ValueT - a bare `void*` getter (e.g.
+        # PropertyBase::source(), a type-erased handle with no reflectable
+        # pointee) deduces ValueT=void, which fails to compile (can't form
+        # `void&`/`const void&` - see TypedProperty's RefGetter/Setter
+        # aliases). Not fixable by picking a different accessor shape here
+        # - void* genuinely isn't representable as a Property - so this
+        # stays a plain .method() instead, same as any other candidate
+        # that doesn't pan out.
+        if normalize_type_spelling(getter_cursor.result_type.spelling) == "void":
+            sys.stderr.write(
+                f"reflectgen: '{class_name}.{getter_name}' returns void* - not representable as a "
+                "Property (ClassBuilder::property() needs a real pointee type); registered as a plain "
+                "method instead.\n"
+            )
+            continue
+
+        # Same reasoning, for the "reflectable collection" shape instead
+        # of the plain-scalar one - a getter returning e.g. `const
+        # std::vector<std::unique_ptr<Key>>&` (Animation::keys()) auto-
+        # detects as TypedPropertyCollection<T, std::unique_ptr<Key>>
+        # inside ClassBuilder::property() (see
+        # reflectable_collection_element_type()'s own comment), whose
+        # get() wraps each element in a std::any - impossible when the
+        # element type (here, unique_ptr) can't be copy-constructed at
+        # all. Same fallback as everywhere else this session: not a
+        # Property, still a plain .method().
+        collection_element = reflectable_collection_element_type(getter_cursor.result_type)
+        if collection_element is not None and not is_copy_constructible(collection_element):
+            sys.stderr.write(
+                f"reflectgen: '{class_name}.{getter_name}' returns a collection of "
+                f"'{collection_element.spelling}', which isn't copy-constructible - "
+                "ClassBuilder::property()'s collection support needs to copy each element; "
+                "registered as a plain method instead.\n"
+            )
+            continue
+
         setter_names = setter_names_by_stem.get(stem, [])
         setter_cursor = None
         if len(setter_names) == 1:
@@ -573,6 +840,104 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
                 f"({', '.join(setter_names)}) that all look like a setter for '{stem}' - "
                 "ambiguous, none wired in; registered read-only.\n"
             )
+
+        # A same-stem setter isn't necessarily the *getter's* setter -
+        # ClassBuilder::property()'s Setter/PtrSetter shapes both need
+        # their one argument to be the same ValueT the getter returns
+        # (stripped of const/ref/pointer - see TypedProperty's own
+        # aliases), which a same-named "transfer ownership" setter taking
+        # e.g. `std::unique_ptr<LayoutParams>` against a getter returning
+        # `LayoutParams*` (SubView::layoutParams(), View::style()) isn't:
+        # different types, just related ones. Caught here the same
+        # string-normalized way has_matching_backing_member() already
+        # compares a getter against a backing field's type; a real
+        # mismatch falls back to read-only rather than emitting a
+        # `.property(...)` call std::invoke can't actually compile.
+        if setter_cursor is not None:
+            setter_arg = next(setter_cursor.get_arguments())
+            setter_arg_type = setter_arg.type.spelling
+            if normalize_type_spelling(setter_arg_type) != normalize_type_spelling(getter_cursor.result_type.spelling):
+                sys.stderr.write(
+                    f"reflectgen: '{class_name}.{setter_cursor.spelling}' takes '{setter_arg_type}', which "
+                    f"doesn't match getter '{getter_name}''s return type '{getter_cursor.result_type.spelling}' "
+                    f"- not a real setter for '{stem}'; registered read-only.\n"
+                )
+                setter_cursor = None
+            elif (
+                setter_arg.type.kind not in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE)
+                and not is_copy_constructible(setter_arg.type)
+            ):
+                # A by-value setter (setCursor(Cursor), not setCursor(const
+                # Cursor&)) whose parameter type can't be copy-constructed
+                # at all - see is_copy_constructible()'s own comment for
+                # why that's fatal for property()'s Setter shape
+                # specifically: the wrapping lambda
+                # `[setter](T&, const ValueT& value) { std::invoke(setter,
+                # self, value); }` (ClassBuilder::property(), reflection.h)
+                # itself has to copy `value` to call a by-value setter
+                # with it - unconditional, built whenever a setter is
+                # given at all, not guarded the way TypedProperty::set()'s
+                # *own* body later is.
+                sys.stderr.write(
+                    f"reflectgen: '{class_name}.{setter_cursor.spelling}' takes '{setter_arg_type}' by value, and "
+                    f"that type isn't copy-constructible - ClassBuilder::property()'s setter can't pass it "
+                    f"through; registered read-only.\n"
+                )
+                setter_cursor = None
+
+        # ClassBuilder<T>::property()'s getter/setter overload picks one of
+        # several TypedProperty construction modes at compile time
+        # (reflection.h) based on the getter's return shape - a
+        # PtrGetter/PtrSetter pair only ever moves a pointer at
+        # *registration* time, and an "addressable" RefGetter (a non-
+        # const-reference-returning getter with no setter, e.g. `MenuItem&
+        # root()`, MenuBar) just returns the reference as-is - neither
+        # copies ValueT there. TypedProperty::get()/set()/write()/read()
+        # are all themselves guarded by `if constexpr
+        # (std::is_copy_constructible_v<ValueT>)`, which would make a
+        # non-copy-constructible ValueT look safe in every mode... except
+        # that guard is only as reliable as the trait itself, and MSVC's
+        # own std::is_copy_constructible_v is - verified directly, both
+        # against MenuItem itself and against a from-scratch minimal
+        # repro (a struct holding nothing but a
+        # std::vector<std::unique_ptr<Self>>) - WRONG for exactly this
+        # "class holds a container of unique_ptr to its own type" shape:
+        # it reports true, so write()/read()'s "safe" branch still gets
+        # compiled and still really copy-constructs ValueT inside it
+        # (write()'s `ValueT temp = std::any_cast<ValueT>(boxed);`, e.g.),
+        # which is real, unconditional MSVC-vtable-forced instantiation
+        # (write()/read() are virtual overrides - built for every
+        # TypedProperty<T,ValueT> regardless of getter shape or whether
+        # they're ever called) - that's what actually fails to compile,
+        # cascading through MenuItem's own now-attempted implicit copy
+        # constructor into its `std::vector<std::unique_ptr<MenuItem>>
+        # children_` member.
+        #
+        # Since reflectgen has no way to ask MSVC's real, in-compiler
+        # trait evaluation whether a given ValueT is one of the types this
+        # bites (only its own, more careful is_copy_constructible() -
+        # which gets MenuItem right), the only safe policy is to distrust
+        # every mode equally here rather than try to carve out the
+        # ones that are "supposed" to be safe - .method() has no such
+        # weak point (TypedMethod has no write()/read() analogue) and is
+        # always available as a fallback regardless of return shape (see
+        # method_return_type_unsupported()'s own comment for the
+        # narrower rule that applies there instead).
+        getter_result_type = getter_cursor.result_type
+        if getter_result_type.kind == cindex.TypeKind.POINTER:
+            value_type = getter_result_type.get_pointee()
+        elif getter_result_type.kind in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE):
+            value_type = getter_result_type.get_pointee()
+        else:
+            value_type = getter_result_type
+        if not is_copy_constructible(value_type):
+            sys.stderr.write(
+                f"reflectgen: '{class_name}.{getter_name}' returns '{value_type.spelling}', which isn't "
+                "copy-constructible - ClassBuilder::property()'s TypedProperty<T,ValueT> can't safely be "
+                "built for it (see reflectgen's own notes on MSVC's is_copy_constructible_v reliability "
+                "here); registered as a plain method instead.\n"
+            )
+            continue
 
         if not has_accessor_prefix(getter_name, _GETTER_PREFIXES) and setter_cursor is None:
             if not has_matching_backing_member(stem, getter_cursor.result_type.spelling, fields):
@@ -597,7 +962,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
         setter_ambiguous = False
         setter_is_const = False
         if setter_cursor is not None:
-            setter_arg_type = next(setter_cursor.get_arguments()).type.spelling
+            setter_arg_type = qualify_type_spelling(next(setter_cursor.get_arguments()).type)
             setter_ambiguous = len(method_cursors_by_name[setter_cursor.spelling]) > 1
             setter_is_const = setter_cursor.is_const_method()
 
@@ -605,7 +970,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             key=key,
             scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
             getter_name=getter_name,
-            getter_return_type=getter_cursor.result_type.spelling,
+            getter_return_type=qualify_type_spelling(getter_cursor.result_type),
             getter_is_const=getter_cursor.is_const_method(),
             ambiguous=len(cursors) > 1,
             setter_name=setter_cursor.spelling if setter_cursor else None,
@@ -699,7 +1064,7 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
             key=key,
             scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
             getter_name=getter_name,
-            getter_return_type=getter_cursor.result_type.spelling,
+            getter_return_type=qualify_type_spelling(getter_cursor.result_type),
             getter_is_const=getter_cursor.is_const_method(),
             ambiguous=len(cursors) > 1,
             add_name=add_cursor.spelling if add_cursor else None,
@@ -753,15 +1118,81 @@ def collect_class(cursor):
         if kind == CursorKind.FIELD_DECL:
             if access != AccessSpecifier.PUBLIC and not info.has_friend:
                 continue
-            if is_delegate_field_type(child.type):
+            if child.type.is_const_qualified():
+                # ClassBuilder::field()'s ValueT T::* overload (reflection.h)
+                # always builds a TypedMemberField<T, ValueT> - unconditionally
+                # both readable *and* writable (TypedField::set()/
+                # TypedMemberField::set() write through the raw pointer/member
+                # unconditionally) - ValueT=const X fails to compile there
+                # (assigning through a const X*/const X T::*). A const field
+                # is real, read-only C++ that reflectgen's Field vocabulary
+                # (see reflection.h's own Field class comment) just doesn't
+                # have a read-only variant of yet; skip and warn rather than
+                # emit something that can't compile.
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' is const-qualified - "
+                    "ClassBuilder::field() has no read-only variant; not registered.\n"
+                )
+                continue
+            field_collection_element = reflectable_collection_element_type(child.type)
+            if field_collection_element is not None and not is_copy_constructible(field_collection_element):
+                # ClassBuilder::field()'s ValueT T::* overload always
+                # branches into TypedFieldCollection<T, ValueT> for a
+                # reflectable-collection ValueT (reflection.h) - the
+                # caller (reflectgen) has no way to force the plain
+                # TypedMemberField path instead just by how `&Class::member`
+                # is spelled. TypedFieldCollection's element access goes
+                # through container_traits<ContainerT>::getByIndex(), which
+                # for std::vector returns `c.at(index)` *by value* - the
+                # exact same copy-a-move-only-element problem
+                # reflectable_collection_element_type()'s own comment
+                # describes for a property getter (e.g. Animation::keys()),
+                # just reached from a private field going through
+                # NEWUI_REFLECT_PRIVATE() instead (MenuItem::children_,
+                # menus.h - `std::vector<std::unique_ptr<MenuItem>>`).
+                # Not representable via .field() at all - skip entirely.
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' is a collection of "
+                    f"'{field_collection_element.spelling}', which isn't copy-constructible - "
+                    "ClassBuilder::field()'s collection support needs to copy each element; not registered.\n"
+                )
+                continue
+            if (
+                is_delegate_field_type(child.type)
+                and delegate_sender_matches(child.type, name)
+                and not delegate_args_unsupported(child.type)
+            ):
                 # Never a Property, even though it's a member variable -
                 # see Delegate's class comment in reflection.h.
                 info.delegates.append(DelegateField(child.spelling, SCOPE_NAMES[access]))
+            elif is_delegate_field_type(child.type):
+                # Still a real Delegate<...> field, just either with a
+                # Sender fixed to some other class (see
+                # delegate_sender_matches()'s own comment) or with an Args
+                # type TypedDelegate::invoke() can't pass through std::any
+                # (see delegate_args_unsupported()'s own comment, e.g.
+                # RunLoop's `Delegate<RunLoop, bool&> onIdle;`) -
+                # ClassBuilder::delegate()'s templated overload can't
+                # express either case, but plain .field() can (no such
+                # constraint on ValueT, and never instantiates invoke() at
+                # all), so it's still fully reflected, just without the
+                # Delegate-specific connect/invoke API.
+                info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
             else:
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
 
         elif kind == CursorKind.VAR_DECL and child.semantic_parent == cursor:
             if access == AccessSpecifier.PUBLIC or info.has_friend:
+                if child.type.is_const_qualified():
+                    # Same TypedField<ValueT>::set() constraint as the
+                    # FIELD_DECL branch above (e.g. `static const size_t
+                    # Invalid = ...;`, controls.h) - a static field goes
+                    # through the exact same const-can't-set() failure.
+                    sys.stderr.write(
+                        f"reflectgen: '{name}.{child.spelling}' is const-qualified - "
+                        "ClassBuilder::field() has no read-only variant; not registered.\n"
+                    )
+                    continue
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=True))
 
         elif kind == CursorKind.CXX_METHOD and child in method_cursors:
@@ -775,12 +1206,26 @@ def collect_class(cursor):
                 # Only publicly-invocable methods get a real accessor in v1
                 # (see Method::invoke()'s doc comment in reflection.h).
                 continue
-            arg_types = [a.type.spelling for a in child.get_arguments()]
+            if has_unsupported_invoke_arg(child):
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' takes a parameter Method::invoke() can't "
+                    "pass through std::any (a non-const/rvalue reference, or a by-value type that isn't "
+                    "copy-constructible); not registered.\n"
+                )
+                continue
+            if method_return_type_unsupported(child.result_type):
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' returns '{child.result_type.spelling}', which "
+                    "isn't copy-constructible - Method::invoke() can't pass it back through std::any; "
+                    "not registered.\n"
+                )
+                continue
+            arg_types = [qualify_type_spelling(a.type) for a in child.get_arguments()]
             info.methods.append(Method(
                 name=child.spelling,
                 scope=SCOPE_NAMES[access],
                 is_const=child.is_const_method(),
-                return_type=child.result_type.spelling,
+                return_type=qualify_type_spelling(child.result_type),
                 arg_types=arg_types,
                 ambiguous=method_name_counts[child.spelling] > 1,
             ))
@@ -792,7 +1237,29 @@ def collect_class(cursor):
                 continue
             if is_deleted(child):
                 continue
-            arg_types = [a.type.spelling for a in child.get_arguments()]
+            if cursor.is_abstract_record():
+                # TypedConstructor<T,...>::invoke() (reflection.h) does a
+                # real `new T(...)` - a class with any pure virtual method
+                # left unoverridden (e.g. ViewController::loadView(),
+                # Document::readFromFile()/writeToFile() - real abstract
+                # base classes meant to be subclassed, not instantiated
+                # directly) can't be instantiated at all, constructor
+                # visibility notwithstanding; emitting .constructor<...>()
+                # for one is a hard compile error (C2259), not a heuristic
+                # miss - skip every constructor for the whole class.
+                continue
+            if has_unsupported_invoke_arg(child):
+                # Same std::any_cast<Args> constraint as
+                # has_unsupported_invoke_arg()'s own comment describes for
+                # TypedMethod - TypedConstructor<T,...>::invokeImpl() does
+                # the exact same `std::any_cast<Args>(args.at(I))...` unpack.
+                sys.stderr.write(
+                    f"reflectgen: '{name}' has a constructor taking a parameter Constructor::invoke() "
+                    "can't pass through std::any (a non-const/rvalue reference, or a by-value type that "
+                    "isn't copy-constructible); not registered.\n"
+                )
+                continue
+            arg_types = [qualify_type_spelling(a.type) for a in child.get_arguments()]
             info.ctors.append(Ctor(arg_types))
 
         elif kind == CursorKind.CXX_BASE_SPECIFIER:
@@ -1016,9 +1483,18 @@ def emit_register_function(info):
         args = ", ".join(c.arg_types)
         chain.append(f".constructor<{args}>()")
 
-    for i, entry in enumerate(chain):
-        terminator = ";" if i == len(chain) - 1 else ""
-        lines.append(f"        {entry}{terminator}")
+    if chain:
+        for i, entry in enumerate(chain):
+            terminator = ";" if i == len(chain) - 1 else ""
+            lines.append(f"        {entry}{terminator}")
+    else:
+        # A class with no fields/properties/delegates/methods/ctors found
+        # (e.g. an empty tag type, or everything private with no
+        # NEWUI_REFLECT_PRIVATE) - `builder.clazz()` alone is still a
+        # complete, valid statement, but needs its own terminating ';'
+        # since the loop above (which normally supplies it on the *last*
+        # chained call) never runs.
+        lines[-1] += ";"
 
     lines.append("")
     lines.append("    ReflectionRegistry::registerClass(builder);")
@@ -1060,6 +1536,17 @@ def emit_register_enum_function(info):
     return "\n".join(lines)
 
 
+
+# The namespace a fully-qualified name (info.name, e.g. "newui::gfx::Image")
+# was declared in ("newui::gfx"), or None for one at global scope. Used by
+# generate() below to bring every involved namespace into scope - see its
+# own comment for why that's needed at all.
+def enclosing_namespace(qualified_name_str):
+    if "::" not in qualified_name_str:
+        return None
+    return qualified_name_str.rsplit("::", 1)[0]
+
+
 def generate(classes, enums, sources, extra_includes):
     out = []
     out.append("// Generated by reflectgen (tools/reflectgen) - see tools/reflectgen/README.md.")
@@ -1072,7 +1559,55 @@ def generate(classes, enums, sources, extra_includes):
     for inc in extra_includes:
         out.append(f'#include "{inc}"')
     out.append("")
-    out.append("using namespace newui::reflection;")
+
+    # Every registration function lives at *global* scope, but a method's
+    # return/argument type spelling (used verbatim for e.g.
+    # selectOverload<...>() - see emit_property_getter_expr()/
+    # emit_property_setter_expr()) comes back from clang UNqualified
+    # whenever that type is visible without qualification from *where the
+    # method itself is declared* - i.e. relative to the class's own
+    # namespace, not global scope. `RootView &(newui::Dialog::*)()` (both
+    # Dialog and RootView living in namespace newui) is exactly this - a
+    # real, previously-unexercised bug (every earlier smoke-test class in
+    # this session happened to be at global scope, where "unqualified" and
+    # "fully qualified" are the same thing). Bringing every namespace any
+    # registered class/enum actually lives in into scope here - not just
+    # the fixed "newui::reflection" this always had - means those
+    # unqualified spellings resolve exactly the way they did at their own
+    # declaration site. Doesn't help a type from a namespace *nothing here
+    # registers* (a third-party dependency's own type, say) - narrower
+    # fix than a real qualified-name rewrite of every emitted type
+    # spelling would be, but real and correct for the overwhelmingly
+    # common case (a class referencing another type from the same
+    # project), and enough to resolve every failure actually found
+    # scanning newui's own real headers.
+    #
+    # enclosing_namespace()'s own name is a slight misnomer for a *nested*
+    # enum/class (e.g. "newui::Control::StateFlags" -> "newui::Control") -
+    # that's a *class*, not a namespace, and "using namespace" on a class
+    # name doesn't compile (MSVC C2867) - excluded here by checking
+    # against every registered class's own qualified name (the class
+    # itself was necessarily also scanned as a top-level entry in
+    # `classes` for this to ever come up in practice - see this file's own
+    # comment on find_declarations() only recursing into NAMESPACE/
+    # TRANSLATION_UNIT, so a nested enum's *outer class* was found the
+    # same pass a namespace-scoped one would be). Real gap only if that
+    # outer class was itself excluded from this run somehow (e.g. its own
+    # "@reflect ignore=true") while one of its nested enums wasn't -
+    # unusual enough not to chase further here.
+    class_names = {info.name for info in classes}
+
+    namespaces = {"newui::reflection"}
+    for info in classes:
+        ns = enclosing_namespace(info.name)
+        if ns and ns not in class_names:
+            namespaces.add(ns)
+    for info in enums:
+        ns = enclosing_namespace(info.name)
+        if ns and ns not in class_names:
+            namespaces.add(ns)
+    for ns in sorted(namespaces):
+        out.append(f"using namespace {ns};")
     out.append("")
 
     for info in classes:
@@ -1200,7 +1735,20 @@ def main():
                 had_errors = True
             sys.stderr.write(f"{diag}\n")
         if had_errors:
-            sys.stderr.write("reflectgen: combined scan had parse errors - output may be incomplete or wrong\n")
+            # A real parse error means find_declarations() below is working
+            # from an incomplete/wrong AST for every input file, not just
+            # the one the diagnostic points at (everything shares the one
+            # combined prelude TU) - continuing on to emit a .cpp from that
+            # produces confusing, unrelated-looking C2xxx errors several
+            # steps removed from the actual cause (a missing include, a bad
+            # --clang-arg, ...) once the *generated* file fails to compile.
+            # Failing here instead, loudly and at the source, is strictly
+            # more useful than a silent "may be incomplete or wrong" that
+            # still wrote output and exited 0.
+            sys.stderr.write(
+                "reflectgen: combined scan had parse errors (see above) - aborting, no output written\n"
+            )
+            sys.exit(1)
 
         for path in valid_paths:
             classes, enums = find_declarations(tu, path)
