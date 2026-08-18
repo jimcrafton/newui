@@ -155,11 +155,40 @@ def is_deleted(cursor):
     return "delete" in tokens[-3:]
 
 
+# Was: "does this class have ANY friend declaration at all" - a real bug,
+# found only once reflectgen was actually pointed at real production
+# classes (scan-all mode, see cmake/ReflectGen.cmake's own HANDOFF.md
+# history) that have a `friend class X` for ordinary encapsulation reasons
+# completely unrelated to reflection - reflectgen treated that as "this
+# class is friended for reflection" and emitted a direct
+# &Class::privateMember expression that genuinely can't compile outside
+# the *real* friend's context (MSVC C2248, not a false alarm).
+#
+# Checks for the literal NEWUI_REFLECT_PRIVATE() macro name instead, via
+# the class body's own raw source text (its extent's real file offsets,
+# read directly - not through clang's already-macro-expanded token
+# stream, so the literal, unexpanded macro name is exactly what's there
+# to find) rather than trying to structurally identify "a friend
+# declaration targeting newui::reflection::detail::ClassAccess specifically"
+# through the AST - substantially simpler, and avoids depending on how a
+# particular libclang version exposes a templated friend declaration's
+# target. Same "cheap substring check, false positive is harmless (a
+# stray comment mentioning the macro name), false negative is the
+# failure mode worth avoiding" reasoning discover_reflectable.py's own
+# marker scan already uses. Imprecise only for a nested class whose own
+# body also contains the macro - see class body extents nesting inside
+# each other - accepted as a known, rare edge case rather than a real
+# per-declaration source-range parser.
 def has_reflect_friend(class_cursor):
-    for child in class_cursor.get_children():
-        if child.kind == CursorKind.FRIEND_DECL:
-            return True
-    return False
+    extent = class_cursor.extent
+    if extent.start.file is None:
+        return False
+    try:
+        with open(extent.start.file.name, "r", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+    except OSError:
+        return False
+    return "NEWUI_REFLECT_PRIVATE" in text[extent.start.offset:extent.end.offset]
 
 
 # Matches one "key" or "key=value" token inside a "@reflect key[=value]
@@ -1118,33 +1147,52 @@ def main():
     all_classes = []
     all_enums = []
 
-    # Per-file parse timing (libclang's own parse, not this script's
-    # comparatively cheap AST-walking on top of it, is the dominant and
-    # most variable cost here - a large/heavily-templated header can take
-    # noticeably longer than a small one) plus a total for the whole run,
-    # printed in the final summary below. Wall-clock (perf_counter), not
-    # CPU time - what actually matters for "how long did this make the
-    # build wait."
     run_start = time.perf_counter()
-    parse_seconds_by_path = {}
 
+    valid_paths = []
     for path in input_files:
         if not os.path.isfile(path):
             sys.stderr.write(f"reflectgen: '{path}' does not exist - skipping\n")
             continue
+        valid_paths.append(path)
+
+    # One combined synthetic translation unit - #include "newui/newui.h"
+    # plus every input file, in one temp .cpp - parsed ONCE, not once per
+    # file. Real per-file parsing (this function's original design) fails
+    # for a real fraction of newui's own headers: a header using a type
+    # declared in a *different* newui header (RootView, Rect, Orientation,
+    # Anchor, ... all showed up as "undeclared identifier" this way) relies
+    # - same as any ordinary .cpp compiling it normally would - on
+    # something else having already #include'd that other header first;
+    # nothing is "wrong" with those headers for real compilation, only for
+    # being parsed as their own standalone translation unit the way this
+    # function used to. Combining everything into one prelude gives every
+    # type the same visibility a real translation unit already has -
+    # find_declarations()'s existing same_file() check still correctly
+    # attributes each declaration back to its own real source file
+    # afterward, so per-file output is unaffected, only *how* parsing gets
+    # there. (Also meaningfully faster in practice - libclang parses the
+    # shared standard/Windows-header preamble once instead of once per
+    # input file.)
+    tmp_dir = tempfile.mkdtemp(prefix="reflectgen_")
+    try:
+        prelude_path = os.path.join(tmp_dir, "reflectgen_prelude.cpp")
+        with open(prelude_path, "w", encoding="utf-8") as f:
+            f.write('#include "newui/newui.h"\n')
+            for path in valid_paths:
+                f.write(f'#include "{path.replace(os.sep, "/")}"\n')
 
         parse_start = time.perf_counter()
         try:
-            tu = index.parse(path, args=clang_args, options=cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
+            tu = index.parse(prelude_path, args=clang_args, options=cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
         except cindex.TranslationUnitLoadError:
             # libclang couldn't produce a TU at all (as opposed to producing
-            # one with diagnostics, handled below) - e.g. the file exists
-            # but isn't valid source, or a clang_arg itself is malformed.
-            # Report and move on to the rest of input_files instead of
-            # letting a raw Python traceback abort the whole scan.
-            sys.stderr.write(f"reflectgen: '{path}' could not be parsed at all - skipping\n")
-            continue
-        parse_seconds_by_path[path] = time.perf_counter() - parse_start
+            # one with diagnostics, handled below) - a clang_arg itself is
+            # malformed, or something equally fatal to the whole batch (not
+            # just one input file, now that everything's parsed together).
+            sys.stderr.write("reflectgen: combined scan could not be parsed at all - aborting\n")
+            sys.exit(1)
+        parse_seconds = time.perf_counter() - parse_start
 
         had_errors = False
         for diag in tu.diagnostics:
@@ -1152,11 +1200,18 @@ def main():
                 had_errors = True
             sys.stderr.write(f"{diag}\n")
         if had_errors:
-            sys.stderr.write(f"reflectgen: '{path}' had parse errors - output may be incomplete or wrong\n")
+            sys.stderr.write("reflectgen: combined scan had parse errors - output may be incomplete or wrong\n")
 
-        classes, enums = find_declarations(tu, path)
-        all_classes.extend(classes)
-        all_enums.extend(enums)
+        for path in valid_paths:
+            classes, enums = find_declarations(tu, path)
+            all_classes.extend(classes)
+            all_enums.extend(enums)
+    finally:
+        try:
+            os.remove(prelude_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
 
     if not all_classes and not all_enums:
         sys.stderr.write("reflectgen: no reflectable classes or enums found\n")
@@ -1173,13 +1228,10 @@ def main():
 
     total_seconds = time.perf_counter() - run_start
 
-    if parse_seconds_by_path:
-        parse_total = sum(parse_seconds_by_path.values())
-        parse_avg = parse_total / len(parse_seconds_by_path)
-        slowest = sorted(parse_seconds_by_path.items(), key=lambda kv: kv[1], reverse=True)[:5]
-        slowest_str = ", ".join(f"{os.path.basename(p)}={s:.2f}s" for p, s in slowest)
-        print(f"reflectgen: parsed {len(parse_seconds_by_path)} file(s) in "
-              f"{parse_total:.2f}s total, {parse_avg:.2f}s avg/file (slowest: {slowest_str})")
+    if valid_paths:
+        parse_avg = parse_seconds / len(valid_paths)
+        print(f"reflectgen: parsed {len(valid_paths)} file(s) in one combined pass, "
+              f"{parse_seconds:.2f}s total, {parse_avg:.4f}s avg/file")
 
     class_names = ", ".join(c.name for c in all_classes)
     enum_names = ", ".join(e.name for e in all_enums)

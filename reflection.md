@@ -312,6 +312,89 @@ is still hand-written. The pipeline is proven correct in marker-required mode (v
 against a throwaway annotated header, added and removed, real CMake reconfigures both
 directions) and ready for whenever a real header opts in.
 
+## Using reflectgen in your own project
+
+`newui_add_reflectgen_output()` (`cmake/ReflectGen.cmake`) isn't specific to the `newui`
+target — it's a general-purpose CMake function that takes the target and scan directories
+as arguments, so a project that uses `newui` as a library can call it again for its *own*
+classes, completely independently of `newui`'s own use of the same machinery. This section
+walks through doing that, end to end.
+
+**1. Get `newui`'s CMake into your build.** If you already consume `newui` via
+`add_subdirectory(path/to/newui)` (or `FetchContent`), `cmake/ReflectGen.cmake` is already
+`include()`d as part of `newui`'s own `CMakeLists.txt` processing — `newui_add_reflectgen_output()`
+and the `NEWUI_REFLECTGEN_REQUIRE_MARKER` option are already available in your own
+`CMakeLists.txt` once that call returns, no extra `include()` needed on your end.
+
+**2. Make sure `tools/reflectgen/.venv` is set up** inside your copy of the `newui` source
+tree (the "One-time setup" steps above) — `newui_add_reflectgen_output()` resolves the
+Python/libclang environment relative to `newui`'s own source directory
+(`${newui_source_dir}/tools/reflectgen/.venv`), not your project's, so this only needs
+doing once per `newui` checkout, regardless of how many downstream projects use it.
+
+**3. Write a class with `@reflect`/`NEWUI_REFLECT_PRIVATE()` markers**, same as anywhere
+else in this document — nothing project-specific here:
+
+```cpp
+// myapp/widget.h
+#pragma once
+#include <newui/reflection.h>
+#include <string>
+
+class MyAppWidget {
+public:
+    MyAppWidget() = default;
+
+    // @reflect property
+    const std::string& label() const { return label_; }
+    void setLabel(const std::string& v) { label_ = v; }
+
+private:
+    std::string label_;
+};
+```
+
+**4. Call `newui_add_reflectgen_output()` for your own target**, after defining it, passing
+`SCAN_DIRS` for wherever your reflectable headers live (your own `include/newui` equivalent
+— can be one directory or several) and, if any of your headers need `-I` paths beyond what
+`newui` itself already needs (its own `include/`, `3rdparty/json5/include`, etc. — always
+added automatically), `INCLUDE_DIRS` for those:
+
+```cmake
+add_executable(myapp src/main.cpp)
+target_link_libraries(myapp PRIVATE newui)
+
+newui_add_reflectgen_output(myapp
+    SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/myapp
+    # INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/myapp/third_party/include   # only if needed
+)
+```
+
+This registers a build-time step - discovery + generation together, real per-file
+incremental (see "Automatic CMake integration" above for the mechanics) - that produces
+`${CMAKE_CURRENT_BINARY_DIR}/generated/myapp_reflection_generated.cpp` and adds it straight
+to `myapp`'s sources. `myapp`'s own generated file is completely independent of `newui`'s
+own (`newui_reflection_generated.cpp`) - each target gets its own, scoped to its own
+`SCAN_DIRS`. `NEWUI_REFLECTGEN_REQUIRE_MARKER` (the `ON`/marker-required default, or
+`-DNEWUI_REFLECTGEN_REQUIRE_MARKER=OFF` for scan-all - see its own section above for the
+real caveats scan-all currently has against `newui`'s *own* headers, which may or may not
+apply to yours) applies to every `newui_add_reflectgen_output()` call process-wide, not per
+call.
+
+**5. Call the generated registration function.** Nothing does this for you - add a call to
+`register_MyAppWidgetReflection()` (the name `reflectgen` derives from the class name, see
+`emit_register_function()` in `reflectgen.py` if you need the exact pattern for a namespaced
+class) somewhere in your own startup code, same as `examples/reflection1.cpp`/
+`reflection2.cpp` do for their own hand-written registration functions.
+
+**Verified working end to end** (not just described) with exactly the `MyAppWidget` example
+above, in a throwaway directory outside `newui`'s own tree, via
+`newui_add_reflectgen_output(reflection2 SCAN_DIRS <that dir>)` temporarily added to
+`examples/CMakeLists.txt`: a real CMake reconfigure + build produced a correctly-scoped,
+separate `reflection2_reflection_generated.cpp` (empty placeholder before the `@reflect
+property` marker was added, real `MyAppWidget` registration after - both without touching
+`newui`'s own generated output at all), which compiled and linked cleanly.
+
 ## Reading/writing objects (`reflectionio.h`)
 
 `ObjectWriter`/`ObjectReader` (`include/newui/reflectionio.h`) are a generic JSON5
