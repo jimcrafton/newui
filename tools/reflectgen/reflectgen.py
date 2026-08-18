@@ -1402,7 +1402,7 @@ def emit_property_setter_expr(info, pa):
     return f"selectOverload<void ({info.name}::*)({pa.setter_arg_type}){const_suffix}>({target})"
 
 
-def emit_register_function(info):
+def emit_register_function(info,function_listing):
     fn_name = f"register_{info.name.replace('::', '')}Reflection"
     lines = [f"void {fn_name}() {{"]
     lines.append(f"    ClassBuilder<{info.name}> builder;")
@@ -1499,6 +1499,9 @@ def emit_register_function(info):
     lines.append("")
     lines.append("    ReflectionRegistry::registerClass(builder);")
     lines.append("}")
+
+    function_listing.append(fn_name)
+
     return "\n".join(lines)
 
 
@@ -1524,7 +1527,7 @@ def expand_inputs(inputs, extensions, recursive):
     return sorted(set(files))
 
 
-def emit_register_enum_function(info):
+def emit_register_enum_function(info, function_listing):
     fn_name = f"register_{info.name.replace('::', '')}Enum"
     lines = [f"void {fn_name}() {{"]
     lines.append("    ReflectionRegistry::registerEnum(")
@@ -1533,6 +1536,9 @@ def emit_register_enum_function(info):
         lines.append(f'            .addValue("{v.name}", {v.value})')
     lines[-1] += "\n            .build());"
     lines.append("}")
+
+    function_listing.append(fn_name)
+
     return "\n".join(lines)
 
 
@@ -1596,6 +1602,7 @@ def generate(classes, enums, sources, extra_includes):
     # "@reflect ignore=true") while one of its nested enums wasn't -
     # unusual enough not to chase further here.
     class_names = {info.name for info in classes}
+    function_listing = []
 
     namespaces = {"newui::reflection"}
     for info in classes:
@@ -1612,13 +1619,25 @@ def generate(classes, enums, sources, extra_includes):
 
     for info in classes:
         out.append(emit_class_access(info))
-        out.append(emit_register_function(info))
+        out.append(emit_register_function(info, function_listing))
         out.append("")
 
     for info in enums:
-        out.append(emit_register_enum_function(info))
+        out.append(emit_register_enum_function(info, function_listing))
         out.append("")
 
+    out.append("")
+
+    out.append("void registerReflectionData()")
+    out.append("{\n")
+
+    for funcname in function_listing:
+        out.append(f"\t{funcname}();\n")
+        
+    #out.append("\n")
+    #out.append("\tReflectionRegistry::addInitFunction(&registerReflectionData);")
+    
+    out.append("}\n\n")
     return "\n".join(out)
 
 

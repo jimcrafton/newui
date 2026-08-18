@@ -33,5 +33,7 @@ int main() {
         printf("lfFaceName: %s\n", ncm.lfMessageFont.lfFaceName);
     }
 
+
+
     return 0;
 }

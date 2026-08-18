@@ -75,7 +75,26 @@ add_library(newui STATIC
     "src/rootview.cpp"
     src/subview.cpp
     src/fontmanager.cpp
- "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color.h" "include/newui/color_constants.h" "include/newui/viewstyle.h" "include/newui/fontmanager.h" "include/newui/font.h" "include/newui/property.h" "src/property.cpp" "include/newui/custom_message_constants.h" "include/newui/animation.h" "src/animation.cpp" "include/newui/animationframe.h" "include/newui/curveinterpolation.h" "src/viewstyle.cpp" "include/newui/layout.h" "src/layout.cpp"
+    "src/runloop.cpp" 
+    "include/newui/keyboard_constants.h" 
+    "include/newui/utils.h" 
+    "src/utils.cpp" 
+    "src/view.cpp" 
+    "include/newui/mouse_constants.h" 
+    "include/newui/color.h" 
+    "include/newui/color_constants.h" 
+    "include/newui/viewstyle.h" "include/newui/fontmanager.h" 
+    "include/newui/font.h" 
+    "include/newui/property.h" 
+    "src/property.cpp" 
+    "include/newui/custom_message_constants.h" 
+    "include/newui/animation.h" 
+    "src/animation.cpp" 
+    "include/newui/animationframe.h" 
+    "include/newui/curveinterpolation.h" 
+    "src/viewstyle.cpp" 
+    "include/newui/layout.h" 
+    "src/layout.cpp"
     "include/newui/bundle.h" "src/bundle.cpp"
     "include/newui/reflection.h" "src/reflection.cpp"
     "include/newui/cursor.h" "src/cursor.cpp"
@@ -87,7 +106,10 @@ add_library(newui STATIC
     "include/newui/models.h" "src/models.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
     "include/newui/controls.h" "src/controls.cpp"
-    "include/newui/themedata.h" "src/themedata.cpp" "include/newui/reflectionio.h")
+    "include/newui/themedata.h" 
+    "src/themedata.cpp" 
+    "include/newui/reflectionio.h"
+    ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
 

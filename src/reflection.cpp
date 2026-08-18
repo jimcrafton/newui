@@ -136,6 +136,20 @@ namespace newui::reflection {
         return getEnum(found->second);
     }
 
+    void ReflectionRegistry::addInitFunction(InitFunc initFunc)
+    {
+        auto& reg = instance();
+        reg.initList_.push_back(initFunc);
+    }
+
+    void ReflectionRegistry::init()
+    {
+        auto& reg = instance();
+        for (auto initFunc : reg.initList_) {
+            initFunc();
+        }
+    }
+
     void Property::readValue(const std::string& valName, const std::type_index& valType, std::any& val, void* instancePtr, ClassReader* reader)
     {
         const Class* valClazz = classinfo(valType);

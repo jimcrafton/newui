@@ -129,6 +129,7 @@ function(newui_add_reflectgen_output target)
     endif()
 
     set(output ${CMAKE_CURRENT_BINARY_DIR}/generated/${target}_reflection_generated.cpp)
+    set(REFLECTION_GENERATED_CPP ${output})
 
     set(require_marker_arg)
     if(NEWUI_REFLECTGEN_REQUIRE_MARKER)

@@ -2307,6 +2307,9 @@ namespace newui::reflection {
         ReflectionRegistry(const ReflectionRegistry&) = delete;
         ReflectionRegistry& operator=(const ReflectionRegistry&) = delete;
 
+        using InitFunc = std::function<void()>;
+        
+
         // Takes ownership - classInfo must be heap-allocated (ClassBuilder<T>::
         // build()'s result, almost always passed straight through). Replacing
         // an already-registered type deletes the old entry first, same as
@@ -2320,6 +2323,9 @@ namespace newui::reflection {
         static const Enum* getEnum(std::type_index type);
         static const Enum* getEnum(const std::string& name);
 
+        static void addInitFunction(InitFunc initFunc);
+
+        static void init();
     private:
         ReflectionRegistry() = default;
         ~ReflectionRegistry();
@@ -2331,6 +2337,8 @@ namespace newui::reflection {
 
         std::unordered_map<std::type_index, Enum> enumsByType_;
         std::unordered_map<std::string, std::type_index> enumNameToType_;
+
+        std::vector<InitFunc> initList_;
     };
 
     inline const Class* classinfo(const std::string& name) {
