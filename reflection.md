@@ -108,6 +108,67 @@ all (only independent `count()`/`getAt(index)` methods, no method returning the 
 container), use `propertyCollectionByCountAndIndex()` instead — same shape, four separate
 methods instead of one accessor plus two.
 
+## Enums
+
+An `enum`/`enum class` is registered separately from any `Class` — via `EnumBuilder<T>`
+(mirrors `ClassBuilder<T>`'s own shape: `T` is a template argument, not a runtime value, so
+its `typeid` is derived internally) and `ReflectionRegistry::registerEnum()`:
+
+```cpp
+enum class Orientation { Horizontal, Vertical };
+
+ReflectionRegistry::registerEnum(EnumBuilder<Orientation>("Orientation")
+    .addValue("Horizontal", 0)
+    .addValue("Vertical", 1)
+    .build());
+```
+
+Once registered, any `Property`/`Field` whose value type is that enum is handled
+automatically — both by generic code walking `Class::properties()`/`fields()`, and by
+`ObjectWriter`/`ObjectReader` (see "Reading/writing objects" below, which is where this
+actually matters day to day: an enum-typed property writes/reads as JSON automatically,
+no per-enum glue needed).
+
+**Flags enums** — a value meant to be a bitwise-OR of several named constants (window
+manager masks, style flags, ...) — need one more thing: `.flags(true)` (or, from
+`reflectgen`, a `// @reflect flags` comment directly above the `enum`):
+
+```cpp
+enum class ButtonFlags : std::uint32_t {
+    None = 0,
+    Bold = 1u << 0,
+    Italic = 1u << 1,
+    Underline = 1u << 2,
+    BoldItalic = Bold | Italic,   // a declared combo - see Enum::decompose()'s own comment
+};
+
+ReflectionRegistry::registerEnum(EnumBuilder<ButtonFlags>("ButtonFlags")
+    .addValue("None", 0)
+    .addValue("Bold", 1)
+    .addValue("Italic", 2)
+    .addValue("Underline", 4)
+    .addValue("BoldItalic", 3)
+    .flags(true)
+    .build());
+```
+
+This is **always explicit** — `reflectgen`/`EnumBuilder<T>` never guess "flags-shaped" from
+an enum's own values, name, or operators. Every heuristic considered (power-of-two/
+combinable values, an `operator|` overload, a `Mask`/`Flags` name suffix) either misses a
+real flags enum in this project's own real headers or actively misclassifies an ordinary
+one — `DialogResult`'s `Ok=1`/`Cancel=2`/`No=4` are individually powers of two purely by
+coincidence of small sequential values, which would make `Abort=5` decompose into the
+nonsensical `"Ok"|"No"`. Mark the ones that are really meant to combine; leave everything
+else alone.
+
+`Enum::tryParse(name, outValue)`/`tryToString(value, outName)` convert between a value's
+name and its `std::uint64_t` numeric form (always unsigned, regardless of the enum's own
+underlying type, so bitwise AND/OR/NOT never have sign-extension surprises); a flags enum's
+`decompose(value)` breaks a combined value down into the fewest declared names that
+reconstruct it, preferring a declared combo name (`"BoldItalic"`) over separately listing
+its bits, with a `"0x..."` hex token for any leftover bits nothing declared can name (see
+"Reading/writing objects" for where that actually surfaces).
+
 ## Reflecting private members — `NEWUI_REFLECT_PRIVATE()`
 
 `field()`/`property()`/`delegate()` all take a real pointer-to-member or method pointer,
@@ -145,6 +206,9 @@ write it by hand when registering manually.
   only ever works for genuinely public methods, unlike `field()`/`property()`/`delegate()`).
 - `.delegate(name, scope, &Class::delegateMember)` — a `newui::Delegate<SenderT, Args...>`
   member specifically (see `include/newui/delegate.h`), invoked via its own `syncCall()`.
+  A connection made through one of `Delegate<>`'s *named* `add(descriptor, ...)` overloads
+  (as opposed to the plain, unnamed `add(...)`) is also serializable — see "Reading/writing
+  objects" below for what that actually produces.
 - `.constructor<Args...>()` — a real, callable constructor overload; `Class::createInstance()`
   picks the first registered one whose argument count matches what's passed. Skip this if
   `T` is never meant to be freshly constructed through reflection (e.g. a singleton, or a
@@ -201,6 +265,7 @@ above the declaration:
 | `// @reflect collection` | above a whole-container-returning getter | Register as a `.propertyCollection(...)` — collections are still opt-in only (getter+add+remove can't be told apart from three unrelated methods by shape alone). |
 | `// @reflect collection=someName add=addMethod remove=removeMethod` | above a whole-container-returning getter | Same, with an explicit name and/or the real add/remove methods to wire in (either, both, or neither). |
 | `// @reflect ignore=true` | above a class/struct | Excludes the whole class from generation. |
+| `// @reflect flags` | above an `enum`/`enum class` | Registers it as a combinable *flags* enum — see "Enums" below. Always opt-in, never guessed from the enum's own values/name/operators (see that section for why every shape-based heuristic tried against this project's own real enums turned out unsafe). |
 
 The bare forms (`@reflect property`, `@reflect collection`) and the `key=value` forms can
 be freely mixed on the same line (`@reflect collection add=addChild remove=removeChild`
@@ -217,7 +282,10 @@ getter (and its setter, if from the same overloaded name) is excluded from separ
 
 `tools/reflectgen/reflectgen.py` scans one or more headers/sources with libclang and emits
 a single `.cpp` containing a `register_<Class>Reflection()` function per class/enum it
-finds (plus any `detail::ClassAccess<T>` specializations private members need).
+finds (plus any `detail::ClassAccess<T>` specializations private members need), plus one
+master function — `registerReflectionData()` by default — that calls all of them, base
+classes before derived (see "Automatic CMake integration" below for the full story on that
+function and how to rename it).
 
 **One-time setup** (see `tools/reflectgen/README.md` for the full story — MSVC STL/libclang
 version notes, the no-system-LLVM fallback, etc.):
@@ -241,6 +309,7 @@ python -m venv .venv
 | `--include HEADER` | Extra `#include "HEADER"` line in the generated output (repeatable — one per source header is typical, since `reflectgen` doesn't include a class's own header for you). |
 | `--ext .EXT` | File extension to scan when an input is a directory (repeatable; default `.h`). |
 | `--no-recursive` | Only scan a directory input's top level, not subdirectories. |
+| `--register-function NAME` | Name of the generated master function (default `registerReflectionData`) — see "Automatic CMake integration" below for why you'd rename it. |
 | `-v`, `--version` | Print the tool's version and exit. |
 | `-- <clang args>` | Extra arguments passed straight to libclang — include paths (`-I...`), `-std=...`, defines. Quote every `-I...` path in PowerShell (see `tools/reflectgen/README.md`'s own note on a real tokenizer gotcha there). |
 
@@ -288,7 +357,7 @@ headers discovery actually includes:
   isn't very useful in practice: it requires going back and annotating every existing class
   by hand before reflectgen does anything at all. Verified end-to-end against every real
   header in this project — a full build (`newui`, `newui_tests`, every example) and the
-  full test suite (559/559) both succeed with this on. `reflectgen.py` itself independently
+  full test suite (583/583, as of this writing) both succeed with this on. `reflectgen.py` itself independently
   falls back to `.method()`/`.field()`/skips registration entirely (with a `reflectgen:`
   warning on stderr, not a build failure) for any accessor shape it can't safely wire up —
   see reflectgen.py's own comments on the non-copy-constructible-getter/setter/collection-
@@ -313,18 +382,38 @@ automated build path (see `--require-marker`/`--var` in its own `--help`); runni
 `reflectgen.py` directly against a directory always scans every class in every file it's
 pointed at, markers or not.
 
-Nothing calls the generated `register_*Reflection()` functions automatically — that's
-still up to application setup code, the same way `examples/reflection1.cpp`/
-`reflection2.cpp` call their own hand-written ones.
+Each generated `.cpp` ends with one master function — `registerReflectionData()` by
+default — that calls every individual `register_*Reflection()`/`register_*Enum()` function
+it emits, exactly once each, in an order that's guaranteed **base classes before their own
+derived classes** (a topological sort over each class's `.base<BaseT>()` — necessary because
+`ClassBuilder<T>::base<BaseT>()` throws `std::logic_error` if `BaseT` isn't registered yet;
+discovery order alone can't guarantee that). Calling *that* one function is still up to
+application setup code — `src/main.cpp` does it with a plain
+`extern void registerReflectionData(); ...; registerReflectionData();`, and
+`unittests/test_reflection.cpp` does the same via a `::testing::Environment` so it runs once
+before any test — `examples/reflection1.cpp`/`reflection2.cpp` still call their own
+hand-written per-class registration functions individually instead (they predate this and
+demonstrate the hand-written path deliberately), which still works fine, just doesn't need
+`registerReflectionData()` at all.
+
+The master function's name is configurable, if a target ever needs more than one
+`newui_add_reflectgen_output()` call of its own (two different `SCAN_DIRS`, say) — two
+`void registerReflectionData()` definitions in one binary won't link, so a second call needs
+a distinct name:
+
+```cmake
+newui_add_reflectgen_output(myapp
+    SCAN_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/myapp/widgets
+    REGISTER_FUNCTION registerWidgetsReflection
+)
+```
+
+(Or, calling `reflectgen.py`/`generate_reflection.py` directly: `--register-function NAME`.)
 
 As of this writing, every real header under `include/newui` is reflected automatically via
 scan-all (114 classes, 32 enums, across the 34 headers with anything reflectable) - `newui`,
 `newui_tests`, and every example all build clean against the generated output, and the full
-test suite passes. `examples/reflection2.cpp` still registers its own small example classes
-by hand (it predates scan-all and demonstrates the hand-written path deliberately) - nothing
-currently *calls* the auto-generated `register_*Reflection()` functions for `newui`'s own
-classes, same as ever (see the paragraph above); scan-all only means they exist and compile,
-not that anything invokes them yet.
+test suite passes.
 
 ## Using reflectgen in your own project
 
@@ -403,11 +492,13 @@ own (`newui_reflection_generated.cpp`) - each target gets its own, scoped to its
 `-DNEWUI_REFLECTGEN_REQUIRE_MARKER=ON` for the old opt-in-only mode - see its own section
 above) applies to every `newui_add_reflectgen_output()` call process-wide, not per call.
 
-**5. Call the generated registration function.** Nothing does this for you - add a call to
-`register_MyAppWidgetReflection()` (the name `reflectgen` derives from the class name, see
-`emit_register_function()` in `reflectgen.py` if you need the exact pattern for a namespaced
-class) somewhere in your own startup code, same as `examples/reflection1.cpp`/
-`reflection2.cpp` do for their own hand-written registration functions.
+**5. Call the generated master registration function.** Nothing does this for you - add
+`extern void registerReflectionData(); /* ... */ registerReflectionData();` somewhere in
+your own startup code (see "Automatic CMake integration" above for exactly what that one
+call does - registers every class/enum found under your `SCAN_DIRS`, base classes before
+their own derived classes). If your target also called `newui_add_reflectgen_output()` a
+second time with its own `REGISTER_FUNCTION` name (needed only if you have more than one
+such call for the same target - see that section), call that name instead.
 
 **Verified working end to end** (not just described) with exactly the `MyAppWidget` example
 above, in a throwaway directory outside `newui`'s own tree, via
@@ -421,11 +512,105 @@ property` marker was added, real `MyAppWidget` registration after - both without
 
 `ObjectWriter`/`ObjectReader` (`include/newui/reflectionio.h`) are a generic JSON5
 read/write pipeline built entirely on the `Class`/`Property`/`Field` API above — no
-knowledge of any specific class. See `examples/reflection2.cpp`'s `demoWriter()`/
-`demoRoundTrip()` for a complete, working example (write a real object tree, read it back
-into a fresh one, verify field-by-field) including document metadata (author/date/
-copyright/version) and collection reconstruction via a `propertyCollection()`'s real
-add method.
+knowledge of any specific class. Two entry points on each:
+
+- **Single instance** — `ObjectWriter::write(InstanceT*)` / `ObjectReader::read(InstanceT*)`.
+  The document's root *is* the instance itself (`{ meta: {...}, type: "...", ...its own
+  properties... }`) — read reuses an existing live object, never allocates one. See
+  `examples/reflection2.cpp`'s `demoWriter()`/`demoRoundTrip()` for a complete, working
+  example (write a real object tree, read it back into a fresh one, verify field-by-field)
+  including document metadata (author/date/copyright/version) and collection reconstruction
+  via a `propertyCollection()`'s real add method.
+- **Multiple named instances** — `ObjectWriter::writeObjects(vector<NamedObject>)` /
+  `ObjectReader::readObjects()`. Several independently-named instances share one document,
+  as siblings at the root alongside `meta`:
+
+  ```json5
+  {
+    meta: { ... },
+    foo: { type: "FooBar", ... },
+    bar: { type: "Bar", ... }
+  }
+  ```
+
+  `readObjects()` returns every instance it constructed (owned by the caller from that
+  point on, same convention `Class::createInstance()` already has) and does this in two
+  passes: first every named instance is constructed and its ordinary properties read
+  (`Class::read()`, same as the single-instance path); only once every instance in the
+  document exists does a second pass resolve delegate connections (below) that reference a
+  *sibling* object by name — which is the whole reason this needs to be a document-level
+  operation rather than something a single `Class::read()` call could do on its own.
+
+### Delegate connections
+
+A `Delegate<>` field with **at least one currently-connected, *describable* listener** (see
+"Other `ClassBuilder<T>` entries" above — only a connection made through a named
+`add(descriptor, ...)` counts; a plain `add(...)` connection is real but invisible to this)
+gets a `"delegates"` object, keyed by the delegate's own field name, whose value is an array
+of every describable connection's own descriptor string:
+
+```json5
+foo: {
+  type: "FooBar",
+  delegates: {
+    onHappyChanged: [ "HappyChanged", "bar@Bar.happyChanged" ]
+  }
+}
+```
+
+Two descriptor forms:
+- **A bare name** (`"HappyChanged"`) — a free/static function. Write-only today: the name
+  round-trips into the file, but reading one back doesn't reconnect it (no name→address
+  registry exists yet - `ObjectReader` logs a message and skips it, doesn't fail the read).
+- **`<object>@<Class>.<method>`** (`"bar@Bar.happyChanged"`) — another object *in the same
+  document*, reconnected on read via reflection: `bar` is looked up by name in the
+  document's own name→instance map (see `readObjects()` above), then `happyChanged` is
+  looked up as an ordinary, already-registered `Method` on `Bar`'s own `Class` (walking its
+  base chain). `<Class>` itself isn't strictly enforced (a mismatch just logs a warning and
+  connects using the object's real class) - it's there for readability and as a sanity
+  check, not a hard requirement.
+
+  The one real constraint this places on `happyChanged`'s own C++ signature: it has to take
+  its sender **by pointer** (`SyncReturn happyChanged(FooBar* sender, bool value)`), not by
+  reference — that's what makes it reachable as an ordinary reflected `.method()` at all
+  (`Method::invoke()`'s `std::any`-based argument boxing can't safely carry a live mutable
+  reference; a pointer is just a safe address copy). `newui::Delegate<>`'s own listener
+  signature (`SourceT&`, used by every ordinary hand-wired `add(instance, method)`
+  connection) is completely unaffected — the pointer convention only applies to a method
+  meant to be reconnectable this way.
+
+  Every failure mode here (unknown object name, unknown method, a signature that doesn't
+  match) logs a message and skips just that one connection - it never fails the whole read.
+
+Any *un*-connected `Delegate<>` field, or one whose only connections are undescribed, gets
+no `"delegates"` entry at all - not even an empty one.
+
+### Enum properties
+
+A `Property`/`Field` whose value type is a registered enum (see "Enums" above) writes/reads
+automatically: a plain enum as one JSON5 string, a `.flags(true)`-registered one as an array
+of decomposed flag names:
+
+```json5
+orientation: "Vertical",
+flags: [ "Bold", "Underline" ]
+```
+
+A value with no exact match (a plain enum) — or leftover bits nothing declared can name (a
+flags enum) — falls back to a `"0x..."` hex token rather than silently dropping data, so
+even a value nothing here can fully name still round-trips losslessly.
+
+### Trying it end to end
+
+`examples/reflection2.cpp`'s "Demo 3" (`demoDelegateAndEnumFileRoundTrip()`) exercises all
+three of the above together, against a real file on disk (not just an in-memory string):
+writes a `DemoPanel`/`DemoLogger` pair — a plain enum, a flags enum, and a delegate
+connected across the two objects — via `writeObjects()` to `reflection2_demo3.json5`, reads
+that file back via `readObjects()`, and *fires* the reconnected delegate to prove
+`DemoLogger::onPanelResized` genuinely ran, not just that the JSON looked right.
+`unittests/test_delegateserialization.cpp` and `unittests/test_enumserialization.cpp` cover
+the same ground headlessly, including the failure-mode paths (unknown object, unrecognized
+flag token, ...).
 
 ## Further reading
 
@@ -436,6 +621,12 @@ add method.
 - `examples/reflection1.cpp` — a minimal, fully hand-written registration example
   (`Widget`/`SuperWidget`), good for seeing every `ClassBuilder` call in isolation.
 - `examples/reflection2.cpp` — a real read/write round-trip against `newui`'s own
-  `Application`/`Frame`/`View`/`SubView`/`ViewStyle` hierarchy.
+  `Application`/`Frame`/`View`/`SubView`/`ViewStyle` hierarchy (Demos 1-2), plus a
+  delegates+enums round trip through a real file on disk (Demo 3).
 - `unittests/test_reflection.cpp`, `unittests/test_reflectionio.cpp` — headless coverage
   of the `Class`/`Property`/`Field`/collection API and the JSON5 read/write pipeline.
+- `unittests/test_delegate.cpp` — `newui::Delegate<>`'s own descriptor-tracking `add(...)`
+  overloads and `describedListeners()`, independent of reflection entirely.
+- `unittests/test_delegateserialization.cpp`, `unittests/test_enumserialization.cpp` —
+  headless coverage of the "delegates" JSON5 block (including cross-object reconnection)
+  and enum-typed properties (plain and flags), respectively.
