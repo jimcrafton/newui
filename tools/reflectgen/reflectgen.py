@@ -475,6 +475,23 @@ def is_reflect_ignored(cursor):
     return reflect_annotations(cursor).get("ignore", "").lower() == "true"
 
 
+# "@reflect flags" right above an enum opts it into ObjectWriter/
+# ObjectReader's "flags" treatment (reflectionio.h - a JSON5 array of
+# decomposed flag names, instead of a single name) - always explicit,
+# never guessed from the enum's own values/name/operators. Every shape-
+# based heuristic considered (power-of-two/combinable values, an
+# "operator|" overload, a "Mask"/"Flags" name suffix) either misses a
+# real flags enum in this project's own real headers or - worse -
+# misclassifies an ordinary sequential enum as flags-shaped (DialogResult's
+# Ok=1/Cancel=2/No=4 are individually powers of two purely by coincidence
+# of small sequential values, which would make Abort=5 decompose into the
+# nonsensical "Ok"|"No") - same "shape alone isn't reliable signal, so
+# it's opt-in" reasoning collect_collection_accessors()'s own "@reflect
+# collection" already uses.
+def is_reflect_flags(cursor):
+    return reflect_annotations(cursor).get("flags", "").lower() == "true"
+
+
 class Field:
     def __init__(self, name, scope, is_static):
         self.name = name
@@ -583,9 +600,10 @@ class EnumValue:
 
 
 class EnumInfo:
-    def __init__(self, name):
+    def __init__(self, name, is_flags=False):
         self.name = name  # fully qualified, e.g. "newui::SyncReturn::ReturnCode"
         self.values = []
+        self.is_flags = is_flags  # see is_reflect_flags()'s own comment
 
     @property
     def bare_name(self):
@@ -1312,10 +1330,22 @@ def choose_base(info):
 
 
 def collect_enum(cursor):
-    info = EnumInfo(qualified_name(cursor))
+    info = EnumInfo(qualified_name(cursor), is_reflect_flags(cursor))
+    # Mask to the enum's own underlying-type width (mod 2^width) - matches
+    # EnumBuilder<T>'s own toUInt64_ conversion (reflection.h) exactly: it
+    # narrows through make_unsigned_t<underlying_type_t<T>> first, then
+    # zero-extends to uint64_t. Emitting child.enum_value's raw (possibly
+    # negative) Python int directly as a uint64_t literal instead would
+    # sign-extend across all 64 bits - fine for a 64-bit underlying type,
+    # but a mismatch against toUInt64_'s own narrower-first result for any
+    # negative-valued enum constant with a narrower one (e.g. -1 as a
+    # 32-bit enum's own EnumValue.value needs to end up 0x00000000FFFFFFFF,
+    # not 0xFFFFFFFFFFFFFFFF).
+    width_bits = cursor.enum_type.get_size() * 8
+    mask = (1 << width_bits) - 1
     for child in cursor.get_children():
         if child.kind == CursorKind.ENUM_CONSTANT_DECL:
-            info.values.append(EnumValue(child.spelling, child.enum_value))
+            info.values.append(EnumValue(child.spelling, child.enum_value & mask))
     return info
 
 
@@ -1590,9 +1620,11 @@ def emit_register_enum_function(info, function_listing):
     fn_name = f"register_{info.name.replace('::', '')}Enum"
     lines = [f"void {fn_name}() {{"]
     lines.append("    ReflectionRegistry::registerEnum(")
-    lines.append(f'        EnumBuilder(typeid({info.name}), "{info.bare_name}")')
+    lines.append(f'        EnumBuilder<{info.name}>("{info.bare_name}")')
     for v in info.values:
-        lines.append(f'            .addValue("{v.name}", {v.value})')
+        lines.append(f'            .addValue("{v.name}", {v.value}ull)')
+    if info.is_flags:
+        lines.append("            .flags(true)")
     lines[-1] += "\n            .build());"
     lines.append("}")
 

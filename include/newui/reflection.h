@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <any>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -775,12 +777,12 @@ namespace newui::reflection {
             if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
                 if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
-                        nestedClazz->write(nestedPtr, writer, this);
+                        nestedClazz->write(nestedPtr, writer, this->name());
                     }
                 } else if constexpr (std::is_copy_constructible_v<ValueT>) {
                     if (std::any boxed = get(instancePtr); boxed.has_value()) {
                         ValueT temp = std::any_cast<ValueT>(boxed);
-                        nestedClazz->write(&temp, writer, this);
+                        nestedClazz->write(&temp, writer, this->name());
                     }
                 }
                 return;
@@ -1437,6 +1439,42 @@ namespace newui::reflection {
             return invoke_ ? invoke_(instance, args) : std::any();
         }
 
+        // Every currently-connected, describable listener's own descriptor
+        // (see newui::Delegate<SenderT,Args...>::describedListeners(),
+        // delegate.h) - what TypedClass<T>::write() (below) uses to decide
+        // both whether this delegate gets a "delegates" entry at all (an
+        // empty result - the common case for a delegate nobody's connected
+        // yet, or one only ever wired up through undescribed add() calls -
+        // means "don't write me") and, when it does, exactly which
+        // descriptor strings go in its array. Base Delegate has no real
+        // newui::Delegate<> to reach into (it only knows a type-erased
+        // instance pointer, not SourceT/Args), so this is virtual, real
+        // implementation in TypedDelegate below.
+        virtual std::vector<std::string> describedListeners(void* instance) const {
+            return {};
+        }
+
+        // Reconnects a listener read back from a "delegates" block
+        // (ObjectReader::readObjects(), reflectionio.h) - `targetMethod`
+        // must be a genuinely public Method on the target's own Class
+        // (walked up its base chain by the caller, since Class::method()
+        // itself only checks direct members) whose signature is
+        // `SyncReturn(SourceT*, Args...)` - sender by *pointer*, not
+        // reference, is what makes this representable through Method::
+        // invoke()'s std::any-based argument boxing at all (a non-const
+        // reference argument can't safely round-trip through std::any -
+        // see invoke_arg_type_unsupported()'s comment in reflectgen.py for
+        // the same constraint on the codegen side); newui::Delegate<>'s
+        // own Callback signature (SourceT&, Args...) is untouched, this
+        // only concerns what a *reflectable* listener method needs to look
+        // like. Returns false (caller logs and skips) on any signature
+        // mismatch, or if this base Delegate has no real SourceT/Args to
+        // check against - real implementation in TypedDelegate below.
+        virtual bool connectListener(void* senderInstance, const std::string& descriptor,
+                                      void* targetInstance, const Method* targetMethod) const {
+            return false;
+        }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -1474,7 +1512,44 @@ namespace newui::reflection {
             return invokeImpl(instance, args, std::index_sequence_for<Args...>{});
         }
 
+        std::vector<std::string> describedListeners(void* instance) const override {
+            SourceT* self = static_cast<SourceT*>(instance);
+            return (self->*member_).describedListeners();
+        }
+
+        // See Delegate::connectListener()'s own comment for the signature
+        // contract targetMethod must satisfy - checked here (arguments()[0]
+        // must be SourceT*, the rest must match Args... exactly, and the
+        // return must be a real SyncReturn) since a wrong signature would
+        // otherwise surface as a std::bad_any_cast several frames down
+        // inside targetMethod->invoke() instead of a clean "false" the
+        // caller can log and skip.
+        bool connectListener(void* senderInstance, const std::string& descriptor,
+                              void* targetInstance, const Method* targetMethod) const override {
+            if (!targetMethod->hasReturnValue() || targetMethod->returnType() != typeid(SyncReturn)) {
+                return false;
+            }
+            const std::vector<Argument>& margs = targetMethod->arguments();
+            if (margs.size() != 1 + sizeof...(Args) || margs[0].type != typeid(SourceT*)) {
+                return false;
+            }
+            if (!argsMatch(margs, std::index_sequence_for<Args...>{})) {
+                return false;
+            }
+
+            SourceT* self = static_cast<SourceT*>(senderInstance);
+            Callback fn = [targetInstance, targetMethod](SourceT& sender, Args... args) -> SyncReturn {
+                std::vector<std::any> boxed{ std::any(&sender), std::any(args)... };
+                std::any result = targetMethod->invoke(targetInstance, boxed);
+                return result.has_value() ? std::any_cast<SyncReturn>(result) : SyncReturn(SyncReturn::Ignored);
+            };
+            (self->*member_).add(descriptor, std::move(fn));
+            return true;
+        }
+
     private:
+        using Callback = typename newui::Delegate<SourceT, Args...>::Callback;
+
         template<std::size_t... I>
         std::any invokeImpl(void* instance, const std::vector<std::any>& args, std::index_sequence<I...>) const {
             SourceT* self = static_cast<SourceT*>(instance);
@@ -1482,16 +1557,34 @@ namespace newui::reflection {
             return std::any();
         }
 
+        // Args...'s own types against margs[1..] (margs[0] - the sender
+        // slot - already checked separately in connectListener(), always
+        // SourceT* there, never one of Args...) - same index_sequence
+        // shape invokeImpl() already uses, just comparing type_index
+        // instead of unpacking a std::any.
+        template<std::size_t... I>
+        bool argsMatch(const std::vector<Argument>& margs, std::index_sequence<I...>) const {
+            return ((margs[1 + I].type == typeid(Args)) && ...);
+        }
+
         MemberPtr member_;
     };
 
     // One name/value pair of a reflected enum. value is always normalized to
-    // int64_t regardless of the enum's real underlying type, so Enum doesn't
-    // need to be templated on it.
+    // uint64_t regardless of the enum's real underlying type, so Enum
+    // doesn't need to be templated on it - unsigned specifically (not
+    // int64_t) so the bitwise AND/OR/NOT decompose()/EnumBuilder<T>'s own
+    // conversion functions never have to worry about sign-extension: a
+    // signed type's ~value or a right-shift of a negative value are exactly
+    // the kind of surprise a mask/flags enum's bit manipulation shouldn't
+    // have to reason about. Any real (possibly signed) underlying_type_t<T>
+    // value still round-trips correctly through this - EnumBuilder<T>'s own
+    // toUInt64_/fromUInt64_ do the (defined, bit-preserving) signed<->
+    // unsigned conversion at the one place that knows T.
     //@reflect ignore=true
     struct EnumValue {
         std::string name;
-        std::int64_t value;
+        std::uint64_t value;
     };
 
     //@reflect ignore=true
@@ -1503,7 +1596,35 @@ namespace newui::reflection {
         std::type_index type() const { return type_; }
         const std::vector<EnumValue>& values() const { return values_; }
 
-        bool tryParse(const std::string& valueName, std::int64_t& outValue) const {
+        // Set only via EnumBuilder<T>::flags() - an explicit, per-enum
+        // opt-in (see its own comment) rather than guessed from the
+        // enum's values or name: this codebase's own real enums proved
+        // every shape-based heuristic considered (power-of-two/combinable
+        // values, an "operator|" overload, a "Mask"/"Flags" name suffix)
+        // either misses a real flags enum or - worse - misclassifies an
+        // ordinary sequential enum as flags-shaped (DialogResult's
+        // Ok=1/Cancel=2/No=4 are individually powers of two purely by
+        // coincidence of small sequential values, which would make
+        // Abort=5 decompose into the nonsensical "Ok"|"No").
+        bool isFlags() const { return isFlags_; }
+
+        // Boxes/unboxes an arbitrary std::any holding this Enum's own
+        // real C++ type - only EnumBuilder<T> (below) can install these,
+        // since only it knows T at the point it's constructed; Enum
+        // itself stays a concrete, non-polymorphic value type (consistent
+        // with Delegate/Method/Constructor's own raw-function-pointer
+        // type erasure elsewhere in this file, not virtual dispatch -
+        // Enum is stored by value in ReflectionRegistry's own
+        // std::unordered_map<type_index, Enum>, not through a pointer, so
+        // there's nothing to make polymorphic in the first place).
+        std::uint64_t toUInt64(const std::any& val) const {
+            return toUInt64_ ? toUInt64_(val) : 0;
+        }
+        std::any fromUInt64(std::uint64_t val) const {
+            return fromUInt64_ ? fromUInt64_(val) : std::any();
+        }
+
+        bool tryParse(const std::string& valueName, std::uint64_t& outValue) const {
             for (const auto& v : values_) {
                 if (v.name == valueName) {
                     outValue = v.value;
@@ -1513,7 +1634,7 @@ namespace newui::reflection {
             return false;
         }
 
-        bool tryToString(std::int64_t value, std::string& outName) const {
+        bool tryToString(std::uint64_t value, std::string& outName) const {
             for (const auto& v : values_) {
                 if (v.value == value) {
                     outName = v.name;
@@ -1523,12 +1644,80 @@ namespace newui::reflection {
             return false;
         }
 
+        // Decomposes `value` into the fewest declared flag names whose
+        // bitwise OR reconstructs it - only meaningful when isFlags() is
+        // true, but callable regardless (an empty/all-numeric-remainder
+        // result for a non-flags Enum just means "nothing declared
+        // matched", same as tryToString() failing). Tries every declared
+        // nonzero value as a candidate component, largest bit-count
+        // (popcount) first so an explicitly-declared combo name (e.g.
+        // "CtrlShift" = Ctrl|Shift) is preferred over separately naming
+        // its individual bits, ties broken by declaration order. Any bits
+        // left over once no further candidate matches (an undeclared bit
+        // combination, or the enum wasn't really flags-shaped at all) are
+        // appended as a single "0x..." hex token instead of silently
+        // dropped - see ObjectReader's own read side for how that token
+        // is recognized and OR'd back in on read, keeping this lossless
+        // even for a value nothing here can fully name.
+        std::vector<std::string> decompose(std::uint64_t value) const {
+            std::vector<std::string> candidates;
+            for (const auto& v : values_) {
+                if (v.value != 0) {
+                    candidates.push_back(v.name);
+                }
+            }
+            std::stable_sort(candidates.begin(), candidates.end(),
+                [this](const std::string& a, const std::string& b) {
+                    return popcount(valueOf(a)) > popcount(valueOf(b));
+                });
+
+            std::vector<std::string> result;
+            std::uint64_t remaining = value;
+            for (const std::string& name : candidates) {
+                std::uint64_t v = valueOf(name);
+                if (v != 0 && (remaining & v) == v) {
+                    result.push_back(name);
+                    remaining &= ~v;
+                    if (remaining == 0) {
+                        break;
+                    }
+                }
+            }
+            if (remaining != 0) {
+                std::ostringstream hex;
+                hex << "0x" << std::hex << remaining;
+                result.push_back(hex.str());
+            }
+            return result;
+        }
+
     private:
-        friend class EnumBuilder;
+        template<typename T> friend class EnumBuilder;
+
+        std::uint64_t valueOf(const std::string& name) const {
+            std::uint64_t v = 0;
+            tryParse(name, v);
+            return v;
+        }
+
+        static int popcount(std::uint64_t v) {
+            int count = 0;
+            while (v != 0) {
+                count += static_cast<int>(v & 1u);
+                v >>= 1;
+            }
+            return count;
+        }
+
+        using ToUInt64Fn = std::uint64_t (*)(const std::any&);
+        using FromUInt64Fn = std::any (*)(std::uint64_t);
 
         std::type_index type_;
         std::string name_;
         std::vector<EnumValue> values_;
+        bool isFlags_ = false;
+        ToUInt64Fn toUInt64_ = nullptr;
+        FromUInt64Fn fromUInt64_ = nullptr;
     };
 
     // One constructor overload. Unlike Property/Field/Delegate, and same as
@@ -1658,6 +1847,34 @@ namespace newui::reflection {
         const Method* method(const std::string& methodName) const;
         const Delegate* delegate(const std::string& delegateName) const;
 
+        // Most-derived-first, first occurrence of each name wins - same
+        // merge rule TypedClass<T>::allProperties() already uses (see its
+        // own comment), just for delegates_ instead of properties_. Lives
+        // directly on Class (not TypedClass<T>, unlike allProperties())
+        // since it only ever touches delegates()/parentClass(), both
+        // already public here - needed by ObjectReader::readObjects()
+        // (reflectionio.h), which only ever has a type-erased `const
+        // Class*` per object (its concrete T isn't known until the
+        // "type" tag is resolved at runtime), never a TypedClass<T> to
+        // call a templated helper on.
+        bool allDelegates(std::vector<const Delegate*>& outDelegates) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                for (const Delegate* d : c->delegates()) {
+                    bool alreadySeen = false;
+                    for (const Delegate* existing : outDelegates) {
+                        if (existing->name() == d->name()) {
+                            alreadySeen = true;
+                            break;
+                        }
+                    }
+                    if (!alreadySeen) {
+                        outDelegates.push_back(d);
+                    }
+                }
+            }
+            return !outDelegates.empty();
+        }
+
         // Constructors that weren't genuinely public were never added to
         // constructors_ in the first place (see ClassBuilder::addConstructor()'s
         // comment) - so a private/protected-only class simply has no
@@ -1677,18 +1894,41 @@ namespace newui::reflection {
         std::any createInstance() const;
         std::any createInstance(const std::vector<std::any>& args) const;
 
-        // propertyName is the key this object should attach itself under
-        // in whatever the Writer is building - Writer::beginObject()/
+        // name is the key this object should attach itself under in
+        // whatever the Writer is building - Writer::beginObject()/
         // endObject()'s own first argument, verbatim. Empty for the two
         // cases that don't have one: the true document root (the caller's
-        // very first Class::write() call), and a collection element
-        // (positional, not keyed - see PropertyCollection::write()/
+        // very first Class::write() call - ObjectWriter::write<InstanceT>()
+        // passes an empty name for exactly this reason), and a collection
+        // element (positional, not keyed - see PropertyCollection::write()/
         // TypedPropertyCollection::writeItem(), which always pass "").
-        // Property::writeValue() is what supplies a real one for a nested
-        // property (its own name()) when recursing via valClazz->write().
-        virtual void write(void* instancePtr, ClassWriter* writer, const Property* owningProperty) const = 0;
+        // Property::writeValue() supplies a real one for a nested property
+        // (its own name()) when recursing via valClazz->write(); a
+        // multi-object write (ObjectWriter::writeObjects(), reflectionio.h)
+        // supplies the object's own document-level key ("foo", "bar", ...)
+        // directly - a plain string, not a Property*, since a root-level
+        // named object in a multi-object document isn't anybody's property
+        // at all. Matches read()'s own propertyName parameter, just below -
+        // this used to take `const Property* owningProperty` instead and
+        // derive the name from it, an asymmetry with read() that also made
+        // a multi-object write need to fabricate a throwaway Property just
+        // to name itself; taking the string directly removes both.
+        virtual void write(void* instancePtr, ClassWriter* writer, const std::string& name) const = 0;
 
-        virtual void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance, bool& instanceOnHeap ) const = 0;
+        // outRawInstance, when non-null, receives the same raw pointer
+        // outInstance ends up holding (as a type-erased void* rather than
+        // the std::any's own concretely-typed T*) - the only way a caller
+        // that doesn't know T can get a usable pointer back at all, since
+        // std::any_cast requires an exact type match and a generic caller
+        // has no T to cast to. Needed by ObjectReader::readObjects()
+        // (reflectionio.h): its pass 1 creates/reads every named object
+        // through this same Class::read() regardless of its concrete type,
+        // then pass 2 needs a real pointer for each to hand to Method::
+        // invoke()/Delegate::connectListener() while resolving delegate
+        // connections - both of which already take void*, not std::any.
+        // Defaulted so every existing call site is unaffected.
+        virtual void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
+                            bool& instanceOnHeap, void** outRawInstance = nullptr) const = 0;
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -1793,25 +2033,54 @@ namespace newui::reflection {
             return !outProperties.empty();
         }
 
-        void write(void* instancePtr, ClassWriter* writer, const Property* owningProperty) const override {
-            // Empty for the true document root (owningProperty == nullptr) -
-            // see Class::write()'s own doc comment for why: a Writer's
-            // attach()-style logic treats an empty name at depth 0 as "this
-            // is the root, already handled", not a keyed property. Passing
-            // this->name() (the class name, e.g. "Application") here instead
-            // made every root-level write() call ObjectWriter::attach() with
-            // a non-empty name after builder.pop() had already popped the
-            // one open scope - the next builder[name]=... then read
-            // _counts.back() on an empty vector (MSVC vector debug assert).
-            auto name = owningProperty == nullptr ? std::string() : owningProperty->name();
+        void write(void* instancePtr, ClassWriter* writer, const std::string& name) const override {
+            // Empty for the true document root - see Class::write()'s own
+            // doc comment for why: a Writer's attach()-style logic treats
+            // an empty name at depth 0 as "this is the root, already
+            // handled", not a keyed property. Writing the class name
+            // (e.g. "Application") here instead made every root-level
+            // write() call ObjectWriter::attach() with a non-empty name
+            // after builder.pop() had already popped the one open scope -
+            // the next builder[name]=... then read _counts.back() on an
+            // empty vector (MSVC vector debug assert).
             writer->beginObject(name, this);
 
-            
             std::vector<const Property*> ordered;
-            allProperties(ordered);            
+            allProperties(ordered);
 
             for (const Property* property : ordered) {
                 property->write(instancePtr, writer);
+            }
+
+            // "delegates" - see Delegate::describedListeners()'s own
+            // comment. Collected up front (rather than writing straight
+            // into a beginObject("delegates",...)/endObject() bracket as
+            // each Delegate is visited) so the whole block - including
+            // the wrapper object itself - is skipped entirely when no
+            // Delegate on this class currently has anything describable
+            // connected; ObjectWriter::beginObject()'s own null-Class
+            // guard is what makes a Class-less "delegates" wrapper object
+            // (no "type" tag - it isn't a reflected instance, just a
+            // grouping) safe to open at all.
+            std::vector<const Delegate*> delegatesOrdered;
+            allDelegates(delegatesOrdered);
+            std::vector<std::pair<const Delegate*, std::vector<std::string>>> described;
+            for (const Delegate* d : delegatesOrdered) {
+                std::vector<std::string> names = d->describedListeners(instancePtr);
+                if (!names.empty()) {
+                    described.emplace_back(d, std::move(names));
+                }
+            }
+            if (!described.empty()) {
+                writer->beginObject("delegates", nullptr);
+                for (const auto& [d, names] : described) {
+                    writer->beginCollection(d->name());
+                    for (const std::string& n : names) {
+                        writer->writeString("", n);
+                    }
+                    writer->endCollection(d->name());
+                }
+                writer->endObject("delegates", nullptr);
             }
 
             writer->endObject(name, this);
@@ -1833,7 +2102,8 @@ namespace newui::reflection {
         // TypedProperty::read()'s isAddressable()/stack-local branches)
         // leaves instancePtr null rather than crashing on
         // std::any_cast<T*> against an empty std::any.
-        void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance, bool& instanceOnHeap) const override {
+        void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
+                    bool& instanceOnHeap, void** outRawInstance = nullptr) const override {
             // Mirrors write()'s own beginObject()/endObject() bracketing
             // above - was missing entirely before this pass, which meant a
             // reader had no hook to descend into the propertyName-keyed
@@ -1849,6 +2119,9 @@ namespace newui::reflection {
             } else {
                 outInstance = this->createInstance();
                 if (!outInstance.has_value()) {
+                    if (outRawInstance) {
+                        *outRawInstance = nullptr;
+                    }
                     reader->endObject(propertyName, this);
                     return;
                 }
@@ -1861,6 +2134,10 @@ namespace newui::reflection {
 
             for (const Property* property : ordered) {
                 property->read(instancePtr, reader);
+            }
+
+            if (outRawInstance) {
+                *outRawInstance = instancePtr;
             }
 
             reader->endObject(propertyName, this);
@@ -2270,13 +2547,48 @@ namespace newui::reflection {
         std::unique_ptr< TypedClass<T> > class_;
     };
 
+    // T-aware, mirroring ClassBuilder<T>'s own shape (typeid(T) derived
+    // internally rather than passed by the caller) - needed here
+    // specifically so the constructor can install real, type-safe
+    // toUInt64_/fromUInt64_ conversions on the Enum it builds (see their
+    // own comments on Enum) - only the point where T is concretely known
+    // can ever safely std::any_cast<T> at all. Used in exactly one place
+    // outside this declaration (reflectgen.py's own generated
+    // registration code), so replacing the previous untemplated,
+    // conversion-less EnumBuilder outright (rather than keeping both)
+    // carried no other blast radius.
     //@reflect ignore=true
+    template<typename T>
     class EnumBuilder {
-    public:
-        EnumBuilder(std::type_index type, std::string name) : enum_(type, std::move(name)) {}
+        static_assert(std::is_enum_v<T>, "EnumBuilder<T>: T must be a real enum type");
 
-        EnumBuilder& addValue(std::string name, std::int64_t value) {
+    public:
+        explicit EnumBuilder(std::string name) : enum_(typeid(T), std::move(name)) {
+            enum_.toUInt64_ = [](const std::any& val) -> std::uint64_t {
+                using UnderlyingT = std::underlying_type_t<T>;
+                return static_cast<std::uint64_t>(
+                    static_cast<std::make_unsigned_t<UnderlyingT>>(
+                        static_cast<UnderlyingT>(std::any_cast<T>(val))));
+            };
+            enum_.fromUInt64_ = [](std::uint64_t val) -> std::any {
+                return std::any(static_cast<T>(static_cast<std::underlying_type_t<T>>(val)));
+            };
+        }
+
+        EnumBuilder& addValue(std::string name, std::uint64_t value) {
             enum_.values_.push_back(EnumValue{std::move(name), value});
+            return *this;
+        }
+
+        // Opts this enum into "flags" treatment (array of decomposed flag
+        // names, ObjectWriter/ObjectReader - reflectionio.h) - always
+        // explicit, never guessed from the enum's own values/name/
+        // operators - see Enum::isFlags()'s own comment for the real,
+        // concrete counter-examples (this codebase's own DialogResult,
+        // Anchor, KeyboardMasks, ...) that ruled out every shape-based
+        // heuristic considered.
+        EnumBuilder& flags(bool value = true) {
+            enum_.isFlags_ = value;
             return *this;
         }
 

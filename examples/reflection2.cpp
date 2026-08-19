@@ -46,7 +46,10 @@
 #include "newui/reflectionio.h"
 
 #include <any>
+#include <cstdint>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -301,6 +304,107 @@ SubView* demoWriter()
 }
 
 // ---------------------------------------------------------------------
+// Demo 3 - delegates + enums: a self-contained pair of classes (not the
+// View/Frame hierarchy above) demonstrating this session's other two
+// serialization additions - a "delegates" JSON5 block (Delegate<>
+// connections, including one that crosses between two different objects
+// in the same file) and enum-typed properties (a plain enum, and a
+// "flags"-registered one written as a decomposed array) - written to and
+// read back from a real file on disk via ObjectWriter::writeObjects()/
+// ObjectReader::readObjects(), not just an in-memory string the way
+// demoWriter()/demoRoundTrip() above do.
+//
+// "Demo"-prefixed names throughout, deliberately distinct from every
+// real newui:: class/enum, since nothing here needs (or wants) to
+// collide with the real reflection registry this same process could in
+// principle also populate via registerReflectionData() (see HANDOFF.md
+// Part 45/46) - this file doesn't call that, but keeping these names
+// unambiguous costs nothing.
+// ---------------------------------------------------------------------
+
+enum class DemoOrientation {
+    Horizontal,
+    Vertical,
+};
+
+// @reflect flags - see EnumBuilder<T>::flags()'s own comment (reflection.h)
+// for why this is always an explicit opt-in, never guessed from the
+// enum's own shape.
+enum class DemoPanelFlags : std::uint32_t {
+    None = 0,
+    Resizable = 1u << 0,
+    Draggable = 1u << 1,
+    AlwaysOnTop = 1u << 2,
+};
+
+class DemoPanel {
+public:
+    // The connection side of this demo - see registerDemoDelegateEnumReflection()
+    // for how "onResized" gets registered, and demoDelegateAndEnumFileRoundTrip()
+    // for the "logger@DemoLogger.onPanelResized" descriptor that connects
+    // it to a *different* object in the same file.
+    newui::Delegate<DemoPanel, bool> onResized;
+
+    DemoOrientation orientation() const { return orientation_; }
+    void setOrientation(DemoOrientation v) { orientation_ = v; }
+
+    DemoPanelFlags flags() const { return flags_; }
+    void setFlags(DemoPanelFlags v) { flags_ = v; }
+
+private:
+    DemoOrientation orientation_ = DemoOrientation::Horizontal;
+    DemoPanelFlags flags_ = DemoPanelFlags::None;
+};
+
+class DemoLogger {
+public:
+    // sender is DemoPanel* (a pointer), not DemoPanel& - required for
+    // this to be reachable as an ordinary reflected .method() at all, see
+    // Delegate::connectListener()'s own comment in reflection.h for why a
+    // reference sender can't safely round-trip through Method::invoke()'s
+    // std::any-based argument boxing.
+    newui::SyncReturn onPanelResized(DemoPanel* sender, bool wasUserInitiated) {
+        ++callCount;
+        lastWasUserInitiated = wasUserInitiated;
+        std::cout << "  DemoLogger::onPanelResized fired (wasUserInitiated="
+                   << std::boolalpha << wasUserInitiated << ")\n";
+        return newui::SyncReturn::Handled;
+    }
+
+    int callCount = 0;
+    bool lastWasUserInitiated = false;
+};
+
+void registerDemoDelegateEnumReflection() {
+    ReflectionRegistry::registerEnum(EnumBuilder<DemoOrientation>("DemoOrientation")
+        .addValue("Horizontal", 0)
+        .addValue("Vertical", 1)
+        .build());
+
+    ReflectionRegistry::registerEnum(EnumBuilder<DemoPanelFlags>("DemoPanelFlags")
+        .addValue("None", 0)
+        .addValue("Resizable", 1)
+        .addValue("Draggable", 2)
+        .addValue("AlwaysOnTop", 4)
+        .flags(true)
+        .build());
+
+    ClassBuilder<DemoPanel> panelBuilder;
+    panelBuilder.clazz()
+        .delegate("onResized", Scope::Public, &DemoPanel::onResized)
+        .property("orientation", Scope::Public, &DemoPanel::orientation, &DemoPanel::setOrientation)
+        .property("flags", Scope::Public, &DemoPanel::flags, &DemoPanel::setFlags)
+        .constructor<>();
+    ReflectionRegistry::registerClass(panelBuilder);
+
+    ClassBuilder<DemoLogger> loggerBuilder;
+    loggerBuilder.clazz()
+        .method("onPanelResized", Scope::Public, &DemoLogger::onPanelResized)
+        .constructor<>();
+    ReflectionRegistry::registerClass(loggerBuilder);
+}
+
+// ---------------------------------------------------------------------
 // Demos
 // ---------------------------------------------------------------------
 
@@ -374,6 +478,101 @@ void demoRoundTrip(SubView* panel) {
     freshPanel.destroy();
 }
 
+// Writes DemoPanel+DemoLogger to a real file (ObjectWriter::writeObjects(),
+// a multi-object document - see its own comment for why: reconnecting the
+// cross-object delegate below needs both objects present in one file),
+// reads that same file back from disk (not the in-memory json5::document
+// demoWriter()/demoRoundTrip() above reuse directly), and proves the
+// round trip two ways: the enum/flags properties come back with the same
+// values, and firing the *reconnected* delegate on the freshly-read
+// objects actually reaches DemoLogger::onPanelResized - genuine behavioral
+// proof, not just matching JSON shape.
+void demoDelegateAndEnumFileRoundTrip() {
+    std::cout << "\n== Demo 3: delegates + flags/plain enums, written to and read back from a real file ==\n";
+
+    registerDemoDelegateEnumReflection();
+
+    DemoPanel panel;
+    panel.setOrientation(DemoOrientation::Vertical);
+    panel.setFlags(static_cast<DemoPanelFlags>(
+        static_cast<std::uint32_t>(DemoPanelFlags::Resizable) |
+        static_cast<std::uint32_t>(DemoPanelFlags::AlwaysOnTop)));
+
+    DemoLogger logger;
+    // The descriptor is what actually round-trips into the file's own
+    // "delegates" block (Delegate<>::add(descriptor, ...), delegate.h) -
+    // the lambda itself is a throwaway placeholder that never runs: on
+    // read, readObjects() reconnects "logger@DemoLogger.onPanelResized"
+    // via reflection against the *freshly read* objects below, completely
+    // independent of this connection.
+    panel.onResized.add("logger@DemoLogger.onPanelResized", [](DemoPanel&, bool) {
+        return newui::SyncReturn::Handled;
+    });
+
+    const Class* panelClass = classinfo(typeid(DemoPanel));
+    const Class* loggerClass = classinfo(typeid(DemoLogger));
+
+    ObjectWriter writer;
+    writer.metadata.author = "reflection2 demo";
+    writer.writeObjects({
+        {"panel", panelClass, &panel},
+        {"logger", loggerClass, &logger},
+    });
+
+    const std::string path = "reflection2_demo3.json5";
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << json5::to_string(writer.doc);
+    out.close();
+    std::cout << "  wrote " << path << "\n";
+
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream slurp;
+    slurp << in.rdbuf();
+    std::string text = slurp.str();
+    in.close();
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(text, reader.doc);
+    if (err) {
+        std::cout << "  ObjectReader: failed to re-parse " << path << "\n";
+        return;
+    }
+
+    std::vector<ObjectReader::NamedObject> objects = reader.readObjects();
+    DemoPanel* freshPanel = nullptr;
+    DemoLogger* freshLogger = nullptr;
+    for (auto& obj : objects) {
+        if (obj.name == "panel") {
+            freshPanel = std::any_cast<DemoPanel*>(obj.instance);
+        }
+        else if (obj.name == "logger") {
+            freshLogger = std::any_cast<DemoLogger*>(obj.instance);
+        }
+    }
+
+    auto check = [](const char* label, bool ok) {
+        std::cout << "  [" << (ok ? "PASS" : "FAIL") << "] " << label << "\n";
+    };
+
+    check("panel/logger both read back from disk", freshPanel != nullptr && freshLogger != nullptr);
+    if (freshPanel == nullptr || freshLogger == nullptr) {
+        return;
+    }
+
+    check("orientation round-tripped", freshPanel->orientation() == DemoOrientation::Vertical);
+    check("flags round-tripped",
+        freshPanel->flags() == static_cast<DemoPanelFlags>(
+            static_cast<std::uint32_t>(DemoPanelFlags::Resizable) |
+            static_cast<std::uint32_t>(DemoPanelFlags::AlwaysOnTop)));
+
+    freshPanel->onResized.syncCall(*freshPanel, true);
+    check("reconnected delegate reached the real DemoLogger::onPanelResized", freshLogger->callCount == 1);
+    check("argument round-tripped through the reconnected call", freshLogger->lastWasUserInitiated == true);
+
+    delete freshPanel;
+    delete freshLogger;
+}
+
 int main() {
     std::cout << "newui " << newui::version() << " - reflection2: prototype reflection-driven serialization\n";
     
@@ -383,6 +582,8 @@ int main() {
 
     SubView* panel = demoWriter();
     demoRoundTrip(panel);
+
+    demoDelegateAndEnumFileRoundTrip();
 
     return 0;
 }

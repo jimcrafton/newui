@@ -330,3 +330,76 @@ TEST(Delegate, ConcurrentSyncCallDuringAddDoesNotCrash) {
 
     SUCCEED();
 }
+
+// ---------------------------------------------------------------------
+// Named add() overloads / describedListeners() - the descriptor-tracking
+// added for newui::reflection's "delegates" JSON block (reflectionio.h):
+// a connection made through one of these is otherwise functionally
+// identical to its plain (unnamed) counterpart above - same dispatch,
+// same removal via Connection - the descriptor is pure metadata,
+// consulted only by describedListeners() itself.
+// ---------------------------------------------------------------------
+
+TEST(Delegate, UnnamedAddIsNotDescribed) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    delegate.add(&IncrementCount);
+
+    EXPECT_TRUE(delegate.describedListeners().empty());
+}
+
+TEST(Delegate, NamedAddOfFunctionPtrIsDescribed) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    delegate.add("IncrementCount", &IncrementCount);
+
+    EXPECT_EQ(delegate.describedListeners(), std::vector<std::string>{"IncrementCount"});
+}
+
+TEST(Delegate, NamedAddOfFunctionPtrStillCallsIt) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    delegate.add("RecordCall", &RecordCall);
+    int sender = 4;
+    delegate.syncCall(sender);
+
+    EXPECT_EQ(g_callCount, 1);
+    EXPECT_EQ(g_lastValue, 4);
+}
+
+TEST(Delegate, NamedAddOfMemberFunctionIsDescribed) {
+    newui::Delegate<FakeSender, int> delegate;
+    Listener listener;
+    delegate.add("listener@Listener.record", &listener, &Listener::record);
+
+    EXPECT_EQ(delegate.describedListeners(), std::vector<std::string>{"listener@Listener.record"});
+}
+
+TEST(Delegate, NamedAddOfConstMemberFunctionIsDescribedAndStillCalled) {
+    const Listener listener;
+    newui::Delegate<FakeSender, int> delegate;
+    delegate.add("listener@Listener.recordConst", &listener, &Listener::recordConst);
+    FakeSender sender{6};
+    delegate.syncCall(sender, 21);
+
+    EXPECT_EQ(delegate.describedListeners(), std::vector<std::string>{"listener@Listener.recordConst"});
+    EXPECT_EQ(listener.callCount, 1);
+    EXPECT_EQ(listener.lastSenderId, 6);
+    EXPECT_EQ(listener.lastValue, 21);
+}
+
+TEST(Delegate, DescribedListenersOmitsUndescribedConnectionsAmongDescribedOnes) {
+    newui::Delegate<int> delegate;
+    delegate.add(&IncrementCount);              // undescribed
+    delegate.add("RecordCall", &RecordCall);    // described
+
+    EXPECT_EQ(delegate.describedListeners(), std::vector<std::string>{"RecordCall"});
+}
+
+TEST(Delegate, RemovingADescribedListenerDropsItFromDescribedListeners) {
+    newui::Delegate<int> delegate;
+    newui::Connection connection = delegate.add("IncrementCount", &IncrementCount);
+    delegate.remove(connection);
+
+    EXPECT_TRUE(delegate.describedListeners().empty());
+}

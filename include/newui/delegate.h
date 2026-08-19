@@ -182,13 +182,36 @@ public:
     Delegate() : slots_(std::make_shared<const SlotList>()) {}
 
     // Accepts a free function, a lambda (capturing or not), or any other
-    // SyncReturn(SenderRefT, Args...)-callable.
+    // SyncReturn(SenderRefT, Args...)-callable. Not describable - see
+    // add(descriptor, ...)'s own comment - so invisible to
+    // reflection::Delegate::describedListeners() (newui/reflection.h),
+    // and thus never written out by ObjectWriter's own "delegates" block
+    // (reflectionio.h).
     Connection add(Callback fn) {
+        return add(std::string(), std::move(fn));
+    }
+
+    // Same as add(Callback), but tags the connection with a `descriptor` -
+    // an opaque string reflection::Delegate::describedListeners() (see
+    // newui/reflection.h) hands back verbatim, and ObjectWriter's
+    // "delegates" block (reflectionio.h) writes verbatim into the array
+    // for this delegate's own key. A std::function type-erases its
+    // target, so there's no way to recover a name from an arbitrary
+    // connection after the fact - the descriptor has to be supplied here,
+    // at connect time, by whoever already knows what this connection
+    // *is* (typically ObjectReader reconnecting a "<object>@<Class>.
+    // <method>" entry it just read, or application code that wants this
+    // exact connection to round-trip through a future write()). An empty
+    // descriptor (or the plain, undescribed add(Callback) above) means
+    // "connect, but don't serialize this" - the common case for a
+    // same-process-lifetime lambda/closure that isn't meant to survive a
+    // save/load round-trip at all.
+    Connection add(std::string descriptor, Callback fn) {
         if (!fn) {
             return Connection();
         }
         std::uint64_t id = detail::nextConnectionId();
-        addSlot(Slot{id, std::move(fn)});
+        addSlot(Slot{id, std::move(fn), std::move(descriptor)});
         return Connection(id);
     }
 
@@ -198,31 +221,61 @@ public:
     // a specific function pointer, not when it's a class type like
     // std::function that would have to deduce which overload to convert.
     Connection add(FunctionPtr fn) {
+        return add(std::string(), fn);
+    }
+
+    // Same as add(FunctionPtr), but describable - see add(descriptor,
+    // Callback)'s own comment. `descriptor` is typically just fn's own
+    // name (e.g. "HappyChanged") - reconnecting a bare name like that
+    // from a saved file isn't supported yet (ObjectReader::readObjects()'s
+    // own comment, reflectionio.h), so this is write-only for now: the
+    // name round-trips into the output, reading it back in a fresh
+    // process doesn't yet reconnect it.
+    Connection add(std::string descriptor, FunctionPtr fn) {
         if (fn == nullptr) {
             return Connection();
         }
-        return add(Callback(fn));
+        return add(std::move(descriptor), Callback(fn));
     }
 
     // Binds a non-const member function on instance, e.g.
     //   delegate.add(&logger, &Logger::onChanged);
     template<typename T>
     Connection add(T* instance, SyncReturn (T::*method)(SenderRefT, Args...)) {
+        return add(std::string(), instance, method);
+    }
+
+    // Same as above, but describable - see add(descriptor, Callback)'s
+    // own comment. This is the overload ObjectReader::readObjects()
+    // (reflectionio.h) itself ends up calling indirectly, through
+    // reflection::TypedDelegate<SourceT,Args...>::connectListener()
+    // (newui/reflection.h), to reconnect a "<object>@<Class>.<method>"
+    // entry read back from a file.
+    template<typename T>
+    Connection add(std::string descriptor, T* instance, SyncReturn (T::*method)(SenderRefT, Args...)) {
         if (instance == nullptr || method == nullptr) {
             return Connection();
         }
-        return add([instance, method](SenderRefT sender, Args... args) {
+        return add(std::move(descriptor), [instance, method](SenderRefT sender, Args... args) {
             return (instance->*method)(sender, args...);
         });
     }
 
-    // Same as above, for a const member function bound to a const instance.
+    // Same as add(T*, method), for a const member function bound to a
+    // const instance.
     template<typename T>
     Connection add(const T* instance, SyncReturn (T::*method)(SenderRefT, Args...) const) {
+        return add(std::string(), instance, method);
+    }
+
+    // Same as above, but describable - see add(descriptor, Callback)'s
+    // own comment.
+    template<typename T>
+    Connection add(std::string descriptor, const T* instance, SyncReturn (T::*method)(SenderRefT, Args...) const) {
         if (instance == nullptr || method == nullptr) {
             return Connection();
         }
-        return add([instance, method](SenderRefT sender, Args... args) {
+        return add(std::move(descriptor), [instance, method](SenderRefT sender, Args... args) {
             return (instance->*method)(sender, args...);
         });
     }
@@ -286,10 +339,30 @@ public:
         return asyncReturn;
     }
 
+public:
+    // Every currently-connected slot's own descriptor, skipping any that
+    // connected through an undescribed add() (empty descriptor - see
+    // add(descriptor, Callback)'s own comment) - what
+    // newui::reflection::TypedDelegate<SourceT,Args...>::describedListeners()
+    // (newui/reflection.h) hands back verbatim for ObjectWriter's
+    // "delegates" block (reflectionio.h) to write out. Snapshots slots_
+    // the same lock-free way syncCall() does.
+    std::vector<std::string> describedListeners() const {
+        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
+        std::vector<std::string> result;
+        for (const Slot& slot : *snapshot) {
+            if (!slot.descriptor.empty()) {
+                result.push_back(slot.descriptor);
+            }
+        }
+        return result;
+    }
+
 private:
     struct Slot {
         std::uint64_t id;
         Callback fn;
+        std::string descriptor;  // empty - not describable, see add(descriptor, Callback)
     };
 
     using SlotList = std::vector<Slot>;

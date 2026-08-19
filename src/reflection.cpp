@@ -2,6 +2,26 @@
 
 namespace newui::reflection {
 
+    // Reads back a "0x..." hex token - the fallback Property::writeValue()
+    // (below) emits for a value/leftover bits nothing in the Enum's own
+    // declared values could name (see Enum::decompose()'s own comment) -
+    // std::stoull throwing (a malformed/truncated token, e.g. hand-edited)
+    // just means "not one of these", same as tryParse() failing.
+    namespace {
+        bool tryParseHexToken(const std::string& token, std::uint64_t& outValue) {
+            if (token.size() <= 2 || token[0] != '0' || (token[1] != 'x' && token[1] != 'X')) {
+                return false;
+            }
+            try {
+                std::size_t consumed = 0;
+                outValue = std::stoull(token.substr(2), &consumed, 16);
+                return consumed == token.size() - 2;
+            } catch (...) {
+                return false;
+            }
+        }
+    }
+
     const Property* Class::property(const std::string& propertyName) const {
         for (const auto* p : properties_) {
             if (p->name() == propertyName) {
@@ -164,6 +184,41 @@ namespace newui::reflection {
             bool onHeap = false;
             valClazz->read(reader, valName, val, onHeap);
         }
+        else if (const Enum* valEnum = ReflectionRegistry::getEnum(valType); valEnum != nullptr) {
+            // Mirrors writeValue()'s own enum branch below - one string
+            // (plain enum) or an array of them (flags enum, Enum::
+            // isFlags()) - see EnumBuilder<T>::flags()'s own comment for
+            // why that's always an explicit registration-time choice, not
+            // guessed here from valType alone.
+            std::uint64_t combined = 0;
+            if (valEnum->isFlags()) {
+                std::size_t n = reader->beginCollection(valName);
+                for (std::size_t i = 0; i < n; ++i) {
+                    std::string token;
+                    reader->readString("", token);
+                    std::uint64_t flagValue = 0;
+                    if (valEnum->tryParse(token, flagValue) || tryParseHexToken(token, flagValue)) {
+                        combined |= flagValue;
+                    }
+                    // An unrecognized token (a flag name from a newer
+                    // version of this enum, or a hand-edit typo) is
+                    // silently dropped rather than failing the whole
+                    // read - same "absent/unrecognized data reads back as
+                    // default" contract every other ObjectReader field
+                    // already has (see reflectionio.h's own DocumentMetadata
+                    // comment).
+                }
+                reader->endCollection(valName);
+            }
+            else {
+                std::string token;
+                reader->readString(valName, token);
+                if (!valEnum->tryParse(token, combined)) {
+                    tryParseHexToken(token, combined);
+                }
+            }
+            val = valEnum->fromUInt64(combined);
+        }
         else {
             if (valType == typeid(std::string)) {
                 std::string str;
@@ -237,11 +292,39 @@ namespace newui::reflection {
         // writeValue() overload above does for a plain nested property.
         // valName is always "" here (a collection element is positional,
         // not keyed - see Class::write()'s own doc comment), so this
-        // passes owningProperty == nullptr straight through rather than
-        // fabricating a Property to carry a name that wouldn't be used
-        // anyway.
+        // passes an empty name straight through, same as that overload's
+        // own owningProperty == nullptr case does.
         if (const Class* valClazz = classinfo(valType); valClazz != nullptr && instancePtr != nullptr) {
-            valClazz->write(instancePtr, writer, nullptr);
+            valClazz->write(instancePtr, writer, std::string());
+            return;
+        }
+        if (const Enum* valEnum = ReflectionRegistry::getEnum(valType); valEnum != nullptr) {
+            // Mirrors readValue()'s own enum branch - one string (plain
+            // enum) or an array of them (flags enum, Enum::isFlags()) -
+            // see EnumBuilder<T>::flags()'s own comment for why that's
+            // always an explicit registration-time choice, not guessed
+            // here from valType alone. A value with no exact declared
+            // match (plain enum) or leftover bits nothing declared can
+            // name (flags enum) falls back to a "0x..." hex token rather
+            // than silently writing nothing - see Enum::decompose()'s own
+            // comment.
+            std::uint64_t raw = valEnum->toUInt64(val);
+            if (valEnum->isFlags()) {
+                writer->beginCollection(valName);
+                for (const std::string& flagName : valEnum->decompose(raw)) {
+                    writer->writeString("", flagName);
+                }
+                writer->endCollection(valName);
+            }
+            else {
+                std::string name;
+                if (!valEnum->tryToString(raw, name)) {
+                    std::ostringstream hex;
+                    hex << "0x" << std::hex << raw;
+                    name = hex.str();
+                }
+                writer->writeString(valName, name);
+            }
             return;
         }
         if (valType == typeid(std::string)) {
@@ -293,7 +376,7 @@ namespace newui::reflection {
         // silently skipped, same as the scalar branches below skip a
         // std::any that doesn't hold what val() looks like.
         if (nullptr != valClazz && nullptr != instancePtr) {
-            valClazz->write(instancePtr, writer, property);
+            valClazz->write(instancePtr, writer, valName);
         }
         else if (nullptr == valClazz) {
             

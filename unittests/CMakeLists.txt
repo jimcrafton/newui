@@ -22,6 +22,8 @@ add_executable(newui_tests
     test_bundle.cpp
     test_reflection.cpp
     test_reflectionio.cpp
+    test_delegateserialization.cpp
+    test_enumserialization.cpp
     test_dialogs.cpp
     test_controllers.cpp
     test_documents.cpp

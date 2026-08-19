@@ -8,6 +8,8 @@
 #include <json5/json5_output.hpp>
 
 #include <ctime>
+#include <iostream>
+#include <unordered_map>
 
 namespace newui::reflection {
 
@@ -78,17 +80,24 @@ namespace newui::reflection {
             // header comment) - happens exactly once per write(), so
             // "meta" is written exactly once too, as a sibling key
             // alongside "type" and every one of InstanceT's own
-            // properties, never nested inside a deeper object.
+            // properties, never nested inside a deeper object. writeObjects()
+            // (below) stamps this itself instead, before its own named
+            // objects start at depth_ 1, so a multi-object document still
+            // only ever gets one "meta" too.
             if (depth_ == 0) {
-                builder.push_object();
-                builder["author"] = builder.new_string(metadata.author);
-                builder["date"] = builder.new_string(currentDateString());
-                builder["copyright"] = builder.new_string(metadata.copyright);
-                builder["version"] = builder.new_string(newui::version());
-                builder["meta"] = builder.pop();
+                writeMeta();
             }
 
-            builder["type"] = builder.new_string(clazz->name());
+            // clazz is null for a synthetic grouping object that isn't a
+            // reflected instance at all - e.g. the "delegates" wrapper
+            // TypedClass<T>::write() opens (reflection.h) to hold each
+            // Delegate's own array of connection descriptors. Such an
+            // object gets no "type" tag (there's no Class to name it
+            // with, and it isn't meant to look like a reconstructable
+            // instance on read anyway).
+            if (clazz) {
+                builder["type"] = builder.new_string(clazz->name());
+            }
 
             ++depth_;
         }
@@ -138,7 +147,56 @@ namespace newui::reflection {
         template <typename InstanceT>
         void write(InstanceT* inst) {
             const Class* clazz = classinfo<InstanceT>();
-            clazz->write(inst, this, nullptr);
+            clazz->write(inst, this, std::string());
+
+            std::string text = json5::to_string(doc);
+            std::cout << "  --- ObjectWriter written JSON5 ---\n" << text << "  --- end JSON5 ---\n";
+        }
+
+        // One already-live instance to write as a named sibling at a
+        // multi-object document's own root - see writeObjects()'s own
+        // comment. clazz must be instance's real, most-derived registered
+        // Class (e.g. classinfo<FooBar>()) - same requirement write<T>()'s
+        // classinfo<InstanceT>() call already satisfies implicitly for the
+        // single-instance case.
+        struct NamedObject {
+            std::string name;
+            const Class* clazz;
+            void* instance;
+        };
+
+        // Writes a document whose root holds several independently-named
+        // instances side by side - "foo": {...}, "bar": {...}, alongside
+        // the usual "meta" - rather than write<T>()'s single anonymous
+        // root instance. Needed for delegate connections that cross
+        // between objects (a "<object>@<Class>.<method>" entry, see
+        // Delegate::describedListeners()'s own comment) - resolving one
+        // back on read requires every named instance in the file to
+        // already exist, which only makes sense once a document can hold
+        // more than one (see ObjectReader::readObjects(), the read-side
+        // mirror of this). write<T>() itself is untouched - this is a
+        // separate, additive entry point, not a replacement.
+        void writeObjects(const std::vector<NamedObject>& objects) {
+            builder.push_object();
+            writeMeta();
+            // Pretend a scope's already open at depth_ 1 (the "meta" one
+            // above never nests, unlike a real object write) so each
+            // object's own beginObject() call below - genuinely at depth_
+            // 1, one level under the true root - doesn't re-trigger the
+            // depth_==0 branch and stamp "meta" a second time per object.
+            depth_ = 1;
+            for (const NamedObject& obj : objects) {
+                obj.clazz->write(obj.instance, this, obj.name);
+            }
+            depth_ = 0;
+            // builder.pop() on this last, outermost scope assigns straight
+            // into doc itself (json5::builder::pop()'s own _stack.empty()
+            // branch) - same as the single-instance write<T>() path's own
+            // outermost endObject()/pop() already does, just reached
+            // directly here instead of through Class::write()'s own
+            // beginObject()/endObject() bracketing (this root scope isn't
+            // a reflected Class instance, so nothing calls those for it).
+            builder.pop();
 
             std::string text = json5::to_string(doc);
             std::cout << "  --- ObjectWriter written JSON5 ---\n" << text << "  --- end JSON5 ---\n";
@@ -157,6 +215,21 @@ namespace newui::reflection {
             }
             // depth_ == 0 && propertyName.empty(): the true document root -
             // builder.pop() already assigned it, nothing further to do.
+        }
+
+        // Stamps "meta" as a sibling key in whatever object scope is
+        // currently open - shared by beginObject()'s own depth_==0 branch
+        // (the single-instance write<T>() path) and writeObjects() (which
+        // opens its own root scope directly, without going through
+        // beginObject() at all, since a multi-object root isn't itself a
+        // reflected Class instance).
+        void writeMeta() {
+            builder.push_object();
+            builder["author"] = builder.new_string(metadata.author);
+            builder["date"] = builder.new_string(currentDateString());
+            builder["copyright"] = builder.new_string(metadata.copyright);
+            builder["version"] = builder.new_string(newui::version());
+            builder["meta"] = builder.pop();
         }
 
         int depth_ = 0;
@@ -286,6 +359,114 @@ namespace newui::reflection {
             metadata.version = meta["version"].get_c_str("");
         }
 
+        // One instance read back from a multi-object document - see
+        // readObjects()'s own comment. `instance` owns the object
+        // (createInstance()'d fresh by Class::read(), same "caller now
+        // owns this" convention Class::createInstance() itself already
+        // implies); `rawInstance` is the same pointer type-erased to
+        // void* (Class::read()'s new outRawInstance out-param, reflection.h)
+        // - readObjects()'s own pass 2 needs a raw pointer to hand to
+        // Delegate::connectListener()/Method::invoke(), neither of which
+        // can be reached generically through `instance`'s std::any without
+        // already knowing its concrete type.
+        struct NamedObject {
+            std::string name;
+            const Class* clazz = nullptr;
+            std::any instance;
+            void* rawInstance = nullptr;
+        };
+
+        // The read-side mirror of ObjectWriter::writeObjects() - reads a
+        // document whose root holds several independently-named instances
+        // (see that method's own comment for why: reconnecting a
+        // "<object>@<Class>.<method>" delegate connection needs every
+        // named instance in the file to already exist). Two passes:
+        //
+        //   1. Construct and read every top-level named object (skipping
+        //      "meta") via the exact same Class::read() every other read
+        //      path already goes through - no separate construction logic
+        //      here, just a new outer loop over the document's own keys.
+        //      A "delegates" block is read as an ordinary property would
+        //      be at this point (TypedClass<T>::read() doesn't touch it -
+        //      see reflection.h; delegate resolution is entirely pass 2's
+        //      own concern, not Class::read()'s), so pass 1 alone leaves
+        //      every connection unresolved.
+        //   2. Re-visit each object's own "delegates" block directly
+        //      (bypassing Class::read() this time - it was never taught
+        //      about delegates at all, deliberately, since resolving one
+        //      needs the *whole* name->instance map pass 1 just built,
+        //      not just this one object) and reconnect each descriptor
+        //      found there via reflection, now that every referenced
+        //      object actually exists.
+        //
+        // Returns every object created - the caller owns them (same
+        // convention as Class::createInstance()) and is responsible for
+        // eventually destroying each one via its own known concrete type.
+        std::vector<NamedObject> readObjects() {
+            std::vector<NamedObject> objects;
+            std::unordered_map<std::string, std::size_t> indexByName;
+
+            stack.clear();
+            cursorStack.clear();
+            stack.push_back(doc);
+            cursorStack.push_back(0);
+
+            for (auto [key, node] : json5::object_view(doc)) {
+                std::string name(key);
+                if (name == "meta" || !node.is_object()) {
+                    continue;
+                }
+
+                const Class* clazz = classinfo(std::string(node["type"].get_c_str("")));
+                if (clazz == nullptr) {
+                    std::cerr << "ObjectReader::readObjects(): '" << name
+                              << "' has an unknown or missing \"type\" - skipping\n";
+                    continue;
+                }
+
+                std::any instVal;
+                bool onHeap = false;
+                void* raw = nullptr;
+                clazz->read(this, name, instVal, onHeap, &raw);
+
+                indexByName[name] = objects.size();
+                objects.push_back(NamedObject{ name, clazz, std::move(instVal), raw });
+            }
+
+            for (const NamedObject& obj : objects) {
+                if (obj.rawInstance == nullptr) {
+                    continue;
+                }
+
+                beginObject(obj.name);
+                beginObject("delegates");
+
+                std::vector<const Delegate*> delegatesOrdered;
+                obj.clazz->allDelegates(delegatesOrdered);
+
+                for (const Delegate* d : delegatesOrdered) {
+                    std::size_t n = beginCollection(d->name());
+                    for (std::size_t i = 0; i < n; ++i) {
+                        std::string descriptor;
+                        readString("", descriptor);
+                        resolveDelegateConnection(obj, d, descriptor, indexByName, objects);
+                    }
+                    endCollection(d->name());
+                }
+
+                endObject("delegates", nullptr);
+                endObject(obj.name, obj.clazz);
+            }
+
+            json5::value meta = doc["meta"];
+            metadata.author = meta["author"].get_c_str("");
+            metadata.date = meta["date"].get_c_str("");
+            metadata.copyright = meta["copyright"].get_c_str("");
+            metadata.version = meta["version"].get_c_str("");
+
+            return objects;
+        }
+
         json5::document doc;
 
         // Populated by read() from the file's own "meta" object - see its
@@ -294,6 +475,87 @@ namespace newui::reflection {
         DocumentMetadata metadata;
 
     private:
+        // One entry of a "delegates" array read back for `sender` (an
+        // object readObjects() itself already constructed) - `descriptor`
+        // is exactly one string readObjects() just read out of that
+        // array, in the two forms Delegate::describedListeners()'s own
+        // comment (reflection.h) describes:
+        //   - no '@' at all: a free/static function name - reconnecting
+        //     this isn't supported yet (see this project's own README/
+        //     HANDOFF notes on why - free-function name resolution needs
+        //     a name->address registry nothing populates today); logged
+        //     and skipped, not treated as an error.
+        //   - "<object>@<Class>.<method>": looked up in `indexByName`/
+        //     `objects` (built by readObjects()'s own pass 1, so every
+        //     name is already resolvable by the time pass 2 calls this),
+        //     then `<method>` is searched for on the target's own Class
+        //     - walking its base chain manually (Class::method() itself
+        //     only checks direct members) - and, if found, handed to
+        //     Delegate::connectListener() (reflection.h) to do the actual
+        //     type-checked reconnect. `<Class>` itself is never enforced
+        //     strictly (a mismatch just gets a warning) - the connection
+        //     always uses the target's own *real* class, since requiring
+        //     an exact match would make this needlessly brittle against
+        //     e.g. a subclass that wasn't the exact type originally
+        //     written.
+        void resolveDelegateConnection(const NamedObject& sender, const Delegate* delegate,
+                                         const std::string& descriptor,
+                                         const std::unordered_map<std::string, std::size_t>& indexByName,
+                                         std::vector<NamedObject>& objects) {
+            std::size_t at = descriptor.find('@');
+            if (at == std::string::npos) {
+                std::cerr << "ObjectReader::readObjects(): skipping delegate connection '" << descriptor
+                          << "' on " << sender.name << "." << delegate->name()
+                          << " - free-function reconnection isn't supported yet\n";
+                return;
+            }
+
+            std::string targetName = descriptor.substr(0, at);
+            std::string rest = descriptor.substr(at + 1);
+            std::size_t dot = rest.find('.');
+            if (dot == std::string::npos) {
+                std::cerr << "ObjectReader::readObjects(): malformed delegate connection '" << descriptor
+                          << "' on " << sender.name << "." << delegate->name()
+                          << " - expected '<object>@<Class>.<method>'\n";
+                return;
+            }
+
+            std::string className = rest.substr(0, dot);
+            std::string methodName = rest.substr(dot + 1);
+
+            auto it = indexByName.find(targetName);
+            if (it == indexByName.end()) {
+                std::cerr << "ObjectReader::readObjects(): delegate connection '" << descriptor << "' on "
+                          << sender.name << "." << delegate->name() << " refers to unknown object '"
+                          << targetName << "'\n";
+                return;
+            }
+
+            NamedObject& target = objects[it->second];
+            if (target.clazz->name() != className) {
+                std::cerr << "ObjectReader::readObjects(): warning - '" << targetName << "' is a '"
+                          << target.clazz->name() << "', not '" << className << "' as '" << descriptor
+                          << "' claims - connecting anyway\n";
+            }
+
+            const Method* method = nullptr;
+            for (const Class* c = target.clazz; c != nullptr && method == nullptr; c = c->parentClass()) {
+                method = c->method(methodName);
+            }
+            if (method == nullptr) {
+                std::cerr << "ObjectReader::readObjects(): delegate connection '" << descriptor << "' on "
+                          << sender.name << "." << delegate->name() << " - no method '" << methodName
+                          << "' on '" << target.clazz->name() << "'\n";
+                return;
+            }
+
+            if (!delegate->connectListener(sender.rawInstance, descriptor, target.rawInstance, method)) {
+                std::cerr << "ObjectReader::readObjects(): delegate connection '" << descriptor << "' on "
+                          << sender.name << "." << delegate->name()
+                          << " - signature mismatch, not connected\n";
+            }
+        }
+
         // propertyName non-empty: a keyed scalar within the current object
         // scope. Empty: the current array scope's next not-yet-read element,
         // consumed positionally - same cursor beginObject("") uses for an
