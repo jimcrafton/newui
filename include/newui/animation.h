@@ -297,6 +297,24 @@ namespace newui {
             return frame >= startTime_ && frame <= endTime();
         }
 
+        // Whether AnimationManager::processIdle() should wrap this
+        // Animation's playback back to startTime() once it passes
+        // endTime(), indefinitely, instead of holding endTime()'s Key
+        // values forever (the non-looping default - see processIdle()'s
+        // own comment on how the two modes differ). processFrame() itself
+        // knows nothing about looping - it always interpolates whatever
+        // absolute frame it's given, clamped to [startTime(), endTime()]
+        // the same way regardless of this flag; looping is entirely
+        // processIdle() feeding it a wrapped frame number instead of the
+        // raw elapsed one.
+        bool looping() const {
+            return looping_;
+        }
+
+        void setLooping(bool looping) {
+            looping_ = looping;
+        }
+
         // Creates a Key, owned by this Animation, and returns a pointer to
         // it - stable for the Animation's lifetime regardless of further
         // addKey() calls (unlike a plain vector<Key> element, which
@@ -320,6 +338,7 @@ namespace newui {
         std::string name_;
         std::uint64_t startTime_ = 0;
         std::uint64_t duration_ = 0;
+        bool looping_ = false;
         std::vector<std::unique_ptr<Key>> keys_;
     };
 
@@ -348,6 +367,23 @@ namespace newui {
             static AnimationManager manager;
             return manager;
         }
+
+        // Fired by processIdle() with the new currentFrame() value every
+        // time playback actually advances by at least one whole frame -
+        // exactly the condition every registered Animation gets
+        // (re-)checked against (see processIdle()'s own comment). A UI
+        // component hosting animated state (e.g. a View painting a
+        // ShapeLayer whose shapes get synced from Property values each
+        // frame - see examples/shapes2.cpp) can subscribe here to know
+        // when to resync and repaint itself, instead of separately
+        // polling currentFrame() on every RunLoop idle pass to notice
+        // when it's changed. Delegate only accepts plain function
+        // pointers, not a capturing lambda (see Delegate's own class
+        // comment, delegate.h) - a subscriber that needs to reach a
+        // specific instance (a specific View, a specific set of Shapes)
+        // needs that reachable some other way (a singleton, a static/
+        // file-local pointer, ...) rather than captured directly here.
+        Delegate<AnimationManager, std::uint64_t> onFrameChanged;
 
         static FrameRate frameRate()  {
             return AnimationManager::instance().currentFrame_.framerate();

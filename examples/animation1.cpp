@@ -249,6 +249,64 @@ void demoAnimationManagerWithRunLoop() {
               << " (manager reached frame " << newui::AnimationManager::currentFrame() << ")\n";
 }
 
+// ---------------------------------------------------------------------
+// Demo 7: a looping Animation. Animation::processFrame() itself has no
+// concept of looping - past endTime() it just holds the last Key's
+// value forever (see Demo 6's one-shot fade-in, and Animation::looping()'s
+// own comment, animation.h). Animation::setLooping(true) instead asks
+// AnimationManager::processIdle() to keep wrapping this Animation's
+// playback back to startTime() every time it would otherwise finish,
+// indefinitely - logged here across several loop cycles (not just once)
+// to prove it actually keeps cycling.
+// ---------------------------------------------------------------------
+
+template<typename SourceT, typename ValueT>
+newui::SyncReturn LogScaleChanged(newui::ObservableProperty<SourceT, ValueT>& property, SourceT*, ValueT* value) {
+    std::cout << "  onValueChanged: '" << property.name() << "' -> "
+              << std::fixed << std::setprecision(1) << *value << "\n";
+    return newui::SyncReturn::Handled;
+}
+
+void demoLoopingAnimation() {
+    std::cout << "\n== Demo 7: a looping Animation via AnimationManager ==\n";
+
+    newui::PropertyManager::instance().clear();
+    Entity entity;
+    auto* scale = newui::PropertyManager::instance().registerProperty(&entity, &entity.scale, "scale");
+    scale->onValueChanged.add(&LogScaleChanged);
+
+    newui::AnimationManager::clear();
+    newui::AnimationManager::setFrameRate(newui::FrameRate::FPS30());
+
+    newui::Animation* animation = newui::AnimationManager::addAnimation("pulse-loop", 0, 10);
+    animation->setLooping(true);
+    animation->addKey("low", 0)->setValue(scale, 0.0f);
+    animation->addKey("high", 5)->setValue(scale, 100.0f, newui::InterpolationKind::EaseOut);
+    animation->addKey("low-again", 10)->setValue(scale, 0.0f, newui::InterpolationKind::EaseIn);
+
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    newui::AnimationManager::addToRunLoop(runLoop);
+
+    // One loop cycle (10 frames at 30fps) is ~333ms; run for a bit more
+    // than three cycles so the log above visibly rises and falls more
+    // than once - proof this keeps cycling rather than settling after
+    // its first pass through Key "low-again". quit()/join() below
+    // synchronizes with the loop thread, so reading entity.scale
+    // afterward on this thread is safe without extra atomics - same
+    // reasoning as Demo 6's own final read.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+
+    runLoop.quit();
+    loopThread.join();
+
+    std::cout << "  final scale: " << entity.scale
+              << " (manager reached frame " << newui::AnimationManager::currentFrame()
+              << " - kept pulsing across multiple loop cycles instead of stopping after the first)\n";
+}
+
 int main() {
     std::cout << "newui " << newui::version() << " - animation examples\n";
 
@@ -258,6 +316,7 @@ int main() {
     demoBezierPathCurve();
     demoCurveInterpolation();
     demoAnimationManagerWithRunLoop();
+    demoLoopingAnimation();
 
     return 0;
 }

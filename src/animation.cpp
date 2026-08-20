@@ -23,38 +23,62 @@ void Animation::processFrame(std::uint64_t frame) {
 
     std::uint64_t localFrame = (frame > startTime_) ? (frame - startTime_) : 0;
 
-    if (localFrame <= keys_.front()->keyFrame()) {
-        for (const auto& value : keys_.front()->values()) {
-            value->apply();
+    // Each property is bracketed and interpolated independently, walking
+    // only the Keys that actually set *that* property - not just the two
+    // Keys immediately adjacent to localFrame in this Animation's overall
+    // keys_ list. A Key doesn't have to set every property this Animation
+    // ever touches (see Key's own class comment: "Properties this Key
+    // doesn't mention are left alone by it"), so two different properties
+    // can have two entirely different bracketing Key pairs for the same
+    // localFrame - e.g. a property set only on Keys at frame 0 and frame
+    // 90 needs to keep interpolating smoothly across that whole span even
+    // though some other property sets a Key at frame 45 in between that
+    // says nothing about the first property at all. Treating keys_[i]/
+    // keys_[i+1] as a shared bracket for every property (the previous
+    // implementation) breaks exactly that case: a property missing from
+    // the adjacent Key has nothing for interpolateFrom() to blend from,
+    // so it steps straight to its next real value instead of continuing
+    // its interpolation.
+    std::vector<PropertyBase*> processed;
+    for (const auto& key : keys_) {
+        for (const auto& value : key->values()) {
+            PropertyBase* property = value->property();
+            if (std::find(processed.begin(), processed.end(), property) != processed.end()) {
+                continue;
+            }
+            processed.push_back(property);
+
+            Key* fromKey = nullptr;
+            Key* toKey = nullptr;
+            for (const auto& candidate : keys_) {
+                if (candidate->findValue(property) == nullptr) {
+                    continue;
+                }
+                if (candidate->keyFrame() <= localFrame) {
+                    fromKey = candidate.get();
+                } else if (toKey == nullptr) {
+                    toKey = candidate.get();
+                }
+            }
+
+            if (toKey == nullptr) {
+                // localFrame is at or past the last Key that sets this
+                // property specifically - hold its value.
+                fromKey->findValue(property)->apply();
+            } else if (fromKey == nullptr) {
+                // localFrame is at or before the first Key that sets this
+                // property specifically - nothing earlier to interpolate
+                // from, so hold its value instead (same as
+                // KeyValue::interpolateFrom(nullptr, t)'s own fallback).
+                toKey->findValue(property)->apply();
+            } else {
+                std::uint64_t span = toKey->keyFrame() - fromKey->keyFrame();
+                float t = (span > 0)
+                    ? static_cast<float>(localFrame - fromKey->keyFrame()) / static_cast<float>(span)
+                    : 1.0f;
+                toKey->findValue(property)->interpolateFrom(fromKey->findValue(property), t);
+            }
         }
-        return;
-    }
-
-    if (localFrame >= keys_.back()->keyFrame()) {
-        for (const auto& value : keys_.back()->values()) {
-            value->apply();
-        }
-        return;
-    }
-
-    Key* fromKey = keys_.front().get();
-    Key* toKey = keys_.back().get();
-    for (std::size_t i = 0; i + 1 < keys_.size(); ++i) {
-        if (localFrame >= keys_[i]->keyFrame() && localFrame <= keys_[i + 1]->keyFrame()) {
-            fromKey = keys_[i].get();
-            toKey = keys_[i + 1].get();
-            break;
-        }
-    }
-
-    std::uint64_t span = toKey->keyFrame() - fromKey->keyFrame();
-    float t = (span > 0)
-        ? static_cast<float>(localFrame - fromKey->keyFrame()) / static_cast<float>(span)
-        : 1.0f;
-
-    for (const auto& toValue : toKey->values()) {
-        KeyValue* fromValue = fromKey->findValue(toValue->property());
-        toValue->interpolateFrom(fromValue, t);
     }
 }
 
@@ -95,6 +119,23 @@ bool AnimationManager::processIdle() {
     inst.currentFrame_ = next;
 
     for (const auto& animation : inst.animations_) {
+        // A looping Animation (see Animation::looping()) never goes
+        // through the isActiveAt()/justFinished machinery below at all -
+        // once currentFrame_ reaches startTime(), it's fed
+        // startTime() + (elapsed % duration()) forever, wrapping playback
+        // back to the beginning every time it would otherwise have ended,
+        // instead of holding endTime()'s Key values.
+        if (animation->looping()) {
+            if (inst.currentFrame_.value() < animation->startTime()) {
+                continue;
+            }
+            std::uint64_t duration = animation->duration();
+            std::uint64_t elapsed = inst.currentFrame_.value() - animation->startTime();
+            std::uint64_t wrapped = animation->startTime() + (duration > 0 ? elapsed % duration : 0);
+            animation->processFrame(wrapped);
+            continue;
+        }
+
         // Normally isActiveAt() alone is enough - currentFrame_ advances
         // one (or a few) whole frames per call, so a still-running
         // animation is simply active on the next call, same as always.
@@ -120,6 +161,12 @@ bool AnimationManager::processIdle() {
             animation->processFrame(frameToApply);
         }
     }
+
+    // Fired once every Animation active at the new frame has already been
+    // given its processFrame() call above, so a subscriber reading
+    // Property values back out (see onFrameChanged's own comment) sees
+    // this frame's fully-updated state, not a partial one.
+    inst.onFrameChanged(inst, inst.currentFrame_.value());
 
     return false;
 }

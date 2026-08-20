@@ -68,3 +68,9 @@ add_executable(shapes1
 )
 
 target_link_libraries(shapes1 PRIVATE newui)
+
+add_executable(shapes2
+    shapes2.cpp
+)
+
+target_link_libraries(shapes2 PRIVATE newui)
