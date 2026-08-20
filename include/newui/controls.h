@@ -717,6 +717,117 @@ namespace newui {
         std::unique_ptr<ThemedScrollbarArrowStyle> downArrowStyle_;
     };
 
+    // A native up/down spin-button pair (SPIN/SPNP_UP + SPNP_DOWN, via
+    // ThemedSpinButtonStyle) that increments/decrements a numeric value()
+    // by step() - called "Stepper" rather than the Win32 name "spin
+    // button"/"up-down control", since that's what most callers actually
+    // mean by it (matches macOS's NSStepper for the same shape). Two
+    // stacked arrows and nothing else - own style() is left as the
+    // default plain (invisible) ViewStyle, since a real up-down control
+    // has no background chrome of its own around the two buttons. Same
+    // single-View, hand-rolled hit-testing shape ScrollBar's own arrows
+    // already use, and for the same reasons (see ScrollBar's own class
+    // comment) - a themed content-rect query against a tiny box and
+    // independent per-part hover are both real, previously-diagnosed
+    // bugs that shape avoids by construction. Always vertical (up on
+    // top, down on bottom) - SPIN has no horizontal counterpart the way
+    // SCROLLBAR does.
+    //
+    // Pair with a sibling EditControl/Label showing the live value() the
+    // same way a caller is expected to pair Slider with its own value
+    // display (see its class comment) - Stepper draws no text of its own.
+    class Stepper : public Control {
+    public:
+        Stepper();
+        ~Stepper() override;
+
+        typedef Delegate<Stepper> ValueChangedDelegate;
+        // Fired whenever value() actually changes (setValue() clamps and
+        // no-ops if the clamped result is unchanged) - both from a
+        // click/repeat and from a direct setValue() call.
+        ValueChangedDelegate onValueChanged;
+
+        float value() const { return value_; }
+        void setValue(float value);
+
+        float minValue() const { return min_; }
+        float maxValue() const { return max_; }
+        // Re-clamps the current value() into the new range immediately -
+        // onValueChanged() fires if that actually changes it.
+        void setRange(float minValue, float maxValue);
+
+        // How much one click (or one auto-repeat tick while held) moves
+        // value(). Clamped to > 0.
+        float step() const { return step_; }
+        void setStep(float step);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        enum class Region { None, Up, Down };
+        Region regionAt(const Point& localPt) const;
+        // The top/bottom half of this Stepper's own bounds - no theme
+        // query needed (unlike ScrollBar::resolvedArrowSize()) since
+        // these two arrows always fill the whole control between them,
+        // rather than reserving natural-sized room at the ends of a
+        // separate track.
+        Rect upRect() const;
+        Rect downRect() const;
+
+        // amount is signed (already includes direction) - added to
+        // value() again on every qualifying repeat tick (the *first*
+        // step is the caller's own immediate setValue() call in
+        // handleMouseDown(), not this), same convention/timing constants
+        // ScrollBar::startRepeat() already uses.
+        void startRepeat(float amount);
+        void stopRepeat();
+
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseEnter(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleStateChanged(Control& sender);
+
+        static constexpr std::chrono::milliseconds kRepeatInitialDelay{400};
+        static constexpr std::chrono::milliseconds kRepeatInterval{60};
+
+        float value_ = 0.0f;
+        float min_ = 0.0f;
+        float max_ = 100.0f;
+        float step_ = 1.0f;
+
+        // Which half the cursor is actually over right now - drives each
+        // arrow's own independent HOT look in paint(). Deliberately NOT
+        // the whole-Control isHighlighted() ScrollBar's own arrows share
+        // (see this class's own doc comment on why that shape doesn't fit
+        // here): up/down are two spatially separate buttons, not one
+        // draggable unit, so a single shared hot flag lit *both* arrows
+        // together the instant the cursor entered either half - including
+        // the one NOT under the cursor, which read as "the wrong button
+        // is highlighted" (confirmed live: clicking the top arrow
+        // correctly incremented value() while the bottom arrow lit up
+        // HOT, since it never got pressed=true and this shared flag was
+        // still true for it too). pressed (per-style, already correct)
+        // still wins over this in ThemedSpinButtonStyle::stateId(), so
+        // this only ever matters for the un-pressed idle/hover look.
+        Region hoverRegion_ = Region::None;
+
+        bool repeating_ = false;
+        float repeatAmount_ = 0.0f;
+        std::chrono::steady_clock::time_point repeatNextTime_;
+
+        // See startRepeat()'s own doc comment - flips false in
+        // ~Stepper() so a repeat task still queued/running past this
+        // control's destruction becomes a safe no-op instead of
+        // touching a dangling this - same convention ScrollBar's own
+        // aliveFlag_ already uses.
+        std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
+
+        std::unique_ptr<ThemedSpinButtonStyle> upStyle_;
+        std::unique_ptr<ThemedSpinButtonStyle> downStyle_;
+    };
+
     // A scrollable container - bundles a content viewport with a vertical
     // and/or horizontal ScrollBar and mouse-wheel support, wired together
     // automatically. Real content goes in via the ordinary addChild()/
@@ -810,6 +921,99 @@ namespace newui {
     private:
         std::string imagePath_;
         SyncReturn updateImage(Image&, const std::string& newPath);
+    };
+
+    // A native toolbar button (TOOLBAR/TP_BUTTON, via
+    // ThemedToolbarButtonStyle) - same "own text drawn on top of native
+    // chrome, no child SubView" shape as Button (see its own class
+    // comment for why hit-testing requires that), and the same
+    // momentary-vs-toggle distinction (setToggleButton()/isChecked()/
+    // onCheckedChanged) - just a different, more compact native part
+    // meant to sit inside a Toolbar rather than stand alone (e.g. a
+    // toolbar Bold/Italic button that stays visually pressed while
+    // isChecked() is true). A Control, not a bare SubView, for the same
+    // reason Button is: the toggle behavior needs Control's own click-
+    // tracking (onMouseDown/onMouseUp -> onClick on a down-then-up-
+    // inside gesture), not something worth reimplementing here.
+    class ToolbarButton : public Control {
+    public:
+        ToolbarButton();
+        virtual ~ToolbarButton() {}
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text);
+
+        void setTextColor(BLRgba32 color);
+
+        bool isToggleButton() const { return isToggleButton_; }
+        void setToggleButton(bool value) { isToggleButton_ = value; }
+
+        bool isChecked() const { return checked_; }
+        void setChecked(bool value);
+
+        typedef Delegate<ToolbarButton> CheckedChangedDelegate;
+        // Fired whenever isChecked() actually changes - both from a
+        // completed toggle click and from a direct setChecked() call.
+        CheckedChangedDelegate onCheckedChanged;
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        void updatePressedVisual();
+
+        SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleClicked(Control& sender);
+
+        std::string text_;
+        BLVar textColor_;
+        bool isToggleButton_ = false;
+        bool checked_ = false;
+        bool pressing_ = false;
+        ThemedToolbarButtonStyle* buttonStyle_ = nullptr;
+    };
+
+    // A toolbar separator (TOOLBAR/TP_SEPARATOR or TP_SEPARATORVERT, via
+    // ThemedToolbarSeparatorStyle) - a thin, non-interactive divider
+    // between groups of ToolbarButtons. Unlike ToolbarButton, a plain
+    // SubView rather than a Control - there's no click/toggle/state
+    // behavior here to inherit, just a themed background. isHorizontal()
+    // should normally match the owning Toolbar's own orientation() (true
+    // for a horizontal toolbar, whose separator is drawn as a vertical
+    // dividing line - see ThemedToolbarSeparatorStyle's own doc comment);
+    // Toolbar's addChild() doesn't enforce this since a ToolbarSeparator
+    // is just an ordinary child from Toolbar's point of view.
+    class ToolbarSeparator : public SubView {
+    public:
+        ToolbarSeparator();
+        virtual ~ToolbarSeparator() {}
+
+        bool isHorizontal() const { return horizontal_; }
+        void setHorizontal(bool value);
+
+    private:
+        bool horizontal_ = true;
+        ThemedToolbarSeparatorStyle* separatorStyle_ = nullptr;
+    };
+
+    // A horizontal (or vertical) strip container for ToolbarButton/
+    // ToolbarSeparator children - FlexLayout-based, the same "own
+    // ThemedViewStyle background + FlexLayout arranges the children"
+    // shape as MenuBar (menus.h), but plain addChild()/removeChild()
+    // rather than MenuBar's own setMenuItems(): a toolbar's items are
+    // already real, independently useful Controls the caller constructs
+    // directly, not synthesized from a lightweight MenuItem-style data
+    // model, so there's nothing for Toolbar itself to own or build.
+    // Background is ThemedRebarBandStyle (REBAR/RP_BAND) - the same
+    // native chrome a real toolbar sits inside of when hosted in a
+    // rebar control.
+    class Toolbar : public SubView {
+    public:
+        explicit Toolbar(Orientation orientation = Orientation::Horizontal);
+        virtual ~Toolbar() {}
+
+        Orientation orientation() const;
+        void setOrientation(Orientation orientation);
     };
 
     class TextCaret {

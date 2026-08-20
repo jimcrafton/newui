@@ -12,6 +12,7 @@
 #include "newui/uicolormanager.h"
 
 #include <array>
+#include <cassert>
 
 namespace {
 	
@@ -245,6 +246,9 @@ namespace newui {
 		// TabControl::selectTab() called it from a headless test. No-op
 		// gracefully instead of crashing, same "do nothing without a live
 		// window" convention ThemedViewStyle::paint() already uses.
+		//assert(nullptr != view_);
+		//assert(nullptr != view_->rootView());
+
 		if (nullptr != view_ && nullptr != view_->rootView()) {
 			view_->redraw();
 		}

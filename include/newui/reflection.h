@@ -323,7 +323,13 @@ namespace newui::reflection {
             return std::any_cast<T>(get(instance));
         }
 
-        virtual void write(void* instancePtr, ClassWriter* writer) {}
+        // Base defaults are no-ops (same "every method has a do-nothing
+        // default" idiom Property/PropertyCollection already use) -
+        // TypedMemberField below is the one that actually does something;
+        // TypedField (a static class variable) and FieldCollection stay
+        // no-op for now, out of scope for this pass.
+        virtual void write(void* instancePtr, ClassWriter* writer) const {}
+        virtual void read(void* instancePtr, ClassReader* reader) const {}
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -386,6 +392,35 @@ namespace newui::reflection {
         }
         void set(void* instance, const std::any& value) const override {
             static_cast<SourceT*>(instance)->*member_ = std::any_cast<ValueT>(value);
+        }
+
+        // Real write()/read() (unlike Field's own no-op defaults) - a
+        // TypedMemberField only ever has the one backing mode (a real
+        // pointer-to-data-member, always addressable), so this is simpler
+        // than TypedProperty's equivalent (no RefGetter/PtrGetter/Getter+
+        // Setter cases to also handle): nested-Class recursion when
+        // ValueT is itself reflected (e.g. a plain-public-field Point
+        // nested inside a reflected class), Property::writeValue()/
+        // readValue()'s scalar path otherwise - same two-way split
+        // TypedProperty::write()/read() already use for the same reason.
+        void write(void* instancePtr, ClassWriter* writer) const override {
+            if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
+                nestedClazz->write(address(instancePtr), writer, name());
+                return;
+            }
+            Property::writeValue(name(), typeid(ValueT), get(instancePtr), instancePtr, writer);
+        }
+
+        void read(void* instancePtr, ClassReader* reader) const override {
+            if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
+                std::any existing(static_cast<ValueT*>(address(instancePtr)));
+                bool onHeap = false;
+                nestedClazz->read(reader, name(), existing, onHeap);
+                return;
+            }
+            std::any val;
+            Property::readValue(name(), typeid(ValueT), val, instancePtr, reader);
+            set(instancePtr, val);
         }
 
     private:
@@ -816,11 +851,22 @@ namespace newui::reflection {
             if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
                 if constexpr (std::is_copy_constructible_v<ValueT>) {
                     if (shouldCreateOnHeap()) {
+                        // raw (a type-erased void*), not
+                        // std::any_cast<ValueT*>(fresh) - fresh may hold a
+                        // more-derived pointer than ValueT (nestedClazz->
+                        // read() can resolve a "type" tag naming a real
+                        // subclass, see TypedClass<T>::read()'s own
+                        // comment), and any_cast needs an exact type
+                        // match. static_cast<ValueT*>(raw) is well-defined
+                        // here for the same single-non-virtual-inheritance
+                        // reason TypedPropertyCollection::readFreshElement()'s
+                        // own pointer branch already relies on.
                         std::any fresh;
                         bool onHeap = false;
-                        nestedClazz->read(reader, name(), fresh, onHeap);
-                        if (fresh.has_value()) {
-                            set(instancePtr, fresh);
+                        void* raw = nullptr;
+                        nestedClazz->read(reader, name(), fresh, onHeap, &raw);
+                        if (raw != nullptr) {
+                            set(instancePtr, std::any(static_cast<ValueT*>(raw)));
                         }
                     } else if (isAddressable()) {
                         if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
@@ -1176,7 +1222,23 @@ namespace newui::reflection {
                 std::type_index runtimeType = elementPtr != nullptr ? typeid(*elementPtr) : elementType();
                 Property::writeValue("", runtimeType, elementVal, static_cast<void*>(elementPtr), writer);
             } else {
-                Property::writeValue("", elementType(), elementVal, nullptr, writer);
+                // instancePtr can't be nullptr here the way the pointer
+                // branch's null-elementPtr case legitimately can - a
+                // non-pointer element always has a real value to write,
+                // and Property::writeValue()'s nested-Class branch
+                // (reflection.cpp) only recurses into valClazz->write()
+                // when instancePtr is non-null; passing nullptr for a
+                // registered-class ElementT (e.g. GradientStop, Point)
+                // silently wrote nothing at all for the whole element -
+                // no error, just an empty array-slot skipped, which is
+                // why a Gradient's own "stops"/Path's own "points" wrote
+                // as "[]" even with real elements. any_cast<ElementT>'s
+                // pointer overload reaches into elementVal's own storage
+                // (elementVal was just constructed to hold exactly
+                // ElementT, so this always succeeds) rather than
+                // requiring some other already-live address.
+                ElementT* elementPtr = std::any_cast<ElementT>(&elementVal);
+                Property::writeValue("", elementType(), elementVal, elementPtr, writer);
             }
 
             writer->endElement(idx, std::any());
@@ -1244,21 +1306,34 @@ namespace newui::reflection {
                 // "already there, edit in place" case the way an addressable
                 // *property* does, it's either a brand new slot/add() call
                 // or an existing one being fully replaced, never partially
-                // updated. Only ever resolves the nested Class by the
-                // element's *static* declared pointee type, not anything a
-                // "type" field in the source data might claim - this
-                // codebase has no polymorphic collection element today
-                // (SubView is never subclassed), so that gap is real but
-                // unexercised; see writeItem()'s own runtime-type lookup
-                // above for the write-side equivalent this doesn't yet
-                // mirror.
+                // updated. Resolves the nested Class by the element's
+                // *static* declared pointee type (e.g. Shape) - that's
+                // only a starting point, though: nestedClazz->read() below
+                // (TypedClass<T>::read(), reflection.h) itself consults
+                // the source data's own "type" tag (via beginObject()'s
+                // return) and, when it names a genuine subclass, hands
+                // back an instance of *that* concrete type instead - see
+                // its own comment for the full mechanism. raw is a type-
+                // erased void*, not std::any_cast<PointeeT*>(fresh) - the
+                // any_cast would throw whenever polymorphic dispatch
+                // actually fired (fresh then holds e.g. Circle*, not
+                // Shape*, and any_cast needs an exact type match) - same
+                // "capture the pointer as void* at the point it's known,
+                // don't try to any_cast it back out later" reasoning
+                // Constructor::invoke(args, outRaw)'s own comment gives.
+                // static_cast<PointeeT*>(raw) is well-defined here only
+                // because every registered element type in practice
+                // reaches PointeeT via single, non-virtual inheritance
+                // (same assumption writeItem()'s own runtime-type lookup
+                // above already relies on for the write side).
                 using PointeeT = std::remove_pointer_t<ElementT>;
                 if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
                     std::any fresh;
                     bool onHeap = false;
-                    nestedClazz->read(reader, "", fresh, onHeap);
-                    if (fresh.has_value()) {
-                        return std::any(std::any_cast<PointeeT*>(fresh));
+                    void* raw = nullptr;
+                    nestedClazz->read(reader, "", fresh, onHeap, &raw);
+                    if (raw != nullptr) {
+                        return std::any(static_cast<PointeeT*>(raw));
                     }
                 }
                 return std::any();
@@ -1737,6 +1812,29 @@ namespace newui::reflection {
             return invoke_ ? invoke_(args) : std::any();
         }
 
+        // Same as invoke(args) above, but also hands back (when outRaw is
+        // non-null) the freshly-constructed object as a type-erased
+        // void* - for a caller that doesn't know the concrete SourceT at
+        // the call site (TypedClass<T>::read()'s polymorphic-dispatch
+        // branch: it only knows the statically-declared base T, e.g.
+        // Shape, so it can't std::any_cast<ConcreteT*> the std::any this
+        // returns - any_cast needs the exact type, and the whole point
+        // here is that the concrete type is more-derived than what the
+        // caller has). Default implementation just clears outRaw and
+        // delegates to invoke(args) - only TypedConstructor's override
+        // below (the one place with a real compile-time SourceT to
+        // construct and hand a pointer to) can actually fill it in; the
+        // untyped invoke_-thunk path (a hand-written registration, e.g.
+        // examples/reflection1.cpp) doesn't support this, same as it
+        // already doesn't support anything else requiring a real C++
+        // type at this layer.
+        virtual std::any invoke(const std::vector<std::any>& args, void** outRaw) const {
+            if (outRaw != nullptr) {
+                *outRaw = nullptr;
+            }
+            return invoke(args);
+        }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -1760,13 +1858,21 @@ namespace newui::reflection {
         TypedConstructor() : Constructor({ Argument{"", typeid(Args)}... }, nullptr) {}
 
         std::any invoke(const std::vector<std::any>& args) const override {
-            return invokeImpl(args, std::index_sequence_for<Args...>{});
+            return invokeImpl(args, nullptr, std::index_sequence_for<Args...>{});
+        }
+
+        std::any invoke(const std::vector<std::any>& args, void** outRaw) const override {
+            return invokeImpl(args, outRaw, std::index_sequence_for<Args...>{});
         }
 
     private:
         template<std::size_t... I>
-        std::any invokeImpl(const std::vector<std::any>& args, std::index_sequence<I...>) const {
-            return std::any(new SourceT(std::any_cast<Args>(args.at(I))...));
+        std::any invokeImpl(const std::vector<std::any>& args, void** outRaw, std::index_sequence<I...>) const {
+            SourceT* obj = new SourceT(std::any_cast<Args>(args.at(I))...);
+            if (outRaw != nullptr) {
+                *outRaw = obj;
+            }
+            return std::any(obj);
         }
     };
 
@@ -1875,6 +1981,57 @@ namespace newui::reflection {
             return !outDelegates.empty();
         }
 
+        // Same most-derived-first, first-name-wins merge as allDelegates()
+        // above, just for properties() instead. Lives here (not on
+        // TypedClass<T>) for the same reason allDelegates() does - a
+        // caller resolving a polymorphic collection element or nested
+        // property (TypedClass<T>::read()'s own dispatch branch,
+        // TypedPropertyCollection::readFreshElement()) only ever has a
+        // type-erased `const Class*` for whichever *concrete* class a
+        // "type" tag named, not a TypedClass<T> to call a templated
+        // helper on.
+        bool allProperties(std::vector<const Property*>& outProperties) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                for (const Property* p : c->properties()) {
+                    bool alreadySeen = false;
+                    for (const Property* existing : outProperties) {
+                        if (existing->name() == p->name()) {
+                            alreadySeen = true;
+                            break;
+                        }
+                    }
+                    if (!alreadySeen) {
+                        outProperties.push_back(p);
+                    }
+                }
+            }
+
+            return !outProperties.empty();
+        }
+
+        // Same merge again, for fields() - a plain public-field value
+        // type (Point, Size, Rect, ...) has no properties of its own at
+        // all, only fields, so write()/read() need this to actually
+        // reach them.
+        bool allFields(std::vector<const Field*>& outFields) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                for (const Field* f : c->fields()) {
+                    bool alreadySeen = false;
+                    for (const Field* existing : outFields) {
+                        if (existing->name() == f->name()) {
+                            alreadySeen = true;
+                            break;
+                        }
+                    }
+                    if (!alreadySeen) {
+                        outFields.push_back(f);
+                    }
+                }
+            }
+
+            return !outFields.empty();
+        }
+
         // Constructors that weren't genuinely public were never added to
         // constructors_ in the first place (see ClassBuilder::addConstructor()'s
         // comment) - so a private/protected-only class simply has no
@@ -1893,6 +2050,17 @@ namespace newui::reflection {
         // top for callers who already know T.
         std::any createInstance() const;
         std::any createInstance(const std::vector<std::any>& args) const;
+
+        // Same as createInstance() above, but also hands back (when
+        // outRaw is non-null) the freshly-built object as a type-erased
+        // void* - see Constructor::invoke(args, outRaw)'s own comment for
+        // why a caller ever needs this instead of just any_cast-ing the
+        // returned std::any: it's for exactly the case where the caller
+        // (this Class's *own* type isn't necessarily what got
+        // constructed - e.g. calling createInstance(&raw) on a more-
+        // derived Class* resolved from a "type" tag) doesn't know the
+        // concrete type at the call site.
+        std::any createInstance(void** outRaw) const;
 
         // name is the key this object should attach itself under in
         // whatever the Writer is building - Writer::beginObject()/
@@ -2007,32 +2175,6 @@ namespace newui::reflection {
             return result.has_value() ? std::any_cast<T*>(result) : nullptr;
         }
 
-        // Most-derived-first, first occurrence of each name wins - a
-        // property this class re-declares (e.g. SubView's settable
-        // "bounds"/"visible" shadowing View's get-only ones) is
-        // written exactly once, using the most-derived declaration,
-        // never both and never the base's read-only version instead
-        // of the derived class's settable one.
-        bool allProperties(std::vector<const Property*>& outProperties) const {
-            
-            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
-                for (const Property* p : c->properties()) {
-                    bool alreadySeen = false;
-                    for (const Property* existing : outProperties) {
-                        if (existing->name() == p->name()) {
-                            alreadySeen = true;
-                            break;
-                        }
-                    }
-                    if (!alreadySeen) {
-                        outProperties.push_back(p);
-                    }
-                }
-            }
-
-            return !outProperties.empty();
-        }
-
         void write(void* instancePtr, ClassWriter* writer, const std::string& name) const override {
             // Empty for the true document root - see Class::write()'s own
             // doc comment for why: a Writer's attach()-style logic treats
@@ -2050,6 +2192,26 @@ namespace newui::reflection {
 
             for (const Property* property : ordered) {
                 property->write(instancePtr, writer);
+            }
+
+            // Fields - the .field() (rather than .property()) side of
+            // ClassBuilder, e.g. Point/Size/Rect's own plain public x/y/
+            // width/height. Public only, deliberately: a field with no
+            // accessor methods at all reached private/protected scope
+            // only via NEWUI_REFLECT_PRIVATE()'s friend bypass - fine for
+            // ad hoc runtime introspection (Class::field(name)'s own
+            // purpose), but writing one out here would serialize
+            // implementation details a class never chose to expose,
+            // unlike a Property (which already reaches private members
+            // regardless of scope - see Property's own class comment) -
+            // that asymmetry is intentional, not an oversight.
+            std::vector<const Field*> orderedFields;
+            allFields(orderedFields);
+
+            for (const Field* field : orderedFields) {
+                if (field->scope() == Scope::Public) {
+                    field->write(instancePtr, writer);
+                }
             }
 
             // "delegates" - see Delegate::describedListeners()'s own
@@ -2095,13 +2257,34 @@ namespace newui::reflection {
         // has nothing new to report). An empty outInstance only happens
         // from the shouldCreateOnHeap() branch (or a future generic
         // Reader's true top-level read(), which has no property/address
-        // context at all) - always this class's own registered
-        // constructor, always heap. createInstance() returning nothing
-        // (no matching constructor registered - e.g. Rect, which is never
-        // meant to be built this way in the first place, see
+        // context at all) - always heap, and (see below) not always this
+        // class's own registered constructor. createInstance() returning
+        // nothing (no matching constructor registered - e.g. Rect, which
+        // is never meant to be built this way in the first place, see
         // TypedProperty::read()'s isAddressable()/stack-local branches)
         // leaves instancePtr null rather than crashing on
         // std::any_cast<T*> against an empty std::any.
+        //
+        // Polymorphic dispatch: beginObject() below already resolves and
+        // returns the *concrete* Class the data's own "type" tag names
+        // (ObjectReader::beginObject(), reflectionio.h) - only used here
+        // when actually constructing fresh (an already-live outInstance is
+        // already the correct, specific type its owner allocated it as -
+        // nothing to swap) and when that resolved class is a genuine
+        // registered subclass of T (walked via parentClass() below - a
+        // stray/bogus "type" tag naming some unrelated class is ignored,
+        // falling back to this class's own T, same as if beginObject() had
+        // resolved nothing at all). Without this, e.g. a Shape-typed
+        // collection element whose data says "type": "Circle" would always
+        // try to construct exactly Shape (abstract - createInstance()
+        // fails outright) and would only ever read Shape's own properties
+        // even if it could - Circle's centerX/centerY/radius would never
+        // be reached. clazz->createInstance(&raw)/allProperties()/
+        // allFields() (not this->...) is what actually reaches the
+        // concrete type's own constructor and full property/field set;
+        // see Constructor::invoke(args, outRaw)'s own comment for why a
+        // raw void* (not std::any_cast<T*>) is what crosses this
+        // particular boundary - clazz might not be T here.
         void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
                     bool& instanceOnHeap, void** outRawInstance = nullptr) const override {
             // Mirrors write()'s own beginObject()/endObject() bracketing
@@ -2110,37 +2293,64 @@ namespace newui::reflection {
             // sub-object at all before reading its properties (see
             // ClassReader::beginObject()'s own doc comment for what a real
             // implementation is expected to do with propertyName).
-            reader->beginObject(propertyName);
+            const Class* clazz = reader->beginObject(propertyName);
 
-            T* instancePtr = nullptr;
+            bool useResolvedClazz = false;
+            if (clazz != nullptr && clazz != static_cast<const Class*>(this) && !outInstance.has_value()) {
+                for (const Class* c = clazz; c != nullptr; c = c->parentClass()) {
+                    if (c == static_cast<const Class*>(this)) {
+                        useResolvedClazz = true;
+                        break;
+                    }
+                }
+            }
+            if (!useResolvedClazz) {
+                clazz = this;
+            }
+
+            void* instancePtr = nullptr;
 
             if (outInstance.has_value()) {
                 instancePtr = std::any_cast<T*>(outInstance);
             } else {
-                outInstance = this->createInstance();
-                if (!outInstance.has_value()) {
+                void* raw = nullptr;
+                outInstance = clazz->createInstance(&raw);
+                if (raw == nullptr) {
                     if (outRawInstance) {
                         *outRawInstance = nullptr;
                     }
                     reader->endObject(propertyName, this);
                     return;
                 }
-                instancePtr = std::any_cast<T*>(outInstance);
+                instancePtr = raw;
                 instanceOnHeap = true;
             }
 
             std::vector<const Property*> ordered;
-            allProperties(ordered);
+            clazz->allProperties(ordered);
 
             for (const Property* property : ordered) {
                 property->read(instancePtr, reader);
+            }
+
+            // Fields - the read-side mirror of write()'s own fields loop
+            // above. Public-only there because a private field was never
+            // written in the first place (matching scope, not required by
+            // anything on this side specifically) - there's simply no
+            // data under a private field's name to read back regardless,
+            // so this doesn't re-check scope() itself.
+            std::vector<const Field*> orderedFields;
+            clazz->allFields(orderedFields);
+
+            for (const Field* field : orderedFields) {
+                field->read(instancePtr, reader);
             }
 
             if (outRawInstance) {
                 *outRawInstance = instancePtr;
             }
 
-            reader->endObject(propertyName, this);
+            reader->endObject(propertyName, clazz);
         }
     };
 

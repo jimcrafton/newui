@@ -1,7 +1,14 @@
 #include "newui/view.h"
 #include "newui/subview.h"
+#include <cassert>
 
 namespace newui {
+
+	View::View()
+	{
+		this->style_->setView(this);
+	}
+
 	bool View::initialize()
 	{
 		return true;

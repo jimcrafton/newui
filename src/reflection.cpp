@@ -76,6 +76,18 @@ namespace newui::reflection {
         return std::any();
     }
 
+    std::any Class::createInstance(void** outRaw) const {
+        if (outRaw != nullptr) {
+            *outRaw = nullptr;
+        }
+        for (const auto* ctor : constructors_) {
+            if (ctor->arguments().empty()) {
+                return ctor->invoke({}, outRaw);
+            }
+        }
+        return std::any();
+    }
+
     Class::~Class() {
         for (auto* p : properties_) {
             delete p;

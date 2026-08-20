@@ -1165,6 +1165,218 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    // -----------------------------------------------------------------
+    // Stepper
+    // -----------------------------------------------------------------
+
+    Stepper::Stepper() {
+        setVisible(true);
+
+        upStyle_ = std::make_unique<ThemedSpinButtonStyle>();
+        upStyle_->isUpButton = true;
+        upStyle_->setView(this);
+
+        downStyle_ = std::make_unique<ThemedSpinButtonStyle>();
+        downStyle_->isUpButton = false;
+        downStyle_->setView(this);
+
+        onStateChanged.add(this, &Stepper::handleStateChanged);
+
+        onMouseDown.add(this, &Stepper::handleMouseDown);
+        onMouseMove.add(this, &Stepper::handleMouseMove);
+        onMouseUp.add(this, &Stepper::handleMouseUp);
+        onMouseLeft.add(this, &Stepper::handleMouseLeft);
+        onMouseEntered.add(this, &Stepper::handleMouseEnter);
+    }
+
+    Stepper::~Stepper() {
+        // See startRepeat()'s own doc comment (controls.h) - a repeat
+        // task still queued/running past this point becomes a safe no-op
+        // instead of touching a dangling this.
+        *aliveFlag_ = false;
+    }
+
+    void Stepper::setValue(float value) {
+        value = value < min_ ? min_ : (value > max_ ? max_ : value);
+        if (value_ == value) {
+            return;
+        }
+        value_ = value;
+        style().markDirty();
+        onValueChanged(*this);
+    }
+
+    void Stepper::setRange(float minValue, float maxValue) {
+        min_ = minValue;
+        max_ = maxValue;
+        setValue(value_);
+    }
+
+    void Stepper::setStep(float step) {
+        step_ = step > 0.0f ? step : step_;
+    }
+
+    void Stepper::paint(BLContext& ctx) {
+        // Each arrow's HOT look follows hoverRegion_ independently (see
+        // its own doc comment, controls.h) - not a single shared flag
+        // the way ScrollBar's thumb+arrows share isHighlighted().
+        Rect unused;
+
+        Rect up = upRect();
+        ctx.save();
+        ctx.translate(up.left(), up.top());
+        upStyle_->paint(ctx, up.size(), hoverRegion_ == Region::Up, unused);
+        ctx.restore();
+
+        Rect down = downRect();
+        ctx.save();
+        ctx.translate(down.left(), down.top());
+        downStyle_->paint(ctx, down.size(), hoverRegion_ == Region::Down, unused);
+
+        printf("paint upStyle_->pressed: %d, downStyle_->pressed: %d\n", (int)upStyle_->pressed, (int)downStyle_->pressed);
+
+        ctx.restore();
+    }
+
+    Stepper::Region Stepper::regionAt(const Point& localPt) const {
+        if (upRect().contains(localPt)) {
+            return Region::Up;
+        }
+        if (downRect().contains(localPt)) {
+            return Region::Down;
+        }
+        return Region::None;
+    }
+
+    Rect Stepper::upRect() const {
+        Size size = bounds().size();
+        float halfHeight = size.height * 0.5f;
+        return Rect(0.0f, 0.0f, size.width, halfHeight);
+    }
+
+    Rect Stepper::downRect() const {
+        Size size = bounds().size();
+        float halfHeight = size.height * 0.5f;
+        return Rect(0.0f, halfHeight, size.width, size.height - halfHeight);
+    }
+
+    void Stepper::startRepeat(float amount) {
+        repeating_ = true;
+        repeatAmount_ = amount;
+        repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
+
+        std::shared_ptr<bool> alive = aliveFlag_;
+        Application::instance().runLoop().postIdle([this, alive]() {
+            if (!*alive || !repeating_) {
+                return true;  // destroyed, or the press already ended - stop
+            }
+
+            auto now = std::chrono::steady_clock::now();
+            if (now < repeatNextTime_) {
+                return false;  // not time for the next tick yet - keep polling
+            }
+            repeatNextTime_ = now + kRepeatInterval;
+
+            setValue(value_ + repeatAmount_);
+            return false;
+        });
+    }
+
+    void Stepper::stopRepeat() {
+        repeating_ = false;
+    }
+
+    SyncReturn Stepper::handleMouseDown(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!isEnabled()) {
+            return SyncReturn::Ignored;
+        }
+
+        Region region = regionAt(pt);
+
+        if (region == Region::None) {
+            return SyncReturn::Ignored;
+        }
+
+        hoverRegion_ = region;
+        bool isUp = (region == Region::Up);
+        upStyle_->pressed = isUp;
+        downStyle_->pressed = !isUp;
+
+        style().markDirty();
+
+        float amount = isUp ? step_ : -step_;
+        setValue(value_ + amount);
+        startRepeat(amount);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn Stepper::handleMouseMove(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        Region region = regionAt(pt);
+
+        
+        if (region != hoverRegion_) {
+            hoverRegion_ = region;
+            style().markDirty();
+        }
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn Stepper::handleMouseUp(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        upStyle_->pressed = false;
+        downStyle_->pressed = false;
+        stopRepeat();
+        hoverRegion_ = regionAt(pt);
+
+
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    
+
+    SyncReturn Stepper::handleMouseEnter(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (hoverRegion_ != Region::None) {
+
+        }
+
+        Region region = regionAt(pt);
+
+        hoverRegion_ = region;
+
+        style().markDirty();
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn Stepper::handleMouseLeft(View& /*sender*/, const Point& /*pt*/,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (hoverRegion_ != Region::None) {
+            
+        }
+
+        hoverRegion_ = Region::None;
+
+        style().markDirty();
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn Stepper::handleStateChanged(Control& /*sender*/) {
+        bool enabled = isEnabled();
+        upStyle_->enabled = enabled;
+        downStyle_->enabled = enabled;
+        if (!enabled) {
+            upStyle_->pressed = false;
+            downStyle_->pressed = false;
+            hoverRegion_ = Region::None;
+            stopRepeat();
+        }
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
     ScrollView::ScrollView() {
         setVisible(true);
 
@@ -1360,9 +1572,166 @@ namespace newui {
     {
         auto& curStyle = style();
         curStyle.setBackgroundImage(newPath);
-        curStyle.markDirty();        
-        
+        curStyle.markDirty();
+
         return SyncReturn::Handled;
+    }
+
+    // -----------------------------------------------------------------
+    // ToolbarButton
+    // -----------------------------------------------------------------
+
+    ToolbarButton::ToolbarButton() {
+        setVisible(true);
+
+        auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
+        buttonStyle_ = buttonStyle.get();
+        buttonStyle_->font = FontManager::getSystemFont(SystemUIFont::Message);
+        setStyle(std::move(buttonStyle));
+
+        textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+
+        onMouseDown.add(this, &ToolbarButton::handlePressStart);
+        onMouseUp.add(this, &ToolbarButton::handlePressEnd);
+        onClick.add(this, &ToolbarButton::handleClicked);
+    }
+
+    void ToolbarButton::setText(const std::string& text) {
+        if (text_ == text) {
+            return;
+        }
+        text_ = text;
+        style().markDirty();
+    }
+
+    void ToolbarButton::setTextColor(BLRgba32 color) {
+        textColor_ = color;
+        style().markDirty();
+    }
+
+    void ToolbarButton::setChecked(bool value) {
+        if (checked_ == value) {
+            return;
+        }
+        checked_ = value;
+        updatePressedVisual();
+        onCheckedChanged(*this);
+    }
+
+    void ToolbarButton::updatePressedVisual() {
+        bool wantPressed = pressing_;
+        bool wantChecked = isToggleButton_ && checked_;
+        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked) {
+            return;
+        }
+        buttonStyle_->pressed = wantPressed;
+        buttonStyle_->checked = wantChecked;
+        style().markDirty();
+    }
+
+    SyncReturn ToolbarButton::handlePressStart(View& /*sender*/, const Point& /*pt*/,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!isEnabled()) {
+            return SyncReturn::Ignored;
+        }
+        pressing_ = true;
+        updatePressedVisual();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ToolbarButton::handlePressEnd(View& /*sender*/, const Point& /*pt*/,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        pressing_ = false;
+        updatePressedVisual();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ToolbarButton::handleClicked(Control& /*sender*/) {
+        if (isToggleButton_) {
+            setChecked(!checked_);
+        }
+        return SyncReturn::Handled;
+    }
+
+    void ToolbarButton::paint(BLContext& ctx) {
+        if (text_.empty() || textColor_.is_null()) {
+            return;
+        }
+
+        BLFont* blFont = buttonStyle_->font.blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
+        }
+
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
+            return;
+        }
+
+        BLGlyphBuffer glyphBuffer;
+        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+        blFont->shape(glyphBuffer);
+
+        BLTextMetrics textMetrics;
+        blFont->get_text_metrics(glyphBuffer, textMetrics);
+
+        const BLFontMetrics& fontMetrics = blFont->metrics();
+        double textWidth = textMetrics.advance.x;
+        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+
+        double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
+        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+
+        ctx.save();
+        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
+        ctx.set_fill_style(textColor_);
+        ctx.set_fill_alpha(buttonStyle_->opacity);
+        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
+    // ToolbarSeparator
+    // -----------------------------------------------------------------
+
+    ToolbarSeparator::ToolbarSeparator() {
+        setVisible(true);
+
+        auto separatorStyle = std::make_unique<ThemedToolbarSeparatorStyle>();
+        separatorStyle_ = separatorStyle.get();
+        setStyle(std::move(separatorStyle));
+
+        setDesiredSize(Size(9.0f, 0.0f));
+    }
+
+    void ToolbarSeparator::setHorizontal(bool value) {
+        if (horizontal_ == value) {
+            return;
+        }
+        horizontal_ = value;
+        separatorStyle_->horizontal = value;
+        setDesiredSize(horizontal_ ? Size(9.0f, 0.0f) : Size(0.0f, 9.0f));
+        style().markDirty();
+    }
+
+    // -----------------------------------------------------------------
+    // Toolbar
+    // -----------------------------------------------------------------
+
+    Toolbar::Toolbar(Orientation orientation) {
+        setName("Toolbar");
+        setVisible(true);
+        setStyle(std::make_unique<ThemedRebarBandStyle>());
+        setLayout(std::make_unique<FlexLayout>(orientation));
+        setDesiredSize(orientation == Orientation::Horizontal ? Size(0.0f, 28.0f) : Size(28.0f, 0.0f));
+    }
+
+    Orientation Toolbar::orientation() const {
+        return static_cast<FlexLayout*>(layout())->orientation();
+    }
+
+    void Toolbar::setOrientation(Orientation orientation) {
+        static_cast<FlexLayout*>(layout())->setOrientation(orientation);
     }
 
 }

@@ -28,6 +28,9 @@ namespace newui {
     // View::destroy().
     class View {
     public:
+
+        View();
+
         virtual ~View() = default;
 
         typedef Delegate<View, const Size&> SizeChangedDelegate;

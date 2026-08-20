@@ -220,6 +220,137 @@ TEST(ScrollBar, MouseMoveWithoutAPrecedingMouseDownIsIgnored) {
 }
 
 // ---------------------------------------------------------------------
+// Stepper - range/value/step clamping, plus arrow click behavior. Same
+// "no live RunLoop needed" scope as ScrollBar's own tests above -
+// auto-repeat (Stepper::startRepeat()) isn't exercised here beyond
+// confirming the initial click's own immediate setValue() doesn't
+// crash/throw.
+// ---------------------------------------------------------------------
+
+TEST(Stepper, DefaultsAreSaneRangeAndStep) {
+    auto* stepper = new Stepper();
+
+    EXPECT_FLOAT_EQ(stepper->value(), 0.0f);
+    EXPECT_FLOAT_EQ(stepper->minValue(), 0.0f);
+    EXPECT_FLOAT_EQ(stepper->maxValue(), 100.0f);
+    EXPECT_FLOAT_EQ(stepper->step(), 1.0f);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, SetValueClampsToRange) {
+    auto* stepper = new Stepper();
+    stepper->setRange(0.0f, 10.0f);
+
+    stepper->setValue(1000.0f);
+    EXPECT_FLOAT_EQ(stepper->value(), 10.0f);
+
+    stepper->setValue(-50.0f);
+    EXPECT_FLOAT_EQ(stepper->value(), 0.0f);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, SetRangeReclampsExistingValue) {
+    auto* stepper = new Stepper();
+    stepper->setRange(0.0f, 100.0f);
+    stepper->setValue(90.0f);
+    ASSERT_FLOAT_EQ(stepper->value(), 90.0f);
+
+    stepper->setRange(0.0f, 50.0f);
+    EXPECT_FLOAT_EQ(stepper->value(), 50.0f);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, SetStepIgnoresNonPositiveValues) {
+    auto* stepper = new Stepper();
+
+    stepper->setStep(0.5f);
+    EXPECT_FLOAT_EQ(stepper->step(), 0.5f);
+
+    // step() must stay > 0 - a zero/negative request leaves it unchanged.
+    stepper->setStep(0.0f);
+    EXPECT_FLOAT_EQ(stepper->step(), 0.5f);
+    stepper->setStep(-3.0f);
+    EXPECT_FLOAT_EQ(stepper->step(), 0.5f);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, OnValueChangedFiresOnlyOnActualChange) {
+    auto* stepper = new Stepper();
+    stepper->setRange(0.0f, 100.0f);
+
+    int fireCount = 0;
+    stepper->onValueChanged.add([&fireCount](Stepper&) {
+        ++fireCount;
+        return SyncReturn::Handled;
+    });
+
+    stepper->setValue(50.0f);
+    EXPECT_EQ(fireCount, 1);
+
+    stepper->setValue(50.0f);  // unchanged - no-op
+    EXPECT_EQ(fireCount, 1);
+
+    stepper->setValue(60.0f);
+    EXPECT_EQ(fireCount, 2);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, ClickingUpArrowIncreasesValueByStep) {
+    auto* stepper = new Stepper();
+    stepper->setBounds(Rect(0, 0, 20, 40));  // upRect = top 20px, downRect = bottom 20px
+    stepper->setRange(0.0f, 100.0f);
+    stepper->setStep(5.0f);
+    stepper->setValue(50.0f);
+
+    stepper->onMouseDown(*stepper, Point(10.0f, 5.0f), 1, 0);
+    EXPECT_FLOAT_EQ(stepper->value(), 55.0f);
+
+    stepper->onMouseUp(*stepper, Point(10.0f, 5.0f), 1, 0);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, ClickingDownArrowDecreasesValueByStep) {
+    auto* stepper = new Stepper();
+    stepper->setBounds(Rect(0, 0, 20, 40));
+    stepper->setRange(0.0f, 100.0f);
+    stepper->setStep(5.0f);
+    stepper->setValue(50.0f);
+
+    stepper->onMouseDown(*stepper, Point(10.0f, 30.0f), 1, 0);
+    EXPECT_FLOAT_EQ(stepper->value(), 45.0f);
+
+    stepper->onMouseUp(*stepper, Point(10.0f, 30.0f), 1, 0);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+TEST(Stepper, ClickOutsideBoundsIsIgnored) {
+    auto* stepper = new Stepper();
+    stepper->setBounds(Rect(0, 0, 20, 40));
+    stepper->setRange(0.0f, 100.0f);
+    stepper->setValue(50.0f);
+
+    stepper->onMouseDown(*stepper, Point(100.0f, 100.0f), 1, 0);
+    EXPECT_FLOAT_EQ(stepper->value(), 50.0f);
+
+    stepper->destroy();
+    delete stepper;
+}
+
+// ---------------------------------------------------------------------
 // ScrollView - bar visibility/sizing and origin() wiring
 // ---------------------------------------------------------------------
 
@@ -287,4 +418,147 @@ TEST(ScrollView, AddChildDoesNotBecomeADirectChildOfScrollViewItself) {
 
     view->destroy();
     delete view;
+}
+
+// ---------------------------------------------------------------------
+// ToolbarButton - same momentary-vs-toggle click gesture as Button,
+// just checked via ThemedToolbarButtonStyle instead
+// ---------------------------------------------------------------------
+
+TEST(ToolbarButton, MomentaryByDefaultDoesNotToggleOnClick) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 40, 24));
+    ASSERT_FALSE(button->isToggleButton());
+
+    button->onMouseDown(*button, Point(10.0f, 10.0f), 1, 0);
+    button->onMouseUp(*button, Point(10.0f, 10.0f), 1, 0);
+
+    EXPECT_FALSE(button->isChecked());
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, ToggleButtonFlipsCheckedOnCompletedClick) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 40, 24));
+    button->setToggleButton(true);
+
+    button->onMouseDown(*button, Point(10.0f, 10.0f), 1, 0);
+    button->onMouseUp(*button, Point(10.0f, 10.0f), 1, 0);
+    EXPECT_TRUE(button->isChecked());
+
+    button->onMouseDown(*button, Point(10.0f, 10.0f), 1, 0);
+    button->onMouseUp(*button, Point(10.0f, 10.0f), 1, 0);
+    EXPECT_FALSE(button->isChecked());
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, ReleasingOutsideBoundsDoesNotToggle) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 40, 24));
+    button->setToggleButton(true);
+
+    button->onMouseDown(*button, Point(10.0f, 10.0f), 1, 0);
+    button->onMouseUp(*button, Point(1000.0f, 1000.0f), 1, 0);
+
+    EXPECT_FALSE(button->isChecked());
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, OnCheckedChangedFiresOnlyOnActualChange) {
+    auto* button = new ToolbarButton();
+
+    int fireCount = 0;
+    button->onCheckedChanged.add([&fireCount](ToolbarButton&) {
+        ++fireCount;
+        return SyncReturn::Handled;
+    });
+
+    button->setChecked(true);
+    EXPECT_EQ(fireCount, 1);
+    button->setChecked(true);
+    EXPECT_EQ(fireCount, 1);
+    button->setChecked(false);
+    EXPECT_EQ(fireCount, 2);
+
+    button->destroy();
+    delete button;
+}
+
+// ---------------------------------------------------------------------
+// ToolbarSeparator - orientation picks which axis carries the thin
+// dividing-line size, the other stays 0 (Stretch fills it from the
+// owning Toolbar's own cross-axis size)
+// ---------------------------------------------------------------------
+
+TEST(ToolbarSeparator, DefaultsToHorizontalToolbarOrientation) {
+    auto* separator = new ToolbarSeparator();
+
+    EXPECT_TRUE(separator->isHorizontal());
+    EXPECT_GT(separator->desiredSize().width, 0.0f);
+    EXPECT_FLOAT_EQ(separator->desiredSize().height, 0.0f);
+
+    separator->destroy();
+    delete separator;
+}
+
+TEST(ToolbarSeparator, SetHorizontalFalseSwapsWhichAxisIsSized) {
+    auto* separator = new ToolbarSeparator();
+    separator->setHorizontal(false);
+
+    EXPECT_FALSE(separator->isHorizontal());
+    EXPECT_FLOAT_EQ(separator->desiredSize().width, 0.0f);
+    EXPECT_GT(separator->desiredSize().height, 0.0f);
+
+    separator->destroy();
+    delete separator;
+}
+
+// ---------------------------------------------------------------------
+// Toolbar - FlexLayout-based container, same shape as MenuBar
+// ---------------------------------------------------------------------
+
+TEST(Toolbar, DefaultsToHorizontalOrientation) {
+    auto* toolbar = new Toolbar();
+
+    EXPECT_TRUE(toolbar->orientation() == Orientation::Horizontal);
+
+    toolbar->destroy();
+    delete toolbar;
+}
+
+TEST(Toolbar, ChildrenAreArrangedSideBySideAlongTheMainAxis) {
+    auto* toolbar = new Toolbar();
+    toolbar->setBounds(Rect(0, 0, 400, 28));
+
+    auto* first = new ToolbarButton();
+    first->setVisible(true);
+    first->setDesiredSize(Size(30.0f, 24.0f));
+    toolbar->addChild(first);
+
+    auto* second = new ToolbarButton();
+    second->setVisible(true);
+    second->setDesiredSize(Size(30.0f, 24.0f));
+    toolbar->addChild(second);
+
+    EXPECT_FLOAT_EQ(first->bounds().pos().x, 0.0f);
+    EXPECT_GT(second->bounds().pos().x, first->bounds().pos().x);
+
+    toolbar->destroy();
+    delete toolbar;
+}
+
+TEST(Toolbar, SetOrientationSwitchesTheFlexLayoutAxis) {
+    auto* toolbar = new Toolbar(Orientation::Horizontal);
+
+    toolbar->setOrientation(Orientation::Vertical);
+    EXPECT_TRUE(toolbar->orientation() == Orientation::Vertical);
+
+    toolbar->destroy();
+    delete toolbar;
 }

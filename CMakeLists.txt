@@ -106,7 +106,8 @@ add_library(newui STATIC
     "include/newui/models.h" "src/models.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
     "include/newui/controls.h" "src/controls.cpp"
-    "include/newui/themedata.h" 
+    "include/newui/shapes.h" "src/shapes.cpp"
+    "include/newui/themedata.h"
     "src/themedata.cpp" 
     "include/newui/reflectionio.h"
     ${REFLECTION_GENERATED_CPP})

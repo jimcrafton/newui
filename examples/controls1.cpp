@@ -109,7 +109,16 @@ int main() {
     app.setFrame(&frame);
 
     frame.setTitle("Controls Example");
-    frame.setBounds(newui::Rect(10, 10, 520, 400));
+    // Tall enough for every row below (Progress x4, a weighted vertical
+    // bar, buttons, the new toolbar, labels, toggles, sliders, and a
+    // 100px image) to actually fit within RootView's own client area
+    // (Frame::setBounds() sizes the *outer* window - see
+    // Frame::updateViewBounds(), which derives RootView's real bounds
+    // from GetClientRect() instead) - too short here left the lower rows
+    // laid out past the visible client height with nothing to scroll to
+    // them, which is why the toolbar (added partway down the stack)
+    // wasn't visible before this was widened.
+    frame.setBounds(newui::Rect(10, 10, 520, 720));
     frame.onClosed += FrameClosed;
 
     newui::RootView& root = frame.getView();
@@ -137,6 +146,64 @@ int main() {
     rootLayout->setSpacing(10.0f);
     rootLayout->setPadding(16.0f);
     root.setLayout(std::move(rootLayout));
+
+    // Toolbar - a horizontal FlexLayout strip (Toolbar, controls.h) of
+    // ToolbarButtons plus a ToolbarSeparator between the two groups,
+    // docked at the very top like a real app's toolbar (root's own
+    // FlexLayout just stacks children in addChild() order, so "first
+    // child added" is what makes this the top row - no special docking
+    // concept needed). "New"/"Open" are momentary (fire onClick() once
+    // per completed click, same touchUpInside semantics as clickButton
+    // below); "Bold"/"Italic" are toggle buttons (setToggleButton(true))
+    // that stay visually pressed while isChecked() - the toolbar-
+    // formatting-button use case ThemedToolbarButtonStyle's own class
+    // comment (viewstyle.h) describes.
+    auto* toolbar = new newui::Toolbar();
+    root.addChild(toolbar);
+
+    auto* newButton = new newui::ToolbarButton();
+    newButton->setText("New");
+    newButton->setDesiredSize(newui::Size(50.0f, 24.0f));
+    newButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
+        [](newui::Control&) -> newui::SyncReturn {
+            printf("Toolbar: New clicked\n");
+            return newui::SyncReturn::Handled;
+        }));
+    toolbar->addChild(newButton);
+
+    auto* openButton = new newui::ToolbarButton();
+    openButton->setText("Open");
+    openButton->setDesiredSize(newui::Size(50.0f, 24.0f));
+    openButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
+        [](newui::Control&) -> newui::SyncReturn {
+            printf("Toolbar: Open clicked\n");
+            return newui::SyncReturn::Handled;
+        }));
+    toolbar->addChild(openButton);
+
+    toolbar->addChild(new newui::ToolbarSeparator());
+
+    auto* boldButton = new newui::ToolbarButton();
+    boldButton->setText("Bold");
+    boldButton->setToggleButton(true);
+    boldButton->setDesiredSize(newui::Size(50.0f, 24.0f));
+    boldButton->onCheckedChanged.add(std::function<newui::SyncReturn(newui::ToolbarButton&)>(
+        [](newui::ToolbarButton& sender) -> newui::SyncReturn {
+            printf("Toolbar: Bold is now %s\n", sender.isChecked() ? "ON" : "off");
+            return newui::SyncReturn::Handled;
+        }));
+    toolbar->addChild(boldButton);
+
+    auto* italicButton = new newui::ToolbarButton();
+    italicButton->setText("Italic");
+    italicButton->setToggleButton(true);
+    italicButton->setDesiredSize(newui::Size(50.0f, 24.0f));
+    italicButton->onCheckedChanged.add(std::function<newui::SyncReturn(newui::ToolbarButton&)>(
+        [](newui::ToolbarButton& sender) -> newui::SyncReturn {
+            printf("Toolbar: Italic is now %s\n", sender.isChecked() ? "ON" : "off");
+            return newui::SyncReturn::Handled;
+        }));
+    toolbar->addChild(italicButton);
 
     AddProgressRow(&root, "25%")->setValue(0.25f);
     AddProgressRow(&root, "75%")->setValue(0.75f);
@@ -186,6 +253,8 @@ int main() {
 
     
     auto* liveBar = AddProgressRow(&root, "Live (counts up)");
+
+    /*
     app.runLoop().postIdle([liveBar, lastTick = std::chrono::steady_clock::now()]() mutable {
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTick).count() < 33) {
@@ -197,7 +266,7 @@ int main() {
         liveBar->setValue(next >= 1.0f ? 0.0f : next);
         return false;  // never "done" - keeps running for the app's life
     });
-    
+    */
 
     // Buttons - one momentary (fires onClick() on each full down-then-
     // up-inside gesture, the same UIControl-style touchUpInside semantics
@@ -377,8 +446,40 @@ int main() {
         }));
     floatSliderRow->addChild(floatSlider);
 
+    // Stepper - a pair of up/down arrows and nothing else (draws no text
+    // of its own, see its class comment), paired with a Label the same
+    // way the Sliders above are. Not layoutParams(1.0f)'d like the
+    // Sliders - a Stepper is a fixed-width control, not one meant to
+    // stretch to fill its row.
+    auto* stepperRow = new newui::SubView();
+    stepperRow->setVisible(true);
+    stepperRow->setDesiredSize(newui::Size(0.0f, 32.0f));
+    auto stepperRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    stepperRowLayout->setSpacing(12.0f);
+    stepperRow->setLayout(std::move(stepperRowLayout));
+    root.addChild(stepperRow);
+
+    auto* stepperValueLabel = new newui::Label();
+    stepperValueLabel->setText("Stepper: 5");
+    stepperValueLabel->setDesiredSize(newui::Size(80.0f, 24.0f));
+    stepperRow->addChild(stepperValueLabel);
+
+    auto* stepper = new newui::Stepper();
+    stepper->setRange(0.0f, 10.0f);
+    stepper->setValue(5.0f);
+    stepper->setStep(1.0f);
+    stepper->setDesiredSize(newui::Size(20.0f, 32.0f));
+    stepper->onValueChanged.add(std::function<newui::SyncReturn(newui::Stepper&)>(
+        [stepperValueLabel](newui::Stepper& sender) -> newui::SyncReturn {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "Stepper: %d", static_cast<int>(sender.value()));
+            stepperValueLabel->setText(buf);
+            return newui::SyncReturn::Handled;
+        }));
+    stepperRow->addChild(stepper);
 
 
+    /*
     auto* imageRow = new newui::SubView();
     imageRow->setVisible(true);
     imageRow->setDesiredSize(newui::Size(0.0f, 100.0f));
@@ -393,7 +494,7 @@ int main() {
     imgCtrl->setImagePath("C:\\Users\\jim\\Pictures\\Screenshots\\Screenshot 2026-08-14 175923.png");
 
     imageRow->addChild(imgCtrl);
-
+    */
     
 
     app.run();
