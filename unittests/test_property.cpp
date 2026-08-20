@@ -1,6 +1,8 @@
+#include "newui/newui.h"
 #include "newui/property.h"
 
 #include "newui/geometry.h"
+#include "newui/shapes.h"
 
 #include <gtest/gtest.h>
 
@@ -284,6 +286,90 @@ TEST(Property, StructFieldBuiltInInterpolateKindThrows) {
 // like `property->interpolate(0.5f, std::vector<float>{0, 1})` simply
 // wouldn't compile. Left as documentation, same as the analogous
 // Delegate<FakeSender&, ...> case in test_delegate.cpp.
+
+// ---------------------------------------------------------------------
+// ObservableProperty backed by a reflection::Property (PropertyManager::
+// registerProperty<ValueT>(source, "propertyName")) instead of a raw
+// field address - newui::shapes::Circle is a real, everyday case of
+// exactly what this is for: private fields, only a getter/setter pair
+// exposed (see shapes.h's own class comment). Circle's own reflection
+// data is registered once, globally, by whatever GTest environment in
+// this binary calls registerReflectionData() (see test_reflection.cpp) -
+// every test below relies on that already having happened by the time it
+// runs, the same way every other reflection-touching test in this binary
+// does.
+// ---------------------------------------------------------------------
+
+TEST(Property, ReflectedPropertyGetReturnsTheLiveGetterValue) {
+    newui::PropertyManager::instance().clear();
+    newui::shapes::Circle circle;
+    circle.setRadius(12.5f);
+
+    auto* property = newui::PropertyManager::instance().registerProperty<float>(&circle, "radius");
+
+    ASSERT_NE(property, nullptr);
+    EXPECT_FLOAT_EQ(property->get(), 12.5f);
+}
+
+TEST(Property, ReflectedPropertySetWritesThroughTheRealSetter) {
+    newui::PropertyManager::instance().clear();
+    newui::shapes::Circle circle;
+
+    auto* property = newui::PropertyManager::instance().registerProperty<float>(&circle, "radius");
+    property->set(40.0f);
+
+    EXPECT_FLOAT_EQ(circle.radius(), 40.0f);
+    EXPECT_FLOAT_EQ(property->get(), 40.0f);
+}
+
+TEST(Property, ReflectedPropertySetDoesNotFireOnValueChangedWhenUnchanged) {
+    newui::PropertyManager::instance().clear();
+    ResetRecorder();
+    newui::shapes::Circle circle;
+    circle.setCenterX(5.0f);
+
+    auto* property = newui::PropertyManager::instance().registerProperty<float>(&circle, "centerX");
+    property->onValueChanged.add(&RecordChange);
+
+    property->set(5.0f);
+
+    EXPECT_EQ(g_changeCount, 0);
+}
+
+TEST(Property, ReflectedPropertyFiresOnValueChangedWhenValueDiffers) {
+    newui::PropertyManager::instance().clear();
+    ResetRecorder();
+    newui::shapes::Circle circle;
+
+    auto* property = newui::PropertyManager::instance().registerProperty<float>(&circle, "centerX");
+    property->onValueChanged.add(&RecordChange);
+
+    property->set(99.0f);
+
+    EXPECT_EQ(g_changeCount, 1);
+    EXPECT_EQ(g_lastChangedName, "centerX");
+}
+
+TEST(Property, ReflectedPropertyInterpolatesJustLikeAFieldBackedOne) {
+    newui::PropertyManager::instance().clear();
+    newui::shapes::Circle circle;
+
+    auto* property = newui::PropertyManager::instance().registerProperty<float>(&circle, "radius");
+    property->setupInterpolation(0.0f, 100.0f);
+
+    property->interpolate(0.5f);
+
+    EXPECT_FLOAT_EQ(circle.radius(), 50.0f);
+}
+
+TEST(Property, ReflectedPropertyThrowsForAPropertyNameCircleDoesNotHave) {
+    newui::PropertyManager::instance().clear();
+    newui::shapes::Circle circle;
+
+    EXPECT_THROW(
+        newui::PropertyManager::instance().registerProperty<float>(&circle, "notARealCircleProperty"),
+        std::invalid_argument);
+}
 
 TEST(PropertyManager, RegisterPropertyCreatesAndStoresProperty) {
     newui::PropertyManager& manager = newui::PropertyManager::instance();

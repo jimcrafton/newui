@@ -18,7 +18,14 @@
 //   - a spinning RoundRect: rotationRadians driven by an angle sweeping
 //     0..2*PI once per loop, transform().pivot() set to its own center
 //     so it turns in place (see shapes1.cpp's AddRotatedSquaresShapes()
-//     for the same pivot convention)
+//     for the same pivot convention) - and, unlike the other four, bound
+//     *directly* to g_spinSquare->transform() via PropertyManager::
+//     registerProperty<float>(source, "rotationRadians") instead of
+//     through g_state (see below) - Transform2D::rotationRadians()/
+//     setRotationRadians() is already a real reflected property (every
+//     newui::shapes field is - see shapes.h's own class comment), so
+//     Animation can write straight into it with no shadow field and no
+//     manual sync step for this one property at all.
 //
 // AnimationManager (application.h's own runLoop() comment: "code that
 // needs to hook into idle time - e.g. AnimationManager::run()") owns and
@@ -34,15 +41,19 @@
 // hue 360, ...), which is what makes each wrap seamless rather than a
 // visible jump back to the start.
 //
-// The Animation only ever writes into g_state below - a small POD struct
-// of plain floats, the same shape newui::Property requires (see
-// IsPodLike, property.h) and the same pattern animation1.cpp's Entity
-// uses - not directly into the Shapes. Shape's own geometry/style/
-// transform fields are private (getter/setter only, no reference
-// accessor - see shapes.h's own class comment on why), so nothing outside
-// Shape can hand PropertyManager a pointer into one directly.
-// SyncShapesToState() is the one place that reads g_state back out and
-// pushes it into the shapes through their real setters; it's subscribed
+// Four of the Animation's five properties write into g_state below - a
+// small POD struct of plain floats, the same shape newui::Property
+// requires (see IsPodLike, property.h) and the same pattern
+// animation1.cpp's Entity uses - rather than directly into the Shapes,
+// since orbitAngle/pulseScale/bounceLift/hueDegrees each need a bit of
+// math (trig, a base offset, an HSL-to-color conversion) a plain
+// PropertyManager-driven setter call can't do on its own. The fifth
+// (spinRadians) skips that shadow field entirely - see this file's own
+// comment above on the spinning RoundRect - since it maps onto a real
+// reflected property (Transform2D::rotationRadians()) with nothing extra
+// to compute. SyncShapesToState() is the one place that reads g_state
+// back out and pushes it into the shapes through their real setters (plus
+// re-renders the window); it's subscribed
 // as a plain function to AnimationManager::instance().onFrameChanged
 // (animation.h), which fires with the new frame number every time
 // AnimationManager's playback clock actually advances - the UI component
@@ -67,6 +78,16 @@
 // unittests/test_shapes.cpp already do this).
 
 #include "newui/newui.h"
+
+// Defined in the reflectgen-generated .cpp (compiled into the `newui`
+// target this example links against - see shapes1.cpp's own comment on
+// this same forward declaration) - has to run before main() registers
+// the "rotationRadians" property below (PropertyManager::registerProperty
+// <float>(source, "rotationRadians")), since reflection::classinfo()
+// finds nothing for newui::shapes::Transform2D (or any other reflected
+// class) until this has run at least once.
+extern void registerReflectionData();
+
 #include "newui/animation.h"
 #include "newui/application.h"
 #include "newui/color.h"
@@ -113,7 +134,6 @@ struct AnimState {
     float pulseScale = 1.0f;     // 1.0..~1.4, twice per loop
     float bounceLift = 0.0f;     // 0..~55 pixels, twice per loop
     float hueDegrees = 0.0f;     // 0..360, once per loop
-    float spinRadians = 0.0f;    // radians, 0..2*PI once per loop
 };
 
 // Layout constants shared between main() (initial shape placement) and
@@ -152,7 +172,9 @@ newui::SyncReturn SyncShapesToState(newui::AnimationManager&, std::uint64_t) {
     g_bounceRect->setY(kBounceBaseY - g_state.bounceLift);
     float hue = g_state.hueDegrees >= 360.0f ? g_state.hueDegrees - 360.0f : g_state.hueDegrees;
     g_hueRect->style().fill().setColor(newui::Color::fromHSL(hue, 0.6f, 0.55f));
-    g_spinSquare->transform().setRotationRadians(g_state.spinRadians);
+    // spinRadians isn't read here - Animation already wrote it straight
+    // into g_spinSquare->transform() itself (see main()'s registerProperty
+    // <float>(&g_spinSquare->transform(), "rotationRadians") call).
 
     g_shapeView->rootView()->markDirty();
 
@@ -164,6 +186,8 @@ int main() {
     printf("An orbiting Circle, a breathing Circle, a bouncing RoundRect, a hue-cycling\n");
     printf("RoundRect, and a spinning RoundRect - all driven by a single looping\n");
     printf("newui::Animation via AnimationManager (property.h/animation.h).\n");
+
+    registerReflectionData();
 
     newui::Frame frame;
 
@@ -306,11 +330,21 @@ int main() {
     constexpr std::uint64_t kLoopDuration = 180;  // 6 seconds at 30fps
 
     newui::PropertyManager::instance().clear();
-    auto* orbitAngleProp = newui::PropertyManager::instance().registerProperty(&g_state, &g_state.orbitAngle, "orbitAngle");
-    auto* pulseScaleProp = newui::PropertyManager::instance().registerProperty(&g_state, &g_state.pulseScale, "pulseScale");
-    auto* bounceLiftProp = newui::PropertyManager::instance().registerProperty(&g_state, &g_state.bounceLift, "bounceLift");
-    auto* hueDegreesProp = newui::PropertyManager::instance().registerProperty(&g_state, &g_state.hueDegrees, "hueDegrees");
-    auto* spinRadiansProp = newui::PropertyManager::instance().registerProperty(&g_state, &g_state.spinRadians, "spinRadians");
+    auto* orbitAngleProp = newui::PropertyManager::registerProperty(&g_state, &g_state.orbitAngle, "orbitAngle");
+    auto* pulseScaleProp = newui::PropertyManager::registerProperty(&g_state, &g_state.pulseScale, "pulseScale");
+    auto* bounceLiftProp = newui::PropertyManager::registerProperty(&g_state, &g_state.bounceLift, "bounceLift");
+    auto* hueDegreesProp = newui::PropertyManager::registerProperty(&g_state, &g_state.hueDegrees, "hueDegrees");
+
+    // Bound directly to the shape's own Transform2D - not to g_state -
+    // via the reflection system (reflection.h), rather than a raw field
+    // address: Transform2D's fields are private, only rotationRadians()/
+    // setRotationRadians() exposed (see shapes.h's own class comment),
+    // and reflectgen already registered that pair as a real property
+    // named "rotationRadians" when the newui target built. Animation
+    // writes straight through it from here on - see this file's own top
+    // comment.
+    auto* spinRadiansProp =
+        newui::PropertyManager::registerProperty<float>(&g_spinSquare->transform(), "rotationRadians");
 
     constexpr float kPi = 3.14159265359f;
     constexpr float kTwoPi = 6.28318530718f;

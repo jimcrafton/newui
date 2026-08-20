@@ -1,3 +1,4 @@
+#include "newui/newui.h"
 #include "newui/controllers.h"
 
 #include <algorithm>

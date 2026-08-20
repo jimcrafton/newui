@@ -1,14 +1,17 @@
 #pragma once
 
+#include <any>
 #include <cmath>
 #include <functional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <typeindex>
 #include <unordered_map>
 #include <vector>
 
 #include <newui/delegate.h>
+#include <newui/reflection.h>
 
 namespace newui {
 
@@ -38,6 +41,25 @@ namespace newui {
         EaseOut,
         EaseInOut,
     };
+
+    namespace detail {
+        // Shared by every Property kind's interpolate(t) (ObservableProperty
+        // below, ReflectedProperty) - factored out rather than duplicated so
+        // a future new curve only needs to change in one place.
+        inline float ease(float t, InterpolationKind kind) {
+            switch (kind) {
+                case InterpolationKind::EaseIn:
+                    return t * t;
+                case InterpolationKind::EaseOut:
+                    return t * (2.0f - t);
+                case InterpolationKind::EaseInOut:
+                    return t < 0.5f ? 2.0f * t * t : 1.0f - 2.0f * (1.0f - t) * (1.0f - t);
+                case InterpolationKind::Linear:
+                default:
+                    return t;
+            }
+        }
+    }
 
     // Non-template base so PropertyManager can hold Property<Foo, int>,
     // Property<Bar, float>, etc. in a single collection. Property<SourceT,
@@ -87,6 +109,21 @@ namespace newui {
     // directly on it; interpolate(t, fn) works for struct ValueT too,
     // since the caller-supplied fn does the actual blending (e.g.
     // componentwise).
+    //
+    // Backed by *either* a raw field address (PropertyManager::
+    // registerProperty(source, &source->field_, name), the original way -
+    // field_ non-null) *or* a named property already registered through
+    // the reflection system (PropertyManager::registerProperty<ValueT>
+    // (source, "propertyName"), reflectionProperty_ non-null - see that
+    // overload's own comment). Exactly one of the two is ever set (the
+    // private constructor used decides which), and get()/set() below just
+    // branch on which. This is what lets PropertyManager drive a class
+    // like newui::shapes::Circle - private fields, only a getter/setter
+    // pair exposed (see shapes.h's own class comment: "has real accessor
+    // methods for a future PropertyManager-driven animation to call") -
+    // without that class ever handing out a raw pointer to reach past its
+    // own encapsulation, and without a second Property-like class
+    // duplicating this one's interpolation machinery.
     template<typename SourceT, typename ValueT>
     class ObservableProperty : public PropertyBase {
         static_assert(IsPodLike<ValueT>::value,
@@ -108,12 +145,15 @@ namespace newui {
         typedef const ValueT& ConstValueRef;
 
         // Fired by set() (and so by interpolate(), which writes through
-        // set()) once the bound field's value has actually changed.
-        // Sender is this concrete Property<SourceT, ValueT>, not
-        // PropertyBase, and the callback also receives the source
-        // instance and a pointer to the (already updated) field directly,
-        // so it never needs to call typedSource()/get() itself, let alone
-        // static_cast anything.
+        // set()) once the property's value has actually changed. Sender
+        // is this concrete Property<SourceT, ValueT>, not PropertyBase,
+        // and the callback also receives the source instance and a
+        // pointer to the (already updated) field directly - field_ itself
+        // for a field-backed property, or nullptr for a reflection-backed
+        // one (there's no live field address to hand out there - a
+        // reflection::Property can be a by-value getter/setter pair with
+        // nothing addressable at all; call get() for the new value in
+        // that case instead of dereferencing this).
         typedef Delegate<PropertyT, SourcePtr, ValuePtr> ValueChangedDelegate;
         ValueChangedDelegate onValueChanged;
 
@@ -124,22 +164,32 @@ namespace newui {
             return static_cast<SourcePtr>(source_);
         }
 
-        // Returns a reference, not a copy, so reading a struct ValueT
-        // (Point, Color, ...) doesn't pay for copying every field just to
-        // look at it.
-        ConstValueRef get() const {
-            return *field_;
+        // Returns by value - a reflection-backed property has no live
+        // field to hand a reference into (reflection::Property::get()
+        // itself only ever returns a fresh std::any by value; see
+        // reflection.h), so this can't return ConstValueRef the way a
+        // field-backed property alone could. Free either way for the POD
+        // ValueT this class ever holds (see IsPodLike) - not the
+        // reference-avoids-a-copy concern a non-POD type would have.
+        ValueT get() const {
+            return field_ != nullptr ? *field_ : std::any_cast<ValueT>(reflectionProperty_->get(source_));
         }
 
-        // Writes value into the bound field and fires onValueChanged - but
-        // only if value actually differs from the field's current value
-        // (matching e.g. SubView::setBounds()'s onSizeChanged).
+        // Writes value through to the field or the reflection property
+        // (whichever this was registered against) and fires
+        // onValueChanged - but only if value actually differs from the
+        // current one (matching e.g. SubView::setBounds()'s
+        // onSizeChanged).
         void set(ConstValueRef value) {
-            if (*field_ == value) {
+            if (get() == value) {
                 return;
             }
 
-            *field_ = value;
+            if (field_ != nullptr) {
+                *field_ = value;
+            } else {
+                reflectionProperty_->set(source_, std::any(value));
+            }
             onValueChanged(*this, typedSource(), field_);
         }
 
@@ -160,7 +210,7 @@ namespace newui {
         // to the caller.
         void interpolate(float t) override {
             if constexpr (std::is_arithmetic<ValueT>::value) {
-                float eased = ease(t, interpKind_);
+                float eased = detail::ease(t, interpKind_);
                 double value = static_cast<double>(interpStart_)
                     + (static_cast<double>(interpEnd_) - static_cast<double>(interpStart_)) * eased;
                 set(static_cast<ValueT>(value));
@@ -227,23 +277,13 @@ namespace newui {
         friend class PropertyManager;
 
         ObservableProperty(const std::string& name, SourceT* source, ValueT* field)
-            : PropertyBase(name, source), field_(field) {}
+            : PropertyBase(name, source), field_(field), reflectionProperty_(nullptr) {}
 
-        static float ease(float t, InterpolationKind kind) {
-            switch (kind) {
-                case InterpolationKind::EaseIn:
-                    return t * t;
-                case InterpolationKind::EaseOut:
-                    return t * (2.0f - t);
-                case InterpolationKind::EaseInOut:
-                    return t < 0.5f ? 2.0f * t * t : 1.0f - 2.0f * (1.0f - t) * (1.0f - t);
-                case InterpolationKind::Linear:
-                default:
-                    return t;
-            }
-        }
+        ObservableProperty(const std::string& name, SourceT* source, const reflection::Property* reflectionProperty)
+            : PropertyBase(name, source), field_(nullptr), reflectionProperty_(reflectionProperty) {}
 
         ValueT* field_;
+        const reflection::Property* reflectionProperty_;
         ValueT interpStart_{};
         ValueT interpEnd_{};
         InterpolationKind interpKind_ = InterpolationKind::Linear;
@@ -310,6 +350,62 @@ namespace newui {
         template<typename ValueT>
         static ObservableProperty<void, ValueT>* registerProperty(std::nullptr_t, ValueT* field, const std::string& name) {
             return registerProperty<void, ValueT>(static_cast<void*>(nullptr), field, name);
+        }
+
+        // Same as the field-address overload above, but binds through a
+        // named property already registered via the reflection system
+        // (reflection.h/tools/reflectgen) instead of a raw field address -
+        // for a class like newui::shapes::Circle, whose fields are
+        // private specifically so a setter gets called instead of a raw
+        // field reached past (see shapes.h's own class comment). SourceT
+        // only needs to be a type reflectgen found a getter/setter pair
+        // for (every newui::shapes::Shape subclass already qualifies -
+        // see the reflectgen output when the newui target builds); no
+        // getter/setter *member function pointer* pair needs to be
+        // spelled out at the call site, just the property's own name:
+        //
+        //   auto* radius = PropertyManager::instance().registerProperty<float>(circle, "radius");
+        //
+        // ValueT can't be deduced from propertyName (a plain string), so
+        // it's always the explicit template argument here; SourceT still
+        // deduces from source the same way the field-address overload's
+        // does. Throws std::invalid_argument if SourceT was never
+        // registered with the reflection system at all, or has no
+        // property named propertyName - a mistyped name fails loudly here
+        // rather than on the first get()/set() that dereferences a null
+        // reflection::Property*.
+        template<typename ValueT, typename SourceT>
+        static ObservableProperty<SourceT, ValueT>* registerProperty(SourceT* source, const std::string& propertyName) {
+            static_assert(IsPodLike<ValueT>::value,
+                "PropertyManager::registerProperty only supports POD scalar types (int, float, ...) "
+                "or POD structs made up of them (e.g. newui::Point) for the property type.");
+
+            const reflection::Class* clazz = reflection::classinfo(std::type_index(typeid(SourceT)));
+            const reflection::Property* reflectionProperty = clazz != nullptr ? clazz->property(propertyName) : nullptr;
+            if (reflectionProperty == nullptr) {
+                throw std::invalid_argument(
+                    "PropertyManager::registerProperty<ValueT>(source, \"" + propertyName + "\"): "
+                    "no reflected property by that name was found for this SourceT - check that it was "
+                    "registered (registerReflectionData(), or whichever reflectgen entry point this "
+                    "process calls) before this runs, and that the name matches exactly.");
+            }
+
+            auto& pm = PropertyManager::instance();
+
+            ObservableProperty<SourceT, ValueT>* property =
+                new ObservableProperty<SourceT, ValueT>(propertyName, source, reflectionProperty);
+            Key key{ propertyName, static_cast<void*>(source) };
+
+            auto it = pm.properties_.find(key);
+            if (it != pm.properties_.end()) {
+                delete it->second;
+                it->second = property;
+            }
+            else {
+                pm.properties_.emplace(std::move(key), property);
+            }
+
+            return property;
         }
 
         // Returns the Property registered for (source, name), or nullptr

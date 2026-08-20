@@ -1,3 +1,4 @@
+#include "newui/newui.h"
 #include "newui/property.h"
 
 namespace newui {

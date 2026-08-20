@@ -1,3 +1,4 @@
+#include "newui/newui.h"
 #include "newui/curveinterpolation.h"
 
 #include "newui/animation.h"
