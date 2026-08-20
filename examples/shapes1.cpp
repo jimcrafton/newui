@@ -571,6 +571,34 @@ void AddTextShapes(newui::shapes::ShapeLayer& layer) {
     layer.addShape(transformed);
 }
 
+// Text flowing along a wavy Curve-shaped path - see TextOnPath's own
+// class comment (shapes.h) for why this exists: blend2d itself has no
+// built-in text-on-a-path layout (nothing like SVG's textPath), so this
+// walks the same Catmull-Rom curve Curve draws (shapes.cpp's shared
+// catmullRomSegments()/sampleCurve() helpers) by arc length, shaping and
+// placing each character's own glyph outline individually, rotated to
+// match the curve's tangent there. The curve itself is never drawn here -
+// only the placed glyphs are (points() is a guide, not a visible shape) -
+// same "buildPath() emits glyph geometry, not the path" trick Text uses.
+void AddTextOnPathShape(newui::shapes::ShapeLayer& layer) {
+    auto* textOnPath = new newui::shapes::TextOnPath();
+    textOnPath->points().push_back(newui::Point(30.0f, 1130.0f));
+    textOnPath->points().push_back(newui::Point(180.0f, 1070.0f));
+    textOnPath->points().push_back(newui::Point(330.0f, 1170.0f));
+    textOnPath->points().push_back(newui::Point(480.0f, 1070.0f));
+    textOnPath->points().push_back(newui::Point(630.0f, 1130.0f));
+
+    textOnPath->setText("text flowing along a wavy curve!");
+    textOnPath->font() = newui::FontManager::getSystemFont(newui::SystemUIFont::Message);
+    textOnPath->font().setSize(22.0f);
+    textOnPath->font().setBold(true);
+
+    textOnPath->style().fill().setColor(newui::Color(0xe8590cu, false));
+    textOnPath->style().fill().setKind(newui::gfx::PaintKind::Color);
+
+    layer.addShape(textOnPath);
+}
+
 // Writes layer out as JSON5 via ObjectWriter - the same single-object
 // write()/json5::to_string()/std::ofstream shape unittests/test_shapes.cpp's
 // own roundTrip() helper and examples/reflection2.cpp's demoDelegateAndEnum
@@ -601,7 +629,7 @@ int main() {
     printf("a glassmorphism panel (card, pill button, toggle switch) over a Point-gradient backdrop,\n");
     printf("a compositingOp blend-mode Venn diagram, a Conic-gradient color wheel, rotated squares,\n");
     printf("skewed squares, a thick-stroked glowing Curve, a gradient-filled Text title, a stroke-only\n");
-    printf("Text caption, and a rotated+skewed Text.\n");
+    printf("Text caption, a rotated+skewed Text, and Text placed along a wavy path (TextOnPath).\n");
 
     registerReflectionData();
 
@@ -612,7 +640,7 @@ int main() {
     app.setFrame(&frame);
 
     frame.setTitle("Shapes Example");
-    frame.setBounds(newui::Rect(10, 10, 760, 1060));
+    frame.setBounds(newui::Rect(10, 10, 760, 1220));
     frame.onClosed += FrameClosed;
 
     newui::RootView& root = frame.getView();
@@ -647,6 +675,7 @@ int main() {
     AddSkewedSquaresShapes(layer);
     AddGlowingStrokedCurveShape(layer);
     AddTextShapes(layer);
+    AddTextOnPathShape(layer);
 
     //WriteShapeLayerToDisk(layer, "shapes1_layer.json5");
 

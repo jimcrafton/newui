@@ -430,6 +430,61 @@ namespace newui::shapes {
         Font font_;
     };
 
+    // Path, but renders text() flowing along its points() (the same
+    // Catmull-Rom curve Curve draws) instead of drawing the curve itself
+    // - blend2d has no built-in text-on-a-path layout (nothing like SVG's
+    // textPath), so this builds one out of the same lower-level pieces
+    // Text already uses (BLFont::shape()/get_glyph_run_outlines()) plus a
+    // hand-rolled arc-length walk of the curve (shapes.cpp). Each
+    // character is shaped and measured on its own - no ligature/kerning-
+    // aware batch shaping across the whole string, no bidi/complex-script
+    // support - just enough to place ordinary Latin-ish text along a
+    // path, which is what every shapes1.cpp/shapes2.cpp demo actually
+    // needs. Like Text, buildPath() emits the placed glyph outlines
+    // themselves (not the underlying curve) into the path Shape::render()
+    // fills/strokes/glows, so fill/stroke/glow/dropShadow all apply to
+    // the placed text exactly like any other shape's silhouette; the
+    // curve itself is never drawn - add a separate Curve on top of the
+    // same points() if the guide path itself should also be visible.
+    class TextOnPath : public Path {
+    public:
+        TextOnPath() = default;
+        ~TextOnPath() override = default;
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& value) { text_ = value; }
+
+        Font& font() { return font_; }
+        const Font& font() const { return font_; }
+
+        // Distance, in pixels along the curve from its own start, to
+        // where the text begins - lets text slide along a fixed path
+        // (e.g. to animate it "flowing" along the curve over time)
+        // without moving the path itself. Text past the curve's end
+        // simply stops being placed rather than wrapping or extrapolating
+        // past it.
+        float startOffset() const { return startOffset_; }
+        void setStartOffset(float value) { startOffset_ = value; }
+
+        // A padded box around points()'s own bounding box (roughly one
+        // font-size in every direction, to allow for glyph ascent/descent
+        // and any curve bulge outside the raw control points) - not a
+        // tight fit around the actual placed glyphs the way Text::
+        // localBounds() is, since that would mean re-shaping the whole
+        // string here too. ShapeLayer::render()'s culling test only needs
+        // this to not *under*-estimate (see Shape::boundsWithEffects()'s
+        // own comment), so a generous approximation is fine.
+        Rect localBounds() const override;
+
+    protected:
+        void buildPath(BLPath& path) const override;
+
+    private:
+        std::string text_;
+        Font font_;
+        float startOffset_ = 0.0f;
+    };
+
     // A group of Shapes painted together, with their own opacity/
     // compositingOp applied as a unit on top of each shape's own - the
     // layer-vs-shape split Photoshop's own Layers panel has.
