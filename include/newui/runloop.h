@@ -4,11 +4,13 @@
 #include "newui/custom_message_constants.h"
 #include "newui/delegate.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace newui {
 
@@ -59,6 +61,54 @@ public:
         }
         postTaskMsg();
     }
+
+    // Opaque handle to a still-running postDelayed() timer - accepted by
+    // cancelDelayed(). kInvalidTimerHandle is never a real handle
+    // postDelayed() itself returns.
+    using TimerHandle = UINT_PTR;
+    static constexpr TimerHandle kInvalidTimerHandle = 0;
+
+    // Like postIdle(), but task only actually runs once per interval has
+    // elapsed, rather than on every idle tick - the formal version of the
+    // repeat-timer pattern ScrollBar::startRepeat()/Stepper::startRepeat()
+    // (controls.cpp) each currently hand-roll themselves (a postIdle task
+    // that checks its own steady_clock::time_point). Implemented via
+    // ::SetTimer(nullptr, 0, interval, TimerProc)/::KillTimer() rather
+    // than a hand-rolled scheduler: with hwnd == nullptr, WM_TIMER posts
+    // into the calling thread's own queue and DispatchMessage() invokes
+    // the callback directly (no window procedure involved), so this slots
+    // into run()'s existing GetMessage()/DispatchMessage() pump with no
+    // change needed to that loop's own idle-wait logic (which has a
+    // documented past CPU-usage bug in its own comments - better left
+    // alone). Also thread-safe by construction: a given timer's callback
+    // only ever fires on the thread that called ::SetTimer() for it -
+    // task therefore only ever runs on this RunLoop's own thread, same as
+    // every post()/postIdle() task, but with no aliveFlag_-style guard
+    // needed the way the existing hand-rolled repeats require.
+    //
+    // task's return convention matches postIdle(): false means "not
+    // finished, call again after another interval" (the underlying timer
+    // keeps running); true means "finished" - the timer is killed and
+    // task is dropped, it won't run again.
+    //
+    // Must be called from the same thread already running this RunLoop's
+    // own run() - same restriction as runModal() (see its own doc
+    // comment), for the same underlying reason: a Win32 timer is
+    // inherently thread-affine, unlike a plain post()/postIdle() task,
+    // so there's no cross-thread "wake the loop" path this could
+    // reasonably support instead. Throws std::runtime_error if called
+    // before run() has started, or from a different thread.
+    //
+    // Returns a handle cancelDelayed() accepts to stop this timer early -
+    // e.g. Caret needs to stop blinking the instant focus is lost or it's
+    // destroyed, not wait for its own next tick (whose captured task
+    // would otherwise fire again against a view that's gone).
+    TimerHandle postDelayed(std::chrono::milliseconds interval, std::function<bool()> task);
+
+    // Cancels a timer started via postDelayed() before it finishes on its
+    // own - a no-op if handle is kInvalidTimerHandle or already
+    // finished/cancelled. Same thread restriction as postDelayed() itself.
+    void cancelDelayed(TimerHandle handle);
 
     // Asks the loop to exit; run() returns once it processes this.
     void quit() {
@@ -155,7 +205,26 @@ private:
     std::deque<std::function<void()>> tasks_;
     std::deque<std::function<bool()>> idleTasks_;
 
+    // postDelayed()'s live timers, keyed by the handle ::SetTimer()
+    // returned. Only ever touched from this RunLoop's own thread (see
+    // postDelayed()'s own doc comment on why it doesn't support being
+    // called cross-thread the way tasks_/idleTasks_ do) - no mutex_
+    // guarding this one.
+    std::unordered_map<TimerHandle, std::function<bool()>> timerTasks_;
 
+    // Set for the duration of run(), cleared on return - lets the static
+    // TimerProc() below find its way back to whichever RunLoop instance
+    // is actually running on the current thread, since a Win32 TIMERPROC
+    // carries no user-data slot of its own. Safe as thread_local rather
+    // than needing to be keyed by thread id itself: TimerProc() for a
+    // given timer is only ever invoked on the thread that called
+    // ::SetTimer() for it, which is always the same thread currently
+    // running this RunLoop's own run().
+    static thread_local RunLoop* t_currentRunLoop;
+
+    static void CALLBACK TimerProc(HWND hwnd, UINT message, UINT_PTR idEvent, DWORD dwTime);
+
+    void checkCalledFromLoopThread(const char* what);
 
     void postTaskMsg() const ;
     void postQuitMsg() const ;

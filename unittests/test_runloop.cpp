@@ -335,6 +335,205 @@ TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
     EXPECT_TRUE(sawResult);
 }
 
+// postDelayed()/cancelDelayed() share runModal()'s "must be called from
+// the loop's own thread, after run() has started" guard (see
+// checkCalledFromLoopThread(), runloop.cpp) - covered the same way those
+// tests cover runModal()'s guard, above.
+
+TEST(RunLoopPostDelayed, ThrowsIfCalledBeforeRun) {
+    newui::RunLoop runLoop;
+
+    EXPECT_THROW(runLoop.postDelayed(std::chrono::milliseconds(10), [] { return true; }), std::runtime_error);
+}
+
+TEST(RunLoopPostDelayed, ThrowsIfCalledFromDifferentThreadThanRun) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    // Called from this test's own thread, not loopThread - a Win32 timer
+    // is thread-affine, so postDelayed() should refuse here the same way
+    // runModal() does, rather than silently create a timer that can never
+    // fire on the right thread.
+    EXPECT_THROW(runLoop.postDelayed(std::chrono::milliseconds(10), [] { return true; }), std::runtime_error);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostDelayed, CancelDelayedThrowsIfCalledFromDifferentThreadThanRun) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    EXPECT_THROW(runLoop.cancelDelayed(1), std::runtime_error);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostDelayed, RunsOnLoopThreadAfterInterval) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+    std::thread::id loopThreadId = loopThread.get_id();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+    std::thread::id ranOnThreadId;
+
+    // postDelayed() itself must run on the loop thread (see the guard
+    // tests above) - post() hops onto it first, same as every other test
+    // below that calls postDelayed()/cancelDelayed() for real.
+    runLoop.post([&]() {
+        runLoop.postDelayed(std::chrono::milliseconds(20), [&]() {
+            ranOnThreadId = std::this_thread::get_id();
+            {
+                std::lock_guard<std::mutex> lock(doneMutex);
+                ran = true;
+            }
+            doneCv.notify_all();
+            return true;  // done after one call
+            });
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(ranOnThreadId, loopThreadId);
+    EXPECT_NE(ranOnThreadId, std::this_thread::get_id());
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostDelayed, TaskIsRescheduledUntilItReturnsTrue) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    int callCount = 0;
+    constexpr int kCallsUntilDone = 3;
+
+    runLoop.post([&]() {
+        runLoop.postDelayed(std::chrono::milliseconds(15), [&]() {
+            std::lock_guard<std::mutex> lock(doneMutex);
+            ++callCount;
+            bool complete = callCount >= kCallsUntilDone;
+            if (complete) {
+                doneCv.notify_all();
+            }
+            return complete;
+            });
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5),
+            [&] { return callCount >= kCallsUntilDone; }));
+    }
+
+    // Give the timer a little more time to prove a finished task really
+    // was killed rather than happening to reach kCallsUntilDone on its way
+    // to firing again regardless (same shape as the postIdle equivalent
+    // above).
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+    {
+        std::lock_guard<std::mutex> lock(doneMutex);
+        EXPECT_EQ(callCount, kCallsUntilDone);
+    }
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostDelayed, CancelDelayedStopsATimerBeforeItsFirstTick) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    std::mutex mutex;
+    int callCount = 0;
+
+    runLoop.post([&]() {
+        newui::RunLoop::TimerHandle handle = runLoop.postDelayed(std::chrono::milliseconds(15), [&]() {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++callCount;
+            return false;  // would keep repeating if not cancelled
+            });
+
+        // Cancelled immediately, still on the loop thread, before it's had
+        // any chance to tick even once.
+        runLoop.cancelDelayed(handle);
+        });
+
+    // Several intervals' worth of time - if cancellation didn't actually
+    // take, callCount would be > 0 by now.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_EQ(callCount, 0);
+    }
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    int callCount = 0;
+    newui::RunLoop::TimerHandle handle = newui::RunLoop::kInvalidTimerHandle;
+
+    runLoop.post([&]() {
+        handle = runLoop.postDelayed(std::chrono::milliseconds(15), [&]() {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++callCount;
+            cv.notify_all();
+            return false;  // keeps repeating unless cancelled
+            });
+        });
+
+    // Let it tick at least once for real before cancelling.
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(5), [&] { return callCount >= 1; }));
+    }
+
+    int callCountAtCancel;
+    runLoop.post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        callCountAtCancel = callCount;
+        runLoop.cancelDelayed(handle);
+        });
+
+    // Several more intervals' worth of time - if cancellation didn't
+    // actually take, callCount would keep climbing well past this.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        // Allow one extra tick that may have already been queued (posted
+        // by SetTimer's own periodic re-arm) before the cancelling post()
+        // task actually ran.
+        EXPECT_LE(callCount, callCountAtCancel + 1);
+    }
+
+    runLoop.quit();
+    loopThread.join();
+}
+
 TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
     newui::RunLoop runLoop;
     std::thread loopThread([&runLoop]() { runLoop.run(); });

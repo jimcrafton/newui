@@ -1,11 +1,13 @@
 #include "newui/controls.h"
 #include "newui/application.h"
 #include "newui/color.h"
+#include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 #include <stdexcept>
 
 namespace newui {
@@ -1732,6 +1734,569 @@ namespace newui {
 
     void Toolbar::setOrientation(Orientation orientation) {
         static_cast<FlexLayout*>(layout())->setOrientation(orientation);
+    }
+
+    // -----------------------------------------------------------------
+    // TextController
+    // -----------------------------------------------------------------
+
+    TextController::TextController(Control& owner) : owner_(owner) {
+        // Same defaults/reasoning as Button's own font_/textColor_ setup
+        // (see Button::Button() above): UIColorManager::colorFor(), not
+        // Color::fromSystemColor(), since only the former tracks the
+        // modern Light/Dark mode setting.
+        font_ = FontManager::getSystemFont(SystemUIFont::Message);
+        textColor_ = UIColorManager::colorFor(UIColorRole::ControlText);
+
+        caret_.onVisibilityChanged.add(this, &TextController::handleCaretVisibilityChanged);
+
+        // Any model_ mutation (typed input, a future paste, or a direct
+        // programmatic setText()/insert() call) marks owner_ dirty on
+        // its own via Model::updateAllViews() - handlers below never
+        // need to call owner_.style().markDirty() themselves after
+        // editing model_.
+        model_.addView(&owner_);
+
+        model_.onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+        model_.onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+
+        // Always created (see this class's own doc comment on why
+        // scrolling is internal), always a real child of owner_ so it
+        // paints/hit-tests through the ordinary SubView machinery -
+        // starts invisible; paint() below is what decides, every time,
+        // whether content actually needs it.
+        vScrollBar_ = new ScrollBar();
+        vScrollBar_->setVisible(false);
+        vScrollBar_->onValueChanged.add(this, &TextController::handleScrollBarValueChanged);
+        owner_.addChild(vScrollBar_);
+    }
+
+    SyncReturn TextController::handleCaretVisibilityChanged(text::Caret& sender) {
+        owner_.style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleGotFocus() {
+        caret_.start(Application::instance().runLoop());
+        // start()/setPosition() below deliberately don't fire
+        // onVisibilityChanged themselves (see Caret's own doc comment -
+        // "the caller already knows the outcome at the call site") - this
+        // markDirty() is that caller's half of the contract. Confirmed
+        // live as a real, easy-to-miss gap: without it, a freshly
+        // (re)focused caret doesn't actually appear until whatever the
+        // next blink tick happens to be, up to a full blink interval
+        // later, reading as "laggy" focus/click response.
+        owner_.style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleLostFocus() {
+        caret_.stop();
+        owner_.style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    Point TextController::toLayoutSpace(const Point& localPt) const {
+        Rect clientBounds = owner_.getClientBounds();
+        return Point(localPt.x - clientBounds.left(), localPt.y - clientBounds.top() + scrollOffsetY_);
+    }
+
+    SyncReturn TextController::handleScrollBarValueChanged(ScrollBar& sender) {
+        scrollOffsetY_ = sender.value();
+        owner_.style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    void TextController::ensureCaretVisible(float viewportHeight) {
+        Point caretTopLeft;
+        float caretHeight = 0.0f;
+        layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
+        if (caretHeight <= 0.0f) {
+            return;
+        }
+        float newValue = vScrollBar_->value();
+        if (caretTopLeft.y < newValue) {
+            newValue = caretTopLeft.y;
+        } else if (caretTopLeft.y + caretHeight > newValue + viewportHeight) {
+            newValue = caretTopLeft.y + caretHeight - viewportHeight;
+        }
+        // setValue() clamps and no-ops (no onValueChanged, no markDirty())
+        // if this doesn't actually change anything - safe to call every
+        // paint() unconditionally rather than only when a caret move just
+        // happened.
+        vScrollBar_->setValue(newValue);
+    }
+
+    SyncReturn TextController::handleMouseWheel(const Point& pt, float delta) {
+        if (!vScrollBar_->isVisible()) {
+            return SyncReturn::Ignored;
+        }
+        // Same delta convention (WM_MOUSEWHEEL's WHEEL_DELTA == 120.0f
+        // per notch) and "scroll opposite the wheel's sign" direction
+        // ScrollView::handleMouseWheel() already uses.
+        float notches = delta / 120.0f;
+        vScrollBar_->setValue(vScrollBar_->value() - notches * vScrollBar_->lineStep());
+        return SyncReturn::Handled;
+    }
+
+    void TextController::clearSelection() {
+        selectionAnchor_ = text::TextPosition();
+        selection_.clear();
+    }
+
+    void TextController::moveCaret(size_t newOffset, bool extendSelection, bool resetPreferredColumn) {
+        if (resetPreferredColumn) {
+            hasPreferredColumnX_ = false;
+        }
+        if (extendSelection) {
+            if (!selectionAnchor_.isValid()) {
+                selectionAnchor_ = caret_.position();
+            }
+            size_t anchorOffset = selectionAnchor_.offset();
+            size_t start = (anchorOffset < newOffset) ? anchorOffset : newOffset;
+            size_t length = (anchorOffset < newOffset) ? (newOffset - anchorOffset) : (anchorOffset - newOffset);
+            if (length > 0) {
+                selection_.setRange(text::TextRange(start, length));
+            } else {
+                selection_.clear();
+            }
+        } else {
+            clearSelection();
+        }
+        // setPosition() already resets the blink phase to solid/visible
+        // internally - markDirty() is what actually gets that (and any
+        // selection_ change above) onto screen immediately rather than
+        // waiting for the next blink tick (see handleGotFocus()'s own
+        // comment on why this is needed).
+        caret_.setPosition(text::TextPosition(newOffset));
+        owner_.style().markDirty();
+    }
+
+    void TextController::moveCaretVertically(bool up, bool extendSelection) {
+        Point currentTopLeft;
+        float currentHeight = 0.0f;
+        layoutEngine_.hitTestPosition(caret_.position(), currentTopLeft, currentHeight);
+        if (currentHeight <= 0.0f) {
+            // No layout built yet, or an invalid caret position - nothing
+            // sensible to navigate from.
+            return;
+        }
+
+        float targetX = hasPreferredColumnX_ ? preferredColumnX_ : currentTopLeft.x;
+        // A point safely inside the line above/below - half a line above
+        // currentTopLeft.y for up (currentTopLeft.y is already the *top*
+        // of the current line), one and a half lines below for down
+        // (skips past the rest of the current line into the next one).
+        float targetY = up ? (currentTopLeft.y - currentHeight * 0.5f) : (currentTopLeft.y + currentHeight * 1.5f);
+
+        text::TextPosition hitPos = layoutEngine_.hitTestPoint(Point(targetX, targetY));
+        if (!hitPos.isValid()) {
+            // Already on the first/last line - nothing above/below to
+            // move to (also where a genuinely single-line TextField
+            // always ends up, making this a harmless no-op there).
+            return;
+        }
+
+        if (!hasPreferredColumnX_) {
+            preferredColumnX_ = targetX;
+            hasPreferredColumnX_ = true;
+        }
+        moveCaret(hitPos.offset(), extendSelection, false);
+    }
+
+    namespace {
+        bool isTextEditingWordChar(wchar_t ch) {
+            return std::iswalnum(static_cast<wint_t>(ch)) != 0 || ch == L'_';
+        }
+    }
+
+    void TextController::selectWordAt(const Point& localPt) {
+        text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(localPt));
+        if (!hitPos.isValid()) {
+            return;
+        }
+
+        const std::wstring& text = model_.text();
+        if (text.empty()) {
+            clearSelection();
+            caret_.setPosition(text::TextPosition(0));
+            owner_.style().markDirty();
+            return;
+        }
+
+        size_t offset = (hitPos.offset() < text.size()) ? hitPos.offset() : (text.size() - 1);
+        if (!isTextEditingWordChar(text[offset])) {
+            clearSelection();
+            caret_.setPosition(hitPos);
+            owner_.style().markDirty();
+            return;
+        }
+
+        size_t start = offset;
+        while (start > 0 && isTextEditingWordChar(text[start - 1])) {
+            --start;
+        }
+        size_t end = offset;
+        while (end < text.size() && isTextEditingWordChar(text[end])) {
+            ++end;
+        }
+
+        selectionAnchor_ = text::TextPosition(start);
+        selection_.setRange(text::TextRange(start, end - start));
+        caret_.setPosition(text::TextPosition(end));
+        owner_.style().markDirty();
+    }
+
+    void TextController::selectAll() {
+        size_t length = model_.length();
+        if (length == 0) {
+            clearSelection();
+            caret_.setPosition(text::TextPosition(0));
+        } else {
+            selectionAnchor_ = text::TextPosition(0);
+            selection_.setRange(text::TextRange(0, length));
+            caret_.setPosition(text::TextPosition(length));
+        }
+        owner_.style().markDirty();
+    }
+
+    SyncReturn TextController::handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
+        if (!hitPos.isValid()) {
+            return SyncReturn::Ignored;
+        }
+
+        // Windows has no triple-click message - handleMouseDblClick()
+        // (below) already covers click 2 of a rapid sequence, so a plain
+        // handleMouseDown landing within the system double-click time/
+        // distance window right after that is click 3. Same timing/
+        // distance Windows' own double-click detection itself uses
+        // (::GetDoubleClickTime()/SM_CXDOUBLECLK/SM_CYDOUBLECLK).
+        auto now = std::chrono::steady_clock::now();
+        bool withinMultiClickWindow = clickCount_ > 0
+            && (now - lastClickTime_) <= std::chrono::milliseconds(::GetDoubleClickTime())
+            && std::abs(pt.x - lastClickPos_.x) <= (::GetSystemMetrics(SM_CXDOUBLECLK) / 2.0f)
+            && std::abs(pt.y - lastClickPos_.y) <= (::GetSystemMetrics(SM_CYDOUBLECLK) / 2.0f);
+
+        lastClickTime_ = now;
+        lastClickPos_ = pt;
+
+        if (withinMultiClickWindow && clickCount_ == 2) {
+            // Reset immediately (rather than letting it climb further) so
+            // a 4th rapid click starts a fresh sequence instead of
+            // chaining past "select everything".
+            clickCount_ = 0;
+            selectAll();
+            return SyncReturn::Handled;
+        }
+
+        clickCount_ = 1;
+        dragging_ = true;
+        moveCaret(hitPos.offset(), false);
+        // moveCaret(..., false) just went through clearSelection(), which
+        // resets selectionAnchor_ - re-set it now so a subsequent drag
+        // (handleMouseMove(), below) has a fixed anchor to extend from.
+        selectionAnchor_ = hitPos;
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        if (!dragging_) {
+            return SyncReturn::Ignored;
+        }
+        text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
+        if (!hitPos.isValid()) {
+            return SyncReturn::Ignored;
+        }
+        moveCaret(hitPos.offset(), true);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        bool wasDragging = dragging_;
+        dragging_ = false;
+        return wasDragging ? SyncReturn::Handled : SyncReturn::Ignored;
+    }
+
+    SyncReturn TextController::handleMouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        clickCount_ = 2;
+        lastClickTime_ = std::chrono::steady_clock::now();
+        lastClickPos_ = pt;
+        dragging_ = false;
+        selectWordAt(pt);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleKeyPress(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
+        wchar_t ch = static_cast<wchar_t>(keyCharVal);
+        // Control characters (Backspace/Tab/Enter/Escape/etc.) arrive
+        // here too via WM_CHAR - handleKeyDown() (VKeyCode-driven) is
+        // where those are actually handled, not this insertion path.
+        if (ch < 0x20 || ch == 0x7F) {
+            return SyncReturn::Ignored;
+        }
+
+        size_t insertAt;
+        if (!selection_.isEmpty()) {
+            text::TextRange range = selection_.ranges()[0];
+            clearSelection();
+            model_.replace(range, std::wstring(1, ch));
+            insertAt = range.start() + 1;
+        } else {
+            insertAt = caret_.position().isValid() ? caret_.position().offset() : model_.length();
+            model_.insert(insertAt, std::wstring(1, ch));
+            insertAt += 1;
+        }
+        caret_.setPosition(text::TextPosition(insertAt));
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
+        // Left/Right/Up/Down/Home/End below all go through moveCaret()/
+        // moveCaretVertically(), which extend selection_ from
+        // selectionAnchor_ when extend is true (Shift held) instead of
+        // just relocating the caret - see moveCaret()'s own doc comment
+        // (controls.h).
+        bool extend = (keyMask & kmShift) != 0;
+
+        switch (VKeyCode) {
+            case vkBackSpace: {
+                if (!selection_.isEmpty()) {
+                    text::TextRange range = selection_.ranges()[0];
+                    clearSelection();
+                    model_.remove(range);
+                    caret_.setPosition(text::TextPosition(range.start()));
+                } else if (caret_.position().isValid() && caret_.position().offset() > 0) {
+                    size_t pos = caret_.position().offset() - 1;
+                    model_.remove(text::TextRange(pos, 1));
+                    caret_.setPosition(text::TextPosition(pos));
+                }
+                return SyncReturn::Handled;
+            }
+            case vkDelete: {
+                if (!selection_.isEmpty()) {
+                    text::TextRange range = selection_.ranges()[0];
+                    clearSelection();
+                    model_.remove(range);
+                    caret_.setPosition(text::TextPosition(range.start()));
+                } else if (caret_.position().isValid() && caret_.position().offset() < model_.length()) {
+                    model_.remove(text::TextRange(caret_.position().offset(), 1));
+                }
+                return SyncReturn::Handled;
+            }
+            case vkLeftArrow: {
+                size_t current = caret_.position().isValid() ? caret_.position().offset() : 0;
+                moveCaret(current > 0 ? current - 1 : current, extend);
+                return SyncReturn::Handled;
+            }
+            case vkRightArrow: {
+                size_t current = caret_.position().isValid() ? caret_.position().offset() : model_.length();
+                moveCaret(current < model_.length() ? current + 1 : current, extend);
+                return SyncReturn::Handled;
+            }
+            case vkUpArrow: {
+                moveCaretVertically(true, extend);
+                return SyncReturn::Handled;
+            }
+            case vkDownArrow: {
+                moveCaretVertically(false, extend);
+                return SyncReturn::Handled;
+            }
+            case vkHome: {
+                // The start of the *current visual line*, not the whole
+                // document - correct unchanged for a single-line
+                // TextField too, since its one line's own lineRange()
+                // already starts at 0.
+                text::TextRange line = layoutEngine_.lineRange(caret_.position());
+                moveCaret(line.isValid() ? line.start() : 0, extend);
+                return SyncReturn::Handled;
+            }
+            case vkEnd: {
+                text::TextRange line = layoutEngine_.lineRange(caret_.position());
+                moveCaret(line.isValid() ? line.end() : model_.length(), extend);
+                return SyncReturn::Handled;
+            }
+            case vkReturn: {
+                // Not multiline (TextField) - leave the key alone
+                // entirely, for that caller's own onReturnPressed-style
+                // hook to react to instead (see TextField::handleKeyDown()).
+                if (!multiline_) {
+                    return SyncReturn::Ignored;
+                }
+                size_t insertAt;
+                if (!selection_.isEmpty()) {
+                    text::TextRange range = selection_.ranges()[0];
+                    clearSelection();
+                    model_.replace(range, L"\n");
+                    insertAt = range.start() + 1;
+                } else {
+                    insertAt = caret_.position().isValid() ? caret_.position().offset() : model_.length();
+                    model_.insert(insertAt, L"\n");
+                    insertAt += 1;
+                }
+                caret_.setPosition(text::TextPosition(insertAt));
+                return SyncReturn::Handled;
+            }
+            default:
+                return SyncReturn::Ignored;
+        }
+    }
+
+    SyncReturn TextController::handleModelBeforeChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind, bool& canChange) {
+        if (traits_.isReadOnly()) {
+            canChange = false;
+            return SyncReturn::Handled;
+        }
+        if (kind == text::CharChangeKind::Inserted && traits_.maxLength() > 0 && model_.length() >= traits_.maxLength()) {
+            canChange = false;
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement, bool& canChange) {
+        if (traits_.isReadOnly()) {
+            canChange = false;
+            return SyncReturn::Handled;
+        }
+        if (traits_.maxLength() > 0) {
+            size_t clampedLength = (range.length() > model_.length() - range.start()) ? (model_.length() - range.start()) : range.length();
+            size_t resultLength = model_.length() - clampedLength + replacement.size();
+            if (resultLength > traits_.maxLength()) {
+                canChange = false;
+            }
+        }
+        return SyncReturn::Handled;
+    }
+
+    void TextController::paint(BLContext& ctx, const Rect& clientBounds) {
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+
+        // Two-pass, same shape ScrollView::updateLayout() already uses
+        // for its own vBar_/hBar_ ("whether one bar is needed can change
+        // the space left for content"): lay out at the full width first;
+        // if multiline content turns out taller than clientBounds,
+        // reserve room for vScrollBar_ and rebuild at the narrower
+        // width. Narrowing text can only ever increase wrapped height,
+        // never reduce it, so this can't oscillate back to "doesn't need
+        // one" on the second pass.
+        float textWidth = clientBounds.width();
+        layoutEngine_.update(model_.storage(), font_, textWidth, clientBounds.height());
+
+        bool needsScrollBar = multiline_ && layoutEngine_.contentHeight() > clientBounds.height();
+        if (needsScrollBar) {
+            textWidth = (clientBounds.width() > kScrollBarThickness) ? (clientBounds.width() - kScrollBarThickness) : 0.0f;
+            layoutEngine_.update(model_.storage(), font_, textWidth, clientBounds.height());
+        }
+
+        vScrollBar_->setVisible(needsScrollBar);
+        if (needsScrollBar) {
+            float contentHeight = layoutEngine_.contentHeight();
+            vScrollBar_->setBounds(Rect(clientBounds.left() + textWidth, clientBounds.top(), kScrollBarThickness, clientBounds.height()));
+            vScrollBar_->setRange(0.0f, contentHeight);
+            vScrollBar_->setPageSize(clientBounds.height());
+            // One text line per lineStep() (used by both vScrollBar_'s
+            // own arrow-click stepping and, times a few lines, by
+            // handleMouseWheel()) - a single line's own height, from
+            // wherever the caret currently is, is as good a proxy as any
+            // for "one line" (this font's lines are all the same height
+            // regardless of content, so which line doesn't matter).
+            Point lineTopLeft;
+            float lineHeight = 0.0f;
+            layoutEngine_.hitTestPosition(caret_.position(), lineTopLeft, lineHeight);
+            vScrollBar_->setLineStep(lineHeight > 0.0f ? lineHeight : 16.0f);
+            ensureCaretVisible(clientBounds.height());
+        } else {
+            scrollOffsetY_ = 0.0f;
+        }
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+
+        if (!selection_.isEmpty()) {
+            // Selection highlight rects are plain BLContext fills (no
+            // intermediate D2D/WIC bitmap the way text/caret rendering
+            // below involves) - shifting them via an ordinary
+            // ctx.translate() is exactly as cheap regardless of
+            // scrollOffsetY_'s value, no need for renderer_'s own
+            // small-render-target trick here.
+            ctx.save();
+            ctx.translate(0.0f, -scrollOffsetY_);
+            std::vector<Rect> selectionRects;
+            for (const text::TextRange& range : selection_.ranges()) {
+                std::vector<Rect> rangeRects = layoutEngine_.hitTestRange(range);
+                selectionRects.insert(selectionRects.end(), rangeRects.begin(), rangeRects.end());
+            }
+            selection_.draw(ctx, selectionRects);
+            ctx.restore();
+        }
+
+        renderer_.render(ctx, static_cast<int>(textWidth), static_cast<int>(clientBounds.height()),
+            model_.text(), font_, textColor_, scrollOffsetY_);
+
+        if (caret_.isVisible()) {
+            Point caretTopLeft;
+            float caretHeight = 0.0f;
+            layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
+            caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight);
+        }
+
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
+    // TextField
+    // -----------------------------------------------------------------
+
+    TextField::TextField() : controller_(*this) {
+        setVisible(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
+
+        onGotFocus.add(this, &TextField::handleGotFocus);
+        onLostFocus.add(this, &TextField::handleLostFocus);
+        onMouseDown.add(this, &TextField::handleMouseDown);
+        onMouseMove.add(this, &TextField::handleMouseMove);
+        onMouseUp.add(this, &TextField::handleMouseUp);
+        onMouseDblClick.add(this, &TextField::handleMouseDblClick);
+        onKeyPress.add(this, &TextField::handleKeyPress);
+        onKeyDown.add(this, &TextField::handleKeyDown);
+        onMouseWheel.add(this, &TextField::handleMouseWheel);
+    }
+
+    SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
+        if (VKeyCode == vkReturn) {
+            onReturnPressed(*this);
+            return SyncReturn::Handled;
+        }
+        return controller_.handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
+    }
+
+    // -----------------------------------------------------------------
+    // TextControl
+    // -----------------------------------------------------------------
+
+    TextControl::TextControl() : controller_(*this) {
+        setVisible(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
+
+        controller_.setMultiline(true);
+
+        onGotFocus.add(this, &TextControl::handleGotFocus);
+        onLostFocus.add(this, &TextControl::handleLostFocus);
+        onMouseDown.add(this, &TextControl::handleMouseDown);
+        onMouseMove.add(this, &TextControl::handleMouseMove);
+        onMouseUp.add(this, &TextControl::handleMouseUp);
+        onMouseDblClick.add(this, &TextControl::handleMouseDblClick);
+        onKeyPress.add(this, &TextControl::handleKeyPress);
+        onKeyDown.add(this, &TextControl::handleKeyDown);
+        onMouseWheel.add(this, &TextControl::handleMouseWheel);
     }
 
 }

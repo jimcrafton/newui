@@ -562,3 +562,99 @@ TEST(Toolbar, SetOrientationSwitchesTheFlexLayoutAxis) {
     toolbar->destroy();
     delete toolbar;
 }
+
+// ---------------------------------------------------------------------
+// TextField - pure topology today (text-plan.md, Phase 1): owns a
+// newui::text TextModel/TextSelection/Caret/TextInputTraits and a
+// ThemedEditStyle for chrome, none of it painted or wired to real input
+// yet (Phases 2/3/5) - these tests only cover that composition, the same
+// scope the class itself is limited to right now.
+// ---------------------------------------------------------------------
+
+TEST(TextField, DefaultConstructedIsVisibleAndEmpty) {
+    auto* field = new TextField();
+
+    EXPECT_TRUE(field->isEnabled());
+    EXPECT_EQ(field->text(), L"");
+    EXPECT_TRUE(field->model().empty());
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, StyleIsThemedEditStyle) {
+    auto* field = new TextField();
+
+    EXPECT_NE(dynamic_cast<ThemedEditStyle*>(&field->style()), nullptr);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SetTextForwardsToModel) {
+    auto* field = new TextField();
+
+    field->setText(L"hello");
+
+    EXPECT_EQ(field->text(), L"hello");
+    EXPECT_EQ(field->model().text(), L"hello");
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, ModelAccessorReachesTheRealMutatorsAndEvents) {
+    auto* field = new TextField();
+    int onChangedCount = 0;
+    field->model().onChanged.add([&](Model&) {
+        ++onChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    field->model().insert(0, L"hi");
+
+    EXPECT_EQ(field->text(), L"hi");
+    EXPECT_EQ(onChangedCount, 1);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SelectionAccessorHoldsRealSelectionState) {
+    auto* field = new TextField();
+    EXPECT_TRUE(field->selection().isEmpty());
+
+    field->selection().setRange(text::TextRange(1, 3));
+
+    ASSERT_FALSE(field->selection().isEmpty());
+    EXPECT_EQ(field->selection().ranges()[0], text::TextRange(1, 3));
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, CaretAccessorHoldsRealCaretState) {
+    auto* field = new TextField();
+    EXPECT_FALSE(field->caret().isActive());
+
+    field->caret().setPosition(text::TextPosition(4));
+
+    EXPECT_EQ(field->caret().position(), text::TextPosition(4));
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, InputTraitsAccessorHoldsRealTraitsState) {
+    auto* field = new TextField();
+    EXPECT_FALSE(field->inputTraits().isReadOnly());
+
+    field->inputTraits().setReadOnly(true);
+    field->inputTraits().setMaxLength(10);
+
+    EXPECT_TRUE(field->inputTraits().isReadOnly());
+    EXPECT_EQ(field->inputTraits().maxLength(), 10u);
+
+    field->destroy();
+    delete field;
+}

@@ -30,6 +30,7 @@ add_executable(newui_tests
     test_controls.cpp
     test_themedata.cpp
     test_shapes.cpp
+    test_text.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

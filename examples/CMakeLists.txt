@@ -74,3 +74,18 @@ add_executable(shapes2
 )
 
 target_link_libraries(shapes2 PRIVATE newui)
+
+add_executable(directwrite1
+    directwrite1.cpp
+)
+
+target_link_libraries(directwrite1 PRIVATE newui d2d1 dwrite)
+
+
+add_executable(custom_text_rndr
+    custom_text_rndr.cpp
+)
+
+target_link_libraries(custom_text_rndr PRIVATE newui d2d1 dwrite)
+
+

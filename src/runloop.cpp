@@ -7,11 +7,13 @@
 
 
 namespace newui {
-	
+
+    thread_local RunLoop* RunLoop::t_currentRunLoop = nullptr;
 
     void RunLoop::run() {
 
         threadId_ = ::GetCurrentThreadId();
+        t_currentRunLoop = this;
 
         HRESULT hr = OleInitialize(NULL);
         if (!SUCCEEDED(hr)) {
@@ -152,7 +154,86 @@ namespace newui {
 
         OleUninitialize();
 
+        // Any postDelayed() timers still outstanding at this point belong
+        // to this thread's message queue, which is about to stop being
+        // pumped - kill them explicitly rather than leaving them to fire
+        // WM_TIMER messages nobody will ever process again.
+        for (auto& entry : timerTasks_) {
+            ::KillTimer(nullptr, entry.first);
+        }
+        timerTasks_.clear();
+        t_currentRunLoop = nullptr;
+
 		onEnd(*this);
+    }
+
+    void RunLoop::checkCalledFromLoopThread(const char* what) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!started_) {
+                throw std::runtime_error(std::string("newui::RunLoop::") + what + " called before run()");
+            }
+        }
+        if (::GetCurrentThreadId() != threadId_) {
+            throw std::runtime_error(std::string("newui::RunLoop::") + what + " called from a different thread than run()");
+        }
+    }
+
+    RunLoop::TimerHandle RunLoop::postDelayed(std::chrono::milliseconds interval, std::function<bool()> task) {
+        checkCalledFromLoopThread("postDelayed");
+
+        UINT_PTR elapse = static_cast<UINT_PTR>(interval.count());
+        UINT_PTR handle = ::SetTimer(nullptr, 0, elapse, &RunLoop::TimerProc);
+        if (handle == 0) {
+            throw std::runtime_error("newui::RunLoop::postDelayed: ::SetTimer failed");
+        }
+
+        timerTasks_[handle] = std::move(task);
+        return handle;
+    }
+
+    void RunLoop::cancelDelayed(TimerHandle handle) {
+        checkCalledFromLoopThread("cancelDelayed");
+
+        if (handle == kInvalidTimerHandle) {
+            return;
+        }
+
+        auto it = timerTasks_.find(handle);
+        if (it == timerTasks_.end()) {
+            return;
+        }
+
+        ::KillTimer(nullptr, handle);
+        timerTasks_.erase(it);
+    }
+
+    void CALLBACK RunLoop::TimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
+        RunLoop* loop = t_currentRunLoop;
+        if (loop == nullptr) {
+            return;
+        }
+
+        auto it = loop->timerTasks_.find(idEvent);
+        if (it == loop->timerTasks_.end()) {
+            return;
+        }
+
+        // Copied out rather than invoked in place - task itself may call
+        // postDelayed()/cancelDelayed() (e.g. rescheduling itself, or
+        // cancelling a *different* still-live timer), either of which
+        // would otherwise mutate timerTasks_ out from under the iterator
+        // this holds. The map's own entry for idEvent, if task() leaves it
+        // alone, still holds the real std::function untouched throughout.
+        std::function<bool()> task = it->second;
+        bool finished = task();
+        if (finished) {
+            ::KillTimer(nullptr, idEvent);
+            loop->timerTasks_.erase(idEvent);
+        }
+        // Not finished: ::SetTimer()'s own periodic re-arm already
+        // schedules the next WM_TIMER at the same interval - nothing
+        // further to do here.
     }
 
     void RunLoop::postTaskMsg() const
@@ -167,15 +248,7 @@ namespace newui {
 
     bool RunLoop::runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone)
     {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (!started_) {
-                throw std::runtime_error("newui::RunLoop::runModal called before run()");
-            }
-        }
-        if (::GetCurrentThreadId() != threadId_) {
-            throw std::runtime_error("newui::RunLoop::runModal called from a different thread than run()");
-        }
+        checkCalledFromLoopThread("runModal");
 
         onModalStart(*this);
 

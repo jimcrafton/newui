@@ -1,6 +1,7 @@
 // A tour of newui::Control-derived widgets (controls.h) - starts with
-// Progress, the first fleshed-out concrete Control (Button/EditControl/
-// TextControl are still empty stubs). Six rows, each a small horizontal
+// Progress, the first fleshed-out concrete Control (TextControl is still
+// an empty stub; TextField has real text-editing state - see text.h -
+// but no painting/input wired up yet). Six rows, each a small horizontal
 // FlexLayout pairing a text label (LabelStyle) with one Progress bar
 // demonstrating a different facet:
 //   1. A fixed 25% horizontal bar - the baseline.
@@ -478,6 +479,78 @@ int main() {
         }));
     stepperRow->addChild(stepper);
 
+
+    // TextField - real, fully interactive single-line text editing (see
+    // text-plan.md at the repo root for the phase-by-phase history):
+    // click/drag/double/triple-click selection, Shift+Arrow, typing,
+    // Backspace/Delete, all wired through newui::TextController.
+    auto* textFieldRow = new newui::SubView();
+    textFieldRow->setVisible(true);
+    textFieldRow->setDesiredSize(newui::Size(0.0f, 32.0f));
+    auto textFieldRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    textFieldRowLayout->setSpacing(12.0f);
+    textFieldRow->setLayout(std::move(textFieldRowLayout));
+    root.addChild(textFieldRow);
+
+    auto* textFieldLabel = new newui::Label();
+    textFieldLabel->setText("TextField:");
+    textFieldLabel->setDesiredSize(newui::Size(80.0f, 24.0f));
+    textFieldRow->addChild(textFieldLabel);
+
+    auto* textField = new newui::TextField();
+    textField->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    textField->setText(L"Hello, DirectWrite!");
+    textFieldRow->addChild(textField);
+
+    // Highlights "DirectWrite" (offsets 7-18 of "Hello, DirectWrite!") and
+    // pre-positions the caret at the very end of the text - just initial
+    // state, not shown yet: caret_'s blink doesn't start until this
+    // TextField actually gains real focus (a click - see
+    // TextController::handleGotFocus(), controls.cpp), same as any real
+    // text field. Don't call caret().start() manually here - forcing it
+    // active regardless of real focus makes this control (and any other
+    // one that does the same) show a blinking caret even while some
+    // *other* control actually has focus, which is exactly what
+    // confirmed live when both this and textControl (below) did it.
+    textField->selection().setRange(newui::text::TextRange(7, 11));
+    textField->caret().setPosition(newui::text::TextPosition(textField->text().size()));
+
+    // TextControl - the multi-line counterpart to TextField above, both
+    // thin View-integration shims around one shared newui::TextController
+    // (controls.h). Word-wraps for free (DirectWrite's own default
+    // DWRITE_WORD_WRAPPING_WRAP - TextLayoutEngine/TextRenderer never
+    // had to change for this), plus Up/Down line navigation and Enter
+    // inserting a real newline - both gated on TextController::
+    // isMultiline(), set true by this class's own constructor. No
+    // scrolling yet - content taller than its own bounds is just
+    // clipped.
+    auto* textControlRow = new newui::SubView();
+    textControlRow->setVisible(true);
+    textControlRow->setDesiredSize(newui::Size(0.0f, 100.0f));
+    auto textControlRowLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    textControlRowLayout->setSpacing(12.0f);
+    textControlRow->setLayout(std::move(textControlRowLayout));
+    root.addChild(textControlRow);
+
+    auto* textControlLabel = new newui::Label();
+    textControlLabel->setText("TextControl:");
+    textControlLabel->setDesiredSize(newui::Size(80.0f, 24.0f));
+    textControlRow->addChild(textControlLabel);
+
+    auto* textControl = new newui::TextControl();
+    textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    textControl->setText(
+        L"This is a multi-line TextControl.\n"
+        L"It word-wraps automatically, and Enter starts a new paragraph.\n"
+        L"Up/Down move between visual lines.\n"
+        L"This text is deliberately long enough to overflow the box's own height, "
+        L"so a vertical scrollbar should appear automatically on the right edge - "
+        L"try scrolling with the mouse wheel, dragging the scrollbar's thumb, or "
+        L"just clicking down here and pressing End/Down/Ctrl+End-style navigation "
+        L"to watch it auto-scroll into view as the caret moves past the bottom "
+        L"edge of what's currently visible.\n"
+        L"One more paragraph, just to be sure there's plenty to scroll through.");
+    textControlRow->addChild(textControl);
 
     /*
     auto* imageRow = new newui::SubView();
