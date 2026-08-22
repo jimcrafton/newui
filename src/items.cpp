@@ -69,6 +69,30 @@ namespace newui {
             }
             return std::string();
         }
+
+        // Small filled triangle - pointing right when collapsed, down
+        // when expanded - centered at (centerX, centerY). Hand-drawn
+        // (BLPath), not a themed TVP_GLYPH part - see TreeItem::paint()'s
+        // own doc comment (items.h) for why.
+        void paintExpandGlyph(BLContext& ctx, double centerX, double centerY, double size, bool expanded, BLRgba32 color) {
+            double half = size * 0.5;
+            BLPath path;
+            if (expanded) {
+                path.move_to(centerX - half, centerY - half * 0.6);
+                path.line_to(centerX + half, centerY - half * 0.6);
+                path.line_to(centerX, centerY + half * 0.6);
+            } else {
+                path.move_to(centerX - half * 0.6, centerY - half);
+                path.line_to(centerX - half * 0.6, centerY + half);
+                path.line_to(centerX + half * 0.6, centerY);
+            }
+            path.close();
+
+            ctx.save();
+            ctx.set_fill_style(color);
+            ctx.fill_path(path);
+            ctx.restore();
+        }
     }
 
     Item::Item() : style_(std::make_unique<ViewStyle>()) {
@@ -117,11 +141,26 @@ namespace newui {
         paintItemText(ctx, clientBounds(), valueToString(value), itemTextColor(*this));
     }
 
-    void TreeItem::paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, ItemController& controller) {
+    void TreeItem::paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, TreeController& controller) {
         Item::paint(ctx, rect);
-        Model* model = controller.model();
+
+        TreeModel* model = controller.model();
+        bool hasChildren = model != nullptr && model->hasChildren(path);
+
+        double indent = double(treeDepthOf(path)) * kTreeIndentWidth;
+        double glyphCenterX = clientBounds().left() + indent + kTreeGlyphWidth * 0.5;
+        double glyphCenterY = clientBounds().top() + clientBounds().size().height * 0.5;
+
+        if (hasChildren) {
+            paintExpandGlyph(ctx, glyphCenterX, glyphCenterY, kTreeGlyphWidth * 0.8, controller.isExpanded(path), itemTextColor(*this));
+        }
+
+        double textLeft = clientBounds().left() + indent + kTreeGlyphWidth;
+        Rect textRect(float(textLeft), clientBounds().top(),
+            clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
+
         std::any value = model != nullptr ? model->value(path) : std::any();
-        paintItemText(ctx, clientBounds(), valueToString(value), itemTextColor(*this));
+        paintItemText(ctx, textRect, valueToString(value), itemTextColor(*this));
     }
 
     void TableItem::paint(BLContext& ctx, const Rect& rect, std::size_t row, std::size_t col, ItemController& controller) {

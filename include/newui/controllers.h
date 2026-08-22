@@ -1,6 +1,8 @@
 #pragma once
 #include <cstddef>
 #include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -481,6 +483,14 @@ namespace newui {
     // ItemController for a tree, addressed by path - the sequence of
     // child indices from the root down to a given node (an empty path is
     // the root itself).
+    //
+    // A tree needs one real thing ListController didn't: turning "which
+    // nodes are currently visible" (real hierarchy + expand/collapse
+    // state) into the same flat, indexable row space ListController
+    // already offered for free (a plain 0-based item count). visibleCount()/
+    // pathAt() below are that flattening - see their own doc comments for
+    // why the result is cached, unlike every other O(itemCount()) loop in
+    // this class (and in ListController) that deliberately isn't.
     class TreeController : public ItemController {
     public:
         TreeController();
@@ -488,6 +498,171 @@ namespace newui {
         // Default ignores path entirely - see ListController::createItem()'s
         // own comment.
         virtual TreeItem* createItem(const std::vector<std::size_t>& path);
+
+        // Narrows Controller's own model()/setModel(Model*) to TreeModel*
+        // specifically - same dynamic_cast+throw pattern
+        // ListController::model()/setModel() already use (their own doc
+        // comment explains the non-virtual-Controller::setModel()-bypass
+        // this catches) - see models.h's TreeModel for why this type.
+        TreeModel* model() {
+            Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            TreeModel* asTreeModel = dynamic_cast<TreeModel*>(base);
+            if (asTreeModel == nullptr) {
+                throw std::runtime_error("TreeController::model: attached Model is not a TreeModel");
+            }
+            return asTreeModel;
+        }
+
+        const TreeModel* model() const {
+            const Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            const TreeModel* asTreeModel = dynamic_cast<const TreeModel*>(base);
+            if (asTreeModel == nullptr) {
+                throw std::runtime_error("TreeController::model: attached Model is not a TreeModel");
+            }
+            return asTreeModel;
+        }
+
+        void setModel(TreeModel* model) {
+            if (model != nullptr && dynamic_cast<TreeModel*>(model) == nullptr) {
+                throw std::runtime_error("TreeController::setModel: model is not a TreeModel");
+            }
+            Controller::setModel(model);
+            invalidateVisibleList();
+        }
+
+        // Whether path is currently expanded (its own children, if any,
+        // count toward visibleCount()/pathAt() below) - collapsed
+        // (false) for any path never explicitly expanded, including one
+        // that doesn't currently exist in the model at all.
+        bool isExpanded(const std::vector<std::size_t>& path) const {
+            return expandedPaths_.count(path) != 0;
+        }
+
+        // Setting a path's expand state to what it already was is a
+        // no-op - no invalidation, no onDataChanged. Otherwise
+        // invalidates the cached visible list (below) and fires
+        // onDataChanged, same as a real model mutation - a hosting
+        // TreeView needs to know either way that "how many visible rows,
+        // and which ones" may have changed.
+        void setExpanded(const std::vector<std::size_t>& path, bool expanded) {
+            bool wasExpanded = isExpanded(path);
+            if (wasExpanded == expanded) {
+                return;
+            }
+            if (expanded) {
+                expandedPaths_.insert(path);
+            } else {
+                expandedPaths_.erase(path);
+            }
+            invalidateVisibleList();
+            onDataChanged(*this);
+        }
+
+        void toggleExpanded(const std::vector<std::size_t>& path) {
+            setExpanded(path, !isExpanded(path));
+        }
+
+        // How many rows are currently visible, given the real hierarchy
+        // (TreeModel::childCount()) and expand state above - the tree
+        // analog of ListController::itemCount(). Rebuilds the cached
+        // visible list first if anything invalidated it since the last
+        // call (see rebuildVisibleListIfNeeded()'s own doc comment).
+        std::size_t visibleCount() const {
+            rebuildVisibleListIfNeeded();
+            return visiblePaths_.size();
+        }
+
+        // Which tree path a given visible row actually is - the other
+        // half of the flattening visibleCount() above describes.
+        // Undefined for visibleIndex >= visibleCount() (matches
+        // std::vector::operator[]'s own contract - callers here are
+        // always TreeView's own already-range-checked loops/lookups).
+        const std::vector<std::size_t>& pathAt(std::size_t visibleIndex) const {
+            rebuildVisibleListIfNeeded();
+            return visiblePaths_[visibleIndex];
+        }
+
+        // The visible row index path is currently sitting at, if it's
+        // visible at all (every ancestor expanded) - std::nullopt
+        // otherwise (path is collapsed-away, or doesn't exist). A linear
+        // search over the cached visible list - used by TreeView's own
+        // Shift+click range-select to resolve its anchor path back to a
+        // row index.
+        std::optional<std::size_t> visibleIndexOf(const std::vector<std::size_t>& path) const {
+            rebuildVisibleListIfNeeded();
+            for (std::size_t i = 0; i < visiblePaths_.size(); ++i) {
+                if (visiblePaths_[i] == path) {
+                    return i;
+                }
+            }
+            return std::nullopt;
+        }
+
+        float defaultItemHeight() const { return defaultItemHeight_; }
+        void setDefaultItemHeight(float height) { defaultItemHeight_ = height; }
+
+        // The row height for visibleIndex - default just returns
+        // defaultItemHeight() regardless of index; a subclass overrides
+        // this to vary height per row (by depth, or by that row's own
+        // content) - same idea as ListController::itemHeight(), just
+        // keyed by visible row index instead of a flat item index.
+        virtual float itemHeight(std::size_t visibleIndex) const { return defaultItemHeight_; }
+
+        // Sum of itemHeight(i) for every i in [0, visibleCount()) - same
+        // O(visibleCount()) plain-loop shape (not cached) as
+        // ListController::totalHeight(); the expensive part (flattening
+        // the real hierarchy) is what's cached, in rebuildVisibleListIfNeeded()
+        // below, not this summation.
+        float totalHeight() const;
+
+        // Sum of itemHeight(i) for every i < visibleIndex - same shape
+        // as ListController::itemOffset().
+        float itemOffset(std::size_t visibleIndex) const;
+
+        // The visible row index whose row rect contains contentY - same
+        // shape as ListController::indexAt().
+        std::size_t indexAt(float contentY) const;
+
+        // Fired whenever model()'s own onChanged fires, or expand state
+        // actually changes (setExpanded()/toggleExpanded() above) - a
+        // real TreeView (controls.h) subscribes to this rather than to
+        // model()->onChanged directly, same View->Controller->Model chain
+        // reasoning ListController::onDataChanged already documents.
+        typedef Delegate<TreeController> DataChangedDelegate;
+        DataChangedDelegate onDataChanged;
+
+    protected:
+        SyncReturn modelChanged(Model& sender) override {
+            invalidateVisibleList();
+            onDataChanged(*this);
+            return SyncReturn::Handled;
+        }
+
+    private:
+        void invalidateVisibleList() { visibleListDirty_ = true; }
+
+        // Rebuilds visiblePaths_ from scratch (a recursive-descent walk:
+        // TreeModel::childCount() + isExpanded() at each level) only if
+        // invalidateVisibleList() was called since the last rebuild -
+        // unlike ListController's own deliberately-uncached O(n) loops
+        // (Part 60's own reasoning: cheap enough to just redo per call),
+        // this cache is load-bearing: TreeView::paint()'s per-row loop
+        // calls pathAt() once per visible row, and re-walking the whole
+        // hierarchy from scratch on every one of those would be real,
+        // avoidable O(n) work per row instead of once per frame.
+        void rebuildVisibleListIfNeeded() const;
+        void appendVisibleChildren(const std::vector<std::size_t>& parentPath) const;
+
+        std::set<std::vector<std::size_t>> expandedPaths_;
+        mutable std::vector<std::vector<std::size_t>> visiblePaths_;
+        mutable bool visibleListDirty_ = true;
+        float defaultItemHeight_ = 20.0f;
     };
 
     // ItemController for a table, addressed by (row, col).

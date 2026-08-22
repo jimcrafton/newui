@@ -166,6 +166,34 @@ TEST(Model, SizeIsOverridableByASubclass) {
     EXPECT_EQ(model.size(), 42u);
 }
 
+TEST(TreeModel, ChildCountAndHasChildrenDefaultToZeroAndFalse) {
+    TreeModel model;
+    EXPECT_EQ(model.childCount({}), 0u);
+    EXPECT_FALSE(model.hasChildren({}));
+    EXPECT_EQ(model.childCount({ 0u, 1u }), 0u);
+}
+
+namespace {
+
+class FixedTreeModel : public TreeModel {
+public:
+    std::size_t rootChildren = 0;
+    std::size_t childCount(const std::vector<std::size_t>& path) const override {
+        return path.empty() ? rootChildren : 0u;
+    }
+};
+
+}  // namespace
+
+TEST(TreeModel, ChildCountAndHasChildrenAreOverridableByASubclass) {
+    FixedTreeModel model;
+    EXPECT_FALSE(model.hasChildren({}));
+
+    model.rootChildren = 3;
+    EXPECT_EQ(model.childCount({}), 3u);
+    EXPECT_TRUE(model.hasChildren({}));
+}
+
 // ---------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------

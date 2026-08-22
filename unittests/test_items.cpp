@@ -43,6 +43,34 @@ public:
     std::size_t size() const override { return rows.size(); }
 };
 
+// Model stub for a small, fixed 2-level hierarchy: the root has 2
+// children (0, 1); child 0 has 2 children of its own (0/0, 0/1); child 1
+// and both of 0's children are leaves. Enough real structure to exercise
+// TreeController's own visible-row flattening across expand/collapse.
+class StubTreeModel : public TreeModel {
+public:
+    std::size_t childCount(const std::vector<std::size_t>& path) const override {
+        if (path.empty()) {
+            return 2;
+        }
+        if (path.size() == 1 && path[0] == 0) {
+            return 2;
+        }
+        return 0;
+    }
+
+    std::any value(const std::any& key) override {
+        if (const std::vector<std::size_t>* path = std::any_cast<std::vector<std::size_t>>(&key)) {
+            std::string label = "node";
+            for (std::size_t i : *path) {
+                label += "-" + std::to_string(i);
+            }
+            return label;
+        }
+        return std::any();
+    }
+};
+
 }  // namespace
 
 // ---------------------------------------------------------------------
@@ -117,6 +145,93 @@ TEST(TreeController, CreateItemPoolsAndReuses) {
 
     EXPECT_EQ(first, second);
     controller.releaseItem(second);
+}
+
+// ---------------------------------------------------------------------
+// TreeController - flattening a real hierarchy (StubTreeModel) into a
+// visible-row space, driven by expand/collapse state.
+// ---------------------------------------------------------------------
+
+TEST(TreeController, VisibleCountIsRootChildCountByDefaultAllCollapsed) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    ASSERT_EQ(controller.visibleCount(), 2u);
+    EXPECT_EQ(controller.pathAt(0), (std::vector<std::size_t>{ 0u }));
+    EXPECT_EQ(controller.pathAt(1), (std::vector<std::size_t>{ 1u }));
+}
+
+TEST(TreeController, ExpandingANodeRevealsItsChildrenInPlace) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    controller.setExpanded({ 0u }, true);
+
+    ASSERT_EQ(controller.visibleCount(), 4u);
+    EXPECT_EQ(controller.pathAt(0), (std::vector<std::size_t>{ 0u }));
+    EXPECT_EQ(controller.pathAt(1), (std::vector<std::size_t>{ 0u, 0u }));
+    EXPECT_EQ(controller.pathAt(2), (std::vector<std::size_t>{ 0u, 1u }));
+    EXPECT_EQ(controller.pathAt(3), (std::vector<std::size_t>{ 1u }));
+}
+
+TEST(TreeController, CollapsingHidesChildrenAgain) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    controller.toggleExpanded({ 0u });
+    ASSERT_EQ(controller.visibleCount(), 4u);
+
+    controller.toggleExpanded({ 0u });
+    EXPECT_EQ(controller.visibleCount(), 2u);
+}
+
+TEST(TreeController, VisibleIndexOfFindsAVisiblePathAndNulloptForAHiddenOne) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    EXPECT_EQ(controller.visibleIndexOf({ 0u, 0u }), std::nullopt) << "0/0 is hidden while 0 is collapsed";
+
+    controller.setExpanded({ 0u }, true);
+    ASSERT_TRUE(controller.visibleIndexOf({ 0u, 0u }).has_value());
+    EXPECT_EQ(*controller.visibleIndexOf({ 0u, 0u }), 1u);
+}
+
+TEST(TreeController, OnDataChangedFiresWhenExpandStateActuallyChanges) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    int dataChangedCount = 0;
+    controller.onDataChanged.add([&](TreeController&) {
+        ++dataChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    controller.setExpanded({ 0u }, false);  // already collapsed - no-op
+    EXPECT_EQ(dataChangedCount, 0);
+
+    controller.setExpanded({ 0u }, true);
+    EXPECT_EQ(dataChangedCount, 1);
+
+    controller.toggleExpanded({ 0u });
+    EXPECT_EQ(dataChangedCount, 2);
+}
+
+TEST(TreeController, TotalHeightItemOffsetAndIndexAtOverVisibleRows) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+    controller.setDefaultItemHeight(20.0f);
+    controller.setExpanded({ 0u }, true);  // 4 visible rows now
+
+    EXPECT_FLOAT_EQ(controller.totalHeight(), 80.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(2), 40.0f);
+    EXPECT_EQ(controller.indexAt(41.0f), 2u);
+    EXPECT_EQ(controller.indexAt(80.0f), 4u) << "at/past totalHeight() -> one past the last visible row";
 }
 
 TEST(ListController, ItemCountIsZeroWithNoModel) {
@@ -246,5 +361,51 @@ TEST(Item, PaintSetsClientBoundsFromStyle) {
     EXPECT_FLOAT_EQ(item->clientBounds().size().width, rect.size().width);
     EXPECT_FLOAT_EQ(item->clientBounds().size().height, rect.size().height);
 
+    controller.releaseItem(item);
+}
+
+// ---------------------------------------------------------------------
+// TreeItem paint() - takes TreeController&, not the generic
+// ItemController& ListItem/TableItem use (see TreeItem's own class
+// comment, items.h, for why).
+// ---------------------------------------------------------------------
+
+TEST(TreeItem, PaintWithNoModelDoesNotCrash) {
+    TreeController controller;
+    TreeItem* item = controller.createItem({});
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedContext(), Rect(0.0f, 0.0f, 64.0f, 20.0f), {}, controller);
+
+    controller.releaseItem(item);
+}
+
+TEST(TreeItem, PaintForALeafAndAnExpandableNodeBothDoNotCrash) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+
+    // Path {0} has children (expandable, draws a glyph); path {1} is a
+    // leaf (no glyph, same reserved indent space).
+    TreeItem* expandableItem = controller.createItem({ 0u });
+    ASSERT_NE(expandableItem, nullptr);
+    expandableItem->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), { 0u }, controller);
+    controller.releaseItem(expandableItem);
+
+    TreeItem* leafItem = controller.createItem({ 1u });
+    ASSERT_NE(leafItem, nullptr);
+    leafItem->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), { 1u }, controller);
+    controller.releaseItem(leafItem);
+}
+
+TEST(TreeItem, PaintAtADeeperPathDoesNotCrash) {
+    StubTreeModel model;
+    TreeController controller;
+    controller.setModel(&model);
+    controller.setExpanded({ 0u }, true);
+
+    TreeItem* item = controller.createItem({ 0u, 1u });
+    ASSERT_NE(item, nullptr);
+    item->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), { 0u, 1u }, controller);
     controller.releaseItem(item);
 }

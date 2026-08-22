@@ -1367,3 +1367,205 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     scrollView->destroy();
     delete scrollView;
 }
+
+// ---------------------------------------------------------------------
+// TreeView - the hierarchical counterpart to ListView above. Same
+// multi-selection/hover/ScrollView-hosting coverage, plus the tree-
+// specific piece: clicking the expand/collapse glyph toggles expand
+// without changing selection, and vice versa.
+// ---------------------------------------------------------------------
+
+namespace {
+
+// A small, fixed 2-level hierarchy - the root has 2 children (0, 1);
+// child 0 has 2 children of its own (0/0, 0/1); everything else is a
+// leaf. Same shape test_items.cpp's own StubTreeModel uses.
+class StubTreeRowModel : public TreeModel {
+public:
+    std::size_t childCount(const std::vector<std::size_t>& path) const override {
+        if (path.empty()) {
+            return 2;
+        }
+        if (path.size() == 1 && path[0] == 0) {
+            return 2;
+        }
+        return 0;
+    }
+
+    std::any value(const std::any& key) override {
+        if (const std::vector<std::size_t>* path = std::any_cast<std::vector<std::size_t>>(&key)) {
+            std::string label = "node";
+            for (std::size_t i : *path) {
+                label += "-" + std::to_string(i);
+            }
+            return label;
+        }
+        return std::any();
+    }
+};
+
+void ClickTreeRow(TreeView* treeView, std::size_t visibleIndex, float xOffsetFromLeft, std::uint32_t keyMask) {
+    float clickY = treeView->getClientBounds().top() + (float(visibleIndex) + 0.5f) * treeView->rowHeight();
+    float clickX = treeView->getClientBounds().left() + xOffsetFromLeft;
+    treeView->onMouseDown(*treeView, Point(clickX, clickY), 0, keyMask);
+}
+
+}  // namespace
+
+TEST(TreeView, DefaultConstructedHasZeroVisibleRowsAndNoSelection) {
+    auto* treeView = new TreeView();
+    EXPECT_EQ(treeView->controller().visibleCount(), 0u);
+    EXPECT_FALSE(treeView->selectedPath().has_value());
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ContentSizeReflectsOnlyCurrentlyVisibleRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    // Collapsed: just the 2 root children.
+    Size collapsedSize = treeView->contentSize();
+    EXPECT_FLOAT_EQ(collapsedSize.height, 2.0f * treeView->rowHeight());
+
+    treeView->controller().setExpanded({ 0u }, true);
+    Size expandedSize = treeView->contentSize();
+    EXPECT_FLOAT_EQ(expandedSize.height, 4.0f * treeView->rowHeight());
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ClickingTheGlyphTogglesExpandWithoutSelecting) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    EXPECT_FALSE(treeView->controller().isExpanded({ 0u }));
+
+    // Row 0 (path {0}) is at depth 0, so its glyph sits at local X in
+    // [0, kTreeGlyphWidth) - well inside a click at x=4.
+    ClickTreeRow(treeView, 0, 4.0f, 0);
+
+    EXPECT_TRUE(treeView->controller().isExpanded({ 0u }));
+    EXPECT_FALSE(treeView->selectedPath().has_value()) << "clicking the glyph should not select the row";
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ClickingTheLabelSelectsWithoutTogglingExpand) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    // Well to the right of the glyph - the row's own label text.
+    ClickTreeRow(treeView, 0, 50.0f, 0);
+
+    ASSERT_TRUE(treeView->selectedPath().has_value());
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }));
+    EXPECT_FALSE(treeView->controller().isExpanded({ 0u })) << "clicking the label should not toggle expand";
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, CtrlClickTogglesSelectionAcrossRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    ClickTreeRow(treeView, 0, 50.0f, 0);        // select {0}
+    ClickTreeRow(treeView, 1, 50.0f, kmCtrl);   // add {1}
+
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ShiftClickSelectsARangeAcrossExpandedRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
+
+    ClickTreeRow(treeView, 0, 50.0f, 0);         // anchor at visible row 0 ({0})
+    ClickTreeRow(treeView, 2, 50.0f, kmShift);   // range to visible row 2 ({0,1})
+
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u }, { 0u, 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, HoverHighlightIsEnabledByDefaultAndTracksMouseMove) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    EXPECT_TRUE(treeView->hoverHighlightEnabled());
+
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    float row1Y = treeView->getClientBounds().top() + 1.5f * treeView->rowHeight();
+    treeView->onMouseMove(*treeView, Point(50.0f, row1Y), 0, 0);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    treeView->paint(ctx);  // must not crash while a row is hovered
+
+    treeView->onMouseLeft(*treeView, Point(50.0f, row1Y), 0, 0);
+    treeView->paint(ctx);
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u, 1u });
+
+    TreeItem* before = treeView->controller().createItem({});
+    treeView->controller().releaseItem(before);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    treeView->paint(ctx);
+
+    TreeItem* after = treeView->controller().createItem({});
+    EXPECT_EQ(before, after) << "expected every row's TreeItem, across the whole paint() call, to reuse the same pooled instance";
+    treeView->controller().releaseItem(after);
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* treeView = new TreeView();
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);
+    scrollView->addChild(treeView);
+
+    EXPECT_TRUE(treeView->childViews().empty());
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    treeView->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
+}

@@ -285,6 +285,63 @@ namespace newui
         return static_cast<TreeItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
     }
 
+    float TreeController::totalHeight() const {
+        float total = 0.0f;
+        std::size_t count = visibleCount();
+        for (std::size_t i = 0; i < count; ++i) {
+            total += itemHeight(i);
+        }
+        return total;
+    }
+
+    float TreeController::itemOffset(std::size_t visibleIndex) const {
+        float offset = 0.0f;
+        std::size_t count = visibleCount();
+        std::size_t last = visibleIndex < count ? visibleIndex : count;
+        for (std::size_t i = 0; i < last; ++i) {
+            offset += itemHeight(i);
+        }
+        return offset;
+    }
+
+    std::size_t TreeController::indexAt(float contentY) const {
+        std::size_t count = visibleCount();
+        float offset = 0.0f;
+        for (std::size_t i = 0; i < count; ++i) {
+            float height = itemHeight(i);
+            if (contentY < offset + height) {
+                return i;
+            }
+            offset += height;
+        }
+        return count;
+    }
+
+    void TreeController::rebuildVisibleListIfNeeded() const {
+        if (!visibleListDirty_) {
+            return;
+        }
+        visiblePaths_.clear();
+        appendVisibleChildren(std::vector<std::size_t>());
+        visibleListDirty_ = false;
+    }
+
+    void TreeController::appendVisibleChildren(const std::vector<std::size_t>& parentPath) const {
+        const TreeModel* treeModel = model();
+        if (treeModel == nullptr) {
+            return;
+        }
+        std::size_t count = treeModel->childCount(parentPath);
+        for (std::size_t i = 0; i < count; ++i) {
+            std::vector<std::size_t> childPath = parentPath;
+            childPath.push_back(i);
+            visiblePaths_.push_back(childPath);
+            if (isExpanded(childPath)) {
+                appendVisibleChildren(childPath);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------------
     // TableController
     // ---------------------------------------------------------------------

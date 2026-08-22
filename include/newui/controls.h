@@ -1954,4 +1954,117 @@ namespace newui {
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredIndex_;
     };
+
+    // The hierarchical counterpart to ListView (above) - same overall
+    // shape (heap-owned/swappable controller_, ScrollView virtualization,
+    // pooled Item painting, multi-selection, hover highlighting, per-row
+    // variable height), built on TreeController/TreeItem instead of
+    // ListController/ListItem, with tree paths (std::vector<std::size_t>)
+    // in place of flat indices throughout. See TreeController's own class
+    // comment (controllers.h) for the one genuinely new piece a tree
+    // needs beyond what ListView already had: flattening "which nodes are
+    // currently visible" (real hierarchy + expand/collapse state) into
+    // the same indexable row space ListView could already virtualize/
+    // scroll/hit-test for free.
+    //
+    // Not class TreeView : public ListView - ListView is tightly typed to
+    // ListController/ListItem/integer indices throughout; sharing a real
+    // base would mean extracting the selection/hover/scroll machinery out
+    // of ListView first, a refactor of already-shipped, tested code this
+    // phase doesn't need. This class duplicates that machinery's *shape*
+    // with tree-appropriate types instead.
+    //
+    // Same registerReflectionData() trap ListView's own class comment
+    // documents applies here too - TreeController::createItem() also
+    // constructs its Item via reflection.
+    class TreeView : public Control {
+    public:
+        TreeView();
+        virtual ~TreeView() {}
+
+        TreeController& controller() { return *controller_; }
+        const TreeController& controller() const { return *controller_; }
+
+        // Swaps in a different TreeController (e.g. a custom subclass
+        // overriding createItem() or itemHeight()) - a no-op for nullptr.
+        // Re-wires onDataChanged against the new controller, same
+        // reasoning ListView::setController() already has.
+        void setController(std::unique_ptr<TreeController> controller);
+
+        TreeModel* model() const { return controller_->model(); }
+
+        // Controller::setModel()'s own non-owning contract - see
+        // ListView::setModel()'s own doc comment for the same reasoning,
+        // TreeModel* in place of ListModel*.
+        void setModel(TreeModel* model);
+
+        bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
+        void setHoverHighlightEnabled(bool value);
+
+        float rowHeight() const { return controller_->defaultItemHeight(); }
+        void setRowHeight(float height);
+
+        // Multi-selection over tree paths - same shape as ListView's own
+        // selectedIndices()/isSelected()/selectedIndex()/setSelectedIndex()/
+        // addToSelection()/removeFromSelection()/toggleSelection()/
+        // selectRange()/clearSelection() (see each of those doc comments),
+        // just keyed by std::vector<std::size_t> path instead of
+        // std::size_t index. selectRange() is the one real behavioral
+        // difference: paths aren't linearly orderable the way indices
+        // are, so it resolves both endpoints to their current visible row
+        // index first (controller_->visibleIndexOf()) and selects every
+        // path in that row range - a no-op if either endpoint isn't
+        // currently visible (collapsed away).
+        const std::set<std::vector<std::size_t>>& selectedPaths() const { return selectedPaths_; }
+        bool isSelected(const std::vector<std::size_t>& path) const { return selectedPaths_.count(path) != 0; }
+        std::optional<std::vector<std::size_t>> selectedPath() const;
+        void setSelectedPath(std::optional<std::vector<std::size_t>> path);
+        void addToSelection(const std::vector<std::size_t>& path);
+        void removeFromSelection(const std::vector<std::size_t>& path);
+        void toggleSelection(const std::vector<std::size_t>& path);
+        void selectRange(const std::vector<std::size_t>& first, const std::vector<std::size_t>& last);
+        void clearSelection();
+
+        typedef Delegate<TreeView> SelectionChangedDelegate;
+        SelectionChangedDelegate onSelectionChanged;
+
+        // Same overall shape as ListView::paint() - visible rows found
+        // via controller_->indexAt()/itemOffset()/itemHeight(), each
+        // pooled from controller_->createItem(controller_->pathAt(i))
+        // (a path, not the visible row index directly - see
+        // TreeController::pathAt()'s own doc comment), selected/enabled/
+        // highlighted set the same way, released immediately after.
+        void paint(BLContext& ctx) override;
+
+    private:
+        // Row index + path for whatever visible row pt's Y lands on -
+        // shared by handleMouseDown()/handleMouseMove() so the same
+        // (localY -> indexAt() -> pathAt()) sequence isn't duplicated
+        // between them. std::nullopt if pt.y is above the first row or
+        // past the last one.
+        std::optional<std::size_t> visibleIndexAtY(float localY) const;
+
+        // Whether localX falls within the glyph hit-box for a node at
+        // this depth - the same kTreeIndentWidth/kTreeGlyphWidth geometry
+        // TreeItem::paint() (items.cpp) used to actually draw it, so a
+        // click only toggles expand when it's genuinely over the glyph
+        // itself, not the row's label text.
+        bool isOverGlyph(float localX, std::size_t depth) const;
+
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleQueryContentSize(View& sender, Size& outSize);
+        SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
+        SyncReturn handleDataChanged(TreeController& sender);
+
+        void replaceSelection(std::set<std::vector<std::size_t>> newSelection);
+
+        std::unique_ptr<TreeController> controller_;
+        float scrollOffsetY_ = 0.0f;
+        std::set<std::vector<std::size_t>> selectedPaths_;
+        std::optional<std::vector<std::size_t>> selectionAnchorPath_;
+        bool hoverHighlightEnabled_ = true;
+        std::optional<std::size_t> hoveredVisibleIndex_;
+    };
 }

@@ -13,6 +13,7 @@
 
 namespace newui {
     class ItemController;
+    class TreeController;
 
     // A lightweight, non-View "cell renderer" - owned and recycled by an
     // ItemController (controllers.h), borrowed by whatever SubView is
@@ -144,15 +145,53 @@ namespace newui {
         virtual void paint(BLContext& ctx, const Rect& rect, std::size_t index, ItemController& controller);
     };
 
+    // Geometry TreeItem::paint() (items.cpp) uses to lay out each row's
+    // indent and expand/collapse glyph - exposed here, not local to
+    // items.cpp, so TreeView::isOverGlyph() (controls.cpp) can hit-test a
+    // click against the exact same numbers this used to draw it, rather
+    // than a second, easily-drifting copy.
+    constexpr float kTreeIndentWidth = 16.0f;
+    constexpr float kTreeGlyphWidth = 12.0f;
+
+    // A root-level node's own path is one element long (e.g. {0} - the
+    // first child of the invisible root), not zero - path.size() alone
+    // would indent every root-level row as though it were already one
+    // level deep. This is the "how many levels of real indent" a path
+    // actually represents - 0 for a root-level node, 1 for its own
+    // children, and so on. Empty path (the root itself) never appears as
+    // a real, painted row (TreeController::appendVisibleChildren() only
+    // ever pushes a *child's* path, controllers.cpp) - guarded here
+    // anyway so a direct paint(..., {}, ...) call (as in this codebase's
+    // own headless tests) can't underflow path.size() - 1.
+    inline std::size_t treeDepthOf(const std::vector<std::size_t>& path) {
+        return path.empty() ? 0 : path.size() - 1;
+    }
+
     // Item for a tree, addressed by path: the sequence of child indices
     // from the root down to this node (an empty path is the root itself).
-    // Same paint() shape as ListItem otherwise - see its own comment.
+    // paint() takes TreeController& specifically, not the generic
+    // ItemController& ListItem/TableItem use - unlike those two, this
+    // class genuinely needs tree-specific TreeModel::hasChildren()/
+    // TreeController::isExpanded() (both unreachable through the generic
+    // ItemController/Model pair) to know whether/how to draw its own
+    // expand/collapse glyph.
     class TreeItem : public Item {
     public:
         // See ListItem::ListItem()'s own comment - same reflectgen reason.
         TreeItem() = default;
 
-        virtual void paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, ItemController& controller);
+        // Item::paint() first (inherited chrome - the selected/hovered
+        // flat highlight fill, same as ListItem gets for free). Then, if
+        // the node has children, a small filled-triangle glyph (hand-
+        // drawn - see this session's HANDOFF.md for why not a themed
+        // TVP_GLYPH part) - right when collapsed, down when
+        // controller.isExpanded(path) - indented by path.size() *
+        // indentWidth from clientBounds().left(); a leaf still reserves
+        // that same indent space (just draws no glyph in it), so
+        // siblings/leaves stay vertically aligned regardless. Text draws
+        // after the glyph's own reserved width (paintItemText(), shared
+        // with ListItem/TableItem, items.cpp).
+        virtual void paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, TreeController& controller);
     };
 
     // Item for a table, addressed by (row, col). Same paint() shape as

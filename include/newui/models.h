@@ -134,6 +134,31 @@ namespace newui {
         void setValueAt(std::size_t index, const std::any& newValue) { setValue(newValue, index); }
     };
 
+    // A Model that's hierarchical, addressed by path - the sequence of
+    // child indices from the root down to a given node (an empty path is
+    // the root itself) - the shape TreeController/TreeItem (controllers.h/
+    // items.h) are built around, same "a TreeController would be
+    // associated with TreeModel type data" idea items-plan.md already
+    // describes for ListController/ListModel.
+    //
+    // childCount() is the one piece of information a tree needs beyond
+    // plain Model::value(path) that Model itself can't generically answer
+    // - "how many direct children does this node have" - same reasoning
+    // as ListModel's own size(). Default 0 (no children anywhere); a
+    // concrete subclass overrides it against whatever real hierarchical
+    // data structure backs it - see examples/mvc1.cpp's StringTreeModel
+    // for a real one.
+    //
+    // TreeController::model()/setModel() (controllers.h) require this
+    // type specifically, not plain Model* - same compile-time (plus
+    // dynamic_cast-checked) guarantee ListController::model()/setModel()
+    // already give for ListModel.
+    class TreeModel : public Model {
+    public:
+        virtual std::size_t childCount(const std::vector<std::size_t>& path) const { return 0; }
+        bool hasChildren(const std::vector<std::size_t>& path) const { return childCount(path) > 0; }
+    };
+
     // A Model that represents one open file - a text document, an image,
     // anything with real load/save semantics and a dirty flag. Adds
     // exactly what plain Model doesn't have: filePath()/isModified(), and

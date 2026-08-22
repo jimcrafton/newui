@@ -2647,4 +2647,267 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    // -----------------------------------------------------------------
+    // TreeView
+    // -----------------------------------------------------------------
+
+    TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
+        setVisible(true);
+        setStyle(std::make_unique<ThemedEditStyle>());
+
+        onMouseDown.add(this, &TreeView::handleMouseDown);
+        onMouseMove.add(this, &TreeView::handleMouseMove);
+        onMouseLeft.add(this, &TreeView::handleMouseLeft);
+        onQueryContentSize.add(this, &TreeView::handleQueryContentSize);
+        onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
+        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+    }
+
+    void TreeView::setController(std::unique_ptr<TreeController> controller) {
+        if (controller == nullptr) {
+            return;
+        }
+        controller_ = std::move(controller);
+        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void TreeView::setModel(TreeModel* model) {
+        controller_->setModel(model);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void TreeView::setHoverHighlightEnabled(bool value) {
+        hoverHighlightEnabled_ = value;
+        if (!hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value()) {
+            hoveredVisibleIndex_.reset();
+            style().markDirty();
+        }
+    }
+
+    void TreeView::setRowHeight(float height) {
+        if (height == controller_->defaultItemHeight()) {
+            return;
+        }
+        controller_->setDefaultItemHeight(height);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    std::optional<std::vector<std::size_t>> TreeView::selectedPath() const {
+        if (selectionAnchorPath_.has_value() && selectedPaths_.count(*selectionAnchorPath_) != 0) {
+            return selectionAnchorPath_;
+        }
+        if (selectedPaths_.empty()) {
+            return std::nullopt;
+        }
+        return *selectedPaths_.begin();
+    }
+
+    void TreeView::replaceSelection(std::set<std::vector<std::size_t>> newSelection) {
+        if (newSelection == selectedPaths_) {
+            return;
+        }
+        selectedPaths_ = std::move(newSelection);
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    void TreeView::setSelectedPath(std::optional<std::vector<std::size_t>> path) {
+        std::set<std::vector<std::size_t>> newSelection;
+        if (path.has_value()) {
+            newSelection.insert(*path);
+        }
+        replaceSelection(std::move(newSelection));
+    }
+
+    void TreeView::addToSelection(const std::vector<std::size_t>& path) {
+        if (selectedPaths_.count(path) != 0) {
+            return;
+        }
+        std::set<std::vector<std::size_t>> newSelection = selectedPaths_;
+        newSelection.insert(path);
+        replaceSelection(std::move(newSelection));
+    }
+
+    void TreeView::removeFromSelection(const std::vector<std::size_t>& path) {
+        if (selectedPaths_.count(path) == 0) {
+            return;
+        }
+        std::set<std::vector<std::size_t>> newSelection = selectedPaths_;
+        newSelection.erase(path);
+        replaceSelection(std::move(newSelection));
+    }
+
+    void TreeView::toggleSelection(const std::vector<std::size_t>& path) {
+        if (selectedPaths_.count(path) != 0) {
+            removeFromSelection(path);
+        } else {
+            addToSelection(path);
+        }
+    }
+
+    void TreeView::selectRange(const std::vector<std::size_t>& first, const std::vector<std::size_t>& last) {
+        std::optional<std::size_t> firstIndex = controller_->visibleIndexOf(first);
+        std::optional<std::size_t> lastIndex = controller_->visibleIndexOf(last);
+        if (!firstIndex.has_value() || !lastIndex.has_value()) {
+            return;
+        }
+        std::size_t lo = *firstIndex < *lastIndex ? *firstIndex : *lastIndex;
+        std::size_t hi = *firstIndex < *lastIndex ? *lastIndex : *firstIndex;
+        std::set<std::vector<std::size_t>> newSelection;
+        for (std::size_t i = lo; i <= hi; ++i) {
+            newSelection.insert(controller_->pathAt(i));
+        }
+        replaceSelection(std::move(newSelection));
+    }
+
+    void TreeView::clearSelection() {
+        replaceSelection(std::set<std::vector<std::size_t>>());
+    }
+
+    void TreeView::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+
+        std::size_t count = controller_->visibleCount();
+        if (count == 0) {
+            return;
+        }
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+        ctx.translate(0.0f, -scrollOffsetY_);
+
+        std::size_t firstVisible = controller_->indexAt(scrollOffsetY_);
+        float y = controller_->itemOffset(firstVisible);
+
+        for (std::size_t i = firstVisible; i < count && y < scrollOffsetY_ + clientBounds.height(); ++i) {
+            std::vector<std::size_t> path = controller_->pathAt(i);
+            TreeItem* item = controller_->createItem(path);
+
+            item->style().setView(this);
+            item->setSelected(isSelected(path));
+            item->setEnabled(isEnabled());
+            item->setHighlighted(hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i);
+
+            float height = controller_->itemHeight(i);
+            if (height <= 0.0f) {
+                throw std::runtime_error("TreeView::paint: TreeController::itemHeight() returned a non-positive height");
+            }
+
+            Rect rowRect(0.0f, y, clientBounds.width(), height);
+            item->paint(ctx, rowRect, path, *controller_);
+
+            controller_->releaseItem(item);
+            y += height;
+        }
+
+        ctx.restore();
+
+        std::optional<std::vector<std::size_t>> primary = selectedPath();
+        if (primary.has_value()) {
+            std::optional<std::size_t> primaryIndex = controller_->visibleIndexOf(*primary);
+            if (primaryIndex.has_value()) {
+                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndex), clientBounds.width(),
+                    controller_->itemHeight(*primaryIndex));
+                onRequestScrollIntoView(*this, selectedRect);
+            }
+        }
+    }
+
+    std::optional<std::size_t> TreeView::visibleIndexAtY(float localY) const {
+        if (localY < 0.0f) {
+            return std::nullopt;
+        }
+        std::size_t index = controller_->indexAt(localY);
+        if (index >= controller_->visibleCount()) {
+            return std::nullopt;
+        }
+        return index;
+    }
+
+    bool TreeView::isOverGlyph(float localX, std::size_t depth) const {
+        float glyphLeft = float(depth) * kTreeIndentWidth;
+        float glyphRight = glyphLeft + kTreeGlyphWidth;
+        return localX >= glyphLeft && localX < glyphRight;
+    }
+
+    SyncReturn TreeView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
+        Rect clientBounds = getClientBounds();
+        float localY = pt.y - clientBounds.top() + scrollOffsetY_;
+        std::optional<std::size_t> visibleIndex = visibleIndexAtY(localY);
+        if (!visibleIndex.has_value()) {
+            return SyncReturn::Ignored;
+        }
+
+        std::vector<std::size_t> path = controller_->pathAt(*visibleIndex);
+
+        float localX = pt.x - clientBounds.left();
+        TreeModel* treeModel = controller_->model();
+        bool hasChildren = treeModel != nullptr && treeModel->hasChildren(path);
+        if (hasChildren && isOverGlyph(localX, treeDepthOf(path))) {
+            controller_->toggleExpanded(path);
+            return SyncReturn::Handled;
+        }
+
+        if ((keyMask & kmShift) != 0 && selectionAnchorPath_.has_value()) {
+            selectRange(*selectionAnchorPath_, path);
+        } else if ((keyMask & kmCtrl) != 0) {
+            toggleSelection(path);
+            selectionAnchorPath_ = path;
+        } else {
+            setSelectedPath(path);
+            selectionAnchorPath_ = path;
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleMouseMove(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!hoverHighlightEnabled_) {
+            return SyncReturn::Ignored;
+        }
+
+        Rect clientBounds = getClientBounds();
+        float localY = pt.y - clientBounds.top() + scrollOffsetY_;
+        std::optional<std::size_t> newHoveredIndex = visibleIndexAtY(localY);
+
+        if (newHoveredIndex == hoveredVisibleIndex_) {
+            return SyncReturn::Ignored;
+        }
+        hoveredVisibleIndex_ = newHoveredIndex;
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!hoveredVisibleIndex_.has_value()) {
+            return SyncReturn::Ignored;
+        }
+        hoveredVisibleIndex_.reset();
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleQueryContentSize(View& /*sender*/, Size& outSize) {
+        outSize = Size(getClientBounds().width(), controller_->totalHeight());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
+        scrollOffsetY_ = offset.y;
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleDataChanged(TreeController& /*sender*/) {
+        onContentSizeChanged(*this);
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
 }
