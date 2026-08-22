@@ -63,6 +63,12 @@ add_executable(controls1
 
 target_link_libraries(controls1 PRIVATE newui)
 
+add_executable(mvc1
+    mvc1.cpp
+)
+
+target_link_libraries(mvc1 PRIVATE newui)
+
 add_executable(shapes1
     shapes1.cpp
 )

@@ -50,6 +50,18 @@ namespace newui {
             return true;
         }
 
+        // How many addressable items this Model holds - e.g. row count
+        // for a list/table-shaped Model, consulted by a future ListView/
+        // TableView (controls.h) via ItemController::itemCount()
+        // (controllers.h) to know how many rows exist without needing to
+        // know anything else about the concrete Model subclass. Default
+        // 0, independent of empty() (not empty() == (size() == 0)) -
+        // empty()'s own existing contract is untouched; a concrete Model
+        // subclass overrides whichever of the two it actually needs.
+        virtual std::size_t size() const {
+            return 0;
+        }
+
         virtual std::any value(const std::any& key = std::any()) {
             return std::any();
         }
@@ -98,6 +110,28 @@ namespace newui {
         std::vector<View*> views_;
         std::vector<Connection> viewDestroyedConnections_;
         std::uint32_t updateFlags_ = UpdateFlags::NoFlags;
+    };
+
+    // A Model that's flat and 0-based-indexed - the shape ListController/
+    // ListItem (controllers.h/items.h) are built around, per items-plan.md's
+    // own "a ListController would be associated with ListModel type data."
+    // Adds nothing new over plain Model's own value()/size() other than
+    // valueAt()/setValueAt() below - type-safe convenience wrappers so a
+    // caller (or a concrete subclass's own code) doesn't have to box/
+    // unbox the std::size_t index into the std::any key value()/setValue()
+    // already take, by hand, at every call site. A concrete subclass
+    // still overrides value()/size() exactly as it would for a plain
+    // Model - see examples/mvc1.cpp's StringListModel for a real one.
+    //
+    // ListController::model()/setModel() (controllers.h) require this
+    // type specifically, not plain Model* - a real, compile-time-checked
+    // guarantee that whatever's attached to a ListController is genuinely
+    // list-shaped, not just "answers value()/size() and hopes for the
+    // best."
+    class ListModel : public Model {
+    public:
+        std::any valueAt(std::size_t index) { return value(index); }
+        void setValueAt(std::size_t index, const std::any& newValue) { setValue(newValue, index); }
     };
 
     // A Model that represents one open file - a text document, an image,

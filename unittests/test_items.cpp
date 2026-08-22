@@ -25,8 +25,9 @@ BLContext& SharedContext() {
 // Model stub returning a fixed string for a given std::size_t index - just
 // enough real data for ListItem::paint() to exercise its
 // controller.model()->value(index) path, same "test-local stub" pattern
-// test_controllers.cpp's RecordingController already uses.
-class StubListModel : public Model {
+// test_controllers.cpp's RecordingController already uses. ListModel, not
+// plain Model - ListController::setModel() requires it.
+class StubListModel : public ListModel {
 public:
     std::vector<std::string> rows = { "Alpha", "Bravo", "Charlie" };
 
@@ -38,6 +39,8 @@ public:
         }
         return std::any();
     }
+
+    std::size_t size() const override { return rows.size(); }
 };
 
 }  // namespace
@@ -80,16 +83,16 @@ TEST(ListController, ReleaseItemThenCreateItemReusesSamePointer) {
     controller.releaseItem(second);
 }
 
-TEST(ListController, UnknownDefaultItemClassNameMakesCreateItemReturnNull) {
+TEST(ListController, UnknownDefaultItemClassNameMakesCreateItemThrow) {
     ListController controller;
     controller.setDefaultItemClassName("NoSuchItemClass");
-    EXPECT_EQ(controller.createItem(0), nullptr);
+    EXPECT_THROW(controller.createItem(0), std::runtime_error);
 }
 
-TEST(ListController, BlankDefaultItemClassNameMakesCreateItemReturnNull) {
+TEST(ListController, BlankDefaultItemClassNameMakesCreateItemThrow) {
     ListController controller;
     controller.setDefaultItemClassName("");
-    EXPECT_EQ(controller.createItem(0), nullptr);
+    EXPECT_THROW(controller.createItem(0), std::runtime_error);
 }
 
 TEST(TableController, CreateItemPoolsAndReuses) {
@@ -114,6 +117,95 @@ TEST(TreeController, CreateItemPoolsAndReuses) {
 
     EXPECT_EQ(first, second);
     controller.releaseItem(second);
+}
+
+TEST(ListController, ItemCountIsZeroWithNoModel) {
+    ListController controller;
+    EXPECT_EQ(controller.itemCount(), 0u);
+}
+
+TEST(ListController, ItemCountForwardsToModelSize) {
+    StubListModel model;
+    ListController controller;
+    controller.setModel(&model);
+
+    EXPECT_EQ(controller.itemCount(), model.rows.size());
+}
+
+TEST(ListController, OnDataChangedFiresWhenModelChanges) {
+    StubListModel model;
+    ListController controller;
+    controller.setModel(&model);
+
+    int dataChangedCount = 0;
+    controller.onDataChanged.add([&](ListController&) {
+        ++dataChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    model.setValue(std::any(), std::any());
+
+    EXPECT_EQ(dataChangedCount, 1);
+}
+
+// ---------------------------------------------------------------------
+// ListController - per-row height (itemHeight()/totalHeight()/
+// itemOffset()/indexAt()) - a customized ListController subclass can vary
+// a row's own height by content, not just by a single uniform constant.
+// ---------------------------------------------------------------------
+
+TEST(ListController, ItemHeightDefaultsToDefaultItemHeightForEveryIndex) {
+    ListController controller;
+    controller.setDefaultItemHeight(30.0f);
+
+    EXPECT_FLOAT_EQ(controller.itemHeight(0), 30.0f);
+    EXPECT_FLOAT_EQ(controller.itemHeight(41), 30.0f);
+}
+
+TEST(ListController, TotalHeightItemOffsetAndIndexAtAgreeForAUniformHeightList) {
+    StubListModel model;  // 3 rows
+    ListController controller;
+    controller.setModel(&model);
+    controller.setDefaultItemHeight(20.0f);
+
+    EXPECT_FLOAT_EQ(controller.totalHeight(), 60.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(0), 0.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(1), 20.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(2), 40.0f);
+    EXPECT_EQ(controller.indexAt(0.0f), 0u);
+    EXPECT_EQ(controller.indexAt(19.9f), 0u);
+    EXPECT_EQ(controller.indexAt(20.0f), 1u);
+    EXPECT_EQ(controller.indexAt(59.9f), 2u);
+    EXPECT_EQ(controller.indexAt(60.0f), 3u) << "at/past totalHeight() -> one past the last index";
+}
+
+namespace {
+
+// A customized ListController: row 1 is twice as tall as every other row
+// - e.g. because it represents a kind of content (an image, a header,
+// ...) that genuinely needs more room, exactly the scenario itemHeight()
+// exists for.
+class DoubleHeightSecondRowController : public ListController {
+public:
+    float itemHeight(std::size_t index) const override {
+        return index == 1 ? defaultItemHeight() * 2.0f : defaultItemHeight();
+    }
+};
+
+}  // namespace
+
+TEST(ListController, CustomizedItemHeightChangesTotalHeightItemOffsetAndIndexAt) {
+    StubListModel model;  // 3 rows: 0, 1, 2
+    DoubleHeightSecondRowController controller;
+    controller.setModel(&model);
+    controller.setDefaultItemHeight(20.0f);
+
+    // Row 0: [0, 20), row 1 (doubled): [20, 60), row 2: [60, 80).
+    EXPECT_FLOAT_EQ(controller.totalHeight(), 80.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(1), 20.0f);
+    EXPECT_FLOAT_EQ(controller.itemOffset(2), 60.0f);
+    EXPECT_EQ(controller.indexAt(30.0f), 1u) << "still inside row 1's doubled span";
+    EXPECT_EQ(controller.indexAt(60.0f), 2u);
 }
 
 // ---------------------------------------------------------------------

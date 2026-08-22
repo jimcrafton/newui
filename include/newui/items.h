@@ -31,10 +31,12 @@ namespace newui {
     // without being a View itself, ViewStyle::paint()/computeClientBounds()
     // only ever need a Size/highlighted flag, not a live View, so the same
     // background/border/theme-chrome machinery View::paintStyle()/
-    // getClientBounds() already provide works here unchanged. Swap in a
-    // ThemedListItemStyle/ThemedTreeItemStyle (viewstyle.h) via setStyle()
-    // for real themed row chrome (selection, hot/pressed state, ...); the
-    // default plain ViewStyle just gives a background fill/border.
+    // getClientBounds() already provide works here unchanged for the
+    // *unselected* case - the default plain ViewStyle just gives a
+    // background fill/border, and a caller can swap in something themed
+    // via setStyle() for that state. selected() below deliberately does
+    // NOT go through style() at all, though - see paint()'s own doc
+    // comment for why.
     //
     // No shared virtual paint(index, ...) here on purpose: ListItem/
     // TreeItem/TableItem below each take the index shape natural to their
@@ -56,19 +58,48 @@ namespace newui {
 
         // Swaps in a different ViewStyle (e.g. std::make_unique<ThemedListItemStyle>())
         // - see View::setStyle()'s own doc comment (view.h), same idea.
+        // Unlike View::setStyle(), does NOT call style->setView() - Item
+        // isn't a View, so there's no `this` to give it; the owning
+        // SubView (ListView etc.) is responsible for calling
+        // style().setView(this) itself before paint() if the installed
+        // style is a ThemedViewStyle - see paint()'s own doc comment
+        // below for why that call is required, not optional, for any
+        // real (non-blank) native chrome to draw at all.
         void setStyle(std::unique_ptr<ViewStyle> style) { style_ = std::move(style); }
 
         void setHighlighted(bool highlighted) { highlighted_ = highlighted; }
         bool isHighlighted() const { return highlighted_; }
 
-        // Draws this Item's background/border chrome from style() into
-        // rect (translating ctx to rect's own top-left first, since
-        // ViewStyle::paint() itself only ever draws at local (0,0) - see
-        // View::paintStyle(), the same pattern). Call this first thing
-        // from a derived paint() override (ListItem::paint() etc.), then
-        // draw whatever content is specific to that Item (text, glyphs,
-        // ...) within clientBounds() afterward, same "chrome, then
-        // content" split View::paintStyle()/paint() already have.
+        // Set by the owning SubView (ListView::paint() etc.) before each
+        // paint() call - see paint()'s own doc comment for what selected
+        // actually changes about how this Item draws.
+        void setSelected(bool selected) { selected_ = selected; }
+        bool isSelected() const { return selected_; }
+
+        void setEnabled(bool enabled) { enabled_ = enabled; }
+        bool isEnabled() const { return enabled_; }
+
+        // Draws this Item's background chrome into rect (translating ctx
+        // to rect's own top-left first, since ViewStyle::paint() itself
+        // only ever draws at local (0,0) - see View::paintStyle(), the
+        // same pattern). Call this first thing from a derived paint()
+        // override (ListItem::paint() etc.), then draw whatever content
+        // is specific to that Item (text, glyphs, ...) within
+        // clientBounds() afterward, same "chrome, then content" split
+        // View::paintStyle()/paint() already have.
+        //
+        // selected() deliberately bypasses style() entirely: a flat fill
+        // in UIColorRole::HighlightBackground (uicolormanager.h) across
+        // the whole rect, no border, no theme part - not
+        // style()->paint(). An earlier version used a themed
+        // ThemedListItemStyle (viewstyle.h) part here instead
+        // (LVP_LISTITEM/LISS_SELECTED via "Explorer::ListView") - dropped
+        // after live testing showed a visibly thick/disproportionate
+        // border, since that native theme part isn't really designed to
+        // be stretched across an arbitrary full-width custom row the way
+        // a real ListView's own internal layout would constrain it. A
+        // plain flat highlight fill is what most real custom-drawn list
+        // controls actually use for row selection anyway.
         virtual void paint(BLContext& ctx, const Rect& rect);
 
         // The rect (in the same coordinate space paint()'s own rect
@@ -84,6 +115,8 @@ namespace newui {
     private:
         std::unique_ptr<ViewStyle> style_;
         bool highlighted_ = false;
+        bool selected_ = false;
+        bool enabled_ = true;
         Rect clientBounds_;
     };
 
@@ -96,12 +129,16 @@ namespace newui {
     // LabelStyle::paint() uses (viewstyle.h).
     class ListItem : public Item {
     public:
-        // Explicit, even though trivial - reflectgen's constructor walk
+        // Explicit even though = default - reflectgen's constructor walk
         // only sees a class's constructors when at least one is written
         // out, not purely-implicit ones (the same odr-use limitation
         // documented in tools/reflectgen/reflectgen.py for implicit copy
         // constructors) - without this, ItemController::instantiateItem()
         // couldn't construct a ListItem by name via reflection at all.
+        // Item's own default plain ViewStyle is what this ends up using
+        // for its (unselected-state) chrome - see Item::paint()'s own
+        // doc comment for why selected state doesn't go through style()
+        // at all.
         ListItem() = default;
 
         virtual void paint(BLContext& ctx, const Rect& rect, std::size_t index, ItemController& controller);

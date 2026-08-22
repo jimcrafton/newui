@@ -143,6 +143,29 @@ TEST(Model, UpdateAllViewsDoesNotCrashWithRegisteredViews) {
     delete b;
 }
 
+TEST(Model, SizeDefaultsToZero) {
+    Model model;
+    EXPECT_EQ(model.size(), 0u);
+}
+
+namespace {
+
+class FixedSizeModel : public Model {
+public:
+    std::size_t count = 0;
+    std::size_t size() const override { return count; }
+};
+
+}  // namespace
+
+TEST(Model, SizeIsOverridableByASubclass) {
+    FixedSizeModel model;
+    EXPECT_EQ(model.size(), 0u);
+
+    model.count = 42;
+    EXPECT_EQ(model.size(), 42u);
+}
+
 // ---------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------

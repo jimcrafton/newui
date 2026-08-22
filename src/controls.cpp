@@ -1,6 +1,7 @@
 #include "newui/controls.h"
 #include "newui/application.h"
 #include "newui/color.h"
+#include "newui/items.h"
 #include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
@@ -1827,7 +1828,7 @@ namespace newui {
     // TextController
     // -----------------------------------------------------------------
 
-    TextController::TextController(Control& owner) : owner_(owner), model_(std::make_unique<text::TextModel>()) {
+    TextController::TextController(Control& owner) : owner_(owner) {
         // Same defaults/reasoning as Button's own font_/textColor_ setup
         // (see Button::Button() above): UIColorManager::colorFor(), not
         // Color::fromSystemColor(), since only the former tracks the
@@ -1837,15 +1838,27 @@ namespace newui {
 
         caret_.onVisibilityChanged.add(this, &TextController::handleCaretVisibilityChanged);
 
-        // Any model_ mutation (typed input, a future paste, or a direct
-        // programmatic setText()/insert() call) marks owner_ dirty on
-        // its own via Model::updateAllViews() - handlers below never
-        // need to call owner_.style().markDirty() themselves after
-        // editing model_.
-        model_->addView(&owner_);
+        // Builds the default TextModel and wires it up via setModel()
+        // itself (addView()/onBeforeChar/onBeforeRangeChanged, plus
+        // Controller::setModel() - see setModel()'s own doc comment) -
+        // any later model() mutation (typed input, a future paste, or a
+        // direct programmatic setText()/insert() call) marks owner_ dirty
+        // on its own via Model::updateAllViews() from that point on;
+        // handlers below never need to call owner_.style().markDirty()
+        // themselves after editing model().
+        setModel(std::make_unique<text::TextModel>());
+    }
 
-        model_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
-        model_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+    TextController::~TextController() {
+        // Must run before ownedModel_ (and every other member) is
+        // destroyed - see this destructor's own doc comment (controls.h)
+        // for the real use-after-free this avoids. Controller::setModel(nullptr)
+        // clears model_ to null too, so ~Controller()'s own cleanup
+        // (controllers.cpp) becomes a safe no-op once it runs afterward.
+        if (Controller::model() != nullptr) {
+            model().removeView(&owner_);
+            Controller::setModel(nullptr);
+        }
     }
 
     SyncReturn TextController::handleCaretVisibilityChanged(text::Caret& sender) {
@@ -1880,7 +1893,7 @@ namespace newui {
 
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = owner_.getClientBounds();
-        layoutEngine_.update(model_->storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
+        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
     }
 
     void TextController::setScrollOffsetY(float y) {
@@ -2002,7 +2015,7 @@ namespace newui {
             return;
         }
 
-        const std::wstring& text = model_->text();
+        const std::wstring& text = model().text();
         if (text.empty()) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
@@ -2034,7 +2047,7 @@ namespace newui {
     }
 
     void TextController::selectAll() {
-        size_t length = model_->length();
+        size_t length = model().length();
         if (length == 0) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
@@ -2126,11 +2139,11 @@ namespace newui {
         if (!selection_.isEmpty()) {
             text::TextRange range = selection_.ranges()[0];
             clearSelection();
-            model_->replace(range, std::wstring(1, ch));
+            model().replace(range, std::wstring(1, ch));
             insertAt = range.start() + 1;
         } else {
-            insertAt = caret_.position().isValid() ? caret_.position().offset() : model_->length();
-            model_->insert(insertAt, std::wstring(1, ch));
+            insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
+            model().insert(insertAt, std::wstring(1, ch));
             insertAt += 1;
         }
         caret_.setPosition(text::TextPosition(insertAt));
@@ -2150,11 +2163,11 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_->remove(range);
+                    model().remove(range);
                     caret_.setPosition(text::TextPosition(range.start()));
                 } else if (caret_.position().isValid() && caret_.position().offset() > 0) {
                     size_t pos = caret_.position().offset() - 1;
-                    model_->remove(text::TextRange(pos, 1));
+                    model().remove(text::TextRange(pos, 1));
                     caret_.setPosition(text::TextPosition(pos));
                 }
                 return SyncReturn::Handled;
@@ -2163,10 +2176,10 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_->remove(range);
+                    model().remove(range);
                     caret_.setPosition(text::TextPosition(range.start()));
-                } else if (caret_.position().isValid() && caret_.position().offset() < model_->length()) {
-                    model_->remove(text::TextRange(caret_.position().offset(), 1));
+                } else if (caret_.position().isValid() && caret_.position().offset() < model().length()) {
+                    model().remove(text::TextRange(caret_.position().offset(), 1));
                 }
                 return SyncReturn::Handled;
             }
@@ -2176,8 +2189,8 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkRightArrow: {
-                size_t current = caret_.position().isValid() ? caret_.position().offset() : model_->length();
-                moveCaret(current < model_->length() ? current + 1 : current, extend);
+                size_t current = caret_.position().isValid() ? caret_.position().offset() : model().length();
+                moveCaret(current < model().length() ? current + 1 : current, extend);
                 return SyncReturn::Handled;
             }
             case vkUpArrow: {
@@ -2199,7 +2212,7 @@ namespace newui {
             }
             case vkEnd: {
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
-                moveCaret(line.isValid() ? line.end() : model_->length(), extend);
+                moveCaret(line.isValid() ? line.end() : model().length(), extend);
                 return SyncReturn::Handled;
             }
             case vkReturn: {
@@ -2213,11 +2226,11 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_->replace(range, L"\n");
+                    model().replace(range, L"\n");
                     insertAt = range.start() + 1;
                 } else {
-                    insertAt = caret_.position().isValid() ? caret_.position().offset() : model_->length();
-                    model_->insert(insertAt, L"\n");
+                    insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
+                    model().insert(insertAt, L"\n");
                     insertAt += 1;
                 }
                 caret_.setPosition(text::TextPosition(insertAt));
@@ -2233,7 +2246,7 @@ namespace newui {
             canChange = false;
             return SyncReturn::Handled;
         }
-        if (kind == text::CharChangeKind::Inserted && traits_.maxLength() > 0 && model_->length() >= traits_.maxLength()) {
+        if (kind == text::CharChangeKind::Inserted && traits_.maxLength() > 0 && model().length() >= traits_.maxLength()) {
             canChange = false;
         }
         return SyncReturn::Handled;
@@ -2245,8 +2258,8 @@ namespace newui {
             return SyncReturn::Handled;
         }
         if (traits_.maxLength() > 0) {
-            size_t clampedLength = (range.length() > model_->length() - range.start()) ? (model_->length() - range.start()) : range.length();
-            size_t resultLength = model_->length() - clampedLength + replacement.size();
+            size_t clampedLength = (range.length() > model().length() - range.start()) ? (model().length() - range.start()) : range.length();
+            size_t resultLength = model().length() - clampedLength + replacement.size();
             if (resultLength > traits_.maxLength()) {
                 canChange = false;
             }
@@ -2363,6 +2376,274 @@ namespace newui {
 
     SyncReturn TextControl::handleModelChanged(Model& /*sender*/) {
         onContentSizeChanged(*this);
+        return SyncReturn::Handled;
+    }
+
+    // -----------------------------------------------------------------
+    // ListView
+    // -----------------------------------------------------------------
+
+    ListView::ListView() : controller_(std::make_unique<ListController>()) {
+        setVisible(true);
+        setStyle(std::make_unique<ThemedEditStyle>());
+
+        onMouseDown.add(this, &ListView::handleMouseDown);
+        onMouseMove.add(this, &ListView::handleMouseMove);
+        onMouseLeft.add(this, &ListView::handleMouseLeft);
+        onQueryContentSize.add(this, &ListView::handleQueryContentSize);
+        onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
+        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+    }
+
+    void ListView::setHoverHighlightEnabled(bool value) {
+        hoverHighlightEnabled_ = value;
+        if (!hoverHighlightEnabled_ && hoveredIndex_.has_value()) {
+            hoveredIndex_.reset();
+            style().markDirty();
+        }
+    }
+
+    void ListView::setController(std::unique_ptr<ListController> controller) {
+        if (controller == nullptr) {
+            return;
+        }
+        controller_ = std::move(controller);
+        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void ListView::setModel(ListModel* model) {
+        controller_->setModel(model);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void ListView::setRowHeight(float height) {
+        if (height == controller_->defaultItemHeight()) {
+            return;
+        }
+        controller_->setDefaultItemHeight(height);
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    std::optional<std::size_t> ListView::selectedIndex() const {
+        if (selectionAnchor_.has_value() && selectedIndices_.count(*selectionAnchor_) != 0) {
+            return selectionAnchor_;
+        }
+        if (selectedIndices_.empty()) {
+            return std::nullopt;
+        }
+        return *selectedIndices_.begin();
+    }
+
+    void ListView::replaceSelection(std::set<std::size_t> newSelection) {
+        if (newSelection == selectedIndices_) {
+            return;
+        }
+        selectedIndices_ = std::move(newSelection);
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    void ListView::setSelectedIndex(std::optional<std::size_t> index) {
+        std::set<std::size_t> newSelection;
+        if (index.has_value()) {
+            newSelection.insert(*index);
+        }
+        replaceSelection(std::move(newSelection));
+    }
+
+    void ListView::addToSelection(std::size_t index) {
+        if (selectedIndices_.count(index) != 0) {
+            return;
+        }
+        std::set<std::size_t> newSelection = selectedIndices_;
+        newSelection.insert(index);
+        replaceSelection(std::move(newSelection));
+    }
+
+    void ListView::removeFromSelection(std::size_t index) {
+        if (selectedIndices_.count(index) == 0) {
+            return;
+        }
+        std::set<std::size_t> newSelection = selectedIndices_;
+        newSelection.erase(index);
+        replaceSelection(std::move(newSelection));
+    }
+
+    void ListView::toggleSelection(std::size_t index) {
+        if (selectedIndices_.count(index) != 0) {
+            removeFromSelection(index);
+        } else {
+            addToSelection(index);
+        }
+    }
+
+    void ListView::selectRange(std::size_t first, std::size_t last) {
+        std::size_t lo = first < last ? first : last;
+        std::size_t hi = first < last ? last : first;
+        std::set<std::size_t> newSelection;
+        for (std::size_t i = lo; i <= hi; ++i) {
+            newSelection.insert(i);
+        }
+        replaceSelection(std::move(newSelection));
+    }
+
+    void ListView::clearSelection() {
+        replaceSelection(std::set<std::size_t>());
+    }
+
+    void ListView::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+
+        std::size_t count = controller_->itemCount();
+        if (count == 0) {
+            return;
+        }
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+        ctx.translate(0.0f, -scrollOffsetY_);
+
+        std::size_t firstVisible = controller_->indexAt(scrollOffsetY_);
+        float y = controller_->itemOffset(firstVisible);
+
+        for (std::size_t i = firstVisible; i < count && y < scrollOffsetY_ + clientBounds.height(); ++i) {
+            // createItem() never returns nullptr - it throws instead (see
+            // ItemController::instantiateItem()'s own doc comment,
+            // controllers.h) - a null Item here would only ever mean a
+            // real, silent configuration bug (an unregistered Item class),
+            // never a legitimate "this row has nothing" state, so there's
+            // nothing to skip past.
+            ListItem* item = controller_->createItem(i);
+
+            // Item (items.h) is deliberately not a View, so nothing ever
+            // calls ViewStyle::setView() for its owned style the way
+            // View::setStyle() normally would - without this, a
+            // ThemedViewStyle (viewstyle.h) swapped in via setStyle()
+            // can't resolve a live HWND (view()->rootView()->windowHandle())
+            // and silently draws nothing - a real, confirmed live bug
+            // when ListItem used to default to ThemedListItemStyle. Kept
+            // here regardless of the current default (plain ViewStyle,
+            // unaffected by this) for any caller that swaps in a themed
+            // style of their own for the unselected-state chrome.
+            item->style().setView(this);
+
+            // setSelected()/setEnabled() (items.h) - not a themed style
+            // field - see Item::paint()'s own doc comment for why
+            // selected state is a plain flat highlight fill, not a
+            // ThemedListItemStyle part.
+            item->setSelected(isSelected(i));
+            item->setEnabled(isEnabled());
+            item->setHighlighted(hoverHighlightEnabled_ && hoveredIndex_.has_value() && *hoveredIndex_ == i);
+
+            float height = controller_->itemHeight(i);
+            if (height <= 0.0f) {
+                // A non-positive height would never let y advance -
+                // looping forever repainting the same row instead of
+                // finishing the frame is worse than failing loudly here,
+                // same "fail loud on a genuinely broken invariant"
+                // convention ItemController::instantiateItem()'s own
+                // throw already uses (controllers.h/.cpp) - a custom
+                // ListController::itemHeight() override returning this is
+                // a real bug in that override, not a state ListView can
+                // do anything sensible with.
+                throw std::runtime_error("ListView::paint: ListController::itemHeight() returned a non-positive height");
+            }
+
+            Rect rowRect(0.0f, y, clientBounds.width(), height);
+            item->paint(ctx, rowRect, i, *controller_);
+
+            controller_->releaseItem(item);
+            y += height;
+        }
+
+        ctx.restore();
+
+        std::optional<std::size_t> primary = selectedIndex();
+        if (primary.has_value()) {
+            Rect selectedRect(0.0f, controller_->itemOffset(*primary), clientBounds.width(),
+                controller_->itemHeight(*primary));
+            onRequestScrollIntoView(*this, selectedRect);
+        }
+    }
+
+    SyncReturn ListView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
+        Rect clientBounds = getClientBounds();
+        float localY = pt.y - clientBounds.top() + scrollOffsetY_;
+        if (localY < 0.0f) {
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t index = controller_->indexAt(localY);
+        if (index >= controller_->itemCount()) {
+            return SyncReturn::Ignored;
+        }
+
+        if ((keyMask & kmShift) != 0 && selectionAnchor_.has_value()) {
+            selectRange(*selectionAnchor_, index);
+        } else if ((keyMask & kmCtrl) != 0) {
+            toggleSelection(index);
+            selectionAnchor_ = index;
+        } else {
+            setSelectedIndex(index);
+            selectionAnchor_ = index;
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleMouseMove(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!hoverHighlightEnabled_) {
+            return SyncReturn::Ignored;
+        }
+
+        Rect clientBounds = getClientBounds();
+        float localY = pt.y - clientBounds.top() + scrollOffsetY_;
+
+        std::optional<std::size_t> newHoveredIndex;
+        if (localY >= 0.0f) {
+            std::size_t index = controller_->indexAt(localY);
+            if (index < controller_->itemCount()) {
+                newHoveredIndex = index;
+            }
+        }
+
+        if (newHoveredIndex == hoveredIndex_) {
+            return SyncReturn::Ignored;
+        }
+        hoveredIndex_ = newHoveredIndex;
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!hoveredIndex_.has_value()) {
+            return SyncReturn::Ignored;
+        }
+        hoveredIndex_.reset();
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleQueryContentSize(View& /*sender*/, Size& outSize) {
+        outSize = Size(getClientBounds().width(), controller_->totalHeight());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
+        scrollOffsetY_ = offset.y;
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleDataChanged(ListController& /*sender*/) {
+        onContentSizeChanged(*this);
+        style().markDirty();
         return SyncReturn::Handled;
     }
 

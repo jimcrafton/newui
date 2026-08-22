@@ -925,10 +925,19 @@ namespace newui {
     // tab) is still out of scope, same as everywhere else in this file.
 
     // ThemedViewStyle plus one native ListView row background (LISTVIEW/
-    // LVP_LISTITEM).
+    // LVP_LISTITEM). "Explorer::ListView" - not the plain "LISTVIEW"
+    // class - is deliberate: OpenThemeData()'s pszClassList parameter
+    // accepts an "AppName::ClassName" form, and "Explorer::ListView" is
+    // Microsoft's own documented way to get the modern Explorer-style
+    // selection highlight (the blue/accent rectangle real Windows file
+    // lists show) for a custom-drawn list row - the plain "LISTVIEW"
+    // class renders LISS_SELECTED nearly indistinguishable from
+    // LISS_NORMAL on current Windows, a real, confirmed-live gap (a
+    // ListView, controls.h, whose rows painted fine but never visibly
+    // highlighted when selected).
     class ThemedListItemStyle : public ThemedViewStyle {
     public:
-        ThemedListItemStyle() : ThemedViewStyle(L"LISTVIEW") {}
+        ThemedListItemStyle() : ThemedViewStyle(L"Explorer::ListView") {}
 
         bool selected = false;
         bool enabled = true;
@@ -994,10 +1003,12 @@ namespace newui {
 
     // ThemedViewStyle plus one native TreeView row background (TREEVIEW/
     // TVP_TREEITEM) - same field/state shape as ThemedListItemStyle
-    // above, just a different theme class/part.
+    // above, just a different theme class/part. "Explorer::TreeView" for
+    // the same reason ThemedListItemStyle uses "Explorer::ListView" - see
+    // its own doc comment.
     class ThemedTreeItemStyle : public ThemedViewStyle {
     public:
-        ThemedTreeItemStyle() : ThemedViewStyle(L"TREEVIEW") {}
+        ThemedTreeItemStyle() : ThemedViewStyle(L"Explorer::TreeView") {}
 
         bool selected = false;
         bool enabled = true;

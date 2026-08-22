@@ -3,8 +3,11 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <set>
 
 #include <newui/newui.h>
+#include <newui/controllers.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/subview.h>
@@ -1106,18 +1109,26 @@ namespace newui {
     // TextLayoutEngine (the DirectWrite hit-testing/measurement bridge -
     // see below for why this class, not the layout/paint split its name
     // might suggest, still owns it) and every mouse/keyboard input
-    // handler, so neither owning Control has to duplicate any of it. A
-    // member, not a shared base class TextField/TextControl would
-    // inherit from - matches this toolkit's existing Control/Controller
-    // split (see Controller's own class comment, controllers.h): "a
-    // data-driven Control is expected to own a Controller as a member,
-    // not inherit from it." Not itself a Controller subclass - Controller
-    // is Model-observation-only per its own doc comment, and this class
-    // needs real hit-testing/coordinate-translation responsibilities
-    // Controller doesn't have - but named and composed the same way, for
-    // the same reason: presentation (the owning Control - bounds, style,
-    // being a SubView at all) and text-editing behavior (this class) stay
-    // separate collaborators rather than one class doing both jobs.
+    // handler, so neither owning Control has to duplicate any of it. Held
+    // by each owning Control as a member (now std::unique_ptr<TextController>,
+    // swappable via setController() - see TextField/TextControl), not a
+    // shared base class TextField/TextControl would inherit from - matches
+    // this toolkit's existing Control/Controller split (see Controller's
+    // own class comment, controllers.h): "a data-driven Control is
+    // expected to own a Controller as a member, not inherit from it."
+    //
+    // A genuine Controller subclass, though (unlike an earlier version of
+    // this class, which duplicated Controller's own model-tracking
+    // machinery side-by-side instead of reusing it) - this class really is
+    // "the C in MVC" for a text-editing Control, same as Controller's own
+    // doc comment describes, just with real hit-testing/coordinate-
+    // translation responsibilities layered on top via subclassing.
+    // model()/setModel() below narrow Controller's own generic Model*-based
+    // pair (controllers.h) to the concrete text::TextModel every caller
+    // here actually wants, and additionally own the TextModel instance
+    // itself (ownedModel_, heap, RAII) - Controller's own model_ stays
+    // non-owning throughout, same contract as always; TextController is
+    // simply always the one supplying what it points at.
     //
     // Deliberately does NOT own paint(), TextRenderer, or any of the
     // ScrollView-hosting delegates (onQueryContentSize/onScrollOffsetChanged/
@@ -1168,31 +1179,74 @@ namespace newui {
     // doc comment (view.h) for why that specific reuse is wrong for a
     // view that might own real children of its own (an earlier version
     // of this class did, see HANDOFF.md's Part 53-55 history).
-    class TextController {
+    class TextController : public Controller {
     public:
         explicit TextController(Control& owner);
 
-        text::TextModel& model() { return *model_; }
-        const text::TextModel& model() const { return *model_; }
+        // NOT = default, and NOT safe to leave implicit - C++ destroys a
+        // derived object's own members (ownedModel_ included) BEFORE its
+        // base class destructor runs, so by the time ~Controller() would
+        // run its own "unsubscribe from model_->onChanged" cleanup
+        // (controllers.cpp), ownedModel_ - the very object model_ (a raw,
+        // non-owning pointer inherited from Controller) still points at -
+        // would already be destroyed: a real, confirmed use-after-free
+        // (a debug-heap free-pattern read inside Delegate<Model>::remove(),
+        // caught live while adding this class's own test coverage). This
+        // destructor's body runs before member destruction even begins,
+        // so it detaches from the model (Controller::setModel(nullptr))
+        // and unregisters from it (Model::removeView()) while ownedModel_
+        // is still perfectly valid - by the time ~Controller() itself
+        // later runs, its own model_ is already nullptr and its cleanup
+        // is a no-op.
+        ~TextController();
+
+        // Narrows Controller's own model()/setModel(Model*) (controllers.h,
+        // a non-owning Model* pair) to the concrete text::TextModel every
+        // caller here actually wants - hides (doesn't override; a
+        // pointer-to-reference/Model-to-TextModel return type isn't
+        // covariant) Controller::model()/setModel() for any caller
+        // holding this as a TextController (or narrower, TextField/
+        // TextControl). Controller::model()/Controller::setModel() are
+        // still reachable via an explicit qualified call for the rare
+        // generic-Model-pointer need.
+        text::TextModel& model() { return static_cast<text::TextModel&>(*Controller::model()); }
+        const text::TextModel& model() const { return static_cast<const text::TextModel&>(*Controller::model()); }
 
         // Swaps in a different TextModel (e.g. a custom subclass) - a
-        // no-op for nullptr, since model_ is never optional here (every
-        // handler below dereferences it directly). Tears down the old
-        // model's registration/subscriptions (Model::removeView(),
-        // onBeforeChar/onBeforeRangeChanged) before dropping it, then
-        // wires the new one up exactly the same way the constructor
-        // already does for the default instance.
+        // no-op for nullptr, since Controller::model() is never null here
+        // (every handler below dereferences it directly, via model()
+        // above). Tears down the old model's registration/subscriptions
+        // (Model::removeView(), onBeforeChar/onBeforeRangeChanged) before
+        // dropping it, then wires the new one up exactly the same way the
+        // constructor already does for the default instance - including
+        // Controller::setModel() itself, which handles the onChanged-to-
+        // modelChanged() subscription TextController inherits but doesn't
+        // currently use (addView() below is the real repaint-on-change
+        // path here; modelChanged() stays available for a subclass that
+        // wants it).
         void setModel(std::unique_ptr<text::TextModel> model) {
             if (model == nullptr) {
                 return;
             }
-            if (model_ != nullptr) {
-                model_->removeView(&owner_);
+            if (Controller::model() != nullptr) {
+                // Order matters: unsubscribe from the OLD model's
+                // onChanged (Controller::setModel(nullptr)) before
+                // ownedModel_ = std::move(model) below destroys it (a
+                // move-assignment destroys the previously-held object) -
+                // otherwise Controller's own modelChangedConnection_ is
+                // left pointing into a Delegate that's about to be torn
+                // down along with it, the same use-after-free this
+                // class's own destructor works around (controls.h/.cpp -
+                // see ~TextController()'s doc comment for the real crash
+                // this pattern caused, confirmed live).
+                this->model().removeView(&owner_);
+                Controller::setModel(nullptr);
             }
-            model_ = std::move(model);
-            model_->addView(&owner_);
-            model_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
-            model_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            ownedModel_ = std::move(model);
+            Controller::setModel(ownedModel_.get());
+            ownedModel_->addView(&owner_);
+            ownedModel_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+            ownedModel_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
             owner_.style().markDirty();
         }
 
@@ -1277,12 +1331,17 @@ namespace newui {
         // for - owner_ already identifies it) - the owning Control's own
         // constructor wires onGotFocus/onMouseDown/etc. to a thin
         // forwarding method that calls straight into these (see
-        // TextField::TextField()/TextControl::TextControl()).
-        SyncReturn handleGotFocus();
-        SyncReturn handleLostFocus();
-        SyncReturn handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        SyncReturn handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        SyncReturn handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // TextField::TextField()/TextControl::TextControl()). Virtual so
+        // a custom TextController subclass (see setController(), TextField/
+        // TextControl) can actually override input behavior - a non-
+        // virtual override would silently never be reached, since these
+        // are always called through the owning Control's own
+        // std::unique_ptr<TextController> (base-typed).
+        virtual SyncReturn handleGotFocus();
+        virtual SyncReturn handleLostFocus();
+        virtual SyncReturn handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        virtual SyncReturn handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        virtual SyncReturn handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         // Windows has no triple-click message of its own (WM_LBUTTONDBLCLK
         // only ever covers a *second* click) - handleMouseDown() tracks
         // clickCount_/lastClickTime_/lastClickPos_ itself (using
@@ -1290,13 +1349,13 @@ namespace newui {
         // SM_CYDOUBLECLK), the same timing/distance Windows' own
         // double-click detection uses) to recognize a third rapid click
         // as "select everything" - see its own definition (controls.cpp).
-        SyncReturn handleMouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
-        SyncReturn handleKeyPress(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+        virtual SyncReturn handleMouseDblClick(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        virtual SyncReturn handleKeyPress(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         // vkReturn only inserts a newline when isMultiline() - a
         // non-multiline caller (TextField) gets SyncReturn::Ignored back
         // for it instead, leaving the key entirely for that caller's own
         // onReturnPressed-style hook to react to.
-        SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+        virtual SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
     private:
         // Maps a point in the owner's own local space (as delivered by
@@ -1388,7 +1447,14 @@ namespace newui {
 
         text::TextLayoutEngine layoutEngine_;
 
-        std::unique_ptr<text::TextModel> model_;
+        // Owned here (heap, RAII) - Controller's own model_ (controllers.h,
+        // private to Controller) stays non-owning as always; setModel()
+        // above is what points Controller::model() at this. See this
+        // class's own class comment for why TextController holds the
+        // real Model-owning responsibility instead of the more usual
+        // "caller constructs it externally, Controller just observes"
+        // split every other Controller in this codebase uses.
+        std::unique_ptr<text::TextModel> ownedModel_;
         text::TextSelection selection_;
         text::Caret caret_;
         text::TextInputTraits traits_;
@@ -1460,6 +1526,9 @@ namespace newui {
         // class's own constructor already does for the default instance -
         // setController() only takes ownership, it doesn't build one.
         void setController(std::unique_ptr<TextController> controller) {
+            if (controller == nullptr) {
+                return;
+            }
             controller_ = std::move(controller);
             style().markDirty();
         }
@@ -1589,6 +1658,9 @@ namespace newui {
         // subscription only ever pointed at the old controller's own
         // model, which setController() just replaced.
         void setController(std::unique_ptr<TextController> controller) {
+            if (controller == nullptr) {
+                return;
+            }
             controller_ = std::move(controller);
             controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
             style().markDirty();
@@ -1679,5 +1751,207 @@ namespace newui {
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+    };
+
+    // The first real consumer of the Item/Controller foundation (items.h/
+    // controllers.h) - a Control that paints/scrolls a Model's rows via a
+    // recycled ListItem, one per visible row, never held onto across
+    // paint() calls (ListController::createItem()/releaseItem(), same
+    // pool items-plan.md describes). Owns no per-row SubViews at all -
+    // unlike everything else in this file, a row is just a Rect this
+    // class hands a pooled ListItem to paint into, not a real child in
+    // childViews(); hit-testing a click is a plain (y / rowHeight())
+    // divide, not View::hitTestChildren().
+    //
+    // Hosting/virtualization is the same ScrollView contract TextControl
+    // (above) already uses: onQueryContentSize answers with itemCount()*
+    // rowHeight() and onScrollOffsetChanged drives scrollOffsetY_ - see
+    // ScrollView's own class comment (this file) for the mechanism.
+    //
+    // controller_/model() follow the same "heap-owned, swappable via
+    // setController()" convention TextField/TextControl established for
+    // TextController - see setController()'s own doc comment. Unlike
+    // TextController, this class does NOT construct a default Model of
+    // its own (there's no sensible generic "default list data") -
+    // itemCount() (ListController::itemCount(), forwarding to the new
+    // Model::size(), models.h) stays 0 until setModel() is called.
+    //
+    // A real trap worth calling out explicitly, confirmed live building
+    // examples/mvc1.cpp: ListController::createItem() (controllers.h)
+    // constructs a ListItem via reflection (reflection::classinfo(...)->
+    // createInstance()), which requires the generated registerReflectionData()
+    // (reflection.md's "Automatic CMake integration" - compiled straight
+    // into newui.lib, but calling it is still up to application startup
+    // code, same as src/main.cpp/examples/shapes1.cpp/shapes2.cpp already
+    // do) to have run first. Skip that call and every row silently comes
+    // back null - ListView::paint() just as silently skips a null Item,
+    // so the whole list renders as nothing at all: no crash, no thrown
+    // error, no visible clue why. Call `extern void registerReflectionData();
+    // registerReflectionData();` once at application startup (before
+    // constructing any ListView) if nothing else in the app already does.
+    class ListView : public Control {
+    public:
+        ListView();
+        virtual ~ListView() {}
+
+        ListController& controller() { return *controller_; }
+        const ListController& controller() const { return *controller_; }
+
+        // Swaps in a different ListController (e.g. a custom subclass
+        // overriding createItem() to pick a different Item class per
+        // index, per items-plan.md) - a no-op for nullptr. Re-wires
+        // onDataChanged (below) against the new controller, same "the old
+        // subscription only ever pointed at the old instance" reasoning
+        // TextControl::setController() already has for its own model()
+        // onChanged subscription.
+        void setController(std::unique_ptr<ListController> controller);
+
+        ListModel* model() const { return controller_->model(); }
+
+        // Controller::setModel()'s own non-owning contract, unchanged -
+        // this class never takes ownership of model, same as every other
+        // Controller in this codebase except TextController (see its own
+        // class comment for why that one's different). ListModel*
+        // specifically, not plain Model* - see ListController::model()/
+        // setModel()'s own doc comment (controllers.h) for why. Fires
+        // onContentSizeChanged (view.h) - itemCount() almost certainly
+        // just changed - and repaints.
+        void setModel(ListModel* model);
+
+        // Whether the row currently under the mouse gets a lighter
+        // highlight (Item::setHighlighted(), items.h) - on by default,
+        // matching a normal list view. handleMouseMove()/handleMouseLeft()
+        // (controls.cpp) track which row that is; turning this off
+        // clears any currently-hovered row's highlight immediately.
+        bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
+        void setHoverHighlightEnabled(bool value);
+
+        // Thin forwarders to controller_->defaultItemHeight()/
+        // setDefaultItemHeight() (controllers.h) - the real, per-row
+        // height a custom ListController subclass can vary lives there
+        // now (ListController::itemHeight()), not as a fixed member of
+        // this class; these two exist purely so the common "one uniform
+        // row height" case doesn't need to reach through controller()
+        // itself. setRowHeight() fires onContentSizeChanged/repaints,
+        // same as setModel().
+        float rowHeight() const { return controller_->defaultItemHeight(); }
+        void setRowHeight(float height);
+
+        // Multi-selection: selectedIndices() is the real source of truth
+        // (a set, not just one index) - handleMouseDown() (controls.cpp)
+        // drives it the standard listbox/Explorer way: a plain click
+        // replaces the whole selection with just the clicked row
+        // (setSelectedIndex()); Ctrl+click toggles one row in/out without
+        // disturbing the rest (toggleSelection()); Shift+click selects
+        // every row between the last plain/Ctrl+click and the one just
+        // clicked (selectRange()), same kmShift/kmCtrl keyMask check
+        // TextController::handleKeyDown() already uses (controls.cpp) for
+        // its own Shift+Arrow extension.
+        const std::set<std::size_t>& selectedIndices() const { return selectedIndices_; }
+        bool isSelected(std::size_t index) const { return selectedIndices_.count(index) != 0; }
+
+        // The "primary" selected index for the common single-selection
+        // case (onRequestScrollIntoView's own target in paint(), e.g.) -
+        // selectionAnchor_ if it's still actually selected, otherwise the
+        // smallest selected index, otherwise std::nullopt (selectedIndices()
+        // is empty). Not itself a second source of truth - always derived
+        // from selectedIndices()/selectionAnchor_ below.
+        std::optional<std::size_t> selectedIndex() const;
+
+        // Replaces the whole selection with just index (or clears it
+        // entirely for std::nullopt) - a plain, no-modifier click's
+        // behavior. A no-op if the resulting set wouldn't actually
+        // change. Marks dirty and fires onSelectionChanged when it does;
+        // does not itself validate index against itemCount() -
+        // handleMouseDown() (controls.cpp) is the one real caller that
+        // needs that check and already does it before calling this.
+        void setSelectedIndex(std::optional<std::size_t> index);
+
+        // Adds/removes/toggles index in the current selection without
+        // disturbing the rest of it - Ctrl+click's behavior. A no-op if
+        // index's membership wouldn't actually change (add when already
+        // selected, remove when not).
+        void addToSelection(std::size_t index);
+        void removeFromSelection(std::size_t index);
+        void toggleSelection(std::size_t index);
+
+        // Selects every index in [first, last] (inclusive, regardless of
+        // which is numerically larger) - Shift+click's behavior,
+        // replacing the current selection entirely (matches standard
+        // listbox/Explorer Shift+click, not an additive range).
+        void selectRange(std::size_t first, std::size_t last);
+
+        // Empties the selection entirely - a no-op if already empty.
+        void clearSelection();
+
+        typedef Delegate<ListView> SelectionChangedDelegate;
+        SelectionChangedDelegate onSelectionChanged;
+
+        // Draws into getClientBounds(), translated further by
+        // -scrollOffsetY_ (same two-step TextControl::paint() already
+        // does) - for each row currently within the viewport (found via
+        // controller_->indexAt()/itemOffset()/itemHeight(), not a fixed
+        // row height - a row's own rect can vary per index, see
+        // ListController::itemHeight()'s own doc comment), pools a
+        // ListItem (controller_->createItem()), sets its
+        // selected/enabled (Item::setSelected()/setEnabled(), items.h)
+        // from this ListView's own state, paints it, then immediately
+        // controller_->releaseItem()s it back to the pool - no ListItem
+        // is ever held onto past a single row's paint. Also fires
+        // onRequestScrollIntoView once per call with the primary selected
+        // row's rect (selectedIndex()), if any - same "fire every paint()
+        // with the current rect" pattern TextControl::paint() already
+        // established for its own caret.
+        void paint(BLContext& ctx) override;
+
+    private:
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Tracks hoveredIndex_ - the row (if any) currently under the
+        // mouse - for hoverHighlightEnabled()'s own effect above. A
+        // no-op (does not clear hoveredIndex_) while
+        // !hoverHighlightEnabled(), so nothing to undo when it's turned
+        // back on mid-hover.
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Clears hoveredIndex_ - the cursor has left this control
+        // entirely, so no row is hovered regardless of where it last was.
+        SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Answers this control's own onQueryContentSize (view.h) - see
+        // TextControl::handleQueryContentSize()'s own doc comment (this
+        // file) for the same reasoning (a hosting ScrollView may ask
+        // before this control has ever painted).
+        SyncReturn handleQueryContentSize(View& sender, Size& outSize);
+        // Answers this control's own onScrollOffsetChanged (view.h),
+        // driven by a hosting ScrollView.
+        SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
+        // Subscribed to controller_->onDataChanged in this class's own
+        // constructor (and re-subscribed in setController()) - a model
+        // mutation can change itemCount(), so a hosting ScrollView needs
+        // to re-run its own layout, same reasoning
+        // TextControl::handleModelChanged() already documents for a text
+        // edit.
+        SyncReturn handleDataChanged(ListController& sender);
+
+        // Common "did this actually change the selection" tail shared by
+        // setSelectedIndex()/addToSelection()/removeFromSelection()/
+        // selectRange()/clearSelection() (controls.cpp): replaces
+        // selectedIndices_ with newSelection, no-ops if it wouldn't
+        // actually change, otherwise marks dirty and fires
+        // onSelectionChanged.
+        void replaceSelection(std::set<std::size_t> newSelection);
+
+        std::unique_ptr<ListController> controller_;
+        float scrollOffsetY_ = 0.0f;
+        std::set<std::size_t> selectedIndices_;
+
+        // Shift+click's range start - the last index a plain or
+        // Ctrl+click landed on (handleMouseDown(), controls.cpp), fixed
+        // across a run of Shift+clicks so each one ranges from the same
+        // original point rather than the previous Shift+click's own
+        // target, matching standard listbox/Explorer Shift+click
+        // behavior.
+        std::optional<std::size_t> selectionAnchor_;
+
+        bool hoverHighlightEnabled_ = true;
+        std::optional<std::size_t> hoveredIndex_;
     };
 }

@@ -1,4 +1,6 @@
 #include "newui/controls.h"
+#include "newui/items.h"
+#include "newui/keyboard_constants.h"
 
 #include <gtest/gtest.h>
 
@@ -772,6 +774,114 @@ TEST(TextField, InputTraitsAccessorHoldsRealTraitsState) {
 }
 
 // ---------------------------------------------------------------------
+// TextField/TextControl - controller_/model_ are heap-owned
+// (std::unique_ptr) and swappable via setController()/setModel(), rather
+// than fixed stack members - see HANDOFF.md for why. RecordingTextController
+// below overrides a virtual handler to prove a swapped-in subclass's
+// override is actually reached (not just accepted and ignored).
+// ---------------------------------------------------------------------
+
+namespace {
+
+class RecordingTextController : public TextController {
+public:
+    using TextController::TextController;
+
+    int gotFocusCallCount = 0;
+
+    // Deliberately does NOT chain to TextController::handleGotFocus() -
+    // the real implementation starts a live caret-blink timer via
+    // Application::instance().runLoop(), which needs a real pumped
+    // message loop this headless test doesn't have. Overriding without
+    // chaining is enough to prove dispatch reaches the override at all.
+    SyncReturn handleGotFocus() override {
+        ++gotFocusCallCount;
+        return SyncReturn::Handled;
+    }
+};
+
+}  // namespace
+
+TEST(TextField, SetControllerReplacesTheControllerAndReachesASubclassOverride) {
+    auto* field = new TextField();
+    auto* custom = new RecordingTextController(*field);
+
+    field->setController(std::unique_ptr<TextController>(custom));
+
+    EXPECT_EQ(&field->controller(), custom);
+    EXPECT_EQ(custom->gotFocusCallCount, 0);
+
+    field->onGotFocus(*field);
+
+    EXPECT_EQ(custom->gotFocusCallCount, 1) << "expected the field's own onGotFocus to reach the swapped-in subclass's override";
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SetControllerWithNullptrDoesNotCrashOrReplaceTheExistingOne) {
+    auto* field = new TextField();
+    TextController* original = &field->controller();
+
+    field->setController(nullptr);
+
+    EXPECT_EQ(&field->controller(), original);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SetModelReplacesTheModelAndReflectsItsContent) {
+    auto* field = new TextField();
+    field->setText(L"original");
+
+    auto newModel = std::make_unique<text::TextModel>();
+    newModel->setText(L"replacement");
+    text::TextModel* newModelPtr = newModel.get();
+
+    field->setModel(std::move(newModel));
+
+    EXPECT_EQ(&field->model(), newModelPtr);
+    EXPECT_EQ(field->text(), L"replacement");
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SetModelWithNullptrDoesNotCrashOrReplaceTheExistingOne) {
+    auto* field = new TextField();
+    text::TextModel* original = &field->model();
+
+    field->setModel(nullptr);
+
+    EXPECT_EQ(&field->model(), original);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextControl, SetModelRewiresContentSizeChangeNotificationToTheNewModel) {
+    auto* textControl = new TextControl();
+    int contentSizeChangedCount = 0;
+    textControl->onContentSizeChanged.add([&](View&) {
+        ++contentSizeChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    auto newModel = std::make_unique<text::TextModel>();
+    textControl->setModel(std::move(newModel));
+    EXPECT_GE(contentSizeChangedCount, 1) << "setModel() itself should notify";
+
+    int countAfterSwap = contentSizeChangedCount;
+    textControl->model().setText(L"typed after swap");
+
+    EXPECT_GT(contentSizeChangedCount, countAfterSwap) << "a change on the NEW model should still reach handleModelChanged after the swap";
+
+    textControl->destroy();
+    delete textControl;
+}
+
+// ---------------------------------------------------------------------
 // TextControl - owns no scrollbar of its own at all (see HANDOFF.md for
 // the history: an earlier version had one, hand-rolled, and its scroll-
 // offset bookkeeping could desync from it - removed entirely rather than
@@ -864,6 +974,395 @@ TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     // small, unchanged bounds.
     scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
     textControl->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// ---------------------------------------------------------------------
+// ListView - the first real consumer of the Item/Controller foundation
+// (items.h/controllers.h): rows painted via a pooled ListItem, never a
+// real child SubView per row, hosted the same ScrollView-virtualization
+// way TextControl already is (see its own tests above).
+// ---------------------------------------------------------------------
+
+namespace {
+
+class StubRowModel : public ListModel {
+public:
+    std::vector<std::string> rows;
+
+    std::any value(const std::any& key) override {
+        if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
+            if (*index < rows.size()) {
+                return rows[*index];
+            }
+        }
+        return std::any();
+    }
+
+    std::size_t size() const override { return rows.size(); }
+};
+
+}  // namespace
+
+TEST(ListView, DefaultConstructedHasZeroItemCountAndNoSelection) {
+    auto* listView = new ListView();
+
+    EXPECT_EQ(listView->controller().itemCount(), 0u);
+    EXPECT_FALSE(listView->selectedIndex().has_value());
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ContentSizeIsItemCountTimesRowHeight) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 60));
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    Size reported = listView->contentSize();
+
+    EXPECT_FLOAT_EQ(reported.height, float(model.rows.size()) * listView->rowHeight());
+
+    listView->destroy();
+    delete listView;
+}
+
+namespace {
+
+// A customized ListController whose rows genuinely vary in height by
+// content - row 0 is short (a plain label), row 1 is tall (imagine an
+// image/preview row) - the real scenario ListController::itemHeight()
+// exists for.
+class VariableHeightController : public ListController {
+public:
+    float itemHeight(std::size_t index) const override {
+        return index == 1 ? 50.0f : 20.0f;
+    }
+};
+
+}  // namespace
+
+TEST(ListView, RespectsACustomizedControllersPerRowItemHeight) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    listView->setController(std::make_unique<VariableHeightController>());
+
+    StubRowModel model;
+    model.rows = { "short", "tall", "short again" };
+    listView->setModel(&model);
+
+    // 20 (row 0) + 50 (row 1) + 20 (row 2) = 90, not 3 * rowHeight().
+    Size reported = listView->contentSize();
+    EXPECT_FLOAT_EQ(reported.height, 90.0f);
+
+    // A click inside row 1's taller span (y = 30, well past row 0's own
+    // 20px but still inside row 1's 20-70 span) should select row 1, not
+    // whatever a uniform-row-height assumption would have picked.
+    float clickY = listView->getClientBounds().top() + 30.0f;
+    listView->onMouseDown(*listView, Point(10.0f, clickY), 0, 0);
+
+    ASSERT_TRUE(listView->selectedIndex().has_value());
+    EXPECT_EQ(*listView->selectedIndex(), 1u);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, SetSelectedIndexMarksDirtyAndFiresOnSelectionChanged) {
+    auto* listView = new ListView();
+    int selectionChangedCount = 0;
+    listView->onSelectionChanged.add([&](ListView&) {
+        ++selectionChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    listView->setSelectedIndex(2u);
+
+    ASSERT_TRUE(listView->selectedIndex().has_value());
+    EXPECT_EQ(*listView->selectedIndex(), 2u);
+    EXPECT_EQ(selectionChangedCount, 1);
+
+    // Setting the same index again is a no-op - no extra notification.
+    listView->setSelectedIndex(2u);
+    EXPECT_EQ(selectionChangedCount, 1);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, MouseDownSelectsTheRowUnderThePoint) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 60));
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    listView->setModel(&model);
+
+    int selectionChangedCount = 0;
+    listView->onSelectionChanged.add([&](ListView&) {
+        ++selectionChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    // Midway through row 1 (0-based), relative to wherever this
+    // ListView's own client bounds actually start - not assumed to be
+    // exactly (0,0), since its ThemedEditStyle chrome may inset a border.
+    float clickY = listView->getClientBounds().top() + 1.5f * listView->rowHeight();
+    listView->onMouseDown(*listView, Point(10.0f, clickY), 0, 0);
+
+    ASSERT_TRUE(listView->selectedIndex().has_value());
+    EXPECT_EQ(*listView->selectedIndex(), 1u);
+    EXPECT_EQ(selectionChangedCount, 1);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, MouseDownPastTheLastRowDoesNotSelectAnything) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 60));
+
+    StubRowModel model;
+    model.rows = { "a", "b" };
+    listView->setModel(&model);
+
+    float clickY = listView->getClientBounds().top() + 10.0f * listView->rowHeight();
+    listView->onMouseDown(*listView, Point(10.0f, clickY), 0, 0);
+
+    EXPECT_FALSE(listView->selectedIndex().has_value());
+
+    listView->destroy();
+    delete listView;
+}
+
+// ---------------------------------------------------------------------
+// ListView - multi-selection: a plain click replaces the whole selection,
+// Ctrl+click toggles one row without disturbing the rest, Shift+click
+// range-selects from the last plain/Ctrl+click - standard listbox/
+// Explorer conventions.
+// ---------------------------------------------------------------------
+
+namespace {
+
+void ClickRow(ListView* listView, std::size_t index, std::uint32_t keyMask) {
+    float clickY = listView->getClientBounds().top() + (float(index) + 0.5f) * listView->rowHeight();
+    listView->onMouseDown(*listView, Point(10.0f, clickY), 0, keyMask);
+}
+
+}  // namespace
+
+TEST(ListView, PlainClickReplacesTheWholeSelection) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    ClickRow(listView, 1, 0);
+    ClickRow(listView, 3, 0);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 3u }))
+        << "a later plain click should replace the earlier selection entirely";
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, CtrlClickTogglesARowWithoutDisturbingTheRest) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    ClickRow(listView, 1, 0);
+    ClickRow(listView, 3, kmCtrl);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 3u }));
+
+    // Ctrl+click on an already-selected row toggles it back off.
+    ClickRow(listView, 1, kmCtrl);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 3u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ShiftClickSelectsARangeFromTheLastPlainClick) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    ClickRow(listView, 1, 0);
+    ClickRow(listView, 3, kmShift);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
+
+    // A second Shift+click ranges from the SAME original anchor (row 1),
+    // not from row 3 (the previous Shift+click's own target).
+    ClickRow(listView, 0, kmShift);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 0u, 1u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, SelectRangeAddToSelectionAndClearSelectionWorkDirectly) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->selectRange(1u, 3u);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
+
+    listView->addToSelection(0u);
+    EXPECT_TRUE(listView->isSelected(0u));
+    EXPECT_TRUE(listView->isSelected(2u));
+
+    listView->removeFromSelection(2u);
+    EXPECT_FALSE(listView->isSelected(2u));
+
+    listView->clearSelection();
+    EXPECT_TRUE(listView->selectedIndices().empty());
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, MultiSelectionPaintsAllSelectedRowsWithoutCrashing) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+    listView->selectRange(1u, 3u);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    listView->destroy();
+    delete listView;
+}
+
+// ---------------------------------------------------------------------
+// ListView - hover highlighting (hoverHighlightEnabled(), on by default)
+// ---------------------------------------------------------------------
+
+TEST(ListView, HoverHighlightIsEnabledByDefault) {
+    auto* listView = new ListView();
+    EXPECT_TRUE(listView->hoverHighlightEnabled());
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, MouseMoveTracksTheHoveredRowAndMouseLeftClearsIt) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
+    listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // hovered row must not crash to paint
+
+    listView->onMouseLeft(*listView, Point(10.0f, row2Y), 0, 0);
+    listView->paint(ctx);  // and neither should painting after it clears
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
+    listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
+
+    listView->setHoverHighlightEnabled(false);
+    EXPECT_FALSE(listView->hoverHighlightEnabled());
+
+    // Once disabled, further mouse movement shouldn't track hover at all -
+    // exercised indirectly by just confirming paint() still works cleanly
+    // (no pooled Item is left in a stale highlighted state).
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, PaintDoesNotCrashAndReusesASinglePooledItemAcrossRowsAndCalls) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 60));
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+    listView->setSelectedIndex(1u);
+
+    ListItem* before = listView->controller().createItem(0);
+    listView->controller().releaseItem(before);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    ListItem* after = listView->controller().createItem(0);
+    EXPECT_EQ(before, after) << "expected every row's ListItem, across the whole paint() call, to reuse the same pooled instance - it's released back to the pool immediately after each row";
+    listView->controller().releaseItem(after);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    // No scrollbar of its own, and pinned to the (much smaller) viewport
+    // rather than grown to its true content height - same virtualized-
+    // child contract TextControl's own equivalent test above verifies.
+    EXPECT_TRUE(listView->childViews().empty());
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    EXPECT_LT(listView->bounds().size().height, float(model.rows.size()) * listView->rowHeight());
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
+    listView->paint(ctx);
 
     scrollView->destroy();
     delete scrollView;

@@ -206,10 +206,17 @@ namespace newui
     Item* ItemController::instantiateItem(const std::string& className) const {
         const reflection::Class* cls = reflection::classinfo(className);
         if (cls == nullptr) {
-            return nullptr;
+            throw std::runtime_error(
+                "ItemController::instantiateItem: unknown Item class \"" + className
+                + "\" - not registered (did registerReflectionData() run before this?)");
         }
         void* raw = nullptr;
         cls->createInstance(&raw);
+        if (raw == nullptr) {
+            throw std::runtime_error(
+                "ItemController::instantiateItem: Class::createInstance() failed for \"" + className
+                + "\" (no registered default constructor, or an abstract class?)");
+        }
         return static_cast<Item*>(raw);
     }
 
@@ -232,6 +239,38 @@ namespace newui
 
     ListItem* ListController::createItem(std::size_t /*index*/) {
         return static_cast<ListItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
+    }
+
+    float ListController::totalHeight() const {
+        float total = 0.0f;
+        std::size_t count = itemCount();
+        for (std::size_t i = 0; i < count; ++i) {
+            total += itemHeight(i);
+        }
+        return total;
+    }
+
+    float ListController::itemOffset(std::size_t index) const {
+        float offset = 0.0f;
+        std::size_t count = itemCount();
+        std::size_t last = index < count ? index : count;
+        for (std::size_t i = 0; i < last; ++i) {
+            offset += itemHeight(i);
+        }
+        return offset;
+    }
+
+    std::size_t ListController::indexAt(float contentY) const {
+        std::size_t count = itemCount();
+        float offset = 0.0f;
+        for (std::size_t i = 0; i < count; ++i) {
+            float height = itemHeight(i);
+            if (contentY < offset + height) {
+                return i;
+            }
+            offset += height;
+        }
+        return count;
     }
 
     // ---------------------------------------------------------------------
