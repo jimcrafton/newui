@@ -1826,6 +1826,23 @@ namespace newui {
         bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
         void setHoverHighlightEnabled(bool value);
 
+        // A second, independent highlight - same lighter-fill look as
+        // hoverHighlightEnabled()'s own (Item::setHighlighted(), items.h;
+        // a row highlighted either way just OR's together in paint()), but
+        // driven by keyboard navigation rather than the mouse, and never
+        // cleared by mouse movement. Kept entirely separate from
+        // hoveredIndex_ (not reused for this) - conflating the two would
+        // mean an incidental mouse move while arrowing through the list
+        // silently cancels the keyboard highlight. Not wired to any
+        // onKeyDown handling in this class itself - ListView has no
+        // reliable way to ever hold real keyboard focus when hosted inside
+        // a non-activating PopupFrame (WS_EX_NOACTIVATE), so
+        // DropDownList::handleKeyDown() (controls.cpp) drives this
+        // directly instead. Clamped to a valid index (or cleared if
+        // itemCount() is 0) - never left pointing past the end.
+        std::optional<std::size_t> keyboardHighlightedIndex() const { return keyboardHighlightedIndex_; }
+        void setKeyboardHighlightedIndex(std::optional<std::size_t> index);
+
         // Thin forwarders to controller_->defaultItemHeight()/
         // setDefaultItemHeight() (controllers.h) - the real, per-row
         // height a custom ListController subclass can vary lives there
@@ -1953,6 +1970,7 @@ namespace newui {
 
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredIndex_;
+        std::optional<std::size_t> keyboardHighlightedIndex_;
     };
 
     // The hierarchical counterpart to ListView (above) - same overall
@@ -2066,5 +2084,119 @@ namespace newui {
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
+    };
+
+    class PopupFrame;
+
+    // Displays a single selected item from a ListModel, with a button on
+    // the right that drops down a ListView (hosted in a PopupFrame,
+    // popupframe.h) showing every item - the classic combo-box shape.
+    // Reuses ListController/ListModel/ListItem/ListView entirely
+    // unmodified: the popup's own content is a real ListView, wired to
+    // this DropDownList's own model, exactly the way any other ListView
+    // would be used.
+    //
+    // popup_ is created lazily on first open, not in the constructor -
+    // PopupFrame::initialize() needs a real owner HWND
+    // (rootView()->windowHandle()), which only exists once this control is
+    // actually attached under a live Frame/RootView (the same constraint
+    // ThemedViewStyle already has - see items.h's own doc comment on
+    // Item::setStyle()). Persistent afterward (see PopupFrame's own class
+    // comment) - opening/closing repeatedly just shows/hides the same
+    // window rather than recreating it.
+    class DropDownList : public Control {
+    public:
+        DropDownList();
+        ~DropDownList() override;
+
+        ListController& controller() { return *controller_; }
+        const ListController& controller() const { return *controller_; }
+
+        ListModel* model() const { return controller_->model(); }
+        // Same non-owning ListModel* contract as ListView::setModel() -
+        // see its own doc comment (controls.h). Clears selectedIndex() if
+        // it's no longer valid against the new model's size().
+        void setModel(ListModel* model);
+
+        std::optional<std::size_t> selectedIndex() const { return selectedIndex_; }
+        // A no-op if unchanged. Does not itself validate index against
+        // model()->size() - callers (this class's own popup-selection
+        // handler) already only ever pass an index the popup's own
+        // ListView just reported as selected, which is by construction
+        // always in range.
+        void setSelectedIndex(std::optional<std::size_t> index);
+
+        typedef Delegate<DropDownList> SelectionChangedDelegate;
+        SelectionChangedDelegate onSelectionChanged;
+
+        bool isOpen() const;
+
+        // This control's own chrome (style()) first, then the selected
+        // item's text (controller_->model()->value(*selectedIndex_), left-
+        // aligned/vertically centered - empty if nothing's selected) in
+        // the area left of buttonRect(), then a small hand-drawn filled-
+        // triangle arrow glyph inside buttonRect() - same BLPath triangle
+        // technique TreeItem's own expand/collapse glyph uses (items.cpp),
+        // consistent with this codebase's "hand-drawn, not themed" small
+        // glyphs convention.
+        void paint(BLContext& ctx) override;
+
+    protected:
+        // Fixed-width region on the right - same "one Control, two hit-
+        // regions" shape Stepper::upRect()/downRect() already use.
+        // Protected (not private) purely for testability - a test-local
+        // subclass exposes it via a using-declaration, same pattern
+        // TestableThemedButtonStyle (test_viewstyle.cpp) already uses for
+        // partId()/stateId() - lets tests check real, theme/DPI-dependent
+        // geometry (getClientBounds()'s own border inset) instead of
+        // hardcoding an assumed pixel inset.
+        Rect buttonRect() const;
+
+    private:
+        void openPopup();
+        void closePopup();
+
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handlePopupListSelectionChanged(ListView& sender);
+        // Closes the popup on any click that lands on a real row - not
+        // wired through onSelectionChanged above, which only fires when
+        // the selected *value* actually changes (ListView::
+        // setSelectedIndex() is a no-op otherwise) - re-clicking the
+        // already-selected row is a real, confirmed live case where that
+        // left the popup stuck open (a combo box's popup should close on
+        // any row click, not just a value-changing one).
+        SyncReturn handlePopupListMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handlePopupDismissed(PopupFrame& sender);
+
+        // Up/Down arrows behave differently depending on isOpen() (per
+        // user direction): closed - directly move the committed selection
+        // to the prev/next item. Open - move popupListView_'s own
+        // keyboardHighlightedIndex() (a preview, not yet committed) via
+        // moveKeyboardHighlight() below; Enter commits whatever's
+        // currently highlighted and closes the popup, Escape closes it
+        // without changing the selection. Reachable at all only because
+        // clicking this Control already focuses it via RootView::
+        // mouseDown()'s own setFocusedSubView() call (rootview.cpp) - no
+        // extra focus-handling needed here.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+
+        // Moves popupListView_'s keyboardHighlightedIndex() by delta
+        // (clamped to a valid row, never wrapping) - starts from
+        // selectedIndex_ the first time (seeded in openPopup()), so the
+        // first arrow press while dropped down moves relative to the
+        // already-selected row rather than an arbitrary one.
+        void moveKeyboardHighlight(int delta);
+
+        std::unique_ptr<ListController> controller_;
+        std::unique_ptr<PopupFrame> popup_;
+        ListView* popupListView_ = nullptr;  // owned by popup_->getView()'s normal addChild(), not by this class directly
+        std::optional<std::size_t> selectedIndex_;
+
+        // Guards openPopup()'s own restore of the popup ListView's
+        // selection (to match selectedIndex_ on reopen) from being
+        // mistaken for a real user click - without this, that restore
+        // would fire handlePopupListSelectionChanged(), which calls
+        // closePopup(), closing the popup in the middle of opening it.
+        bool restoringPopupSelection_ = false;
     };
 }

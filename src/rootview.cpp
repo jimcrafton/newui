@@ -802,15 +802,32 @@ namespace newui {
 
 				mouseDown(pt, btnMask, keyMask);
 
-				::SetFocus(viewHwnd_);
-				// Keeps delivering WM_MOUSEMOVE/WM_*BUTTONUP to this window
-				// even once the cursor leaves it - needed so
-				// capturedSubView_ (set by mouseDown() above) keeps
-				// receiving mouseMove()/mouseUp() for the rest of a drag
-				// that goes outside the window's bounds. Released on the
-				// matching button-up below (or via WM_CAPTURECHANGED if
-				// something else steals it first).
-				::SetCapture(viewHwnd_);
+				// mouseDown() above may have synchronously torn this
+				// window down (a target's own onMouseDown handler closing
+				// a popup RootView it was hosted in, e.g. DropDownList
+				// dismissing its PopupFrame's popup on a row click,
+				// controls.cpp) - if so, this window is already hidden by
+				// the time control returns here, and stealing OS focus/
+				// capture onto it now would silently pull real keyboard
+				// input into a window nothing can see anymore, undoing
+				// whatever the nested handler had already refocused
+				// instead (confirmed live: exactly this, reported as "the
+				// dropdown control loses focus" after selecting a popup
+				// row - DropDownList::closePopup()'s own refocus onto the
+				// main window ran *before* this tail code, which then
+				// unconditionally overwrote it right back onto the
+				// popup's own now-hidden HWND).
+				if (::IsWindowVisible(viewHwnd_)) {
+					::SetFocus(viewHwnd_);
+					// Keeps delivering WM_MOUSEMOVE/WM_*BUTTONUP to this
+					// window even once the cursor leaves it - needed so
+					// capturedSubView_ (set by mouseDown() above) keeps
+					// receiving mouseMove()/mouseUp() for the rest of a
+					// drag that goes outside the window's bounds. Released
+					// on the matching button-up below (or via
+					// WM_CAPTURECHANGED if something else steals it first).
+					::SetCapture(viewHwnd_);
+				}
 				result = true;
 			}
 			break;

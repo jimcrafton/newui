@@ -1314,6 +1314,39 @@ TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
     delete listView;
 }
 
+TEST(ListView, SetKeyboardHighlightedIndexClampsAndIsIndependentOfHover) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->setKeyboardHighlightedIndex(2u);
+    ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*listView->keyboardHighlightedIndex(), 2u);
+
+    // Out of range against itemCount() (5 rows, index 99 is past the end) -
+    // clears rather than storing an invalid index.
+    listView->setKeyboardHighlightedIndex(99u);
+    EXPECT_FALSE(listView->keyboardHighlightedIndex().has_value());
+
+    // A real mouse move (hoveredIndex_) must not disturb a keyboard
+    // highlight set independently of it - see keyboardHighlightedIndex()'s
+    // own doc comment (controls.h) for why the two are kept separate.
+    listView->setKeyboardHighlightedIndex(1u);
+    float row3Y = listView->getClientBounds().top() + 3.5f * listView->rowHeight();
+    listView->onMouseMove(*listView, Point(10.0f, row3Y), 0, 0);
+    ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*listView->keyboardHighlightedIndex(), 1u);
+
+    BLImage image(100, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // both a hovered and a keyboard-highlighted row must not crash to paint
+
+    listView->destroy();
+    delete listView;
+}
+
 TEST(ListView, PaintDoesNotCrashAndReusesASinglePooledItemAcrossRowsAndCalls) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
@@ -1568,4 +1601,258 @@ TEST(TreeView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
 
     scrollView->destroy();
     delete scrollView;
+}
+
+// DropDownList's own popup open/dismiss behavior needs a real HWND
+// (PopupFrame::initialize() requires rootView()->windowHandle(), only
+// resolvable once attached under a live Frame/RootView - see openPopup()'s
+// own doc comment, controls.cpp) - not practically testable headlessly, so
+// (matching this file's own established scoping for anything screen/HWND-
+// related) these cover only what's reachable without one: model/selection
+// wiring, buttonRect() hit-testing, and that clicking the button while
+// detached from any live window is a safe no-op rather than a crash.
+
+namespace {
+
+// Exposes protected buttonRect() for direct assertions on its geometry -
+// same "protected purely for testability" pattern TestableThemedButtonStyle
+// (test_viewstyle.cpp) already uses for partId()/stateId().
+class TestableDropDownList : public DropDownList {
+public:
+    using DropDownList::buttonRect;
+};
+
+}  // namespace
+
+TEST(DropDownList, DefaultConstructedHasNoSelectionAndIsNotOpen) {
+    auto* dropDown = new DropDownList();
+
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());
+    EXPECT_FALSE(dropDown->isOpen());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, SetModelWiresTheControllerAndClearsAnOutOfRangeSelection) {
+    auto* dropDown = new DropDownList();
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+    EXPECT_EQ(dropDown->model(), &model);
+
+    dropDown->setSelectedIndex(2u);
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+
+    // Swapping in a smaller model whose size() no longer covers index 2
+    // clears the now-invalid selection - same reasoning
+    // TreeController::setModel() already has for expandedPaths_ referring
+    // to a path that no longer exists.
+    StubRowModel smallerModel;
+    smallerModel.rows = { "only one" };
+    dropDown->setModel(&smallerModel);
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, SetSelectedIndexMarksDirtyAndFiresOnSelectionChanged) {
+    auto* dropDown = new DropDownList();
+    int selectionChangedCount = 0;
+    dropDown->onSelectionChanged.add([&](DropDownList&) {
+        ++selectionChangedCount;
+        return SyncReturn::Handled;
+        });
+
+    dropDown->setSelectedIndex(1u);
+
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 1u);
+    EXPECT_EQ(selectionChangedCount, 1);
+
+    // Setting the same index again is a no-op - no extra notification.
+    dropDown->setSelectedIndex(1u);
+    EXPECT_EQ(selectionChangedCount, 1);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, ButtonRectIsAFixedWidthRegionAlignedToTheRightEdge) {
+    auto* dropDown = new TestableDropDownList();
+    dropDown->setBounds(Rect(0, 0, 200, 24));
+
+    Rect client = dropDown->getClientBounds();
+    Rect button = dropDown->buttonRect();
+
+    EXPECT_FLOAT_EQ(button.top(), client.top());
+    EXPECT_FLOAT_EQ(button.size().height, client.size().height);
+    EXPECT_FLOAT_EQ(button.left() + button.size().width, client.left() + client.size().width);
+    // Square-ish - width matches the client height (clamped to the client
+    // width, irrelevant at this size) - see buttonRect()'s own doc comment.
+    EXPECT_FLOAT_EQ(button.size().width, client.size().height);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, ClickingTheButtonWithNoLiveWindowIsASafeNoOp) {
+    auto* dropDown = new TestableDropDownList();
+    dropDown->setBounds(Rect(0, 0, 200, 24));
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+
+    Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
+    dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
+
+    // openPopup() early-returns (no rootView()/windowHandle() while
+    // detached, as here) - isOpen() stays false rather than crashing.
+    EXPECT_FALSE(dropDown->isOpen());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, ClickingOutsideTheButtonDoesNotOpenIt) {
+    auto* dropDown = new DropDownList();
+    dropDown->setBounds(Rect(0, 0, 200, 24));
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+
+    Point outsideButton(4.0f, 12.0f);
+    dropDown->onMouseDown(*dropDown, outsideButton, 0, 0);
+
+    EXPECT_FALSE(dropDown->isOpen());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, DisabledDropDownIgnoresButtonClicks) {
+    auto* dropDown = new TestableDropDownList();
+    dropDown->setBounds(Rect(0, 0, 200, 24));
+    dropDown->setEnabled(false);
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+
+    Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
+    dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
+
+    EXPECT_FALSE(dropDown->isOpen());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, PaintDoesNotCrashWithOrWithoutASelection) {
+    auto* dropDown = new DropDownList();
+    dropDown->setBounds(Rect(0, 0, 200, 24));
+
+    BLImage image(200, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+
+    // No model/selection yet - paint() should still draw its chrome/arrow
+    // glyph without crashing.
+    dropDown->paint(ctx);
+
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+    dropDown->setSelectedIndex(1u);
+    dropDown->paint(ctx);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+// Arrow keys while the popup is closed - see handleKeyDown()'s own doc
+// comment (controls.h) for why this is reachable/testable headlessly (it
+// only ever touches selectedIndex_ directly, unlike the open-popup case,
+// which needs a live popupListView_).
+
+TEST(DropDownList, DownArrowWithNoSelectionSelectsTheFirstItem) {
+    auto* dropDown = new DropDownList();
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
+
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 0u);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, DownArrowAdvancesAndClampsAtTheLastItem) {
+    auto* dropDown = new DropDownList();
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+    dropDown->setSelectedIndex(1u);
+
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 2u);
+
+    // Already on the last item - stays put rather than going out of range.
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 2u);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, UpArrowRetreatsAndClampsAtTheFirstItem) {
+    auto* dropDown = new DropDownList();
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+    dropDown->setSelectedIndex(1u);
+
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkUpArrow);
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 0u);
+
+    // Already on the first item - stays put rather than going negative.
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkUpArrow);
+    ASSERT_TRUE(dropDown->selectedIndex().has_value());
+    EXPECT_EQ(*dropDown->selectedIndex(), 0u);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, ArrowKeysAreIgnoredWithNoModel) {
+    auto* dropDown = new DropDownList();
+
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(DropDownList, ArrowKeysAreIgnoredWhileDisabled) {
+    auto* dropDown = new DropDownList();
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    dropDown->setModel(&model);
+    dropDown->setEnabled(false);
+
+    dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());
+
+    dropDown->destroy();
+    delete dropDown;
 }

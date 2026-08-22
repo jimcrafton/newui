@@ -12,7 +12,7 @@ namespace newui {
 class Frame {
 public:
     Frame();
-    ~Frame();
+    virtual ~Frame();
 
 	typedef Delegate<Frame, std::string, std::string> TitleChangedDelegate;
 		
@@ -28,7 +28,7 @@ public:
 		return title_;
 	}
 
-	bool initialize();
+	virtual bool initialize();
 
 	void setBounds(const Rect& bounds);
 
@@ -70,25 +70,38 @@ public:
 	// extension, unwritable path, ...).
 	bool renderAllViewsToFile(const std::string& path);
 
+    protected:
+	// Dispatches through the vtable from the static WndProc below, so a
+	// derived class (PopupFrame) overriding this gets called automatically
+	// with no need for its own WndProc - see WndProc's own comment.
+	virtual bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
+
+	// Reused as-is by PopupFrame::initialize() as its own wcex.lpfnWndProc -
+	// this already does nothing Frame-specific beyond the GWLP_USERDATA/
+	// CREATESTRUCT dance and dispatching to thisPtr->handleMessage(...),
+	// which resolves virtually, so a PopupFrame registered with this same
+	// function still gets PopupFrame::handleMessage() called.
+	static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+	// Both just wrap rootView_->initialize()/destroy() - nothing about
+	// either is specific to Frame's own WS_OVERLAPPEDWINDOW styling, so
+	// PopupFrame's own WM_CREATE/WM_DESTROY handling reuses them directly.
+	bool frameCreated();
+	void destroy();
+
     private:
     std::string title_;
 	Rect bounds_;
 
 
-	
-	
+
+
 	RootView* rootView_ = nullptr;
 
 	HWND frameHandle_ = nullptr;
 	WNDPROC defaultWndProc_ = nullptr;
 	WNDPROC wndProc_ = nullptr;
 
-	bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
-
-	static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-
-	bool frameCreated();
-	void destroy();
 	void sizeChange(const Size& newSize);
 	void updateViewBounds();
 };

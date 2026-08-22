@@ -1,0 +1,78 @@
+Ideas 
+
+
+
+
+
+Create a python tool that can take external file based resources, like a png file, and convert into a window’s appropriate app resource, like a cursor or ICO, and then wrap the resource compiler (rc) and compile them 
+
+
+
+
+
+Page: Page scrollers and navigation arrows.
+MonthCal / DatePicker: Calendars, drop-down arrows, grid lines, and selection boxes.
+Window (Non-Client Area): Active/inactive title bars, sizing frames, minimize/maximize/close caption buttons, and menu bars.
+Taskbar & Start Menu: Tray notify areas, taskband buttons, and start menu backgrounds (via internal shell styles
+
+Add toolbar support buttons
+Add docking?
+Add tabs
+
+
+
+
+Add complete support for proper image handling in viewstyle, image path, alignment (center, align to corner, stretch, tile)
+
+
+How to handle running idle tasks outside main winproc and runloop, in hosted environment 
+
+
+
+How to best attach the root view to an existing hwnd that is not a framework owned hwnd 
+
+
+
+Be able to run without application class or frame class
+
+
+Fixes:
+
+Scrolling
+
+
+
+How views are painted and how to properly paint only the necessary views
+
+How to best attach the root view to an existing hwnd that is not a framework owned hwnd 
+
+
+
+Be able to run without application class or frame class
+
+
+Shapes
+
+Support hit testing, given a point
+
+Have a selection class? Support rectangular, circular, straight points, or points converted to curves
+
+
+Selection hold ctrl +shift should allow for non contiguous characters to be selected 
+
+Column mode alt + click
+
+view needs potentially 2 rects - 
+1) a client bounds that represents the visible rect it can draw in
+2) a content bounds that represents the full size of it's content. 
+
+content bounds may be the same as client. Layout processing ONLY affects the client bounds
+
+At the moment we don't have support for different text styles
+  ? so we've got to fix that too
+  
+  
+Clipboard
+Actions hotkey associated (like Ctrl+P), and tied to UI actions, can be hooked up to controls, and menu items
+Drag n Drop (within the framework)
+Drag n Drop (external, needs COM support)

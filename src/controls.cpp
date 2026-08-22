@@ -3,10 +3,12 @@
 #include "newui/color.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
+#include "newui/popupframe.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
 
 #include <algorithm>
+#include <any>
 #include <cmath>
 #include <cwctype>
 #include <stdexcept>
@@ -2403,6 +2405,17 @@ namespace newui {
         }
     }
 
+    void ListView::setKeyboardHighlightedIndex(std::optional<std::size_t> index) {
+        if (index.has_value() && *index >= controller_->itemCount()) {
+            index.reset();
+        }
+        if (index == keyboardHighlightedIndex_) {
+            return;
+        }
+        keyboardHighlightedIndex_ = index;
+        style().markDirty();
+    }
+
     void ListView::setController(std::unique_ptr<ListController> controller) {
         if (controller == nullptr) {
             return;
@@ -2540,7 +2553,9 @@ namespace newui {
             // ThemedListItemStyle part.
             item->setSelected(isSelected(i));
             item->setEnabled(isEnabled());
-            item->setHighlighted(hoverHighlightEnabled_ && hoveredIndex_.has_value() && *hoveredIndex_ == i);
+            bool isHovered = hoverHighlightEnabled_ && hoveredIndex_.has_value() && *hoveredIndex_ == i;
+            bool isKeyboardHighlighted = keyboardHighlightedIndex_.has_value() && *keyboardHighlightedIndex_ == i;
+            item->setHighlighted(isHovered || isKeyboardHighlighted);
 
             float height = controller_->itemHeight(i);
             if (height <= 0.0f) {
@@ -2570,6 +2585,11 @@ namespace newui {
             Rect selectedRect(0.0f, controller_->itemOffset(*primary), clientBounds.width(),
                 controller_->itemHeight(*primary));
             onRequestScrollIntoView(*this, selectedRect);
+        }
+        if (keyboardHighlightedIndex_.has_value()) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
         }
     }
 
@@ -2908,6 +2928,426 @@ namespace newui {
         onContentSizeChanged(*this);
         style().markDirty();
         return SyncReturn::Handled;
+    }
+
+    // -----------------------------------------------------------------
+    // DropDownList
+    // -----------------------------------------------------------------
+
+    DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
+        setVisible(true);
+        setStyle(std::make_unique<ThemedEditStyle>());
+
+        onMouseDown.add(this, &DropDownList::handleMouseDown);
+        onKeyDown.add(this, &DropDownList::handleKeyDown);
+    }
+
+    DropDownList::~DropDownList() {
+        // Same "force the live window down synchronously before Frame's
+        // own destructor sees a live frameHandle_ next to a live
+        // rootView_" reasoning as Dialog::~Dialog() (dialogs.cpp) -
+        // Frame::~Frame() throws otherwise.
+        if (popup_ != nullptr && popup_->frameHandle() != nullptr) {
+            ::DestroyWindow(popup_->frameHandle());
+        }
+    }
+
+    void DropDownList::setModel(ListModel* model) {
+        controller_->setModel(model);
+        if (selectedIndex_.has_value() && (model == nullptr || *selectedIndex_ >= model->size())) {
+            selectedIndex_.reset();
+        }
+        if (popupListView_ != nullptr) {
+            popupListView_->setModel(model);
+        }
+        style().markDirty();
+    }
+
+    void DropDownList::setSelectedIndex(std::optional<std::size_t> index) {
+        if (index == selectedIndex_) {
+            return;
+        }
+        selectedIndex_ = index;
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    bool DropDownList::isOpen() const {
+        return popup_ != nullptr && popup_->isVisible();
+    }
+
+    Rect DropDownList::buttonRect() const {
+        Rect clientBounds = getClientBounds();
+        float buttonWidth = clientBounds.size().height;
+        if (buttonWidth > clientBounds.size().width) {
+            buttonWidth = clientBounds.size().width;
+        }
+        return Rect(clientBounds.left() + clientBounds.size().width - buttonWidth, clientBounds.top(),
+            buttonWidth, clientBounds.size().height);
+    }
+
+    void DropDownList::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
+            return;
+        }
+
+        Rect button = buttonRect();
+        float textWidth = button.left() - clientBounds.left();
+        if (textWidth < 0.0f) {
+            textWidth = 0.0f;
+        }
+
+        if (selectedIndex_.has_value() && controller_->model() != nullptr && textWidth > 0.0f) {
+            std::any value = controller_->model()->value(*selectedIndex_);
+            if (const std::string* s = std::any_cast<std::string>(&value)) {
+                const std::string& text = *s;
+                if (!text.empty()) {
+                    Font font = FontManager::getSystemFont(SystemUIFont::Message);
+                    BLFont* blFont = font.blFont();
+                    if (blFont == nullptr || !blFont->is_valid()) {
+                        throw std::runtime_error("DropDownList::paint: font not resolved to a valid BLFont");
+                    }
+
+                    BLGlyphBuffer glyphBuffer;
+                    glyphBuffer.set_utf8_text(text.c_str(), text.size());
+                    blFont->shape(glyphBuffer);
+
+                    const BLFontMetrics& fontMetrics = blFont->metrics();
+                    double textHeight = fontMetrics.ascent + fontMetrics.descent;
+                    double x = clientBounds.left();
+                    double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+
+                    ctx.save();
+                    ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+                    ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
+                    ctx.restore();
+                }
+            }
+        }
+
+        // Small hand-drawn filled-triangle arrow glyph inside button() -
+        // same BLPath technique TreeItem's own expand/collapse glyph uses
+        // (items.cpp's paintExpandGlyph) - down when closed, up when the
+        // popup is currently showing.
+        double cx = button.left() + button.size().width * 0.5;
+        double cy = button.top() + button.size().height * 0.5;
+        double glyphSize = (button.size().width < button.size().height ? button.size().width : button.size().height) * 0.4;
+        double half = glyphSize * 0.5;
+
+        BLPath path;
+        if (isOpen()) {
+            path.move_to(cx - half, cy + half * 0.6);
+            path.line_to(cx + half, cy + half * 0.6);
+            path.line_to(cx, cy - half * 0.6);
+        } else {
+            path.move_to(cx - half, cy - half * 0.6);
+            path.line_to(cx + half, cy - half * 0.6);
+            path.line_to(cx, cy + half * 0.6);
+        }
+        path.close();
+
+        ctx.save();
+        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+        ctx.fill_path(path);
+        ctx.restore();
+    }
+
+    void DropDownList::openPopup() {
+        if (controller_->model() == nullptr || controller_->model()->size() == 0) {
+            return;
+        }
+
+        RootView* root = rootView();
+        if (root == nullptr || root->windowHandle() == nullptr) {
+            return;
+        }
+        // The popup's owner has to be the real top-level window, not
+        // RootView's own WS_CHILD HWND - same reasoning
+        // MenuBarButtonClicked() (menus.cpp) already documents for
+        // TrackPopupMenu's owner.
+        Frame* frame = root->getFrame();
+        if (frame == nullptr || frame->frameHandle() == nullptr) {
+            return;
+        }
+
+        bool firstOpen = (popup_ == nullptr);
+        if (firstOpen) {
+            popup_ = std::make_unique<PopupFrame>();
+            popup_->onDismissed.add(this, &DropDownList::handlePopupDismissed);
+
+            popupListView_ = new ListView();
+            popupListView_->setVisible(true);
+            popupListView_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+
+            // A real Layout (not manual bounds-poking) is load-bearing
+            // here, not just tidy - see the long comment on why in this
+            // method's own header. RootView::setBounds() (rootview.cpp)
+            // already calls updateLayout() synchronously as part of
+            // handling the real WM_SIZE that show()'s own ShowWindow()
+            // triggers - giving popup_->getView() a FlexLayout means
+            // popupListView_ gets arranged to fill it automatically, in
+            // that same synchronous call, with no separately-timed
+            // setBounds() call of our own that could race show()'s
+            // immediate forced repaint.
+            auto popupLayout = std::make_unique<FlexLayout>(Orientation::Vertical);
+            popupLayout->setSpacing(0.0f);
+            popupLayout->setPadding(0.0f);
+            popup_->getView().setLayout(std::move(popupLayout));
+            popup_->getView().addChild(popupListView_);
+
+            // Without an explicit background, whatever's behind an
+            // unpainted RootView shows through as a solid black rect
+            // (confirmed live). Matches the plain WindowBackground fill
+            // the main window's own root View gets in examples/mvc1.cpp.
+            popup_->getView().style().setBackgroundColor(
+                UIColorManager::colorFor(UIColorRole::WindowBackground));
+        }
+
+        popupListView_->setModel(controller_->model());
+
+        // Restore this control's own current selection into the popup's
+        // ListView before wiring/re-triggering its own onSelectionChanged -
+        // see restoringPopupSelection_'s own doc comment (controls.h) for
+        // why this has to happen before that subscription is (first)
+        // installed below.
+        restoringPopupSelection_ = true;
+        popupListView_->setSelectedIndex(selectedIndex_);
+        restoringPopupSelection_ = false;
+
+        // Seeds the keyboard-highlight preview at the already-selected row
+        // (or clears it if nothing's selected) - see
+        // moveKeyboardHighlight()'s own doc comment (controls.h) for why
+        // this needs a well-defined starting point before the first arrow
+        // press.
+        popupListView_->setKeyboardHighlightedIndex(selectedIndex_);
+
+        if (firstOpen) {
+            popupListView_->onSelectionChanged.add(this, &DropDownList::handlePopupListSelectionChanged);
+            popupListView_->onMouseDown.add(this, &DropDownList::handlePopupListMouseDown);
+        }
+
+        Point controlTopLeftScreen = root->localToScreen(root->accumulatedOffset(this));
+        Point screenPt = root->localToScreen(root->accumulatedOffset(this) + Point(0.0f, bounds().size().height));
+
+        static constexpr float kMaxPopupHeight = 200.0f;
+        float desiredHeight = popupListView_->controller().totalHeight();
+        float popupHeight = desiredHeight > 0.0f
+            ? (desiredHeight < kMaxPopupHeight ? desiredHeight : kMaxPopupHeight)
+            : controller_->defaultItemHeight();
+
+        // Flips the popup above the control (its bottom edge aligned with
+        // the control's own top edge) instead of below it, when there
+        // isn't enough room below on the control's current monitor but
+        // there is above - per user direction, so a DropDownList near the
+        // bottom of the screen still shows a fully visible popup rather
+        // than one clipped off/pushed past the screen edge. Best-effort:
+        // if MonitorFromWindow()/GetMonitorInfo() fails, or the popup
+        // doesn't actually fit in *either* direction, falls back to the
+        // plain below placement rather than adding further clamping logic
+        // nothing has asked for.
+        HMONITOR monitor = ::MonitorFromWindow(frame->frameHandle(), MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo = {};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (monitor != nullptr && ::GetMonitorInfo(monitor, &monitorInfo)) {
+            float spaceBelow = float(monitorInfo.rcWork.bottom) - screenPt.y;
+            float spaceAbove = controlTopLeftScreen.y - float(monitorInfo.rcWork.top);
+            if (popupHeight > spaceBelow && popupHeight <= spaceAbove) {
+                screenPt.y = controlTopLeftScreen.y - popupHeight;
+            }
+        }
+
+        Rect popupBounds(screenPt.x, screenPt.y, bounds().size().width, popupHeight);
+
+        if (firstOpen) {
+            popup_->setBounds(popupBounds);
+            if (!popup_->initialize(frame->frameHandle())) {
+                popup_.reset();
+                popupListView_ = nullptr;
+                return;
+            }
+        } else {
+            popup_->moveTo(popupBounds);
+        }
+
+        popup_->show();
+
+        style().markDirty();
+    }
+
+    void DropDownList::closePopup() {
+        if (popup_ != nullptr) {
+            popup_->hide();
+        }
+
+        // Reclaims both this app's own focus tracking and real Win32
+        // keyboard focus back onto this control - closing the popup from
+        // an in-app interaction (this method's only callers: the button
+        // toggling it closed, a row click, Enter, Escape) must not leave
+        // focus wherever RootView::handleMessage()'s own WM_LBUTTONDOWN
+        // tail (rootview.cpp) last pointed it. That tail unconditionally
+        // calls ::SetFocus(viewHwnd_)/::SetCapture(viewHwnd_) right after
+        // dispatching a click - for a row click, popup_->hide() above (via
+        // handlePopupListMouseDown(), controls.cpp) already ran *during*
+        // that same click's dispatch on the popup's own RootView, so those
+        // calls end up targeting the popup's own now-hidden child HWND
+        // instead - confirmed live as "the dropdown control loses focus"
+        // and a following click landing on whatever's underneath instead
+        // (the TreeView, in the reported case). Deliberately NOT done for
+        // the outside-click-dismiss path (handlePopupDismissed() below,
+        // never routed through this method) - the user dismissed by
+        // clicking elsewhere on purpose, so stealing focus back would be
+        // exactly the kind of rude behavior a badly-behaved popup does.
+        RootView* root = rootView();
+        if (root != nullptr) {
+            root->setFocusedSubView(this);
+            if (root->windowHandle() != nullptr) {
+                ::SetFocus(root->windowHandle());
+            }
+        }
+
+        style().markDirty();
+    }
+
+    SyncReturn DropDownList::handleMouseDown(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (!isEnabled()) {
+            return SyncReturn::Ignored;
+        }
+        if (!buttonRect().contains(pt)) {
+            return SyncReturn::Ignored;
+        }
+        if (isOpen()) {
+            closePopup();
+        } else {
+            openPopup();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn DropDownList::handlePopupListSelectionChanged(ListView& sender) {
+        if (restoringPopupSelection_) {
+            return SyncReturn::Ignored;
+        }
+        // Only syncs selectedIndex_ - does NOT close the popup itself
+        // (see handlePopupListMouseDown()'s own doc comment, controls.h,
+        // for why: this only fires when the selected *value* actually
+        // changes, so re-clicking the already-selected row would never
+        // reach here at all).
+        setSelectedIndex(sender.selectedIndex());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn DropDownList::handlePopupListMouseDown(View& /*sender*/, const Point& pt,
+            std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        // popupListView_'s own onMouseDown (added in its constructor) has
+        // already run by the time this fires - subscriptions call in
+        // add()-order, and this is added after that one (openPopup()) -
+        // so the click has already been applied to its selection, if it
+        // was going to be. This handler only decides whether to close.
+        Rect clientBounds = popupListView_->getClientBounds();
+        float localY = pt.y - clientBounds.top();
+        if (localY < 0.0f) {
+            return SyncReturn::Ignored;
+        }
+        std::size_t index = popupListView_->controller().indexAt(localY);
+        if (index >= popupListView_->controller().itemCount()) {
+            return SyncReturn::Ignored;
+        }
+        closePopup();
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn DropDownList::handlePopupDismissed(PopupFrame& /*sender*/) {
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    void DropDownList::moveKeyboardHighlight(int delta) {
+        if (popupListView_ == nullptr) {
+            return;
+        }
+        std::size_t count = popupListView_->controller().itemCount();
+        if (count == 0) {
+            return;
+        }
+        std::optional<std::size_t> current = popupListView_->keyboardHighlightedIndex();
+        long next = current.has_value() ? static_cast<long>(*current) + delta : 0;
+        if (next < 0) {
+            next = 0;
+        }
+        if (next >= static_cast<long>(count)) {
+            next = static_cast<long>(count) - 1;
+        }
+        popupListView_->setKeyboardHighlightedIndex(static_cast<std::size_t>(next));
+    }
+
+    SyncReturn DropDownList::handleKeyDown(View& /*sender*/, std::uint32_t /*keyMask*/,
+            int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        if (!isEnabled()) {
+            return SyncReturn::Ignored;
+        }
+
+        if (isOpen()) {
+            switch (VKeyCode) {
+                case vkUpArrow:
+                    moveKeyboardHighlight(-1);
+                    return SyncReturn::Handled;
+                case vkDownArrow:
+                    moveKeyboardHighlight(1);
+                    return SyncReturn::Handled;
+                case vkReturn: {
+                    std::optional<std::size_t> highlighted = popupListView_->keyboardHighlightedIndex();
+                    if (highlighted.has_value()) {
+                        setSelectedIndex(highlighted);
+                    }
+                    closePopup();
+                    return SyncReturn::Handled;
+                }
+                case vkEscape:
+                    closePopup();
+                    return SyncReturn::Handled;
+                default:
+                    return SyncReturn::Ignored;
+            }
+        }
+
+        // Popup not visible - Up/Down move the committed selection
+        // directly to the prev/next item, per user direction. Starts from
+        // index 0 the first time nothing's selected yet, in either
+        // direction - a simple, predictable default rather than treating
+        // "no selection" as one-before-the-first/one-past-the-last.
+        if (controller_->model() == nullptr) {
+            return SyncReturn::Ignored;
+        }
+        std::size_t count = controller_->model()->size();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t next = 0;
+                if (selectedIndex_.has_value() && *selectedIndex_ > 0) {
+                    next = *selectedIndex_ - 1;
+                }
+                setSelectedIndex(next);
+                return SyncReturn::Handled;
+            }
+            case vkDownArrow: {
+                std::size_t next = 0;
+                if (selectedIndex_.has_value()) {
+                    next = *selectedIndex_ + 1;
+                    if (next >= count) {
+                        next = count - 1;
+                    }
+                }
+                setSelectedIndex(next);
+                return SyncReturn::Handled;
+            }
+            default:
+                return SyncReturn::Ignored;
+        }
     }
 
 }
