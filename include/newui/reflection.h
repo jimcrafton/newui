@@ -1665,11 +1665,21 @@ namespace newui::reflection {
     //@reflect ignore=true
     class Enum {
     public:
-        Enum(std::type_index type, std::string name) : type_(type), name_(std::move(name)) {}
+        Enum(std::type_index type, std::string name, std::string namespaceName = "")
+            : type_(type), name_(std::move(name)), namespaceName_(std::move(namespaceName)) {}
 
         const std::string& name() const { return name_; }
         std::type_index type() const { return type_; }
         const std::vector<EnumValue>& values() const { return values_; }
+
+        // Same shape as Class::namespaceName()/qualifiedName() (reflection.h) -
+        // namespaceName() already carries its own trailing "::" (see
+        // extractNamespace()), empty for a global-scope enum, so
+        // qualifiedName() is a plain concatenation. Set by EnumBuilder<T>'s
+        // constructor from typeid(T) directly, independent of whatever
+        // bare `name` the caller passed in - see its own comment.
+        const std::string& namespaceName() const { return namespaceName_; }
+        std::string qualifiedName() const { return namespaceName_ + name_; }
 
         // Set only via EnumBuilder<T>::flags() - an explicit, per-enum
         // opt-in (see its own comment) rather than guessed from the
@@ -1789,6 +1799,7 @@ namespace newui::reflection {
 
         std::type_index type_;
         std::string name_;
+        std::string namespaceName_;
         std::vector<EnumValue> values_;
         bool isFlags_ = false;
         ToUInt64Fn toUInt64_ = nullptr;
@@ -1942,6 +1953,13 @@ namespace newui::reflection {
         std::type_index type() const { return type_; }
         const std::string& name() const { return name_; }
         const std::string& namespaceName() const { return namespaceName_; }
+
+        // namespaceName() + name(), e.g. "newui::Rect" - namespaceName()
+        // already carries its own trailing "::" (see extractNamespace()),
+        // so this is a plain concatenation. classinfo()/getClass() accept
+        // this alongside the bare name() - see ReflectionRegistry::
+        // registerClass()'s own comment for why both are registered.
+        std::string qualifiedName() const { return namespaceName_ + name_; }
 
         const std::vector<Property*>& properties() const { return properties_; }
         const std::vector<Field*>& fields() const { return fields_; }
@@ -2773,7 +2791,17 @@ namespace newui::reflection {
         static_assert(std::is_enum_v<T>, "EnumBuilder<T>: T must be a real enum type");
 
     public:
-        explicit EnumBuilder(std::string name) : enum_(typeid(T), std::move(name)) {
+        // name is still the caller-supplied bare name (reflectgen.py's own
+        // EnumInfo::bare_name, or a hand-written literal) rather than
+        // derived from typeid(T) the way ClassBuilder<T> derives its own
+        // name() - a nested enum's fully-qualified spelling isn't always
+        // reconstructable from typeid(T).name() alone the way a class's
+        // is (see reflectgen.py's own EnumInfo::bare_name comment).
+        // namespaceName, though, is exactly what extractNamespace(typeid(T))
+        // already gives Class - deriving it here the same way (rather than
+        // asking the caller for a second string) is what actually makes
+        // classinfo()-style qualified-name lookup possible for enums too.
+        explicit EnumBuilder(std::string name) : enum_(typeid(T), std::move(name), extractNamespace(typeid(T))) {
             enum_.toUInt64_ = [](const std::any& val) -> std::uint64_t {
                 using UnderlyingT = std::underlying_type_t<T>;
                 return static_cast<std::uint64_t>(

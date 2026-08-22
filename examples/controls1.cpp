@@ -521,9 +521,17 @@ int main() {
     // DWRITE_WORD_WRAPPING_WRAP - TextLayoutEngine/TextRenderer never
     // had to change for this), plus Up/Down line navigation and Enter
     // inserting a real newline - both gated on TextController::
-    // isMultiline(), set true by this class's own constructor. No
-    // scrolling yet - content taller than its own bounds is just
-    // clipped.
+    // isMultiline(), set true by this class's own constructor.
+    //
+    // TextControl owns no scrollbar of its own (see its own class
+    // comment, controls.h) - hosted directly, content taller than its
+    // own bounds just clips. Scrolling only happens once it's hosted
+    // inside a real ScrollView, as here: textControlScrollView is what
+    // FlexLayout actually grows to fill the row; textControl is added to
+    // *it*, not to textControlRow directly, and ScrollView detects it as
+    // a virtualized child (it answers onQueryContentSize, view.h) -
+    // provides the real scrollbar, and pins textControl's own bounds to
+    // its viewport instead of growing them to the full document height.
     auto* textControlRow = new newui::SubView();
     textControlRow->setVisible(true);
     textControlRow->setDesiredSize(newui::Size(0.0f, 100.0f));
@@ -537,20 +545,21 @@ int main() {
     textControlLabel->setDesiredSize(newui::Size(80.0f, 24.0f));
     textControlRow->addChild(textControlLabel);
 
+    auto* textControlScrollView = new newui::ScrollView();
+    textControlScrollView->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+    textControlRow->addChild(textControlScrollView);
+
     auto* textControl = new newui::TextControl();
-    textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     textControl->setText(
         L"This is a multi-line TextControl.\n"
         L"It word-wraps automatically, and Enter starts a new paragraph.\n"
         L"Up/Down move between visual lines.\n"
         L"This text is deliberately long enough to overflow the box's own height, "
-        L"so a vertical scrollbar should appear automatically on the right edge - "
-        L"try scrolling with the mouse wheel, dragging the scrollbar's thumb, or "
-        L"just clicking down here and pressing End/Down/Ctrl+End-style navigation "
-        L"to watch it auto-scroll into view as the caret moves past the bottom "
-        L"edge of what's currently visible.\n"
+        L"so a vertical scrollbar should appear automatically on the right edge, "
+        L"provided by the ScrollView this TextControl is hosted inside - try "
+        L"scrolling with the mouse wheel or dragging the scrollbar's thumb.\n"
         L"One more paragraph, just to be sure there's plenty to scroll through.");
-    textControlRow->addChild(textControl);
+    textControlScrollView->addChild(textControl);
 
     /*
     auto* imageRow = new newui::SubView();

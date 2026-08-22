@@ -122,6 +122,16 @@ namespace newui::reflection {
         std::type_index type = classInfo->type();
         reg.classNameToType_.insert_or_assign(classInfo->name(), type);
 
+        // Also index the fully-qualified name ("newui::Rect") alongside
+        // the bare one ("Rect") so getClass()/classinfo() can resolve
+        // either - only when they actually differ (a global-namespace
+        // class has an empty namespaceName(), making qualifiedName() ==
+        // name(), so this would otherwise just repeat the insert above).
+        std::string qualified = classInfo->qualifiedName();
+        if (qualified != classInfo->name()) {
+            reg.classNameToType_.insert_or_assign(std::move(qualified), type);
+        }
+
         auto existing = reg.classesByType_.find(type);
         if (existing != reg.classesByType_.end()) {
             delete existing->second;
@@ -135,6 +145,15 @@ namespace newui::reflection {
         auto& reg = instance();
         std::type_index type = enumInfo.type();
         reg.enumNameToType_.insert_or_assign(enumInfo.name(), type);
+
+        // Same fully-qualified-alongside-bare indexing as registerClass()
+        // above - only when they actually differ (a global-scope enum has
+        // an empty namespaceName(), making qualifiedName() == name()).
+        std::string qualified = enumInfo.qualifiedName();
+        if (qualified != enumInfo.name()) {
+            reg.enumNameToType_.insert_or_assign(std::move(qualified), type);
+        }
+
         reg.enumsByType_.insert_or_assign(type, std::move(enumInfo));
     }
 

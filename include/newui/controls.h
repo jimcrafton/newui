@@ -854,7 +854,27 @@ namespace newui {
         void addChild(SubView* child) override;
         void removeChild(SubView* child) override;
 
+        // Not an override of View::contentSize() above (that one's
+        // non-virtual, deliberately - see its own doc comment) - just the
+        // same name for the same idea, kept as its own const-ref accessor
+        // since callers that already know they have a ScrollView (the
+        // overwhelming majority) shouldn't have to go through a query
+        // delegate for a value this class already owns outright. A caller
+        // holding this ScrollView only as a View*/SubView* still gets a
+        // consistent answer either way - see the constructor, which hooks
+        // this ScrollView's own onQueryContentSize to answer with
+        // contentSize_ too (making a ScrollView nested inside another
+        // ScrollView work automatically, same as any other child).
         const Size& contentSize() const { return contentSize_; }
+        // Explicit, permanent opt-in to manual control - once called, this
+        // ScrollView stops auto-deriving contentSize_ from its sole
+        // content child's own contentSize() (see updateLayout()), even if
+        // that child could answer it. Most callers with a single child
+        // that already knows its own content size (or the common case of
+        // no scrolling content view at all - manually positioned children)
+        // never need to call this at all; it exists for the child that
+        // *can't* answer for itself (a plain container of manually-placed
+        // children whose combined extent nothing computes automatically).
         void setContentSize(const Size& size);
 
         // How many lineStep()s of vBar() one mouse-wheel notch scrolls -
@@ -880,17 +900,79 @@ namespace newui {
         // Recomputes which of vBar_/hBar_ are needed for the current
         // contentSize_ vs. this ScrollView's own bounds, each visible
         // bar's range()/pageSize(), and viewport_'s bounds (client area
-        // minus whichever bar(s) end up reserved) - called from both
-        // handleSizeChanged() and setContentSize(), the two things that
-        // can change the answer.
+        // minus whichever bar(s) end up reserved) - called from
+        // handleSizeChanged(), setContentSize(), and addChild()/
+        // removeChild(), every place that can change the answer.
+        //
+        // First re-derives contentSize_ itself when !contentSizeOverridden_
+        // and viewport_ has exactly one content child: queries that
+        // child's own View::contentSize() (view.h) and uses it directly,
+        // the same way a caller's own setContentSize() call would have -
+        // see contentSizeOverridden_'s own doc comment for why this only
+        // ever applies with exactly one child (a caller with zero or
+        // several still has to call setContentSize() itself; there's no
+        // single sensible auto answer to "combined extent of N siblings"
+        // without a real layout to consult).
+        //
+        // Then, if that sole child is *virtualized* (see
+        // virtualizedContentChild()'s own doc comment) - pins its bounds()
+        // to viewport_'s own bounds (never grows it to contentSize_ the
+        // ordinary way) and, once vBar_/hBar_ visibility/range/pageSize
+        // are settled below, fires the child's own onScrollOffsetChanged
+        // (view.h) with the current scroll position instead of shifting
+        // viewport_'s own origin() - viewport_'s origin() stays (0,0)
+        // for the virtualized case; the child is told directly, and is
+        // small enough (pinned to viewport size) that shifting anything
+        // via origin() would just be shifting it out of its own clip
+        // rect for no reason.
         void updateLayout();
+
+        // viewport_'s sole content child, if (and only if) it answers
+        // View::onQueryContentSize (view.h) - nullptr for zero, several,
+        // or one ordinary (non-content-size-reporting) child. A view
+        // that answers is treated as *virtualized*: it wants to stay
+        // pinned at whatever size this ScrollView gives it rather than
+        // being grown to contentSize_ and repositioned via origin() the
+        // way an ordinary child is - see updateLayout()'s own comment for
+        // exactly how, and TextController's own class comment (this
+        // file) for a real consumer and why it can't work the ordinary
+        // way. Re-derived on every call (a plain delegate dispatch, cheap)
+        // rather than cached - whether the sole child even still exists,
+        // let alone still answers, can change at any time.
+        SubView* virtualizedContentChild() const;
 
         SyncReturn handleSizeChanged(View& sender, const Size& size);
         SyncReturn handleVBarValueChanged(ScrollBar& sender);
         SyncReturn handleHBarValueChanged(ScrollBar& sender);
         SyncReturn handleMouseWheel(View& sender, const Point& pt, float delta);
+        // Answers this ScrollView's own onQueryContentSize with
+        // contentSize_ - see contentSize()'s own doc comment above.
+        SyncReturn handleQueryContentSize(View& sender, Size& outSize);
+        // Subscribed to every real content child's own onContentSizeChanged
+        // (view.h) in addChild() below - re-runs updateLayout() so bar
+        // visibility/range and (for a virtualized child) its own pinned
+        // bounds stay correct after the child's content changes on its
+        // own (more text typed, a different font, ...), not just after
+        // this ScrollView's own resize or an add/removeChild() call. Not
+        // unsubscribed in removeChild() - same "shares its owner's
+        // lifetime, or is gone before this would matter" reasoning
+        // vBar_'s/hBar_'s own onValueChanged subscriptions above already
+        // rely on (see this class's own constructor).
+        SyncReturn handleContentChildContentSizeChanged(View& sender);
 
         Size contentSize_;
+        // False (the default) until setContentSize() is called explicitly
+        // at least once - see updateLayout()'s own comment for what that
+        // gates: while false, updateLayout() keeps contentSize_ in sync
+        // automatically from viewport_'s sole child's own contentSize()
+        // (View::contentSize(), view.h) instead of requiring the caller
+        // to maintain it by hand. A single explicit setContentSize() call
+        // opts a ScrollView permanently back into manual mode, even if a
+        // later call happens to pass the same value the auto-query would
+        // have produced anyway - simpler and more predictable than trying
+        // to tell "caller wants manual control" apart from "caller's
+        // value just happened to match."
+        bool contentSizeOverridden_ = false;
         int wheelLines_ = 3;
 
         // Real content lives here, not directly under this ScrollView -
@@ -1020,22 +1102,40 @@ namespace newui {
     // The shared "how a text-editing Control behaves" logic behind both
     // TextField (single-line, below) and TextControl (multi-line,
     // further below) - owns exactly the state text.h provides for
-    // editing (TextModel/TextSelection/Caret/TextInputTraits) plus the
-    // DirectWrite bridge (TextRenderer/TextLayoutEngine) and every
-    // mouse/keyboard input handler, so neither owning Control has to
-    // duplicate any of it. A member, not a shared base class TextField/
-    // TextControl would inherit from - matches this toolkit's existing
-    // Control/Controller split (see Controller's own class comment,
-    // controllers.h): "a data-driven Control is expected to own a
-    // Controller as a member, not inherit from it." Not itself a
-    // Controller subclass - Controller is Model-observation-only per its
-    // own doc comment, and this class needs real View-side
-    // responsibilities Controller doesn't have (repainting its owner,
-    // translating input coordinates into the owner's own local space) -
-    // but named and composed the same way, for the same reason:
-    // presentation (the owning Control - bounds, style, being a SubView
-    // at all) and text-editing behavior (this class) stay separate
-    // collaborators rather than one class doing both jobs.
+    // editing (TextModel/TextSelection/Caret/TextInputTraits) plus
+    // TextLayoutEngine (the DirectWrite hit-testing/measurement bridge -
+    // see below for why this class, not the layout/paint split its name
+    // might suggest, still owns it) and every mouse/keyboard input
+    // handler, so neither owning Control has to duplicate any of it. A
+    // member, not a shared base class TextField/TextControl would
+    // inherit from - matches this toolkit's existing Control/Controller
+    // split (see Controller's own class comment, controllers.h): "a
+    // data-driven Control is expected to own a Controller as a member,
+    // not inherit from it." Not itself a Controller subclass - Controller
+    // is Model-observation-only per its own doc comment, and this class
+    // needs real hit-testing/coordinate-translation responsibilities
+    // Controller doesn't have - but named and composed the same way, for
+    // the same reason: presentation (the owning Control - bounds, style,
+    // being a SubView at all) and text-editing behavior (this class) stay
+    // separate collaborators rather than one class doing both jobs.
+    //
+    // Deliberately does NOT own paint(), TextRenderer, or any of the
+    // ScrollView-hosting delegates (onQueryContentSize/onScrollOffsetChanged/
+    // onContentSizeChanged/onRequestScrollIntoView, view.h) - painting is
+    // a View responsibility, full stop, and TextField/TextControl paint
+    // genuinely differently (single-line vs. word-wrapped multi-line,
+    // never-scrolled vs. ScrollView-hostable) - see each class's own
+    // paint() override. What stays here (model_/selection_/caret_/
+    // traits_, every mouse/keyboard handler, layoutEngine_ itself) is
+    // identical between the two regardless of that difference; what
+    // doesn't (word-wrap on/off, whether a hosting ScrollView can drive
+    // scrollOffsetY()) is exactly the axis TextField and TextControl
+    // split on, so it lives in each of them instead. layoutEngine_ stays
+    // here anyway, despite being "layout," because the shared mouse/
+    // keyboard handlers (toLayoutSpace(), selectWordAt(), Home/End's own
+    // lineRange() call) need real hit-testing to do their job regardless
+    // of line mode - only *how* layoutEngine_ is configured (wordWrap,
+    // via multiline_) differs, not whether this class needs one at all.
     //
     // Holds a non-owning Control& back-reference purely to call
     // style().markDirty() and read getClientBounds() - the same "the
@@ -1043,37 +1143,31 @@ namespace newui {
     // already uses - never reaches into anything else on it.
     //
     // setMultiline(true) (TextControl's own constructor) changes exactly
-    // three behaviors from the TextField (single-line) default: Enter
-    // inserts a newline into model_ instead of being ignored, Up/Down
-    // arrow navigate between visual lines (a harmless no-op either way
-    // on a genuinely single-line control - there's nowhere else to go),
-    // and a vertical ScrollBar (vScrollBar_) can appear when content
-    // grows taller than the owner's own bounds. Every other behavior -
-    // click/drag/multi-click selection, Shift+Arrow extension, Home/End
+    // two behaviors from the TextField (single-line) default: Enter
+    // inserts a newline into model_ instead of being ignored, and
+    // ensureLayoutUpToDate() configures layoutEngine_ to word-wrap
+    // instead of building a real single-line (DWRITE_WORD_WRAPPING_NO_WRAP)
+    // layout. Up/Down arrow (moveCaretVertically()) stays unconditional -
+    // a harmless no-op on a genuinely single-line control regardless
+    // (there's nowhere else to go, wrapped or not), so it isn't worth
+    // duplicating per line-mode. Every other shared behavior - click/
+    // drag/multi-click selection, Shift+Arrow extension, Home/End
     // (already scoped to the *current visual line* via
     // TextLayoutEngine::lineRange(), not the whole document, so it's
-    // correct unchanged for both), Backspace/Delete, traits_ enforcement -
-    // is identical regardless of this flag.
+    // correct unchanged for both), Backspace/Delete, traits_
+    // enforcement - is identical regardless of line mode too.
     //
-    // Scrolling is deliberately internal (vScrollBar_ + scrollOffsetY_,
-    // both entirely private to this class), not "size this control to
-    // its full content height and let a caller's own ScrollView scroll
-    // it" - the owner's own bounds/clientBounds stay small and fixed
-    // either way, which is what keeps TextRenderer's underlying D2D/WIC
-    // render target bounded to that same small size regardless of how
-    // long the actual document is (see TextRenderer::render()'s own
-    // scrollOffsetY parameter, text.h) - sizing this control to its full
-    // content height instead would mean that render target growing
-    // just as large on every repaint, since there's no general way (yet)
-    // for a View to learn what portion of its own bounds is actually
-    // visible once clipped by an arbitrary scrolling ancestor - Blend2D
-    // exposes no clip-bounds query, and D2D/WIC rendering happens in a
-    // completely separate pipeline unaware of Blend2D's clip state
-    // regardless. A real "here's your visible sub-rect" primitive
-    // through View's own paint dispatch would help here - and would
-    // help any other control whose paint() cost scales with its own
-    // bounds size (e.g. a future Image displaying a large bitmap) - but
-    // that's a standalone core-framework feature, not attempted here.
+    // scrollOffsetY_ is a plain member, written only via setScrollOffsetY()
+    // - TextField never calls it (stays 0 forever, matching "TextField
+    // never scrolls" - it doesn't hook View::onScrollOffsetChanged at
+    // all, see its own class comment), TextControl's own
+    // handleScrollOffsetChanged() (controls.cpp) is the only real
+    // caller, forwarding a hosting ScrollView's notification straight
+    // through. Deliberately not owner_'s own origin() (View's existing
+    // scroll-offset primitive, view.h) - see onScrollOffsetChanged's own
+    // doc comment (view.h) for why that specific reuse is wrong for a
+    // view that might own real children of its own (an earlier version
+    // of this class did, see HANDOFF.md's Part 53-55 history).
     class TextController {
     public:
         explicit TextController(Control& owner);
@@ -1099,15 +1193,63 @@ namespace newui {
         bool isMultiline() const { return multiline_; }
         void setMultiline(bool value) { multiline_ = value; }
 
-        // Draws (in order) selection_'s highlight, model_.text() itself
-        // via text::TextRenderer, then caret_ on top - into clientBounds,
-        // the same "chrome first, content on top" order
-        // View::paintChildren() already runs Button/Label's own paint()
-        // overrides through. layoutEngine_ is updated first (a no-op
-        // unless text/font/size actually changed since the last paint())
-        // and drives both selection_'s highlight rects and caret_'s own
-        // screen position. A no-op if clientBounds is empty.
-        void paint(BLContext& ctx, const Rect& clientBounds);
+        // Rebuilds layoutEngine_ against the owner's own current
+        // getClientBounds() (width/height) and multiline_ (wordWrap) if
+        // anything actually changed since the last call - a cheap no-op
+        // otherwise (TextLayoutEngine::update()'s own memoization, text.h).
+        // Each owning Control's own paint() calls this itself before
+        // drawing (a View's paint() is the only place clientBounds is
+        // authoritatively known "now"); every mouse/keyboard handler
+        // below that hit-tests calls it first too, so hit-testing/
+        // measurement stay correct even before this control has ever
+        // actually been painted (a ScrollView asking for contentSize()
+        // before hosting it, e.g. - see TextControl::handleQueryContentSize(),
+        // controls.cpp).
+        void ensureLayoutUpToDate();
+
+        // The full height layoutEngine_'s current content actually needs
+        // - see TextLayoutEngine::contentHeight()'s own doc comment
+        // (text.h) for what "actually needs" means here (can exceed the
+        // owner's own bounds). Callers that need this fresh should call
+        // ensureLayoutUpToDate() first - this just reads whatever
+        // layoutEngine_'s last update() produced, same as
+        // TextLayoutEngine::contentHeight() itself.
+        float contentHeight() const { return layoutEngine_.contentHeight(); }
+
+        // The vertical scroll position drawSelection()/drawCaret()/
+        // whoever renders this control's own text (via its own
+        // TextRenderer) use - see this class's own comment on why this
+        // is a plain member here, and setScrollOffsetY() below for the
+        // only place it's ever written.
+        float scrollOffsetY() const { return scrollOffsetY_; }
+        void setScrollOffsetY(float y);
+
+        // caret_'s own current on-screen rect, in layoutEngine_'s native
+        // (document/unscrolled) coordinate space - the same space
+        // contentSize() (view.h) reports in. Height 0 if no layout has
+        // been built yet or caret_'s own position is invalid - callers
+        // (TextControl::paint(), controls.cpp) should check before
+        // acting on it, same as TextLayoutEngine::hitTestPosition()'s
+        // own "leaves outputs at default" contract this wraps.
+        Rect caretDocumentRect() const;
+
+        // The two pieces of "paint this control's text" that are
+        // genuinely identical between TextField/TextControl regardless
+        // of line mode or hosting - selection_'s highlight rects (a
+        // no-op if selection_.isEmpty()) and caret_ itself (a no-op if
+        // !caret_.isVisible()) - both shifted up by scrollOffsetY_ the
+        // same way TextRenderer::render()'s own scrollOffsetY parameter
+        // is (text.h). Deliberately two separate calls, not one combined
+        // "drawSelectionAndCaret()" - each owning Control's own paint()
+        // calls drawSelection() before its own TextRenderer::render()
+        // call and drawCaret() after, matching the original "chrome
+        // first, content on top, caret on top of that" order this class
+        // used when it still owned paint() itself (see HANDOFF.md). ctx
+        // must already be translated to (0,0) at the owner's own
+        // clientBounds top-left, matching what layoutEngine_'s own
+        // coordinates assume.
+        void drawSelection(BLContext& ctx) const;
+        void drawCaret(BLContext& ctx) const;
 
         // Every one of these mirrors the identically-named View delegate
         // (minus the View& sender parameter, which this class has no use
@@ -1134,13 +1276,6 @@ namespace newui {
         // for it instead, leaving the key entirely for that caller's own
         // onReturnPressed-style hook to react to.
         SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
-
-        // Ignored (a no-op) whenever vScrollBar_ isn't currently visible -
-        // same "only scroll if there's something to scroll" gate
-        // ScrollView::handleMouseWheel() already uses, and the same
-        // delta convention (WM_MOUSEWHEEL's WHEEL_DELTA == 120.0f per
-        // notch) - see its own definition (controls.cpp).
-        SyncReturn handleMouseWheel(const Point& pt, float delta);
 
     private:
         // Maps a point in the owner's own local space (as delivered by
@@ -1219,38 +1354,18 @@ namespace newui {
         SyncReturn handleModelBeforeChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind, bool& canChange);
         SyncReturn handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement, bool& canChange);
 
-        // Fires whenever vScrollBar_'s value() changes (a drag, a wheel
-        // notch via handleMouseWheel(), or ensureCaretVisible() below) -
-        // the single place scrollOffsetY_ ever gets written, so it never
-        // drifts out of sync with vScrollBar_'s own value().
-        SyncReturn handleScrollBarValueChanged(ScrollBar& sender);
-
-        // Scrolls vScrollBar_ (if visible) just far enough that caret_'s
-        // own current position is back within [scrollOffsetY_,
-        // scrollOffsetY_ + viewportHeight) - a no-op if it already is.
-        // Called from paint() itself (before any actual drawing) rather
-        // than at every individual caret_.setPosition() call site
-        // (typing, Backspace/Delete, Enter, arrow keys, a click, ...) -
-        // one call site instead of a dozen, and it means the correction
-        // (if any) always lands in the very paint() that would otherwise
-        // have drawn the caret outside the visible area, not one frame
-        // later.
-        void ensureCaretVisible(float viewportHeight);
-
         Control& owner_;
         bool multiline_ = false;
 
-        // See this class's own doc comment on why scrolling is internal
-        // to this class rather than "size the owner to its full content
-        // height, let a caller's ScrollView handle it". vScrollBar_ is
-        // always created (matches ScrollView's own "always create both
-        // bars, toggle visible()" convention) even for a non-multiline
-        // TextField, which just never shows or uses it. scrollOffsetY_
-        // always mirrors vScrollBar_->value() - see
-        // handleScrollBarValueChanged().
-        static constexpr float kScrollBarThickness = 16.0f;
-        ScrollBar* vScrollBar_ = nullptr;
+        // This control's own current scroll position, in document
+        // (unscrolled, layoutEngine_-native) coordinates - see this
+        // class's own comment for the whole picture: written only via
+        // setScrollOffsetY(), which TextField never calls (stays 0
+        // forever) and TextControl's own handleScrollOffsetChanged()
+        // (controls.cpp) is the only real caller of.
         float scrollOffsetY_ = 0.0f;
+
+        text::TextLayoutEngine layoutEngine_;
 
         text::TextModel model_;
         text::TextSelection selection_;
@@ -1272,19 +1387,30 @@ namespace newui {
 
         Font font_;
         Color textColor_;
-        text::TextRenderer renderer_;
-        text::TextLayoutEngine layoutEngine_;
     };
 
     // A single-line text editing control - a thin View-integration shim
-    // around one TextController (controller_, above), which owns every
-    // bit of actual text-editing state and behavior: DirectWrite-backed
-    // rendering, layout/hit-testing, selection/caret painting, and real
-    // mouse/keyboard/focus input - see text-plan.md at the repo root for
-    // the phase-by-phase history of how that came together. style()
-    // defaults to ThemedEditStyle (EDIT/EP_EDITTEXT) for the native
-    // background/border chrome, same "chrome now, real content on top"
-    // split Button/Label already draw between their own native/
+    // around one TextController (controller_, above), which owns the
+    // shared editing state/behavior (model/selection/caret/traits, every
+    // mouse/keyboard handler, hit-testing) - see text-plan.md at the
+    // repo root for the phase-by-phase history of how that came
+    // together. Rendering is this class's own, deliberately not shared
+    // with TextControl (see TextController's own class comment for why):
+    // owns its own TextRenderer (renderer_) and its own paint() override,
+    // laying out via controller_.ensureLayoutUpToDate() with wordWrap
+    // false (TextController::isMultiline() stays false here, never set) -
+    // a real single-line layout (DWRITE_WORD_WRAPPING_NO_WRAP), not a
+    // wrapping one that just happens not to wrap for short-enough text.
+    // Never scrolls - scrollOffsetY() stays 0 forever, since nothing
+    // here ever calls controller_.setScrollOffsetY() and this class
+    // doesn't hook onScrollOffsetChanged/onQueryContentSize (view.h) at
+    // all; text that overflows the field's own width simply clips (no
+    // horizontal scroll-follow-caret yet - a known, deliberately deferred
+    // gap, not a bug - see HANDOFF.md).
+    //
+    // style() defaults to ThemedEditStyle (EDIT/EP_EDITTEXT) for the
+    // native background/border chrome, same "chrome now, real content on
+    // top" split Button/Label already draw between their own native/
     // LabelStyle background and their own separately-drawn text -
     // ThemedEditStyle's own class comment (viewstyle.h) documents this
     // split explicitly ("pair with a client/subview that draws its own
@@ -1335,9 +1461,11 @@ namespace newui {
 
         // Draws into getClientBounds(), on top of whatever paintStyle()
         // already drew for editStyle_'s own native background/border -
-        // see TextController::paint()'s own doc comment for the actual
-        // drawing order.
-        void paint(BLContext& ctx) override { controller_.paint(ctx, getClientBounds()); }
+        // selection_'s highlight, then this control's own single-line
+        // text (renderer_.render(), wordWrap false), then the caret on
+        // top - see this class's own comment on why rendering (unlike
+        // the rest of controller_) isn't shared with TextControl.
+        void paint(BLContext& ctx) override;
 
     private:
         // Phase 5 - Win32 message loop interop. RootView already routes
@@ -1360,23 +1488,42 @@ namespace newui {
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
-        SyncReturn handleMouseWheel(View& sender, const Point& pt, float delta) { return controller_.handleMouseWheel(pt, delta); }
 
         TextController controller_;
+        text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
     };
 
     // A multi-line text editing control - TextField's own class comment
     // (above) covers everything shared between the two: both are thin
-    // View-integration shims around one TextController, which does the
-    // real work (see its own class comment for exactly what's shared vs.
-    // different between single- and multi-line use). The only real
-    // behavioral differences from TextField: Enter inserts a newline
-    // (TextController::setMultiline(true), set in this class's own
-    // constructor) instead of firing a shouldReturn-style hook, and
-    // Up/Down arrow navigate between visual lines/a vertical scrollbar
-    // can appear - all already handled generically by TextController
-    // once multiline is set, no per-class special-casing needed here.
+    // View-integration shims around one TextController, which owns the
+    // shared editing state/behavior (see its own class comment for
+    // exactly what's shared vs. different between single- and multi-line
+    // use). Real behavioral differences from TextField: Enter inserts a
+    // newline (TextController::setMultiline(true), set in this class's
+    // own constructor) instead of firing a shouldReturn-style hook;
+    // paint() word-wraps (ensureLayoutUpToDate() with multiline_ true);
+    // and this class - unlike TextField - hooks View::onQueryContentSize/
+    // onScrollOffsetChanged/onContentSizeChanged (view.h, all inherited
+    // from View directly, no need to reach through owner_ the way an
+    // earlier version of this split did - see HANDOFF.md) so a hosting
+    // ScrollView can provide a real scrollbar - see this class's own
+    // constructor and handleQueryContentSize()/handleScrollOffsetChanged()/
+    // handleModelChanged() (controls.cpp). Owns its own TextRenderer
+    // (renderer_, separate from TextField's own instance) and scrollOffsetY
+    // state (via controller_.scrollOffsetY()/setScrollOffsetY() - a plain
+    // member on TextController, but this class is the only thing that
+    // ever writes to it).
+    //
+    // Owns no scrollbar of its own, by design - standalone (no hosting
+    // ScrollView), content taller than its own bounds just clips;
+    // typing/navigating the caret past the visible area fires
+    // onRequestScrollIntoView (view.h) every paint(), same as always, but
+    // it's a no-op with nothing listening. Only once hosted inside a real
+    // ScrollView does that request (and onScrollOffsetChanged/
+    // onQueryContentSize) reach an actual scrollbar - see ScrollView's
+    // own class comment (controls.h) for how it detects and drives a
+    // virtualized child.
     class TextControl : public Control {
     public:
         TextControl();
@@ -1398,12 +1545,27 @@ namespace newui {
         const text::TextInputTraits& inputTraits() const { return controller_.inputTraits(); }
 
         const Font& font() const { return controller_.font(); }
-        void setFont(const Font& font) { controller_.setFont(font); }
+        // Fires onContentSizeChanged (view.h) too - a different font can
+        // change wrapped height at the same text/width, and a hosting
+        // ScrollView needs to know, same reasoning handleModelChanged()'s
+        // own doc comment (controls.cpp) gives for the same firing on a
+        // text change.
+        void setFont(const Font& font) { controller_.setFont(font); onContentSizeChanged(*this); }
 
         const Color& textColor() const { return controller_.textColor(); }
         void setTextColor(const Color& color) { controller_.setTextColor(color); }
 
-        void paint(BLContext& ctx) override { controller_.paint(ctx, getClientBounds()); }
+        // Draws into getClientBounds(): selection_'s highlight, then
+        // this control's own word-wrapped text (renderer_.render(),
+        // wordWrap true, at controller_.scrollOffsetY()), then the caret
+        // on top - see TextController's own class comment on why
+        // rendering isn't shared with TextField. Also where
+        // onRequestScrollIntoView fires (once per call, with caret_'s
+        // current document-space rect) and where ensureLayoutUpToDate()
+        // is called, so layoutEngine_ (and therefore contentSize()) stays
+        // current every repaint, not just when something else happens to
+        // trigger it.
+        void paint(BLContext& ctx) override;
 
     private:
         SyncReturn handleGotFocus(View& sender) { return controller_.handleGotFocus(); }
@@ -1414,9 +1576,28 @@ namespace newui {
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode); }
-        SyncReturn handleMouseWheel(View& sender, const Point& pt, float delta) { return controller_.handleMouseWheel(pt, delta); }
+
+        // Answers this control's own onQueryContentSize (view.h) - see
+        // TextController::ensureLayoutUpToDate()'s own doc comment for
+        // why calling it here (not just relying on a prior paint()) is
+        // both correct and cheap.
+        SyncReturn handleQueryContentSize(View& sender, Size& outSize);
+        // Answers this control's own onScrollOffsetChanged (view.h),
+        // driven by a hosting ScrollView - the only place
+        // controller_.setScrollOffsetY() is ever called.
+        SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
+        // Subscribed to controller_.model().onChanged in this class's own
+        // constructor (TextModel::notifyChanged() fires it at the end of
+        // every real mutation - see its own doc comment, text.h) - fires
+        // this control's own onContentSizeChanged (view.h) so a hosting
+        // ScrollView knows to re-run its own layout; without it, typing
+        // more text than fits (or deleting back down) would never reach
+        // a ScrollView that already finished its initial layout before
+        // this control had this much (or this little) content.
+        SyncReturn handleModelChanged(Model& sender);
 
         TextController controller_;
+        text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
     };
 }

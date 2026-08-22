@@ -646,12 +646,12 @@ namespace newui::text {
         //
         // scrollOffsetY (default 0, TextField's own single-line case)
         // shifts the underlying IDWriteTextLayout's own draw origin up
-        // by that many pixels before rasterizing - what TextController
-        // (controls.h/.cpp) uses for a scrolled multi-line TextControl,
-        // so only the currently-visible slice of a much taller document
-        // ever gets drawn into a render target that's still just
+        // by that many pixels before rasterizing - what TextControl
+        // (controls.h/.cpp) uses for its own scrolled content, so only
+        // the currently-visible slice of a much taller document ever
+        // gets drawn into a render target that's still just
         // width x height pixels (never the full content height) - see
-        // TextController::paint()'s own doc comment for why that matters.
+        // TextControl::paint()'s own doc comment for why that matters.
         // Safe regardless of how large scrollOffsetY is: DirectWrite
         // doesn't truncate line generation based on the layout's own
         // maxHeight (same "maxHeight is soft" behavior
@@ -659,8 +659,16 @@ namespace newui::text {
         // D2D simply never rasterizes glyphs that land outside the
         // render target's own pixel bounds after the origin shift - no
         // separate "how tall is the real content" parameter needed here.
+        //
+        // wordWrap (default true) matches TextLayoutEngine::update()'s
+        // own parameter of the same name - see its doc comment. This
+        // class builds and discards its own independent IDWriteTextLayout
+        // every call (see this class's own doc comment above), so it has
+        // to be told the same thing separately; the two are always
+        // called with matching values for one owning control (see
+        // TextField::paint()/TextControl::paint(), controls.cpp).
         void render(BLContext& ctx, int width, int height, const std::wstring& text,
-            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f);
+            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true);
 
     private:
         // (Re)builds the WIC bitmap + render target together for the
@@ -712,14 +720,22 @@ namespace newui::text {
         TextLayoutEngine(const TextLayoutEngine&) = delete;
         TextLayoutEngine& operator=(const TextLayoutEngine&) = delete;
 
-        // Rebuilds the underlying layout if storage's text(), font, or
-        // maxWidth/maxHeight actually changed since the last call - a
-        // no-op otherwise. Returns whether a usable layout exists
-        // afterward (false if this is the first call and the underlying
-        // DirectWrite calls failed) - every hit-testing method below
-        // returns its own "nothing" value regardless, so checking this
-        // is optional, not required before calling them.
-        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight);
+        // Rebuilds the underlying layout if storage's text(), font,
+        // maxWidth/maxHeight, or wordWrap actually changed since the
+        // last call - a no-op otherwise. Returns whether a usable layout
+        // exists afterward (false if this is the first call and the
+        // underlying DirectWrite calls failed) - every hit-testing
+        // method below returns its own "nothing" value regardless, so
+        // checking this is optional, not required before calling them.
+        //
+        // wordWrap defaults true (multi-line use, TextControl's own
+        // case) - false gives a real single-line layout (DirectWrite's
+        // DWRITE_WORD_WRAPPING_NO_WRAP) instead of wrapping onto
+        // multiple visual lines when text exceeds maxWidth, TextField's
+        // own case (a genuinely single-line control - wrapping would be
+        // wrong there regardless of how the result then gets displayed/
+        // scrolled).
+        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true);
 
         // One highlight rect per contiguous visual run range covers (a
         // multi-line selection spans more than one line, hence possibly
@@ -776,6 +792,7 @@ namespace newui::text {
         std::wstring lastText_;
         float lastMaxWidth_ = 0.0f;
         float lastMaxHeight_ = 0.0f;
+        bool lastWordWrap_ = true;
     };
 
 }

@@ -45,7 +45,11 @@ void registerWidgetReflection() {
 
 Once registered, look the class up anywhere via `classinfo<Widget>()`, `classinfo(typeid(Widget))`,
 or `classinfo("Widget")`, and read/write members through `Class::field(name)`/`property(name)`
-without knowing `Widget`'s real C++ type at all:
+without knowing `Widget`'s real C++ type at all. A class inside a namespace can also be looked
+up by its fully-qualified name (e.g. `classinfo("newui::Rect")`, alongside the bare
+`classinfo("Rect")`) — `ReflectionRegistry::registerClass()` indexes both. `Class::namespaceName()`
+holds the namespace prefix (`"newui::"`, empty for the global namespace) and
+`Class::qualifiedName()` is `namespaceName() + name()`.
 
 ```cpp
 const Class* cls = classinfo<Widget>();
@@ -128,6 +132,13 @@ automatically — both by generic code walking `Class::properties()`/`fields()`,
 `ObjectWriter`/`ObjectReader` (see "Reading/writing objects" below, which is where this
 actually matters day to day: an enum-typed property writes/reads as JSON automatically,
 no per-enum glue needed).
+
+Like `Class`, an `Enum` can be looked up by name via `ReflectionRegistry::getEnum(name)` —
+both the bare name (`"Orientation"`) and, for a namespaced enum, the fully-qualified name
+(`"newui::Orientation"`) resolve to the same `Enum`. The bare `name` passed to
+`EnumBuilder<T>(...)` is still exactly what `Enum::name()` returns; `Enum::namespaceName()`/
+`qualifiedName()` are derived separately, straight from `typeid(T)` (same as
+`Class::namespaceName()`), inside `EnumBuilder<T>`'s own constructor.
 
 **Flags enums** — a value meant to be a bitwise-OR of several named constants (window
 manager masks, style flags, ...) — need one more thing: `.flags(true)` (or, from

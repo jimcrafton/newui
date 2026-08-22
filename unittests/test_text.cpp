@@ -1280,6 +1280,24 @@ TEST(TextLayoutEngine, HitTestRangeReturnsMultipleRectsForARangeSpanningWrappedL
     EXPECT_GT(rects.size(), 1u);
 }
 
+TEST(TextLayoutEngine, WordWrapFalseStaysOnOneLineAtTheSameNarrowWidthThatWouldOtherwiseWrap) {
+    // Same text/width/font as HitTestRangeReturnsMultipleRectsForARangeSpanningWrappedLines
+    // above - wordWrap=true wraps it across several lines there; this
+    // confirms wordWrap=false (TextField's own single-line case,
+    // controls.cpp) genuinely suppresses that instead of merely "not
+    // needing" to wrap for short-enough text - see TextController::
+    // ensureLayoutUpToDate()'s own doc comment (controls.h).
+    TextLayoutEngine engine;
+    TextStorage storage(L"AAAA BBBB CCCC DDDD EEEE FFFF");
+    newui::Font font;
+    font.setSize(20.0f);
+    ASSERT_TRUE(engine.update(storage, font, 60.0f, 500.0f, /*wordWrap=*/false));
+
+    std::vector<newui::Rect> rects = engine.hitTestRange(TextRange(0, storage.length()));
+
+    EXPECT_EQ(rects.size(), 1u);
+}
+
 TEST(TextLayoutEngine, HitTestRangeOfAnOutOfBoundsRangeDoesNotCrash) {
     // DirectWrite doesn't report "nothing" for a range entirely past the
     // end of the text - it reports a degenerate (zero-width) region at

@@ -1413,12 +1413,19 @@ namespace newui {
 
         onSizeChanged.add(this, &ScrollView::handleSizeChanged);
         onMouseWheel.add(this, &ScrollView::handleMouseWheel);
+        onQueryContentSize.add(this, &ScrollView::handleQueryContentSize);
 
         updateLayout();
     }
 
     void ScrollView::addChild(SubView* child) {
         viewport_->addChild(child);
+        // Picks up child's own contentSize() immediately (see
+        // updateLayout()'s own comment) rather than leaving contentSize_
+        // at whatever it was (typically the default Size(), showing no
+        // bars) until some unrelated event - this ScrollView's own resize,
+        // say - happens to trigger a recompute.
+        updateLayout();
     }
 
     void ScrollView::removeChild(SubView* child) {
@@ -1445,9 +1452,16 @@ namespace newui {
             return;
         }
         viewport_->removeChild(child);
+        updateLayout();
     }
 
     void ScrollView::setContentSize(const Size& size) {
+        // Unconditional, even on the early-return below - a caller that
+        // explicitly calls this at all wants manual control from now on,
+        // regardless of whether the value passed happens to match what
+        // auto-derivation would already have produced (see
+        // contentSizeOverridden_'s own doc comment, controls.h).
+        contentSizeOverridden_ = true;
         if (contentSize_ == size) {
             return;
         }
@@ -1459,8 +1473,49 @@ namespace newui {
         return viewport_->origin();
     }
 
+    SyncReturn ScrollView::handleQueryContentSize(View& /*sender*/, Size& outSize) {
+        outSize = contentSize_;
+        return SyncReturn::Handled;
+    }
+
+    SubView* ScrollView::virtualizedContentChild() const {
+        if (viewport_->childViews().size() != 1) {
+            return nullptr;
+        }
+        SubView* child = viewport_->childViews().front();
+        Size probe;
+        return child->onQueryContentSize.syncCallFirst(*child, probe).handled() ? child : nullptr;
+    }
+
     void ScrollView::updateLayout() {
+        SubView* soleChild = viewport_->childViews().size() == 1 ? viewport_->childViews().front() : nullptr;
+        SubView* virtualizedChild = virtualizedContentChild();
+
         Rect client = getClientBounds();
+        if (virtualizedChild) {
+            // Pin to the full client width first - contentSize() below
+            // needs a real wrap width to answer meaningfully, and
+            // whatever bounds() this child happened to have before being
+            // hosted here (its construction default, most likely) isn't
+            // it. Narrowed to the final viewportWidth (if a vertical bar
+            // ends up reserved) further down, once that's known.
+            virtualizedChild->setBounds(Rect(0.0f, 0.0f, client.size().width, client.size().height));
+        }
+
+        // Re-derive contentSize_ from the sole content child's own
+        // contentSize() first, if nothing's ever opted this ScrollView
+        // into manual control - see contentSizeOverridden_'s own doc
+        // comment (controls.h) for why this only applies with exactly one
+        // child. Explicitly reset to Size() (rather than just skipping
+        // the update) once that's no longer true - a second child added
+        // later leaving contentSize_ frozen at whatever the first child's
+        // answer used to be would be stale, misleading data (bars ranged/
+        // shown for content that's no longer what's actually being
+        // measured), not a reasonable "still valid" fallback.
+        if (!contentSizeOverridden_) {
+            contentSize_ = soleChild ? soleChild->contentSize() : Size();
+        }
+
         // Natural thickness of each bar - queried from its own arrow part
         // the same way ScrollBar::resolvedArrowSize() does internally;
         // reuse partSize() through a throwaway-free path isn't available
@@ -1497,6 +1552,19 @@ namespace newui {
 
         viewport_->setBounds(Rect(client.left(), client.top(), viewportWidth, viewportHeight));
 
+        if (virtualizedChild) {
+            // Re-pin at the final (possibly narrower) width and re-derive
+            // contentSize_ from it - narrowing can only ever increase
+            // wrapped height, never decrease it, so this can't oscillate
+            // back to "doesn't need one" (same reasoning TextController::
+            // paint() used to rely on for its own, now-removed, internal
+            // two-pass layout - see HANDOFF.md).
+            virtualizedChild->setBounds(Rect(0.0f, 0.0f, viewportWidth, viewportHeight));
+            if (!contentSizeOverridden_) {
+                contentSize_ = virtualizedChild->contentSize();
+            }
+        }
+
         vBar_->setVisible(needV);
         if (needV) {
             vBar_->setBounds(Rect(client.left() + viewportWidth, client.top(), vBarWidth, viewportHeight));
@@ -1511,10 +1579,19 @@ namespace newui {
             hBar_->setPageSize(viewportWidth);
         }
 
-        Point origin = viewport_->origin();
-        viewport_->setOrigin(Point(needH ? hBar_->value() : 0.0f, needV ? vBar_->value() : 0.0f));
-        if (origin != viewport_->origin()) {
-            viewport_->redraw();
+        if (virtualizedChild) {
+            // The child stays pinned at (0,0) within viewport_, always -
+            // it's told its scroll position directly instead (see
+            // onScrollOffsetChanged's own doc comment, view.h).
+            viewport_->setOrigin(Point(0.0f, 0.0f));
+            Point offset(needH ? hBar_->value() : 0.0f, needV ? vBar_->value() : 0.0f);
+            virtualizedChild->onScrollOffsetChanged.syncCall(*virtualizedChild, offset);
+        } else {
+            Point origin = viewport_->origin();
+            viewport_->setOrigin(Point(needH ? hBar_->value() : 0.0f, needV ? vBar_->value() : 0.0f));
+            if (origin != viewport_->origin()) {
+                viewport_->redraw();
+            }
         }
     }
 
@@ -1524,6 +1601,11 @@ namespace newui {
     }
 
     SyncReturn ScrollView::handleVBarValueChanged(ScrollBar& /*sender*/) {
+        if (SubView* child = virtualizedContentChild()) {
+            child->onScrollOffsetChanged.syncCall(*child, Point(hBar_->isVisible() ? hBar_->value() : 0.0f, vBar_->value()));
+            child->redraw();
+            return SyncReturn::Handled;
+        }
         Point origin = viewport_->origin();
         origin.y = vBar_->value();
         viewport_->setOrigin(origin);
@@ -1532,6 +1614,11 @@ namespace newui {
     }
 
     SyncReturn ScrollView::handleHBarValueChanged(ScrollBar& /*sender*/) {
+        if (SubView* child = virtualizedContentChild()) {
+            child->onScrollOffsetChanged.syncCall(*child, Point(hBar_->value(), vBar_->isVisible() ? vBar_->value() : 0.0f));
+            child->redraw();
+            return SyncReturn::Handled;
+        }
         Point origin = viewport_->origin();
         origin.x = hBar_->value();
         viewport_->setOrigin(origin);
@@ -1759,16 +1846,6 @@ namespace newui {
 
         model_.onBeforeChar.add(this, &TextController::handleModelBeforeChar);
         model_.onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
-
-        // Always created (see this class's own doc comment on why
-        // scrolling is internal), always a real child of owner_ so it
-        // paints/hit-tests through the ordinary SubView machinery -
-        // starts invisible; paint() below is what decides, every time,
-        // whether content actually needs it.
-        vScrollBar_ = new ScrollBar();
-        vScrollBar_->setVisible(false);
-        vScrollBar_->onValueChanged.add(this, &TextController::handleScrollBarValueChanged);
-        owner_.addChild(vScrollBar_);
     }
 
     SyncReturn TextController::handleCaretVisibilityChanged(text::Caret& sender) {
@@ -1801,42 +1878,51 @@ namespace newui {
         return Point(localPt.x - clientBounds.left(), localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
-    SyncReturn TextController::handleScrollBarValueChanged(ScrollBar& sender) {
-        scrollOffsetY_ = sender.value();
-        owner_.style().markDirty();
-        return SyncReturn::Handled;
+    void TextController::ensureLayoutUpToDate() {
+        Rect clientBounds = owner_.getClientBounds();
+        layoutEngine_.update(model_.storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
     }
 
-    void TextController::ensureCaretVisible(float viewportHeight) {
+    void TextController::setScrollOffsetY(float y) {
+        scrollOffsetY_ = y;
+        owner_.style().markDirty();
+    }
+
+    Rect TextController::caretDocumentRect() const {
         Point caretTopLeft;
         float caretHeight = 0.0f;
         layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
-        if (caretHeight <= 0.0f) {
-            return;
-        }
-        float newValue = vScrollBar_->value();
-        if (caretTopLeft.y < newValue) {
-            newValue = caretTopLeft.y;
-        } else if (caretTopLeft.y + caretHeight > newValue + viewportHeight) {
-            newValue = caretTopLeft.y + caretHeight - viewportHeight;
-        }
-        // setValue() clamps and no-ops (no onValueChanged, no markDirty())
-        // if this doesn't actually change anything - safe to call every
-        // paint() unconditionally rather than only when a caret move just
-        // happened.
-        vScrollBar_->setValue(newValue);
+        return Rect(caretTopLeft.x, caretTopLeft.y, 1.0f, caretHeight);
     }
 
-    SyncReturn TextController::handleMouseWheel(const Point& pt, float delta) {
-        if (!vScrollBar_->isVisible()) {
-            return SyncReturn::Ignored;
+    void TextController::drawSelection(BLContext& ctx) const {
+        if (selection_.isEmpty()) {
+            return;
         }
-        // Same delta convention (WM_MOUSEWHEEL's WHEEL_DELTA == 120.0f
-        // per notch) and "scroll opposite the wheel's sign" direction
-        // ScrollView::handleMouseWheel() already uses.
-        float notches = delta / 120.0f;
-        vScrollBar_->setValue(vScrollBar_->value() - notches * vScrollBar_->lineStep());
-        return SyncReturn::Handled;
+        // Plain BLContext fills (no intermediate D2D/WIC bitmap the way
+        // text/caret rendering involves) - shifting via an ordinary
+        // ctx.translate() is exactly as cheap regardless of
+        // scrollOffsetY_'s value, no need for a TextRenderer-style
+        // small-render-target trick here.
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        std::vector<Rect> selectionRects;
+        for (const text::TextRange& range : selection_.ranges()) {
+            std::vector<Rect> rangeRects = layoutEngine_.hitTestRange(range);
+            selectionRects.insert(selectionRects.end(), rangeRects.begin(), rangeRects.end());
+        }
+        selection_.draw(ctx, selectionRects);
+        ctx.restore();
+    }
+
+    void TextController::drawCaret(BLContext& ctx) const {
+        if (!caret_.isVisible()) {
+            return;
+        }
+        Point caretTopLeft;
+        float caretHeight = 0.0f;
+        layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
+        caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight);
     }
 
     void TextController::clearSelection() {
@@ -2168,83 +2254,6 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
-    void TextController::paint(BLContext& ctx, const Rect& clientBounds) {
-        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
-            return;
-        }
-
-        // Two-pass, same shape ScrollView::updateLayout() already uses
-        // for its own vBar_/hBar_ ("whether one bar is needed can change
-        // the space left for content"): lay out at the full width first;
-        // if multiline content turns out taller than clientBounds,
-        // reserve room for vScrollBar_ and rebuild at the narrower
-        // width. Narrowing text can only ever increase wrapped height,
-        // never reduce it, so this can't oscillate back to "doesn't need
-        // one" on the second pass.
-        float textWidth = clientBounds.width();
-        layoutEngine_.update(model_.storage(), font_, textWidth, clientBounds.height());
-
-        bool needsScrollBar = multiline_ && layoutEngine_.contentHeight() > clientBounds.height();
-        if (needsScrollBar) {
-            textWidth = (clientBounds.width() > kScrollBarThickness) ? (clientBounds.width() - kScrollBarThickness) : 0.0f;
-            layoutEngine_.update(model_.storage(), font_, textWidth, clientBounds.height());
-        }
-
-        vScrollBar_->setVisible(needsScrollBar);
-        if (needsScrollBar) {
-            float contentHeight = layoutEngine_.contentHeight();
-            vScrollBar_->setBounds(Rect(clientBounds.left() + textWidth, clientBounds.top(), kScrollBarThickness, clientBounds.height()));
-            vScrollBar_->setRange(0.0f, contentHeight);
-            vScrollBar_->setPageSize(clientBounds.height());
-            // One text line per lineStep() (used by both vScrollBar_'s
-            // own arrow-click stepping and, times a few lines, by
-            // handleMouseWheel()) - a single line's own height, from
-            // wherever the caret currently is, is as good a proxy as any
-            // for "one line" (this font's lines are all the same height
-            // regardless of content, so which line doesn't matter).
-            Point lineTopLeft;
-            float lineHeight = 0.0f;
-            layoutEngine_.hitTestPosition(caret_.position(), lineTopLeft, lineHeight);
-            vScrollBar_->setLineStep(lineHeight > 0.0f ? lineHeight : 16.0f);
-            ensureCaretVisible(clientBounds.height());
-        } else {
-            scrollOffsetY_ = 0.0f;
-        }
-
-        ctx.save();
-        ctx.translate(clientBounds.left(), clientBounds.top());
-
-        if (!selection_.isEmpty()) {
-            // Selection highlight rects are plain BLContext fills (no
-            // intermediate D2D/WIC bitmap the way text/caret rendering
-            // below involves) - shifting them via an ordinary
-            // ctx.translate() is exactly as cheap regardless of
-            // scrollOffsetY_'s value, no need for renderer_'s own
-            // small-render-target trick here.
-            ctx.save();
-            ctx.translate(0.0f, -scrollOffsetY_);
-            std::vector<Rect> selectionRects;
-            for (const text::TextRange& range : selection_.ranges()) {
-                std::vector<Rect> rangeRects = layoutEngine_.hitTestRange(range);
-                selectionRects.insert(selectionRects.end(), rangeRects.begin(), rangeRects.end());
-            }
-            selection_.draw(ctx, selectionRects);
-            ctx.restore();
-        }
-
-        renderer_.render(ctx, static_cast<int>(textWidth), static_cast<int>(clientBounds.height()),
-            model_.text(), font_, textColor_, scrollOffsetY_);
-
-        if (caret_.isVisible()) {
-            Point caretTopLeft;
-            float caretHeight = 0.0f;
-            layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
-            caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight);
-        }
-
-        ctx.restore();
-    }
-
     // -----------------------------------------------------------------
     // TextField
     // -----------------------------------------------------------------
@@ -2264,7 +2273,6 @@ namespace newui {
         onMouseDblClick.add(this, &TextField::handleMouseDblClick);
         onKeyPress.add(this, &TextField::handleKeyPress);
         onKeyDown.add(this, &TextField::handleKeyDown);
-        onMouseWheel.add(this, &TextField::handleMouseWheel);
     }
 
     SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
@@ -2273,6 +2281,22 @@ namespace newui {
             return SyncReturn::Handled;
         }
         return controller_.handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
+    }
+
+    void TextField::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+        controller_.ensureLayoutUpToDate();
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+        controller_.drawSelection(ctx);
+        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+            controller_.model().text(), controller_.font(), controller_.textColor(), controller_.scrollOffsetY(), /*wordWrap=*/false);
+        controller_.drawCaret(ctx);
+        ctx.restore();
     }
 
     // -----------------------------------------------------------------
@@ -2296,7 +2320,50 @@ namespace newui {
         onMouseDblClick.add(this, &TextControl::handleMouseDblClick);
         onKeyPress.add(this, &TextControl::handleKeyPress);
         onKeyDown.add(this, &TextControl::handleKeyDown);
-        onMouseWheel.add(this, &TextControl::handleMouseWheel);
+
+        // Unconditional (unlike TextField, which never hooks these at
+        // all) - see this class's own class comment for why only
+        // TextControl participates in ScrollView hosting.
+        onQueryContentSize.add(this, &TextControl::handleQueryContentSize);
+        onScrollOffsetChanged.add(this, &TextControl::handleScrollOffsetChanged);
+        controller_.model().onChanged.add(this, &TextControl::handleModelChanged);
+    }
+
+    void TextControl::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+        controller_.ensureLayoutUpToDate();
+
+        Rect caretRect = controller_.caretDocumentRect();
+        if (caretRect.height() > 0.0f) {
+            onRequestScrollIntoView(*this, caretRect);
+        }
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+        controller_.drawSelection(ctx);
+        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+            controller_.model().text(), controller_.font(), controller_.textColor(), controller_.scrollOffsetY(), /*wordWrap=*/true);
+        controller_.drawCaret(ctx);
+        ctx.restore();
+    }
+
+    SyncReturn TextControl::handleQueryContentSize(View& /*sender*/, Size& outSize) {
+        controller_.ensureLayoutUpToDate();
+        outSize = Size(getClientBounds().width(), controller_.contentHeight());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextControl::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
+        controller_.setScrollOffsetY(offset.y);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextControl::handleModelChanged(Model& /*sender*/) {
+        onContentSizeChanged(*this);
+        return SyncReturn::Handled;
     }
 
 }

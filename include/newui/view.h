@@ -37,6 +37,10 @@ namespace newui {
         typedef Delegate<View> VisibilityChangedDelegate;
         typedef Delegate<View> CreatedDelegate;
         typedef Delegate<View> DestroyedDelegate;
+        typedef Delegate<View, Size&> QueryContentSizeDelegate;
+        typedef Delegate<View, const Point&> ScrollOffsetChangedDelegate;
+        typedef Delegate<View> ContentSizeChangedDelegate;
+        typedef Delegate<View, const Rect&> RequestScrollIntoViewDelegate;
 
         typedef Delegate<View, const Point&, std::uint32_t, std::uint32_t> MouseEventDelegate;        
         typedef Delegate<View, const Point&, float> MouseWheelDelegate;
@@ -179,6 +183,36 @@ namespace newui {
             return bounds_.size();
         }
 
+        // "How much content is there, total" - a different question from
+        // desiredSize() above, which answers "what size would I like my
+        // own bounds() to be" for a Layout. contentSize() is for a view
+        // whose bounds() can legitimately stay smaller than everything it
+        // actually holds (a long document in a scrolled text area, e.g.),
+        // answering "how big would I have to be to show all of it" for
+        // whoever owns the scrollbar - a generic container (ScrollView,
+        // via this method - see its updateLayout()) or a control that
+        // hand-rolls its own scrollbar and wants to ask a child the same
+        // question without needing to know its concrete type.
+        //
+        // Delegate-based (onQueryContentSize, syncCallFirst - first
+        // listener to claim SyncReturn::Handled wins), not a virtual
+        // override like computeDesiredSize(), matching this toolkit's own
+        // "prefer composition over a growing virtual surface" convention
+        // (see Controller's class comment, controllers.h) - most views
+        // never have an answer other than bounds_.size() (their content
+        // IS their bounds), so this stays a no-op for them; a view that
+        // does have a real answer (TextController, controls.h, is the
+        // real consumer - see its own class comment) hooks
+        // onQueryContentSize itself instead of every such view needing
+        // its own dedicated accessor. A view that answers this is also
+        // what ScrollView (controls.h) treats as *virtualized* content -
+        // see onScrollOffsetChanged below, its counterpart.
+        Size contentSize() {
+            Size result = bounds_.size();
+            onQueryContentSize.syncCallFirst(*this, result);
+            return result;
+        }
+
         //repaint this views clientBounds
         //typically 0,0 to bounds_.size().width, bounds_.size().height
         //but it could be less than this
@@ -279,6 +313,60 @@ namespace newui {
         VisibilityChangedDelegate onVisibilityChanged;
         CreatedDelegate onCreated;
         DestroyedDelegate onDestroyed;
+        // See contentSize()'s own doc comment above.
+        QueryContentSizeDelegate onQueryContentSize;
+
+        // Fired by a scrolling container (ScrollView, controls.h) on a
+        // *virtualized* content child - one that answered onQueryContentSize
+        // above - instead of the ordinary "shift this view's whole
+        // bounds/position via origin()" scrolling every other child gets.
+        // A virtualized child's own bounds() stay pinned to whatever the
+        // container gives it (typically its own viewport size) rather
+        // than growing to match contentSize(); this is how the container
+        // tells it "you're now scrolled to here" (in this view's own
+        // content coordinate space - the same units contentSize()
+        // reports in) so it can adjust whatever it draws internally.
+        // Purely a notification, like onSizeChanged - most views never
+        // subscribe (the same ones that never answer onQueryContentSize
+        // either); TextController (controls.h) is the real consumer.
+        // Deliberately not origin() - origin() already has a real,
+        // established meaning (shift *this view's own children*), and a
+        // virtualized view that also owns real children of its own (see
+        // TextController's class comment, controls.h, for a live example
+        // of exactly this collision) would have origin() reused for two
+        // unrelated purposes at once, one of which was tried and reverted
+        // this same session after breaking live (see HANDOFF.md).
+        ScrollOffsetChangedDelegate onScrollOffsetChanged;
+
+        // Fired by a view *on itself* whenever whatever contentSize()
+        // would now report may have changed - not a bounds/size change
+        // (see onSizeChanged for that; this view's own bounds() haven't
+        // necessarily moved at all), but the logical content extent
+        // behind it has (more text typed, a different font, ...). A
+        // container hosting this view as a virtualized content child
+        // (ScrollView, controls.h - see onScrollOffsetChanged above)
+        // subscribes to this once, when the child's added, to know when
+        // to re-run its own layout (bar visibility/range, re-pinning
+        // this child's bounds) - see ScrollView::addChild(). Most views
+        // never fire this at all - the same ones that never answer
+        // onQueryContentSize either, since there'd be nothing for a
+        // listener to usefully re-query.
+        ContentSizeChangedDelegate onContentSizeChanged;
+
+        // Fired by a view *on itself* to ask whoever's hosting it (if
+        // anyone) to scroll just far enough that requestedRect - in this
+        // view's own content coordinate space, the same units
+        // contentSize() reports in - becomes fully visible. A no-op if
+        // nothing's listening (standalone use) or if it's already
+        // visible - the listener (ScrollView, controls.h, on a
+        // virtualized content child - see onScrollOffsetChanged above)
+        // decides that part, not the caller. TextController (controls.h)
+        // fires this once per paint() with caret_'s own current on-screen
+        // rect - see its own paint()'s comment for why one call site
+        // there covers every caret-moving input path (typing, Backspace/
+        // Delete, Enter, arrow keys, a click, ...) without each needing
+        // its own call.
+        RequestScrollIntoViewDelegate onRequestScrollIntoView;
 
 		MouseEventDelegate onMouseDown;
         MouseEventDelegate onMouseUp;

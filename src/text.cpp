@@ -524,7 +524,7 @@ namespace newui::text {
     }
 
     void TextRenderer::render(BLContext& ctx, int width, int height, const std::wstring& text,
-            const Font& font, const Color& textColor, float scrollOffsetY) {
+            const Font& font, const Color& textColor, float scrollOffsetY, bool wordWrap) {
         if (width <= 0 || height <= 0) {
             return;
         }
@@ -549,6 +549,9 @@ namespace newui::text {
             text.c_str(), static_cast<UINT32>(text.size()), format,
             static_cast<float>(width), static_cast<float>(height), &textLayout);
 
+        if (SUCCEEDED(layoutHr)) {
+            textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
         if (SUCCEEDED(brushHr) && SUCCEEDED(layoutHr)) {
             // scrollOffsetY shifts the whole layout up before rasterizing -
             // see this method's own doc comment (text.h) on why this is
@@ -635,7 +638,7 @@ namespace newui::text {
     // nothing left to do here.
     TextLayoutEngine::~TextLayoutEngine() = default;
 
-    bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight) {
+    bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap) {
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
         if (format == nullptr) {
             return false;
@@ -646,7 +649,8 @@ namespace newui::text {
             || format != impl_->lastFormat
             || lastText_ != text
             || lastMaxWidth_ != maxWidth
-            || lastMaxHeight_ != maxHeight;
+            || lastMaxHeight_ != maxHeight
+            || lastWordWrap_ != wordWrap;
         if (!needsRebuild) {
             return true;
         }
@@ -658,12 +662,14 @@ namespace newui::text {
             impl_->layout = nullptr;
             return false;
         }
+        layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
 
         impl_->layout = layout;
         impl_->lastFormat = format;
         lastText_ = text;
         lastMaxWidth_ = maxWidth;
         lastMaxHeight_ = maxHeight;
+        lastWordWrap_ = wordWrap;
         return true;
     }
 

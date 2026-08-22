@@ -25,6 +25,15 @@ namespace {
 // for each arrow, leaving a 168px track between them.
 constexpr float kArrowSize = 16.0f;
 
+// A plain free function, not a lambda - a non-capturing lambda converts
+// to both Delegate::Callback (std::function) and Delegate::FunctionPtr,
+// which MSVC rejects as an ambiguous add() call (same reasoning
+// test_view.cpp's RecordDestroyed() already documents).
+SyncReturn AnswerContentSize500x800(View&, Size& outSize) {
+    outSize = Size(500.0f, 800.0f);
+    return SyncReturn::Handled;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------
@@ -420,6 +429,109 @@ TEST(ScrollView, AddChildDoesNotBecomeADirectChildOfScrollViewItself) {
     delete view;
 }
 
+TEST(ScrollView, AutoDerivesContentSizeFromSoleChildsContentSizeWithoutAManualCall) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* content = new SubView();
+    content->setVisible(true);
+    content->onQueryContentSize.add(AnswerContentSize500x800);
+    // No setContentSize() call anywhere in this test - addChild() alone
+    // (via updateLayout(), see its own comment, controls.h) should be
+    // enough to pick up content's own answer.
+    view->addChild(content);
+
+    EXPECT_EQ(view->contentSize(), Size(500.0f, 800.0f));
+    ASSERT_TRUE(view->vBar()->isVisible());
+    ASSERT_TRUE(view->hBar()->isVisible());
+    EXPECT_FLOAT_EQ(view->vBar()->maxValue(), 800.0f);
+    EXPECT_FLOAT_EQ(view->hBar()->maxValue(), 500.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, ManualSetContentSizeTakesPermanentPrecedenceOverAChildsOwnAnswer) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+    view->setContentSize(Size(50.0f, 50.0f));
+
+    auto* content = new SubView();
+    content->setVisible(true);
+    content->onQueryContentSize.add(AnswerContentSize500x800);
+    view->addChild(content);
+
+    // The manual value from before addChild() wins, even though content
+    // itself could answer - see contentSizeOverridden_'s own doc comment
+    // (controls.h): a single explicit setContentSize() call opts out of
+    // auto-derivation permanently, not just until the next addChild().
+    EXPECT_EQ(view->contentSize(), Size(50.0f, 50.0f));
+    EXPECT_FALSE(view->vBar()->isVisible());
+    EXPECT_FALSE(view->hBar()->isVisible());
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, DoesNotAutoDeriveContentSizeWithMoreThanOneChild) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* first = new SubView();
+    first->setVisible(true);
+    first->onQueryContentSize.add(AnswerContentSize500x800);
+    view->addChild(first);
+
+    auto* second = new SubView();
+    second->setVisible(true);
+    view->addChild(second);
+
+    // Two children - no single answer makes sense automatically (see
+    // updateLayout()'s own comment, controls.h), so contentSize_ stays at
+    // its untouched default rather than picking first's answer.
+    EXPECT_EQ(view->contentSize(), Size());
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, VirtualizedChildIsPinnedToViewportSizeAndToldItsScrollOffsetDirectly) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* content = new SubView();
+    content->setVisible(true);
+    content->onQueryContentSize.add(AnswerContentSize500x800);
+    std::vector<Point> receivedOffsets;
+    content->onScrollOffsetChanged.add([&receivedOffsets](View&, const Point& offset) -> SyncReturn {
+        receivedOffsets.push_back(offset);
+        return SyncReturn::Handled;
+    });
+    view->addChild(content);
+
+    // Pinned to whatever the viewport actually is, not grown to the
+    // 500x800 it reported - the whole point of being virtualized (see
+    // ScrollView::updateLayout()'s own comment, controls.h).
+    EXPECT_LT(content->bounds().size().width, 500.0f);
+    EXPECT_LT(content->bounds().size().height, 800.0f);
+    EXPECT_EQ(content->bounds().pos(), Point());
+
+    ASSERT_TRUE(view->vBar()->isVisible());
+    ASSERT_FALSE(receivedOffsets.empty());
+    // viewport_'s own origin() never moves for a virtualized child - see
+    // updateLayout()'s own comment for why shifting it would be pointless
+    // (the child is already pinned to exactly viewport_'s own bounds).
+    EXPECT_EQ(view->contentOrigin(), Point());
+
+    view->vBar()->setValue(100.0f);
+
+    EXPECT_FLOAT_EQ(receivedOffsets.back().y, 100.0f);
+    EXPECT_EQ(view->contentOrigin(), Point());
+
+    view->destroy();
+    delete view;
+}
+
 // ---------------------------------------------------------------------
 // ToolbarButton - same momentary-vs-toggle click gesture as Button,
 // just checked via ThemedToolbarButtonStyle instead
@@ -657,4 +769,102 @@ TEST(TextField, InputTraitsAccessorHoldsRealTraitsState) {
 
     field->destroy();
     delete field;
+}
+
+// ---------------------------------------------------------------------
+// TextControl - owns no scrollbar of its own at all (see HANDOFF.md for
+// the history: an earlier version had one, hand-rolled, and its scroll-
+// offset bookkeeping could desync from it - removed entirely rather than
+// patched further). It just answers View::onQueryContentSize/accepts
+// View::onScrollOffsetChanged (view.h) so a hosting ScrollView can
+// provide the real scrollbar (see TextController's own class comment,
+// controls.h, and ScrollView's updateLayout()/virtualizedContentChild()).
+// Standalone use (no ScrollView) simply clips - there's no scrollbar
+// anywhere in that case.
+// ---------------------------------------------------------------------
+
+namespace {
+
+const std::wstring kManyLines =
+    L"line one\nline two\nline three\nline four\nline five\nline six\n"
+    L"line seven\nline eight\nline nine\nline ten";
+
+}  // namespace
+
+TEST(TextControl, HasNoScrollBarOfItsOwnEvenWhenStandaloneContentOverflows) {
+    auto* textControl = new TextControl();
+    textControl->setBounds(Rect(0, 0, 100, 60));
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+
+    textControl->setText(kManyLines);
+    textControl->paint(ctx);
+
+    EXPECT_TRUE(textControl->childViews().empty());
+
+    textControl->destroy();
+    delete textControl;
+}
+
+TEST(TextControl, ReportsRealContentHeightEvenBeforeAnyPaintCall) {
+    auto* textControl = new TextControl();
+    textControl->setBounds(Rect(0, 0, 100, 60));
+    textControl->setText(kManyLines);
+
+    // No paint() call anywhere in this test - handleQueryContentSize()
+    // has to lay out on demand itself (see its own comment, controls.cpp)
+    // since a hosting ScrollView can legitimately ask before this control
+    // has ever actually been painted.
+    Size reported = textControl->contentSize();
+
+    EXPECT_GT(reported.height, textControl->bounds().size().height);
+
+    textControl->destroy();
+    delete textControl;
+}
+
+TEST(TextControl, ReportsBoundsSizeWhenContentFits) {
+    auto* textControl = new TextControl();
+    textControl->setBounds(Rect(0, 0, 100, 60));
+    textControl->setText(L"short");
+
+    Size reported = textControl->contentSize();
+
+    EXPECT_LE(reported.height, textControl->bounds().size().height);
+
+    textControl->destroy();
+    delete textControl;
+}
+
+TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* textControl = new TextControl();
+    textControl->setText(kManyLines);
+    scrollView->addChild(textControl);
+
+    // No scrollbar of its own, and pinned to the (much smaller) viewport
+    // rather than grown to its true content height - the whole point of
+    // being hosted rather than standalone.
+    EXPECT_TRUE(textControl->childViews().empty());
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    EXPECT_LT(textControl->bounds().size().height, 60.0f);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    // Must not crash painting at its pinned (small) bounds despite
+    // holding far more text than that.
+    textControl->paint(ctx);
+
+    // Scrolling the *ScrollView's* bar (not anything on textControl
+    // itself, which has nothing of its own to scroll) must not crash
+    // either, and a subsequent paint() still has to succeed at the same
+    // small, unchanged bounds.
+    scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
+    textControl->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
 }

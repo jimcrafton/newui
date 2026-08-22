@@ -321,3 +321,50 @@ TEST(Reflection, GeneratedDataLinksViewStyleThemedButtonStyleChain) {
     EXPECT_EQ(themedViewStyleClass->parentClass(), viewStyleClass);
     EXPECT_EQ(themedButtonStyleClass->parentClass(), themedViewStyleClass);
 }
+
+// classinfo(typeid(newui::Rect)) above is the type-erased-but-still-
+// compile-time-typed lookup; classinfo(const std::string&) (reflection.h)
+// is the fully-stringly-typed one - a "newui::Rect" name string, with no
+// typeid at all, has to resolve to the exact same Class. Covers both
+// namespaceName()/qualifiedName() actually holding "newui::" (not e.g.
+// "class newui::" - see extractNamespace()'s own MSVC keyword-prefix
+// stripping) and ReflectionRegistry::registerClass() indexing that
+// qualified name alongside the bare one.
+TEST(Reflection, ClassLookupByFullyQualifiedName) {
+    const Class* rectClass = classinfo(typeid(newui::Rect));
+    ASSERT_NE(rectClass, nullptr);
+
+    EXPECT_EQ(rectClass->name(), "Rect");
+    EXPECT_EQ(rectClass->namespaceName(), "newui::");
+    EXPECT_EQ(rectClass->qualifiedName(), "newui::Rect");
+
+    const Class* byBareName = classinfo("Rect");
+    const Class* byQualifiedName = classinfo("newui::Rect");
+    ASSERT_NE(byQualifiedName, nullptr);
+    EXPECT_EQ(byBareName, rectClass);
+    EXPECT_EQ(byQualifiedName, rectClass);
+
+    std::any instance = byQualifiedName->createInstance();
+    EXPECT_TRUE(instance.has_value());
+}
+
+// Same idea as ClassLookupByFullyQualifiedName above, for Enum -
+// EnumBuilder<T>'s constructor derives namespaceName() from typeid(T)
+// directly (reflection.h), independent of the bare `name` string it's
+// handed (reflectgen.py's own EnumInfo::bare_name), and
+// ReflectionRegistry::registerEnum() indexes the qualified name
+// alongside the bare one the same way registerClass() does.
+TEST(Reflection, EnumLookupByFullyQualifiedName) {
+    const Enum* orientationEnum = ReflectionRegistry::getEnum(typeid(newui::Orientation));
+    ASSERT_NE(orientationEnum, nullptr);
+
+    EXPECT_EQ(orientationEnum->name(), "Orientation");
+    EXPECT_EQ(orientationEnum->namespaceName(), "newui::");
+    EXPECT_EQ(orientationEnum->qualifiedName(), "newui::Orientation");
+
+    const Enum* byBareName = ReflectionRegistry::getEnum("Orientation");
+    const Enum* byQualifiedName = ReflectionRegistry::getEnum("newui::Orientation");
+    ASSERT_NE(byQualifiedName, nullptr);
+    EXPECT_EQ(byBareName, orientationEnum);
+    EXPECT_EQ(byQualifiedName, orientationEnum);
+}

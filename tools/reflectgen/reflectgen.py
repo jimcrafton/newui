@@ -608,9 +608,16 @@ class EnumInfo:
     @property
     def bare_name(self):
         # Matches Class::name()'s own convention (demangleTypeName() strips
-        # namespace, ClassBuilder keeps it in a separate namespaceName() -
-        # Enum has no such second field, so this just keeps the registry
-        # key consistent with how classes are already named/looked-up).
+        # namespace, ClassBuilder keeps it in a separate namespaceName()) -
+        # this is only ever passed as EnumBuilder<T>'s own `name` argument
+        # (reflectgen.py's emit_register_enum_function()), which is *not*
+        # where Enum::namespaceName() comes from - EnumBuilder<T>'s
+        # constructor derives that itself from typeid(T) directly (same
+        # extractNamespace() ClassBuilder<T> uses), independent of this
+        # string. Keeping this bare (not fully qualified) still matters:
+        # it's Enum::name()'s own value, and registerEnum() indexes the
+        # bare name in the registry same as it always has, alongside the
+        # namespace-derived qualified name.
         return self.name.rsplit("::", 1)[-1]
 
 

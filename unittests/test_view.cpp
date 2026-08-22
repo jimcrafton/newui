@@ -31,6 +31,24 @@ newui::SyncReturn RecordDestroyed(newui::View&) {
     return newui::SyncReturn::Handled;
 }
 
+// Same "plain free function, not a lambda" reasoning as RecordDestroyed()
+// above applies to onQueryContentSize too - a non-capturing lambda
+// converts to both Delegate::Callback (std::function) and
+// Delegate::FunctionPtr, which MSVC rejects as an ambiguous add() call.
+newui::SyncReturn AnswerContentSize500x4000(newui::View&, newui::Size& outSize) {
+    outSize = newui::Size(500, 4000);
+    return newui::SyncReturn::Handled;
+}
+
+newui::SyncReturn IgnoreContentSizeQuery(newui::View&, newui::Size&) {
+    return newui::SyncReturn::Ignored;
+}
+
+newui::SyncReturn AnswerContentSize10x20(newui::View&, newui::Size& outSize) {
+    outSize = newui::Size(10, 20);
+    return newui::SyncReturn::Handled;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -118,6 +136,47 @@ TEST(ViewDesiredSize, ClearDesiredSizeRevertsToComputedFallback) {
 
     EXPECT_FALSE(view->hasDesiredSizeOverride());
     EXPECT_EQ(view->desiredSize(), newui::Size(80, 24));
+
+    delete view;
+}
+
+// ---------------------------------------------------------------------------
+// contentSize() - onQueryContentSize (syncCallFirst - first listener to
+// return SyncReturn::Handled wins), falling back to bounds().size() when
+// unhandled. See View::contentSize()'s own comment for what this is for
+// (a scroll-owning container learning a child's true content extent
+// without needing to know its concrete type - ScrollView::updateLayout()
+// is the one real consumer today, see test_controls.cpp).
+// ---------------------------------------------------------------------------
+
+TEST(ViewContentSize, DefaultsToBoundsSizeWhenUnhandled) {
+    auto* view = new newui::SubView();
+    view->setBounds(newui::Rect(0, 0, 80, 24));
+
+    EXPECT_EQ(view->contentSize(), newui::Size(80, 24));
+
+    delete view;
+}
+
+TEST(ViewContentSize, ReturnsWhateverASingleHandlerReports) {
+    auto* view = new newui::SubView();
+    view->setBounds(newui::Rect(0, 0, 80, 24));
+
+    view->onQueryContentSize.add(AnswerContentSize500x4000);
+
+    EXPECT_EQ(view->contentSize(), newui::Size(500, 4000));
+
+    delete view;
+}
+
+TEST(ViewContentSize, AListenerThatIgnoresFallsThroughToTheNextOne) {
+    auto* view = new newui::SubView();
+    view->setBounds(newui::Rect(0, 0, 80, 24));
+
+    view->onQueryContentSize.add(IgnoreContentSizeQuery);
+    view->onQueryContentSize.add(AnswerContentSize10x20);
+
+    EXPECT_EQ(view->contentSize(), newui::Size(10, 20));
 
     delete view;
 }
