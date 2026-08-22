@@ -1827,7 +1827,7 @@ namespace newui {
     // TextController
     // -----------------------------------------------------------------
 
-    TextController::TextController(Control& owner) : owner_(owner) {
+    TextController::TextController(Control& owner) : owner_(owner), model_(std::make_unique<text::TextModel>()) {
         // Same defaults/reasoning as Button's own font_/textColor_ setup
         // (see Button::Button() above): UIColorManager::colorFor(), not
         // Color::fromSystemColor(), since only the former tracks the
@@ -1842,10 +1842,10 @@ namespace newui {
         // its own via Model::updateAllViews() - handlers below never
         // need to call owner_.style().markDirty() themselves after
         // editing model_.
-        model_.addView(&owner_);
+        model_->addView(&owner_);
 
-        model_.onBeforeChar.add(this, &TextController::handleModelBeforeChar);
-        model_.onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+        model_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+        model_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
     }
 
     SyncReturn TextController::handleCaretVisibilityChanged(text::Caret& sender) {
@@ -1880,7 +1880,7 @@ namespace newui {
 
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = owner_.getClientBounds();
-        layoutEngine_.update(model_.storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
+        layoutEngine_.update(model_->storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
     }
 
     void TextController::setScrollOffsetY(float y) {
@@ -2002,7 +2002,7 @@ namespace newui {
             return;
         }
 
-        const std::wstring& text = model_.text();
+        const std::wstring& text = model_->text();
         if (text.empty()) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
@@ -2034,7 +2034,7 @@ namespace newui {
     }
 
     void TextController::selectAll() {
-        size_t length = model_.length();
+        size_t length = model_->length();
         if (length == 0) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
@@ -2126,11 +2126,11 @@ namespace newui {
         if (!selection_.isEmpty()) {
             text::TextRange range = selection_.ranges()[0];
             clearSelection();
-            model_.replace(range, std::wstring(1, ch));
+            model_->replace(range, std::wstring(1, ch));
             insertAt = range.start() + 1;
         } else {
-            insertAt = caret_.position().isValid() ? caret_.position().offset() : model_.length();
-            model_.insert(insertAt, std::wstring(1, ch));
+            insertAt = caret_.position().isValid() ? caret_.position().offset() : model_->length();
+            model_->insert(insertAt, std::wstring(1, ch));
             insertAt += 1;
         }
         caret_.setPosition(text::TextPosition(insertAt));
@@ -2150,11 +2150,11 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_.remove(range);
+                    model_->remove(range);
                     caret_.setPosition(text::TextPosition(range.start()));
                 } else if (caret_.position().isValid() && caret_.position().offset() > 0) {
                     size_t pos = caret_.position().offset() - 1;
-                    model_.remove(text::TextRange(pos, 1));
+                    model_->remove(text::TextRange(pos, 1));
                     caret_.setPosition(text::TextPosition(pos));
                 }
                 return SyncReturn::Handled;
@@ -2163,10 +2163,10 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_.remove(range);
+                    model_->remove(range);
                     caret_.setPosition(text::TextPosition(range.start()));
-                } else if (caret_.position().isValid() && caret_.position().offset() < model_.length()) {
-                    model_.remove(text::TextRange(caret_.position().offset(), 1));
+                } else if (caret_.position().isValid() && caret_.position().offset() < model_->length()) {
+                    model_->remove(text::TextRange(caret_.position().offset(), 1));
                 }
                 return SyncReturn::Handled;
             }
@@ -2176,8 +2176,8 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkRightArrow: {
-                size_t current = caret_.position().isValid() ? caret_.position().offset() : model_.length();
-                moveCaret(current < model_.length() ? current + 1 : current, extend);
+                size_t current = caret_.position().isValid() ? caret_.position().offset() : model_->length();
+                moveCaret(current < model_->length() ? current + 1 : current, extend);
                 return SyncReturn::Handled;
             }
             case vkUpArrow: {
@@ -2199,7 +2199,7 @@ namespace newui {
             }
             case vkEnd: {
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
-                moveCaret(line.isValid() ? line.end() : model_.length(), extend);
+                moveCaret(line.isValid() ? line.end() : model_->length(), extend);
                 return SyncReturn::Handled;
             }
             case vkReturn: {
@@ -2213,11 +2213,11 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model_.replace(range, L"\n");
+                    model_->replace(range, L"\n");
                     insertAt = range.start() + 1;
                 } else {
-                    insertAt = caret_.position().isValid() ? caret_.position().offset() : model_.length();
-                    model_.insert(insertAt, L"\n");
+                    insertAt = caret_.position().isValid() ? caret_.position().offset() : model_->length();
+                    model_->insert(insertAt, L"\n");
                     insertAt += 1;
                 }
                 caret_.setPosition(text::TextPosition(insertAt));
@@ -2233,7 +2233,7 @@ namespace newui {
             canChange = false;
             return SyncReturn::Handled;
         }
-        if (kind == text::CharChangeKind::Inserted && traits_.maxLength() > 0 && model_.length() >= traits_.maxLength()) {
+        if (kind == text::CharChangeKind::Inserted && traits_.maxLength() > 0 && model_->length() >= traits_.maxLength()) {
             canChange = false;
         }
         return SyncReturn::Handled;
@@ -2245,8 +2245,8 @@ namespace newui {
             return SyncReturn::Handled;
         }
         if (traits_.maxLength() > 0) {
-            size_t clampedLength = (range.length() > model_.length() - range.start()) ? (model_.length() - range.start()) : range.length();
-            size_t resultLength = model_.length() - clampedLength + replacement.size();
+            size_t clampedLength = (range.length() > model_->length() - range.start()) ? (model_->length() - range.start()) : range.length();
+            size_t resultLength = model_->length() - clampedLength + replacement.size();
             if (resultLength > traits_.maxLength()) {
                 canChange = false;
             }
@@ -2258,7 +2258,7 @@ namespace newui {
     // TextField
     // -----------------------------------------------------------------
 
-    TextField::TextField() : controller_(*this) {
+    TextField::TextField() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
@@ -2280,7 +2280,7 @@ namespace newui {
             onReturnPressed(*this);
             return SyncReturn::Handled;
         }
-        return controller_.handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
+        return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
     }
 
     void TextField::paint(BLContext& ctx) {
@@ -2288,14 +2288,14 @@ namespace newui {
         if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
             return;
         }
-        controller_.ensureLayoutUpToDate();
+        controller_->ensureLayoutUpToDate();
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
-        controller_.drawSelection(ctx);
+        controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_.model().text(), controller_.font(), controller_.textColor(), controller_.scrollOffsetY(), /*wordWrap=*/false);
-        controller_.drawCaret(ctx);
+            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/false);
+        controller_->drawCaret(ctx);
         ctx.restore();
     }
 
@@ -2303,14 +2303,14 @@ namespace newui {
     // TextControl
     // -----------------------------------------------------------------
 
-    TextControl::TextControl() : controller_(*this) {
+    TextControl::TextControl() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
-        controller_.setMultiline(true);
+        controller_->setMultiline(true);
 
         onGotFocus.add(this, &TextControl::handleGotFocus);
         onLostFocus.add(this, &TextControl::handleLostFocus);
@@ -2326,7 +2326,7 @@ namespace newui {
         // TextControl participates in ScrollView hosting.
         onQueryContentSize.add(this, &TextControl::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &TextControl::handleScrollOffsetChanged);
-        controller_.model().onChanged.add(this, &TextControl::handleModelChanged);
+        controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
     }
 
     void TextControl::paint(BLContext& ctx) {
@@ -2334,30 +2334,30 @@ namespace newui {
         if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
             return;
         }
-        controller_.ensureLayoutUpToDate();
+        controller_->ensureLayoutUpToDate();
 
-        Rect caretRect = controller_.caretDocumentRect();
+        Rect caretRect = controller_->caretDocumentRect();
         if (caretRect.height() > 0.0f) {
             onRequestScrollIntoView(*this, caretRect);
         }
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
-        controller_.drawSelection(ctx);
+        controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_.model().text(), controller_.font(), controller_.textColor(), controller_.scrollOffsetY(), /*wordWrap=*/true);
-        controller_.drawCaret(ctx);
+            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/true);
+        controller_->drawCaret(ctx);
         ctx.restore();
     }
 
     SyncReturn TextControl::handleQueryContentSize(View& /*sender*/, Size& outSize) {
-        controller_.ensureLayoutUpToDate();
-        outSize = Size(getClientBounds().width(), controller_.contentHeight());
+        controller_->ensureLayoutUpToDate();
+        outSize = Size(getClientBounds().width(), controller_->contentHeight());
         return SyncReturn::Handled;
     }
 
     SyncReturn TextControl::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
-        controller_.setScrollOffsetY(offset.y);
+        controller_->setScrollOffsetY(offset.y);
         return SyncReturn::Handled;
     }
 

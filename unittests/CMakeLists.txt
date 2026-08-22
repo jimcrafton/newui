@@ -28,6 +28,7 @@ add_executable(newui_tests
     test_controllers.cpp
     test_documents.cpp
     test_controls.cpp
+    test_items.cpp
     test_themedata.cpp
     test_shapes.cpp
     test_text.cpp

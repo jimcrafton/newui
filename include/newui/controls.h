@@ -1172,8 +1172,29 @@ namespace newui {
     public:
         explicit TextController(Control& owner);
 
-        text::TextModel& model() { return model_; }
-        const text::TextModel& model() const { return model_; }
+        text::TextModel& model() { return *model_; }
+        const text::TextModel& model() const { return *model_; }
+
+        // Swaps in a different TextModel (e.g. a custom subclass) - a
+        // no-op for nullptr, since model_ is never optional here (every
+        // handler below dereferences it directly). Tears down the old
+        // model's registration/subscriptions (Model::removeView(),
+        // onBeforeChar/onBeforeRangeChanged) before dropping it, then
+        // wires the new one up exactly the same way the constructor
+        // already does for the default instance.
+        void setModel(std::unique_ptr<text::TextModel> model) {
+            if (model == nullptr) {
+                return;
+            }
+            if (model_ != nullptr) {
+                model_->removeView(&owner_);
+            }
+            model_ = std::move(model);
+            model_->addView(&owner_);
+            model_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+            model_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            owner_.style().markDirty();
+        }
 
         text::TextSelection& selection() { return selection_; }
         const text::TextSelection& selection() const { return selection_; }
@@ -1367,7 +1388,7 @@ namespace newui {
 
         text::TextLayoutEngine layoutEngine_;
 
-        text::TextModel model_;
+        std::unique_ptr<text::TextModel> model_;
         text::TextSelection selection_;
         text::Caret caret_;
         text::TextInputTraits traits_;
@@ -1397,12 +1418,12 @@ namespace newui {
     // together. Rendering is this class's own, deliberately not shared
     // with TextControl (see TextController's own class comment for why):
     // owns its own TextRenderer (renderer_) and its own paint() override,
-    // laying out via controller_.ensureLayoutUpToDate() with wordWrap
+    // laying out via controller_->ensureLayoutUpToDate() with wordWrap
     // false (TextController::isMultiline() stays false here, never set) -
     // a real single-line layout (DWRITE_WORD_WRAPPING_NO_WRAP), not a
     // wrapping one that just happens not to wrap for short-enough text.
     // Never scrolls - scrollOffsetY() stays 0 forever, since nothing
-    // here ever calls controller_.setScrollOffsetY() and this class
+    // here ever calls controller_->setScrollOffsetY() and this class
     // doesn't hook onScrollOffsetChanged/onQueryContentSize (view.h) at
     // all; text that overflows the field's own width simply clips (no
     // horizontal scroll-follow-caret yet - a known, deliberately deferred
@@ -1423,30 +1444,56 @@ namespace newui {
         TextField();
         virtual ~TextField() {}
 
-        text::TextModel& model() { return controller_.model(); }
-        const text::TextModel& model() const { return controller_.model(); }
+        // Direct access to the owned TextController itself - most callers
+        // want the narrower model()/selection()/caret()/inputTraits()/
+        // font()/textColor() forwarders below instead; this is for
+        // anything TextController offers that this class doesn't already
+        // forward (e.g. ensureLayoutUpToDate(), caretDocumentRect()).
+        TextController& controller() { return *controller_; }
+        const TextController& controller() const { return *controller_; }
+
+        // Swaps in a different TextController - e.g. a custom subclass
+        // overriding one of its handleXxx()/moveCaret()-style hooks for
+        // app-specific editing behavior. The caller constructs it
+        // themselves against this TextField as its own owner
+        // (std::make_unique<MyTextController>(*this)), same as this
+        // class's own constructor already does for the default instance -
+        // setController() only takes ownership, it doesn't build one.
+        void setController(std::unique_ptr<TextController> controller) {
+            controller_ = std::move(controller);
+            style().markDirty();
+        }
+
+        text::TextModel& model() { return controller_->model(); }
+        const text::TextModel& model() const { return controller_->model(); }
+
+        // Swaps in a different TextModel (e.g. a custom subclass) - see
+        // TextController::setModel()'s own doc comment (a no-op for
+        // nullptr; tears down/rewires the old and new model's
+        // registration and subscriptions for you).
+        void setModel(std::unique_ptr<text::TextModel> model) { controller_->setModel(std::move(model)); }
 
         // Convenience forwarders to model() - text()/setText() are the
         // common case; reach model() directly for insert()/remove()/
         // replace(), or to subscribe to its onBeforeChar/onAfterChar/
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
-        const std::wstring& text() const { return controller_.model().text(); }
-        void setText(const std::wstring& text) { controller_.model().setText(text); }
+        const std::wstring& text() const { return controller_->model().text(); }
+        void setText(const std::wstring& text) { controller_->model().setText(text); }
 
-        text::TextSelection& selection() { return controller_.selection(); }
-        const text::TextSelection& selection() const { return controller_.selection(); }
+        text::TextSelection& selection() { return controller_->selection(); }
+        const text::TextSelection& selection() const { return controller_->selection(); }
 
-        text::Caret& caret() { return controller_.caret(); }
-        const text::Caret& caret() const { return controller_.caret(); }
+        text::Caret& caret() { return controller_->caret(); }
+        const text::Caret& caret() const { return controller_->caret(); }
 
-        text::TextInputTraits& inputTraits() { return controller_.inputTraits(); }
-        const text::TextInputTraits& inputTraits() const { return controller_.inputTraits(); }
+        text::TextInputTraits& inputTraits() { return controller_->inputTraits(); }
+        const text::TextInputTraits& inputTraits() const { return controller_->inputTraits(); }
 
-        const Font& font() const { return controller_.font(); }
-        void setFont(const Font& font) { controller_.setFont(font); }
+        const Font& font() const { return controller_->font(); }
+        void setFont(const Font& font) { controller_->setFont(font); }
 
-        const Color& textColor() const { return controller_.textColor(); }
-        void setTextColor(const Color& color) { controller_.setTextColor(color); }
+        const Color& textColor() const { return controller_->textColor(); }
+        void setTextColor(const Color& color) { controller_->setTextColor(color); }
 
         typedef Delegate<TextField> ReturnPressedDelegate;
         // Fired when Enter/Return is pressed while this TextField has
@@ -1480,16 +1527,16 @@ namespace newui {
         // instead of going to controller_ at all, since TextController
         // only knows "insert a newline or ignore it", not "notify the
         // owner" (see ReturnPressedDelegate's own doc comment above).
-        SyncReturn handleGotFocus(View& sender) { return controller_.handleGotFocus(); }
-        SyncReturn handleLostFocus(View& sender) { return controller_.handleLostFocus(); }
-        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDown(pt, btnMask, keyMask); }
-        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseMove(pt, btnMask, keyMask); }
-        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseUp(pt, btnMask, keyMask); }
-        SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDblClick(pt, btnMask, keyMask); }
-        SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
+        SyncReturn handleGotFocus(View& sender) { return controller_->handleGotFocus(); }
+        SyncReturn handleLostFocus(View& sender) { return controller_->handleLostFocus(); }
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDown(pt, btnMask, keyMask); }
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseMove(pt, btnMask, keyMask); }
+        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseUp(pt, btnMask, keyMask); }
+        SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
+        SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
-        TextController controller_;
+        std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
     };
@@ -1511,7 +1558,7 @@ namespace newui {
     // constructor and handleQueryContentSize()/handleScrollOffsetChanged()/
     // handleModelChanged() (controls.cpp). Owns its own TextRenderer
     // (renderer_, separate from TextField's own instance) and scrollOffsetY
-    // state (via controller_.scrollOffsetY()/setScrollOffsetY() - a plain
+    // state (via controller_->scrollOffsetY()/setScrollOffsetY() - a plain
     // member on TextController, but this class is the only thing that
     // ever writes to it).
     //
@@ -1529,35 +1576,68 @@ namespace newui {
         TextControl();
         virtual ~TextControl() {}
 
-        text::TextModel& model() { return controller_.model(); }
-        const text::TextModel& model() const { return controller_.model(); }
+        // Direct access to the owned TextController itself - see
+        // TextField::controller()'s own doc comment (same idea).
+        TextController& controller() { return *controller_; }
+        const TextController& controller() const { return *controller_; }
 
-        const std::wstring& text() const { return controller_.model().text(); }
-        void setText(const std::wstring& text) { controller_.model().setText(text); }
+        // Swaps in a different TextController - see TextField::
+        // setController()'s own doc comment for the general contract
+        // (caller builds it, this only takes ownership). Also re-does
+        // this class's own model().onChanged subscription (handleModelChanged,
+        // below) against the new controller's model - the old
+        // subscription only ever pointed at the old controller's own
+        // model, which setController() just replaced.
+        void setController(std::unique_ptr<TextController> controller) {
+            controller_ = std::move(controller);
+            controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
+            style().markDirty();
+            onContentSizeChanged(*this);
+        }
 
-        text::TextSelection& selection() { return controller_.selection(); }
-        const text::TextSelection& selection() const { return controller_.selection(); }
+        text::TextModel& model() { return controller_->model(); }
+        const text::TextModel& model() const { return controller_->model(); }
 
-        text::Caret& caret() { return controller_.caret(); }
-        const text::Caret& caret() const { return controller_.caret(); }
+        // Swaps in a different TextModel - see TextController::setModel()'s
+        // own doc comment for the general contract. Also re-does this
+        // class's own model().onChanged subscription (handleModelChanged,
+        // below) against the new model, same reason setController() does
+        // (the old subscription only ever pointed at the old model).
+        void setModel(std::unique_ptr<text::TextModel> model) {
+            if (model == nullptr) {
+                return;
+            }
+            controller_->setModel(std::move(model));
+            controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
+            onContentSizeChanged(*this);
+        }
 
-        text::TextInputTraits& inputTraits() { return controller_.inputTraits(); }
-        const text::TextInputTraits& inputTraits() const { return controller_.inputTraits(); }
+        const std::wstring& text() const { return controller_->model().text(); }
+        void setText(const std::wstring& text) { controller_->model().setText(text); }
 
-        const Font& font() const { return controller_.font(); }
+        text::TextSelection& selection() { return controller_->selection(); }
+        const text::TextSelection& selection() const { return controller_->selection(); }
+
+        text::Caret& caret() { return controller_->caret(); }
+        const text::Caret& caret() const { return controller_->caret(); }
+
+        text::TextInputTraits& inputTraits() { return controller_->inputTraits(); }
+        const text::TextInputTraits& inputTraits() const { return controller_->inputTraits(); }
+
+        const Font& font() const { return controller_->font(); }
         // Fires onContentSizeChanged (view.h) too - a different font can
         // change wrapped height at the same text/width, and a hosting
         // ScrollView needs to know, same reasoning handleModelChanged()'s
         // own doc comment (controls.cpp) gives for the same firing on a
         // text change.
-        void setFont(const Font& font) { controller_.setFont(font); onContentSizeChanged(*this); }
+        void setFont(const Font& font) { controller_->setFont(font); onContentSizeChanged(*this); }
 
-        const Color& textColor() const { return controller_.textColor(); }
-        void setTextColor(const Color& color) { controller_.setTextColor(color); }
+        const Color& textColor() const { return controller_->textColor(); }
+        void setTextColor(const Color& color) { controller_->setTextColor(color); }
 
         // Draws into getClientBounds(): selection_'s highlight, then
         // this control's own word-wrapped text (renderer_.render(),
-        // wordWrap true, at controller_.scrollOffsetY()), then the caret
+        // wordWrap true, at controller_->scrollOffsetY()), then the caret
         // on top - see TextController's own class comment on why
         // rendering isn't shared with TextField. Also where
         // onRequestScrollIntoView fires (once per call, with caret_'s
@@ -1568,14 +1648,14 @@ namespace newui {
         void paint(BLContext& ctx) override;
 
     private:
-        SyncReturn handleGotFocus(View& sender) { return controller_.handleGotFocus(); }
-        SyncReturn handleLostFocus(View& sender) { return controller_.handleLostFocus(); }
-        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDown(pt, btnMask, keyMask); }
-        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseMove(pt, btnMask, keyMask); }
-        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseUp(pt, btnMask, keyMask); }
-        SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_.handleMouseDblClick(pt, btnMask, keyMask); }
-        SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
-        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_.handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode); }
+        SyncReturn handleGotFocus(View& sender) { return controller_->handleGotFocus(); }
+        SyncReturn handleLostFocus(View& sender) { return controller_->handleLostFocus(); }
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDown(pt, btnMask, keyMask); }
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseMove(pt, btnMask, keyMask); }
+        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseUp(pt, btnMask, keyMask); }
+        SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
+        SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode); }
 
         // Answers this control's own onQueryContentSize (view.h) - see
         // TextController::ensureLayoutUpToDate()'s own doc comment for
@@ -1584,9 +1664,9 @@ namespace newui {
         SyncReturn handleQueryContentSize(View& sender, Size& outSize);
         // Answers this control's own onScrollOffsetChanged (view.h),
         // driven by a hosting ScrollView - the only place
-        // controller_.setScrollOffsetY() is ever called.
+        // controller_->setScrollOffsetY() is ever called.
         SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
-        // Subscribed to controller_.model().onChanged in this class's own
+        // Subscribed to controller_->model().onChanged in this class's own
         // constructor (TextModel::notifyChanged() fires it at the end of
         // every real mutation - see its own doc comment, text.h) - fires
         // this control's own onContentSizeChanged (view.h) so a hosting
@@ -1596,7 +1676,7 @@ namespace newui {
         // this control had this much (or this little) content.
         SyncReturn handleModelChanged(Model& sender);
 
-        TextController controller_;
+        std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
     };

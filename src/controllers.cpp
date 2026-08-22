@@ -5,6 +5,8 @@
 
 #include "newui/animation.h"
 #include "newui/application.h"
+#include "newui/items.h"
+#include "newui/reflection.h"
 #include "newui/runloop.h"
 #include "newui/subview.h"
 #include "newui/view.h"
@@ -188,6 +190,72 @@ namespace newui
         if (wasActive) {
             setActiveDocument(documents_.empty() ? nullptr : documents_.back());
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // ItemController
+    // ---------------------------------------------------------------------
+
+    void ItemController::releaseItem(Item* item) {
+        if (item == nullptr) {
+            return;
+        }
+        pool_.push_back(std::unique_ptr<Item>(item));
+    }
+
+    Item* ItemController::instantiateItem(const std::string& className) const {
+        const reflection::Class* cls = reflection::classinfo(className);
+        if (cls == nullptr) {
+            return nullptr;
+        }
+        void* raw = nullptr;
+        cls->createInstance(&raw);
+        return static_cast<Item*>(raw);
+    }
+
+    Item* ItemController::takeFromPoolOrInstantiate(const std::string& className) {
+        if (!pool_.empty()) {
+            std::unique_ptr<Item> item = std::move(pool_.back());
+            pool_.pop_back();
+            return item.release();
+        }
+        return instantiateItem(className);
+    }
+
+    // ---------------------------------------------------------------------
+    // ListController
+    // ---------------------------------------------------------------------
+
+    ListController::ListController() {
+        setDefaultItemClassName("ListItem");
+    }
+
+    ListItem* ListController::createItem(std::size_t /*index*/) {
+        return static_cast<ListItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
+    }
+
+    // ---------------------------------------------------------------------
+    // TreeController
+    // ---------------------------------------------------------------------
+
+    TreeController::TreeController() {
+        setDefaultItemClassName("TreeItem");
+    }
+
+    TreeItem* TreeController::createItem(const std::vector<std::size_t>& /*path*/) {
+        return static_cast<TreeItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
+    }
+
+    // ---------------------------------------------------------------------
+    // TableController
+    // ---------------------------------------------------------------------
+
+    TableController::TableController() {
+        setDefaultItemClassName("TableItem");
+    }
+
+    TableItem* TableController::createItem(std::size_t /*row*/, std::size_t /*col*/) {
+        return static_cast<TableItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
     }
 
 } // namespace newui

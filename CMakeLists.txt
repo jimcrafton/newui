@@ -104,6 +104,7 @@ add_library(newui STATIC
     "include/newui/dialogs.h" "src/dialogs.cpp"
     "include/newui/uicolormanager.h" "src/uicolormanager.cpp"
     "include/newui/models.h" "src/models.cpp"
+    "include/newui/items.h" "src/items.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
     "include/newui/controls.h" "src/controls.cpp"
     "include/newui/shapes.h" "src/shapes.cpp"
