@@ -233,8 +233,7 @@ namespace newui {
         virtual bool writeToFile(const std::string& path) = 0;
 
     private:
-        void setModifiedFlag(bool value);
-
+        void setModifiedFlag(bool value);        
         std::string filePath_;
         bool modified_ = false;
         bool loading_ = false;

@@ -93,6 +93,21 @@ namespace newui {
         // own failure reasons.
         bool loadRootView(RootView& rootView) const;
 
+        // Loads just the "animations" block of "<frame.getName()>.newui"
+        // into AnimationManager::instance() (via the real addAnimation()/
+        // addKey() calls, resolving each saved target against frame's own,
+        // already-live rootView tree) - unlike loadFrame(), frame's own
+        // properties (including rootView) are left completely untouched,
+        // so this is safe to call on a Frame whose UI was already built
+        // some other way (by hand, or via an earlier loadFrame() call) -
+        // calling loadFrame() again afterward would duplicate every child
+        // in rootView's own childViews (its add-only reconstruction has
+        // no way to know a child it's about to add already exists - see
+        // ObjectReader::read()'s own comment on that). Returns false for
+        // any of loadFrame()'s own failure reasons, or if the file has no
+        // "animations" block at all.
+        bool loadAnimations(Frame& frame) const;
+
         // Loads "<name>.newui" as a freshly Class::createInstance()'d
         // View - the concrete type is whatever the file's own root "type"
         // tag names (a registered, default-constructible View subclass -

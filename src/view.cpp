@@ -1,5 +1,6 @@
 #include "newui/view.h"
 #include "newui/subview.h"
+#include "newui/rootview.h"
 #include <cassert>
 
 namespace newui {
@@ -67,11 +68,49 @@ namespace newui {
 		}
 	}
 
+	void View::setName(const std::string& name) {
+		if (rootView_ != nullptr && !name.empty()) {
+			rootView_->nameManager().reserve(name);
+		}
+		name_ = name;
+	}
+
 	void View::propagateRootView(RootView* root) {
 		setRootView(root);
+		if (root != nullptr) {
+			if (name_.empty()) {
+				name_ = root->generateDefaultName(*this);
+			} else {
+				root->nameManager().reserve(name_);
+			}
+		}
 		for (SubView* child : childViews_) {
 			child->propagateRootView(root);
 		}
+	}
+
+	View* View::findView(const std::string& name) {
+		if (name_ == name) {
+			return this;
+		}
+		for (SubView* child : childViews_) {
+			if (View* found = child->findView(name)) {
+				return found;
+			}
+		}
+		return nullptr;
+	}
+
+	const View* View::findView(const std::string& name) const {
+		if (name_ == name) {
+			return this;
+		}
+		for (const SubView* child : childViews_) {
+			if (const View* found = child->findView(name)) {
+				return found;
+			}
+		}
+		return nullptr;
 	}
 
 	void View::paintChildren(BLContext& ctx) {

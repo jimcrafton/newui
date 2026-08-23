@@ -1,10 +1,16 @@
 #pragma once
 
+#include <any>
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <iostream>
+#include <map>
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <typeindex>
+#include <utility>
 #include <vector>
 
 #include <newui/animationframe.h>
@@ -67,6 +73,13 @@ namespace newui {
         // same PropertyBase*, so this holds by construction.
         virtual void interpolateFrom(const KeyValue* from, float t) const = 0;
 
+        // Type-erased read access to this KeyValue's stored value - ValueT
+        // is always IsPodLike (property.h), so copying it into a std::any
+        // is always valid. Used by Bundle::writeFrame() to write a saved
+        // Animation's key values without needing SourceT/ValueT itself
+        // (see AnimationTargetRegistry, below, for the read-side mirror).
+        virtual std::any boxedValue() const = 0;
+
     protected:
         InterpolationKind interpolationKind_ = InterpolationKind::Linear;
     };
@@ -114,6 +127,10 @@ namespace newui {
 
         PropertyBase* property() const override {
             return property_;
+        }
+
+        std::any boxedValue() const override {
+            return std::any(value_);
         }
 
         void apply() const override {
@@ -223,6 +240,36 @@ namespace newui {
             }
             values_.push_back(
                 std::make_unique<TypedKeyValue<SourceT, ValueT>>(property, std::move(value), std::move(fn)));
+        }
+
+        // Not reflectgen-registered as a collection - unlike Animation::
+        // keys() just below (a real, single, reflectable Key class),
+        // every element here is a TypedKeyValue<SourceT,ValueT> - one
+        // concrete C++ type per (source, value) type pair actually used,
+        // never itself a registered reflection::Class (there's no way to
+        // enumerate every SourceT/ValueT combo an app might ever use).
+        // TypedPropertyCollection::writeItem()'s runtime-type lookup
+        // (classinfo(typeid(*elementPtr))) would find nothing for any real
+        // element here - Bundle::writeFrame() reads this vector directly
+        // in C++ instead, writing each KeyValue's target descriptor +
+        // boxedValue() by hand (see AnimationTargetRegistry, below, for
+        // the read-side mirror).
+        // Inserts an already-built KeyValue directly, replacing any
+        // existing entry for the same property() - the non-templated
+        // counterpart to setValue<SourceT,ValueT>() above, for a caller
+        // that built a KeyValue without SourceT/ValueT of its own to name
+        // (AnimationTargetRegistry::buildKeyValue(), property.h/
+        // animation.h - see Bundle::loadFrame()'s own "animations" block,
+        // bundle.cpp, reconstructing a saved Animation).
+        void addRawValue(std::unique_ptr<KeyValue> value) {
+            PropertyBase* property = value->property();
+            for (auto& entry : values_) {
+                if (entry->property() == property) {
+                    entry = std::move(value);
+                    return;
+                }
+            }
+            values_.push_back(std::move(value));
         }
 
         const std::vector<std::unique_ptr<KeyValue>>& values() const {
@@ -405,6 +452,16 @@ namespace newui {
         // regardless of further addAnimation() calls.
         static Animation* addAnimation(const std::string& name, std::uint64_t startTime, std::uint64_t duration);
 
+        // Every currently-registered Animation - added purely for
+        // Bundle::writeFrame() (bundle.cpp) to filter over when deciding
+        // which animations to persist alongside a given Frame; nothing
+        // else needs to enumerate them (contrast addAnimation()/
+        // removeAnimation(), the only ways animations_ is normally
+        // touched).
+        static const std::vector<std::unique_ptr<Animation>>& animations() {
+            return AnimationManager::instance().animations_;
+        }
+
         // Removes and destroys animation, if it's registered with this
         // manager.
         static void removeAnimation(Animation* animation);
@@ -445,6 +502,82 @@ namespace newui {
         AnimationFrame currentFrame_;
         std::chrono::steady_clock::time_point clockStart_;
         bool started_ = false;
+    };
+
+    // Bridges a saved (sourceType, valueType, propertyName, resolved live
+    // source, boxed value) tuple - everything Bundle::loadFrame() has
+    // after resolving a saved target's view-path (viewpath.h) - back into
+    // a real, working ObservableProperty<SourceT,ValueT>/
+    // TypedKeyValue<SourceT,ValueT> pair, the same shape hand-written code
+    // already builds via PropertyManager::registerProperty<ValueT>(source,
+    // propertyName) + Key::setValue(property, value).
+    //
+    // SourceT/ValueT can't be recovered from a std::type_index alone -
+    // there's no runtime "construct me a T" for an arbitrary C++ type -
+    // so registerTarget<SourceT,ValueT>() closes over both once, at
+    // registration time, into a small type-erased factory keyed by the
+    // (sourceType, valueType) pair; buildKeyValue() below just looks that
+    // factory up and calls it. Same explicit, hand-maintained opt-in idiom
+    // @reflect/NEWUI_REFLECT_PRIVATE already use elsewhere in this
+    // codebase - an app registers every (SourceT, ValueT) combination it
+    // wants a persisted Animation able to target, once (e.g. alongside its
+    // own registerReflectionData() call), rather than this trying to
+    // auto-discover them.
+    class AnimationTargetRegistry {
+    public:
+        template<typename SourceT, typename ValueT>
+        static void registerTarget() {
+            AnimationTargetRegistry& reg = instance();
+            TypeKey key{ std::type_index(typeid(SourceT)), std::type_index(typeid(ValueT)) };
+            reg.factories_[key] = [](void* source, const std::string& propertyName,
+                                       const std::any& boxedValue, InterpolationKind kind) -> std::unique_ptr<KeyValue> {
+                // get-or-register, never a fresh registerProperty() every
+                // call - PropertyManager::registerProperty() *replaces*
+                // (deletes) whatever was already registered for the same
+                // (name, source) pair (its own documented contract), and a
+                // multi-Key Animation calls this once per Key that sets
+                // the same property - a real, reproduced crash the first
+                // way (each call deleting the previous Key's still-in-use
+                // ObservableProperty out from under it). Hand-written code
+                // avoids this by registering once and reusing the same
+                // pointer across every Key::setValue() call (see
+                // examples/shapes2.cpp) - this mirrors that.
+                PropertyBase* existing = PropertyManager::getProperty(source, propertyName);
+                ObservableProperty<SourceT, ValueT>* property = existing != nullptr
+                    ? static_cast<ObservableProperty<SourceT, ValueT>*>(existing)
+                    : PropertyManager::registerProperty<ValueT>(static_cast<SourceT*>(source), propertyName);
+                return std::make_unique<TypedKeyValue<SourceT, ValueT>>(
+                    property, std::any_cast<ValueT>(boxedValue), kind);
+            };
+        }
+
+        // nullptr (with a stderr note) if no registerTarget<SourceT,
+        // ValueT>() call matches this exact (sourceType, valueType) pair -
+        // Bundle::loadFrame() skips just that one key value rather than
+        // failing the whole load, same "unrecognized data is silently
+        // skipped" contract the rest of this codebase's own reflection
+        // read paths already have.
+        static std::unique_ptr<KeyValue> buildKeyValue(std::type_index sourceType, std::type_index valueType,
+                void* source, const std::string& propertyName, const std::any& boxedValue, InterpolationKind kind) {
+            AnimationTargetRegistry& reg = instance();
+            auto it = reg.factories_.find(TypeKey{ sourceType, valueType });
+            if (it == reg.factories_.end()) {
+                return nullptr;
+            }
+            return it->second(source, propertyName, boxedValue, kind);
+        }
+
+    private:
+        AnimationTargetRegistry() = default;
+
+        static AnimationTargetRegistry& instance() {
+            static AnimationTargetRegistry reg;
+            return reg;
+        }
+
+        using TypeKey = std::pair<std::type_index, std::type_index>;
+        using Factory = std::function<std::unique_ptr<KeyValue>(void*, const std::string&, const std::any&, InterpolationKind)>;
+        std::map<TypeKey, Factory> factories_;
     };
 
 }

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -48,6 +49,38 @@ namespace newui::reflection {
         virtual void beginElement(const std::any& index, const std::any& key) {};
         virtual void endElement(const std::any& index, const std::any& key) {};
         virtual void endCollection(const std::string& propertyName) {};
+
+        // Called by TypedClass<T>::write() (reflection.h) right before
+        // opening a nested object's own beginObject()/endObject() bracket -
+        // clazz/instancePtr identify the live object about to be written.
+        // Returns false to skip writing it entirely (beginObject()/
+        // endObject() never run, so it simply doesn't appear under whatever
+        // property/element name would have held it) instead of recursing
+        // into it - the guard against an addressable back-reference (e.g. a
+        // getter pointing back up a tree already being written - real,
+        // reproduced case: View::rootView()/parent(), reflectgen.py's
+        // collect_property_accessors() own comment on why those are
+        // ignore-annotated instead of relying on this alone) walking right
+        // back into an object already open somewhere up the current write()
+        // call chain and recursing forever. Paired with exitInstance()
+        // below, called once this object (and everything nested under it)
+        // is fully written.
+        //
+        // Keyed on (clazz, instancePtr) together, never instancePtr alone -
+        // a standard-layout type's address is the same as its own first
+        // data member's (no vtable, nothing earlier in the layout), so a
+        // real, reproduced case (ShapeStyle's own fill_/gfx::Fill, its
+        // first member) has &shapeStyle == &shapeStyle.fill_ even though
+        // they're two entirely unrelated objects mid-write at once, not a
+        // cycle - instancePtr alone would have wrongly treated entering
+        // "fill" as re-entering the ShapeStyle already open around it, and
+        // silently skipped writing it. Default no-op (always true, "not a
+        // duplicate") - a ClassWriter that doesn't want this protection (or
+        // knows its own object graph is never cyclic) doesn't need to
+        // override either; ObjectWriter (reflectionio.h) is the one real
+        // implementation that does.
+        virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
+        virtual void exitInstance(const Class* clazz, void* instancePtr) {}
     };
 
 
@@ -77,6 +110,19 @@ namespace newui::reflection {
         virtual void beginElement(const std::any& index, const std::any& key) = 0;
         virtual void endElement(const std::any& index, const std::any& key) = 0;
         virtual void endCollection(const std::string& propertyName) = 0;
+
+        // Read-side mirror of ClassWriter::enterInstance()/exitInstance()
+        // above - same (clazz, instancePtr)-keyed guard, same reasoning,
+        // for TypedClass<T>::read() instead. Returns false to skip reading
+        // properties/fields into instancePtr (it's already being read
+        // somewhere up the current read() call chain - recursing into it
+        // again would walk back into itself and never terminate) -
+        // beginObject()/endObject() still run either way, so whatever
+        // object-nesting bookkeeping a concrete Reader keeps stays balanced
+        // regardless. Default no-op (always true) - see ClassWriter::
+        // enterInstance()'s own comment.
+        virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
+        virtual void exitInstance(const Class* clazz, void* instancePtr) {}
     };
     // Forward-declared, never given a generic body - referencing
     // ClassAccess<T> for a T nobody ever explicitly specialized is a hard
@@ -573,6 +619,29 @@ namespace newui::reflection {
         // live Rect& to hand out.
         virtual bool isAddressable() const { return true; }
 
+        // The live object this property currently *points at*, for a
+        // RefGetter/PtrGetter-backed property specifically (nullptr for
+        // every other mode/kind, including MemberPtr and PropertyCollection
+        // itself, and including a currently-null PtrGetter) - narrower than
+        // address() above, which returns the *storage location of this
+        // property's own backing* instead (meaningful for every addressable
+        // mode, including MemberPtr, but for a pointer-typed MemberPtr
+        // that's the address of the pointer *slot*, not the value stored in
+        // it - not what this needs). TypedClass<T>::write() uses this to
+        // check a plain property's live value against every sibling
+        // PropertyCollection's own current elements (PropertyCollection::
+        // elementAddress(), just below) before writing it out - real,
+        // reported case this exists for: Slider::thumb()/Progress::fill()/
+        // Slider::ticks()/ScrollView::vBar()/hBar() (controls.h) are all
+        // real, owned children *also* already added via addChild(), so
+        // without this they'd get written out a second time as their own
+        // named key, duplicating the same object's full subtree (see
+        // examples/overlay1.cpp's own FrameClosed()/Bundle::writeFrame()
+        // for how this was actually found). Default nullptr ("never
+        // comparable to a collection element") - TypedProperty overrides it
+        // for real in its RefGetter/PtrGetter branches only.
+        virtual void* addressableValue(void* instance) const { return nullptr; }
+
         // Convenience for a caller that already knows T at compile time -
         // just std::any_cast<T> on top of get(), still throws
         // std::bad_any_cast on a mismatch rather than silently misreading.
@@ -636,10 +705,29 @@ namespace newui::reflection {
     // the right one from the getter's own return type and is the only
     // thing that ever constructs one of these (besides the plain
     // pointer-to-data-member overload, for MemberPtr).
+    //
+    // AssumeCopyable defaults to true, deferring to the real
+    // std::is_copy_constructible_v<ValueT> trait below via kCopyable -
+    // reflectgen.py explicitly passes false at the call site (ClassBuilder::
+    // property()'s own AssumeCopyable template argument) for a ValueT its
+    // own, more careful is_copy_constructible() has determined genuinely
+    // isn't copy-constructible, short-circuiting the trait check entirely.
+    // That matters because MSVC's std::is_copy_constructible_v is known-
+    // wrong (reports true) for a self-referential "container of
+    // unique_ptr<Self>" shape (verified against MenuItem's own
+    // vector<unique_ptr<MenuItem>> children_) - relying on the trait alone
+    // would let get()/set()'s "safe" branches below still get compiled (and
+    // fail to compile for real) for exactly the ValueT this is meant to
+    // guard against. kCopyable is what every is_copy_constructible_v<ValueT>
+    // check in this class used to read directly - always use kCopyable
+    // instead, never the raw trait, so an explicit AssumeCopyable=false
+    // reliably wins regardless of what the trait itself would say.
     //@reflect ignore=true
-    template<typename SourceT, typename ValueT>
+    template<typename SourceT, typename ValueT, bool AssumeCopyable = true>
     class TypedProperty : public Property {
     public:
+        static constexpr bool kCopyable = AssumeCopyable && std::is_copy_constructible_v<ValueT>;
+
         using MemberPtr = ValueT SourceT::*;
         using RefGetter = std::function<ValueT&(SourceT&)>;
         using PtrGetter = std::function<ValueT*(SourceT&)>;
@@ -701,6 +789,24 @@ namespace newui::reflection {
             throw std::logic_error("TypedProperty::address(): '" + name() +
                 "' is a by-value getter/setter property, not addressable");
         }
+
+        // See Property::addressableValue()'s own comment for why this is
+        // narrower than address() just above - member_ deliberately isn't
+        // handled here (its address() is the pointer *slot*'s address, not
+        // a value ever comparable to a PropertyCollection element), and a
+        // null ptrGetter_ result is passed through as nullptr rather than
+        // treated as "the value is the null pointer" (nothing to
+        // deduplicate against either way).
+        void* addressableValue(void* instance) const override {
+            SourceT* self = static_cast<SourceT*>(instance);
+            if (refGetter_) {
+                return &refGetter_(*self);
+            }
+            if (ptrGetter_) {
+                return static_cast<void*>(ptrGetter_(*self));
+            }
+            return nullptr;
+        }
         // get()/set() box/unbox a *copy* of ValueT in every mode except
         // PtrSetter (see set()'s own comment) - so both need
         // std::is_copy_constructible_v<ValueT> (get())/is_copy_assignable_v
@@ -718,7 +824,7 @@ namespace newui::reflection {
         // through address() even when get()/set() have nothing to offer.
         std::any get(void* instance) const override {
             SourceT* self = static_cast<SourceT*>(instance);
-            if constexpr (std::is_copy_constructible_v<ValueT>) {
+            if constexpr (kCopyable) {
                 if (member_ != nullptr) {
                     return std::any(self->*member_);
                 }
@@ -751,7 +857,7 @@ namespace newui::reflection {
         void set(void* instance, const std::any& value) const override {
             SourceT* self = static_cast<SourceT*>(instance);
             if (member_ != nullptr) {
-                if constexpr (std::is_copy_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
+                if constexpr (kCopyable && std::is_copy_assignable_v<ValueT>) {
                     self->*member_ = std::any_cast<ValueT>(value);
                 }
                 return;
@@ -770,7 +876,7 @@ namespace newui::reflection {
                 return;
             }
             if (setter_) {
-                if constexpr (std::is_copy_constructible_v<ValueT>) {
+                if constexpr (kCopyable) {
                     setter_(*self, std::any_cast<ValueT>(value));
                 }
                 return;
@@ -825,7 +931,7 @@ namespace newui::reflection {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
                         nestedClazz->write(nestedPtr, writer, this->name());
                     }
-                } else if constexpr (std::is_copy_constructible_v<ValueT>) {
+                } else if constexpr (kCopyable) {
                     if (std::any boxed = get(instancePtr); boxed.has_value()) {
                         ValueT temp = std::any_cast<ValueT>(boxed);
                         nestedClazz->write(&temp, writer, this->name());
@@ -860,38 +966,46 @@ namespace newui::reflection {
         //     setter by copy.
         void read(void* instancePtr, ClassReader* reader) const override {
             if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
-                if constexpr (std::is_copy_constructible_v<ValueT>) {
-                    if (shouldCreateOnHeap()) {
-                        // raw (a type-erased void*), not
-                        // std::any_cast<ValueT*>(fresh) - fresh may hold a
-                        // more-derived pointer than ValueT (nestedClazz->
-                        // read() can resolve a "type" tag naming a real
-                        // subclass, see TypedClass<T>::read()'s own
-                        // comment), and any_cast needs an exact type
-                        // match. static_cast<ValueT*>(raw) is well-defined
-                        // here for the same single-non-virtual-inheritance
-                        // reason TypedPropertyCollection::readFreshElement()'s
-                        // own pointer branch already relies on.
-                        std::any fresh;
-                        bool onHeap = false;
-                        void* raw = nullptr;
-                        nestedClazz->read(reader, name(), fresh, onHeap, &raw);
-                        if (raw != nullptr) {
-                            set(instancePtr, std::any(static_cast<ValueT*>(raw)));
-                        }
-                    } else if (isAddressable()) {
-                        if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
-                            std::any existing(static_cast<ValueT*>(nestedPtr));
-                            bool onHeap = false;
-                            nestedClazz->read(reader, name(), existing, onHeap);
-                        }
-                    } else if constexpr (std::is_default_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
-                        ValueT temp{};
-                        std::any boxedTemp(&temp);
-                        bool onHeap = false;
-                        nestedClazz->read(reader, name(), boxedTemp, onHeap);
-                        set(instancePtr, std::any(temp));
+                // Unlike get()/set()/write()'s by-value branches, neither of
+                // these first two cases ever copy-constructs a ValueT - both
+                // only ever box a ValueT* (always copy-constructible
+                // regardless of ValueT itself) - so, unlike before, neither
+                // is gated behind kCopyable any more: an addressable-but-
+                // not-copy-constructible property (e.g. Frame::rootView(),
+                // RootView isn't copy-constructible thanks to its own
+                // std::unique_ptr<Overlay> member) now actually reads
+                // through here instead of silently doing nothing just
+                // because ValueT as a whole can't be copied.
+                if (shouldCreateOnHeap()) {
+                    // raw (a type-erased void*), not
+                    // std::any_cast<ValueT*>(fresh) - fresh may hold a
+                    // more-derived pointer than ValueT (nestedClazz->
+                    // read() can resolve a "type" tag naming a real
+                    // subclass, see TypedClass<T>::read()'s own
+                    // comment), and any_cast needs an exact type
+                    // match. static_cast<ValueT*>(raw) is well-defined
+                    // here for the same single-non-virtual-inheritance
+                    // reason TypedPropertyCollection::readFreshElement()'s
+                    // own pointer branch already relies on.
+                    std::any fresh;
+                    bool onHeap = false;
+                    void* raw = nullptr;
+                    nestedClazz->read(reader, name(), fresh, onHeap, &raw);
+                    if (raw != nullptr) {
+                        set(instancePtr, std::any(static_cast<ValueT*>(raw)));
                     }
+                } else if (isAddressable()) {
+                    if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
+                        std::any existing(static_cast<ValueT*>(nestedPtr));
+                        bool onHeap = false;
+                        nestedClazz->read(reader, name(), existing, onHeap);
+                    }
+                } else if constexpr (kCopyable && std::is_default_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
+                    ValueT temp{};
+                    std::any boxedTemp(&temp);
+                    bool onHeap = false;
+                    nestedClazz->read(reader, name(), boxedTemp, onHeap);
+                    set(instancePtr, std::any(temp));
                 }
                 return;
             }
@@ -958,6 +1072,19 @@ namespace newui::reflection {
         virtual void set(std::any& instance, std::size_t index, const std::any& value) const {}
         virtual std::any get(std::any& instance, const std::any& key) const { return std::any(); }
         virtual void set(std::any& instance, const std::any& key, const std::any& value) const {}
+
+        // The element at index, as a live void* - nullptr for a non-
+        // pointer-typed ElementT (a plain value element, e.g. GradientStop,
+        // has no shared identity another property could ever alias) or an
+        // out-of-range index. See Property::addressableValue()'s own
+        // comment for what this exists for - TypedClass<T>::write() cross-
+        // checks every plain property's addressableValue() against every
+        // sibling collection's own current elements via this, so an owned
+        // child that's both a real collection element (childViews) and a
+        // named convenience property (Slider::thumb()) only gets written
+        // once. Default nullptr; TypedPropertyCollection overrides it for
+        // real when its own ElementT is a pointer.
+        virtual void* elementAddress(std::any& boxedInstance, std::size_t index) const { return nullptr; }
 
         // Calls the *owning* object's real add/remove method directly
         // (e.g. View::addChild()/removeChild()) - never a copy of the
@@ -1213,6 +1340,20 @@ namespace newui::reflection {
         }
         void set(std::any& instance, const std::any& key, const std::any& value) const override {
             Traits::setByKey(unbox(instance), std::any_cast<KeyT>(key), std::any_cast<ElementT>(value));
+        }
+
+        // See PropertyCollection::elementAddress()'s own comment. Only a
+        // pointer-typed ElementT (e.g. SubView* in childViews) has a live
+        // identity another property's addressableValue() could ever alias -
+        // a plain value element (GradientStop, ...) is always a fresh copy
+        // out of get(), never comparable this way, so this stays nullptr
+        // for that case rather than boxing/unboxing one for nothing.
+        void* elementAddress(std::any& boxedInstance, std::size_t index) const override {
+            if constexpr (std::is_pointer_v<ElementT>) {
+                return static_cast<void*>(Traits::getByIndex(unbox(boxedInstance), index));
+            } else {
+                return nullptr;
+            }
         }
 
         // boxedInstance is the whole container (built once by
@@ -2172,6 +2313,39 @@ namespace newui::reflection {
         std::vector<Constructor*> constructors_;
     };
 
+    // Every live pointer already reachable through one of `properties`' own
+    // PropertyCollections (e.g. a View's "childViews") - see Property::
+    // addressableValue()/PropertyCollection::elementAddress()'s own
+    // comments for the full reasoning. TypedClass<T>::write() (below) uses
+    // this to skip writing a plain property a second time when it's really
+    // the same live object as one of its own siblings' collection elements
+    // (Slider::thumb()/Progress::fill()/etc., controls.h - all real, owned
+    // children *also* added via addChild()) - a free function, not a
+    // TypedClass<T> member, so bundle.cpp's own writeInstanceBody() (Part
+    // 69's hand-inlined copy of this same properties walk, minus the
+    // "delegates" block) gets the identical deduplication without
+    // duplicating this logic too.
+    inline std::set<void*> collectionElementAddresses(void* instancePtr, const std::vector<const Property*>& properties) {
+        std::set<void*> reachable;
+        for (const Property* property : properties) {
+            if (!property->isCollection()) {
+                continue;
+            }
+            const auto* collection = dynamic_cast<const PropertyCollection*>(property);
+            if (collection == nullptr) {
+                continue;
+            }
+            std::any boxed = collection->get(instancePtr);
+            std::size_t itemCount = collection->count(boxed);
+            for (std::size_t i = 0; i < itemCount; ++i) {
+                if (void* elem = collection->elementAddress(boxed, i); elem != nullptr) {
+                    reachable.insert(elem);
+                }
+            }
+        }
+        return reachable;
+    }
+
     // Adds T-aware construction convenience on top of Class's type-erased
     // createInstance() - not required to use reflection (a plain Class is
     // enough for the fully runtime-typed case, e.g. a caller that only has
@@ -2210,6 +2384,14 @@ namespace newui::reflection {
         }
 
         void write(void* instancePtr, ClassWriter* writer, const std::string& name) const override {
+            // See ClassWriter::enterInstance()'s own comment - skips this
+            // object (and everything nested under it) entirely when it's
+            // already open somewhere up the current write() call chain,
+            // instead of recursing back into it and never returning.
+            if (!writer->enterInstance(this, instancePtr)) {
+                return;
+            }
+
             // Empty for the true document root - see Class::write()'s own
             // doc comment for why: a Writer's attach()-style logic treats
             // an empty name at depth 0 as "this is the root, already
@@ -2224,7 +2406,17 @@ namespace newui::reflection {
             std::vector<const Property*> ordered;
             allProperties(ordered);
 
+            // See collectionElementAddresses()'s own comment - a plain
+            // property whose live value is really the same object as one
+            // of its own siblings' collection elements (e.g. Slider::
+            // thumb(), also a real childViews entry) is skipped here rather
+            // than written out a second time.
+            std::set<void*> reachableElsewhere = collectionElementAddresses(instancePtr, ordered);
             for (const Property* property : ordered) {
+                if (void* val = property->addressableValue(instancePtr);
+                    val != nullptr && reachableElsewhere.count(val) != 0) {
+                    continue;
+                }
                 property->write(instancePtr, writer);
             }
 
@@ -2280,6 +2472,7 @@ namespace newui::reflection {
             }
 
             writer->endObject(name, this);
+            writer->exitInstance(this, instancePtr);
         }
 
         // outInstance already holding a value means the caller (a
@@ -2360,24 +2553,34 @@ namespace newui::reflection {
                 instanceOnHeap = true;
             }
 
-            std::vector<const Property*> ordered;
-            clazz->allProperties(ordered);
+            // See ClassReader::enterInstance()'s own comment - skips
+            // reading properties/fields into instancePtr when it's already
+            // being read somewhere up the current read() call chain,
+            // instead of recursing back into it and never returning;
+            // beginObject() already ran above, so endObject() still has to
+            // run below regardless of which branch this takes.
+            if (reader->enterInstance(clazz, instancePtr)) {
+                std::vector<const Property*> ordered;
+                clazz->allProperties(ordered);
 
-            for (const Property* property : ordered) {
-                property->read(instancePtr, reader);
-            }
+                for (const Property* property : ordered) {
+                    property->read(instancePtr, reader);
+                }
 
-            // Fields - the read-side mirror of write()'s own fields loop
-            // above. Public-only there because a private field was never
-            // written in the first place (matching scope, not required by
-            // anything on this side specifically) - there's simply no
-            // data under a private field's name to read back regardless,
-            // so this doesn't re-check scope() itself.
-            std::vector<const Field*> orderedFields;
-            clazz->allFields(orderedFields);
+                // Fields - the read-side mirror of write()'s own fields loop
+                // above. Public-only there because a private field was never
+                // written in the first place (matching scope, not required by
+                // anything on this side specifically) - there's simply no
+                // data under a private field's name to read back regardless,
+                // so this doesn't re-check scope() itself.
+                std::vector<const Field*> orderedFields;
+                clazz->allFields(orderedFields);
 
-            for (const Field* field : orderedFields) {
-                field->read(instancePtr, reader);
+                for (const Field* field : orderedFields) {
+                    field->read(instancePtr, reader);
+                }
+
+                reader->exitInstance(clazz, instancePtr);
             }
 
             if (outRawInstance) {
@@ -2530,14 +2733,25 @@ namespace newui::reflection {
         //     property. Not addressable - see TypedProperty/
         //     TypedPropertyCollection's own address() comment for why
         //     that throws rather than guessing.
-        template<typename GetterT, typename SetterT = std::nullptr_t,
+        //
+        // AssumeCopyable is an explicit-only template argument (never
+        // deduced - GetterT/SetterT still deduce normally after it, e.g.
+        // `.property<false>("rootView", Scope::Public, &Frame::rootView)`)
+        // forwarded straight through to TypedProperty/TypedPropertyCollection's
+        // own AssumeCopyable parameter - see TypedProperty's own comment for
+        // why reflectgen needs this instead of trusting
+        // std::is_copy_constructible_v<ValueT> alone. Left at its default
+        // (true) for every ordinary call - only reflectgen's generated code
+        // ever passes false, and only for a getter its own is_copy_
+        // constructible() has determined isn't really copy-constructible.
+        template<bool AssumeCopyable = true, typename GetterT, typename SetterT = std::nullptr_t,
                   typename = std::enable_if_t<!std::is_member_object_pointer_v<GetterT>>>
         ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr) {
             using RawResult = std::invoke_result_t<GetterT, T&>;
 
             if constexpr (std::is_pointer_v<RawResult>) {
                 using ValueT = std::remove_pointer_t<RawResult>;
-                using Prop = TypedProperty<T, ValueT>;
+                using Prop = TypedProperty<T, ValueT, AssumeCopyable>;
                 typename Prop::PtrGetter ptrGetter =
                     [getter](T& self) -> ValueT* { return std::invoke(getter, self); };
                 typename Prop::PtrSetter ptrSetter = nullptr;
@@ -2564,7 +2778,7 @@ namespace newui::reflection {
                         class_->properties_.push_back(new Coll(std::move(name), scope, std::move(valueGetter)));
                     }
                 } else {
-                    using Prop = TypedProperty<T, ValueT>;
+                    using Prop = TypedProperty<T, ValueT, AssumeCopyable>;
                     if constexpr (addressable) {
                         typename Prop::RefGetter refGetter =
                             [getter](T& self) -> ValueT& { return std::invoke(getter, self); };

@@ -38,6 +38,12 @@ public:
 		parentView_ = parentView;
 	}
 
+	// Non-owning upward back-reference to the owning RootView - reachable
+	// downward already via that RootView's own childViews - same "would
+	// recurse straight back into the tree ObjectReader/ObjectWriter are
+	// already walking" reasoning View::rootView() (view.h) is ignore-
+	// annotated for.
+	//@reflect ignore=true
 	RootView* parentView() const {
 		return parentView_;
 	}

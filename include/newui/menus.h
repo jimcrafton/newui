@@ -193,6 +193,12 @@ namespace newui {
             return !children_.empty();
         }
 
+        // Non-owning upward back-reference to the owning MenuItem -
+        // reachable downward already via that item's own children() - same
+        // "would recurse straight back into the tree ObjectReader/
+        // ObjectWriter are already walking" reasoning View::rootView()
+        // (view.h) is ignore-annotated for.
+        //@reflect ignore=true
         MenuItem* parent() const {
             return parent_;
         }

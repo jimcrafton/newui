@@ -9,7 +9,9 @@
 
 #include <ctime>
 #include <iostream>
+#include <set>
 #include <unordered_map>
+#include <utility>
 
 namespace newui::reflection {
 
@@ -135,6 +137,32 @@ namespace newui::reflection {
         void beginElement(const std::any& index, const std::any& key) override {}
         void endElement(const std::any& index, const std::any& key) override {}
 
+        // See ClassWriter::enterInstance()'s own comment - inProgress_ is
+        // every (clazz, instancePtr) pair currently somewhere between its
+        // own TypedClass<T>::write() beginObject()/endObject() bracket
+        // (reflection.h) on *this* write() call chain. insert().second is
+        // false exactly when that exact pair is already in the set - a
+        // cyclic back-reference (or any other path reaching the same live
+        // object, as the same type, twice on the same chain) - which is
+        // when this refuses to recurse again. Keyed on the pair, not
+        // instancePtr alone: a standard-layout type's address equals its
+        // own first member's, so instancePtr alone would wrongly treat two
+        // different, unrelated objects that happen to start at the same
+        // address (e.g. ShapeStyle and its own first member gfx::Fill) as
+        // the same one. nullptr is never meaningfully "in progress" (and
+        // every real caller already checks for null before recursing into
+        // a nested Class - see TypedProperty::write()'s own address()
+        // checks) so it's passed through unconditionally rather than
+        // tracked.
+        bool enterInstance(const Class* clazz, void* instancePtr) override {
+            return instancePtr == nullptr || inProgress_.insert({clazz, instancePtr}).second;
+        }
+        void exitInstance(const Class* clazz, void* instancePtr) override {
+            if (instancePtr != nullptr) {
+                inProgress_.erase({clazz, instancePtr});
+            }
+        }
+
         void beginCollection(const std::string& propertyName) override {
             builder.push_array();
             ++depth_;
@@ -253,6 +281,7 @@ namespace newui::reflection {
         }
 
         int depth_ = 0;
+        std::set<std::pair<const Class*, void*>> inProgress_;
     };
 
 
@@ -337,6 +366,19 @@ namespace newui::reflection {
         void endCollection(const std::string&) override {
             stack.pop_back();
             cursorStack.pop_back();
+        }
+
+        // Read-side mirror of ObjectWriter::enterInstance()/exitInstance()
+        // - see ClassReader::enterInstance()'s own comment. Same
+        // (clazz, instancePtr)-keyed inProgress_ set idiom, same nullptr
+        // pass-through.
+        bool enterInstance(const Class* clazz, void* instancePtr) override {
+            return instancePtr == nullptr || inProgress_.insert({clazz, instancePtr}).second;
+        }
+        void exitInstance(const Class* clazz, void* instancePtr) override {
+            if (instancePtr != nullptr) {
+                inProgress_.erase({clazz, instancePtr});
+            }
         }
 
         // Reads doc (already parsed by the caller, e.g. via
@@ -434,6 +476,25 @@ namespace newui::reflection {
             clazz->read(this, propertyName, instVal, onHeap);
 
             readMetaFromDoc();
+        }
+
+        // Positions this reader at the document root, ready for a caller
+        // with no InstanceT/Class of its own to route through (e.g.
+        // Bundle::loadAnimations(), bundle.cpp, reading a hand-written
+        // "animations" block directly via beginCollection()/beginObject()/
+        // readXXX() rather than through Class::read()) to navigate from
+        // there. Same stack-seeding preamble read()/readNew()/
+        // readNested() above already each do themselves before their own
+        // Class::read() call - factored out here since this caller has no
+        // such call to attach it to. Without this, e.g. beginCollection()'s
+        // own stack.back() runs on a never-seeded (so still empty) stack -
+        // real, reproduced crash ("back() called on an empty vector") this
+        // exists to fix, not a hypothetical.
+        void beginAtRoot() {
+            stack.clear();
+            cursorStack.clear();
+            stack.push_back(doc);
+            cursorStack.push_back(0);
         }
 
         // One instance read back from a multi-object document - see
@@ -660,6 +721,7 @@ namespace newui::reflection {
 
         std::vector<json5::value> stack;
         std::vector<std::size_t> cursorStack;
+        std::set<std::pair<const Class*, void*>> inProgress_;
     };
 
 

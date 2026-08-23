@@ -645,4 +645,19 @@ TEST(AnimationManagerRun, DrivesAnAnimationToCompletionViaRunLoopIdle) {
     loopThread.join();
 
     EXPECT_FLOAT_EQ(field, 100.0f);
+
+    // Unlike every other test in this file, this is the *last* one to
+    // register an Animation/Property - nothing after it resets either
+    // singleton (see AnimationManager/PropertyManager's own "clear() at
+    // the start of the next test that needs a clean slate" convention),
+    // so without this, `animation` (and its KeyValue's ObservableProperty,
+    // still pointing at `field` - a stack local about to go out of scope)
+    // would stay registered in AnimationManager::animations() for the rest
+    // of the whole test binary's run. Real, reproduced bug this caused:
+    // any *later* test that enumerates AnimationManager::animations() (a
+    // real caller - see HANDOFF.md's own entry on Bundle::writeFrame()'s
+    // "animations" block) walks straight into this dangling Animation and
+    // use-after-frees on it - a heap corruption bug, not a hypothetical.
+    newui::AnimationManager::clear();
+    newui::PropertyManager::clear();
 }

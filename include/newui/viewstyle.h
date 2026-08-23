@@ -239,10 +239,23 @@ namespace newui {
         // this and don't need to touch clientBounds again themselves.
         virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const;
 
+        // Non-owning upward back-reference to the owning View (View owns
+        // *this via its own std::unique_ptr<ViewStyle> style_) - reachable
+        // downward already via that View's own "style" property, so
+        // registering this as a Property too would recurse straight back
+        // into the same View ObjectReader/ObjectWriter are already walking
+        // to reach this ViewStyle in the first place. Same reasoning
+        // View::rootView() (view.h) is ignore-annotated for.
+        //@reflect ignore=true
         View* view() {
             return view_;
         }
 
+        // Same ignore reasoning as the non-const overload just above - a
+        // reflectgen "@reflect ignore=true" comment only applies to the one
+        // declaration it's directly attached to, not to sibling overloads,
+        // so the const overload needs its own.
+        //@reflect ignore=true
         const View* view() const {
             return view_;
         }

@@ -1,7 +1,10 @@
 #include "newui/bundle.h"
+#include "newui/animation.h"
 #include "newui/application.h"
+#include "newui/controls.h"
 #include "newui/dialogs.h"
 #include "newui/frame.h"
+#include "newui/property.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
 #include "newui/view.h"
@@ -267,6 +270,62 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsUsingItsRealRuntimeType) {
 TEST_F(NewuiFileFixture, WriteViewFailsWithEmptyName) {
     newui::SubView panel;
     EXPECT_FALSE(newui::Bundle::instance().writeView(panel, ""));
+}
+
+// ---------------------------------------------------------------------
+// Animation persistence - see HANDOFF.md's own entry on this pass. Round-
+// trips a real Animation targeting a real View-tree property (Slider::
+// value(), reflectgen-registered - see controls.h) through Bundle::
+// writeFrame()/loadFrame(), same as this file's other WriteFrame*/
+// LoadFrame* tests do for ordinary View properties.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAnAnimationTargetingARealViewProperty) {
+    trackFile("BundleAnimationFrame1");
+
+    newui::AnimationTargetRegistry::registerTarget<newui::Slider, float>();
+
+    newui::Frame frame;
+    frame.setName("BundleAnimationFrame1");
+
+    newui::Slider* slider = new newui::Slider();
+    slider->setName("mySlider");
+    slider->setValue(0.0f);
+    frame.rootView().addChild(slider);
+
+    auto* valueProp = newui::PropertyManager::registerProperty<float>(slider, "value");
+    newui::Animation* anim = newui::AnimationManager::addAnimation("sliderAnim", 0, 10);
+    newui::Key* startKey = anim->addKey("start", 0);
+    startKey->setValue(valueProp, 0.0f);
+    newui::Key* endKey = anim->addKey("end", 10);
+    endKey->setValue(valueProp, 100.0f);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::AnimationManager::clear();
+    newui::PropertyManager::clear();
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleAnimationFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    newui::Slider* reloadedSlider = static_cast<newui::Slider*>(reloaded.rootView().childViews()[0]);
+    EXPECT_EQ(reloadedSlider->name(), "mySlider");
+
+    ASSERT_EQ(newui::AnimationManager::animations().size(), 1u);
+    newui::Animation* reloadedAnim = newui::AnimationManager::animations()[0].get();
+    EXPECT_EQ(reloadedAnim->name(), "sliderAnim");
+    EXPECT_EQ(reloadedAnim->startTime(), 0u);
+    EXPECT_EQ(reloadedAnim->duration(), 10u);
+    ASSERT_EQ(reloadedAnim->keys().size(), 2u);
+
+    reloadedAnim->processFrame(10);
+    EXPECT_FLOAT_EQ(reloadedSlider->value(), 100.0f);
+
+    reloadedAnim->processFrame(0);
+    EXPECT_FLOAT_EQ(reloadedSlider->value(), 0.0f);
+
+    newui::AnimationManager::clear();
+    newui::PropertyManager::clear();
 }
 
 TEST(Bundle, AppNameFallsBackToApplicationNameWithoutInfoJson) {

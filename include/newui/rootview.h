@@ -8,6 +8,7 @@
 #include <newui/newui.h>
 #include <newui/view.h>
 #include <newui/geometry.h>
+#include <newui/namemanager.h>
 #include <newui/overlay.h>
 
 namespace newui {
@@ -114,6 +115,25 @@ namespace newui {
         // updated on every mouse move/leave; drives onMouseEntered()/
         // onMouseLeft() and View::setHighlighted() (see
         // updateHoveredSubView()).
+        //
+        // Not reflectgen-registered - transient runtime UI state, not
+        // persistent structure, and (like View::rootView()/parent()) a
+        // non-owning pointer into a SubView already reachable downward via
+        // the normal childViews tree. Worse than a plain back-reference
+        // here specifically: TypedProperty<RootView,SubView>::write()'s
+        // nested-Class branch (reflection.h) resolves the written "type"
+        // tag from ValueT (SubView, the getter's *static* return type),
+        // never the pointee's real runtime type the way
+        // TypedPropertyCollection::writeItem() does for an ordinary child -
+        // so writing this out (once it became reachable at all - see
+        // reflectgen.py's AssumeCopyable override) produced a *second*,
+        // wrongly-`"type": "SubView"`-tagged copy of whatever real,
+        // possibly-more-derived control (e.g. a Slider) currently has
+        // hover/capture/focus, duplicating the same subtree's data with
+        // the wrong type tag rather than the real one already written once
+        // under its own parent in childViews - real, reported bad output,
+        // not a hypothetical.
+        //@reflect ignore=true
         SubView* hoveredSubView() const {
             return hoveredSubView_;
         }
@@ -125,6 +145,10 @@ namespace newui {
         // mouseMove()/mouseUp() to it even if the cursor leaves its
         // bounds (or the window entirely - see handleMessage()'s
         // SetCapture()/ReleaseCapture() calls).
+        //
+        // Not reflectgen-registered - same reasoning as hoveredSubView()
+        // just above.
+        //@reflect ignore=true
         SubView* capturedSubView() const {
             return capturedSubView_;
         }
@@ -137,6 +161,13 @@ namespace newui {
         // space clears it), or call this directly for programmatic focus.
         void setFocusedSubView(SubView* target);
 
+        // Not reflectgen-registered - same reasoning as hoveredSubView()
+        // above; real, reported bad output this one specifically produced
+        // (a second, wrongly-"type":"SubView"-tagged copy of whatever
+        // control currently has focus - e.g. a Slider - alongside its one
+        // correctly-tagged copy already written under its own parent in
+        // childViews).
+        //@reflect ignore=true
         SubView* focusedSubView() const {
             return focusedSubView_;
         }
@@ -191,6 +222,29 @@ namespace newui {
 
         Overlay* overlay() const {
             return overlay_.get();
+        }
+
+        // Fresh, guaranteed-unique-within-this-tree default name for view -
+        // lowercase-first-letter reflected class name plus the smallest
+        // positive integer nameManager() hasn't already handed out to
+        // another View in this tree, e.g. the first Button ever attached
+        // anywhere in this tree becomes "button1". Called automatically by
+        // View::propagateRootView() for any newly attached View whose
+        // name() is still "" - not normally called directly.
+        //@reflect ignore=true
+        std::string generateDefaultName(const View& view);
+
+        // Backs generateDefaultName() (and, via View::propagateRootView()/
+        // setName(), reserves every hand-set name too, so a later
+        // generateDefaultName() call never collides with one) - one
+        // NameManager per RootView, so names only need to be unique
+        // within a single tree, not across every RootView in the process.
+        // Exposed publicly (rather than kept behind generateDefaultName()
+        // alone) since View itself needs to reserve a hand-assigned name
+        // directly - see View::setName()/propagateRootView() (view.cpp).
+        //@reflect ignore=true
+        NameManager& nameManager() {
+            return nameManager_;
         }
 
     protected:
@@ -308,6 +362,10 @@ namespace newui {
         SubView* focusedSubView_ = nullptr;
 
         std::unique_ptr<Overlay> overlay_;
+
+        // Backs nameManager()/generateDefaultName() - see their own doc
+        // comments above.
+        NameManager nameManager_;
 
         // Updates hoveredSubView_ to target, firing onMouseLeft()/
         // onMouseEntered() (and toggling View::setHighlighted() +

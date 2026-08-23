@@ -20,6 +20,8 @@ add_executable(newui_tests
     test_rootview.cpp
     test_layout.cpp
     test_bundle.cpp
+    test_viewpath.cpp
+    test_namemanager.cpp
     test_reflection.cpp
     test_reflectionio.cpp
     test_delegateserialization.cpp

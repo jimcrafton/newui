@@ -64,17 +64,16 @@ public:
 		return frameHandle_;
 	}
 
-	// NOT reflectgen-registered as a "rootView" property, despite the bare-
-	// getter/matching-backing-member shape that would normally qualify
-	// (reflection.md) - RootView isn't copy-constructible (its
-	// std::unique_ptr<Overlay> overlay_ deletes the implicit copy ctor),
-	// and reflectgen refuses .property() for *any* non-copy-constructible
-	// return type, addressable-reference getters included - see its own
-	// "MSVC is_copy_constructible_v reliability" comment (reflectgen.py)
-	// for why. Bundle::loadFrame() (bundle.h) reaches this directly in
-	// C++ instead - frame.rootView() is always live regardless, no
-	// reflection needed to get here - then reads the file's own nested
-	// "rootView" node into it via ObjectReader::readNested().
+	// Reflectgen-registered as an addressable-only "rootView" property
+	// (.property<false>(...), reflection.h's TypedProperty AssumeCopyable
+	// override) - RootView isn't copy-constructible (its
+	// std::unique_ptr<Overlay> overlay_ deletes the implicit copy ctor), but
+	// address()/write()/read() never need to copy a ValueT the way get()/
+	// set()'s by-value paths do, so the property still works for
+	// ObjectReader/ObjectWriter's normal per-property walk - see
+	// reflectgen.py's collect_property_accessors() for how this getter
+	// shape gets picked up. Bundle::loadFrame()/writeFrame() (bundle.cpp) no
+	// longer need a separate manual bridge for this because of it.
 	RootView& rootView() {
 		return *rootView_;
 	}

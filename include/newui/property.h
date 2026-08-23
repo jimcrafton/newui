@@ -86,6 +86,18 @@ namespace newui {
         // extrapolate rather than clamp.
         virtual void interpolate(float t) = 0;
 
+        // Type-erased identity for a caller with no SourceT/ValueT of its
+        // own to name (e.g. Bundle::writeFrame(), deciding which Animation
+        // KeyValues have a serializable target at all) - see
+        // ObservableProperty<SourceT,ValueT>'s own overrides. Default
+        // "no identity" (typeid(void), nullptr) is exactly right for a
+        // field-backed property (PropertyManager::registerProperty(source,
+        // &source->field_, name)) - a raw field address has no reflection
+        // identity to serialize as, so it's correctly invisible to anything
+        // built on these two.
+        virtual std::type_index sourceType() const { return typeid(void); }
+        virtual const reflection::Property* reflectionProperty() const { return nullptr; }
+
     protected:
         std::string name_;
         void* source_ = nullptr;
@@ -163,6 +175,13 @@ namespace newui {
         SourcePtr typedSource() const {
             return static_cast<SourcePtr>(source_);
         }
+
+        // See PropertyBase::sourceType()/reflectionProperty()'s own
+        // comment. reflectionProperty() stays nullptr (the base default)
+        // for a field-backed property, exactly the "no serializable
+        // identity" signal a caller like Bundle::writeFrame() needs.
+        std::type_index sourceType() const override { return typeid(SourceT); }
+        const reflection::Property* reflectionProperty() const override { return reflectionProperty_; }
 
         // Returns by value - a reflection-backed property has no live
         // field to hand a reference into (reflection::Property::get()

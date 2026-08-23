@@ -5,7 +5,9 @@
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
 #include "newui/viewstyle.h"
+#include "newui/reflection.h"
 
+#include <cctype>
 #include <cmath>
 
 namespace {
@@ -468,6 +470,15 @@ namespace newui {
 		child->setParentView(nullptr);
 		child->setParent(nullptr);
 		child->propagateRootView(nullptr);
+	}
+
+	std::string RootView::generateDefaultName(const View& view) {
+		const reflection::Class* cls = reflection::classinfo(typeid(view));
+		std::string base = (cls != nullptr) ? cls->name() : std::string("view");
+		if (!base.empty()) {
+			base[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(base[0])));
+		}
+		return nameManager_.generateName(base);
 	}
 
 	Point RootView::accumulatedOffset(const SubView* view) const {

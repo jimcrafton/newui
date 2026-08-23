@@ -5,21 +5,6 @@
 
 namespace {
 
-// propagateRootView()/addChild() only ever store or compare this pointer -
-// never dereference it - so a sentinel value stands in for a real
-// (Win32-backed) RootView, which these tests don't need. NOT safe for a
-// test that calls removeChild() on a subtree rooted at this sentinel,
-// though: SubView::removeChild() now genuinely dereferences rootView()
-// (to call notifySubViewRemoved() - see rootview.h) to keep
-// hovered/captured/focusedSubView_ from dangling after a nested removal,
-// so removeChild() tests need a real, heap-allocated RootView instead
-// (frame=nullptr and never initialize()'d is fine - see
-// ViewDestroy.DestroysDirectRootViewChildrenWithoutCorruptingIteration
-// below for the same pattern).
-newui::RootView* SentinelRoot() {
-    return reinterpret_cast<newui::RootView*>(0x1);
-}
-
 // Delegate::FunctionPtr is a plain function pointer (no capturing lambdas),
 // so a shared counter across several children's onDestroyed has to be a
 // free function over a namespace-scope variable - same convention
@@ -557,37 +542,49 @@ TEST(ViewDestroy, DestroysDirectRootViewChildrenWithoutCorruptingIteration) {
 }
 
 TEST(ViewPropagateRootView, SetsItOnASingleView) {
+    // A real RootView, not a sentinel pointer - propagateRootView() now
+    // genuinely dereferences root (to auto-assign a default name via
+    // RootView::generateDefaultName() when name() is still "") - see
+    // SubViewRemoveChild.PropagatesNullToWholeDetachedSubtree below for
+    // the same "real RootView, frame=nullptr, never initialize()'d"
+    // pattern used for the same reason.
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
     auto* view = new newui::SubView();
 
-    view->propagateRootView(SentinelRoot());
+    view->propagateRootView(root);
 
-    EXPECT_EQ(view->rootView(), SentinelRoot());
+    EXPECT_EQ(view->rootView(), root);
 
     delete view;
+    delete root;
 }
 
 TEST(ViewPropagateRootView, NullClearsIt) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
     auto* view = new newui::SubView();
-    view->propagateRootView(SentinelRoot());
+    view->propagateRootView(root);
 
     view->propagateRootView(nullptr);
 
     EXPECT_EQ(view->rootView(), nullptr);
 
     delete view;
+    delete root;
 }
 
 TEST(SubViewAddChild, PropagatesRootViewToNewChild) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
     auto* parent = new newui::SubView();
     auto* child = new newui::SubView();
-    parent->propagateRootView(SentinelRoot());
+    parent->propagateRootView(root);
 
     parent->addChild(child);
 
-    EXPECT_EQ(child->rootView(), SentinelRoot());
+    EXPECT_EQ(child->rootView(), root);
 
     delete child;
     delete parent;
+    delete root;
 }
 
 TEST(SubViewAddChild, PropagatesRootViewToPreexistingGrandchildren) {
@@ -601,17 +598,19 @@ TEST(SubViewAddChild, PropagatesRootViewToPreexistingGrandchildren) {
 
     EXPECT_EQ(grandchild->rootView(), nullptr);  // nothing rooted yet
 
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
     auto* parent = new newui::SubView();
-    parent->propagateRootView(SentinelRoot());
+    parent->propagateRootView(root);
 
     parent->addChild(child);
 
-    EXPECT_EQ(child->rootView(), SentinelRoot());
-    EXPECT_EQ(grandchild->rootView(), SentinelRoot());  // propagated through
+    EXPECT_EQ(child->rootView(), root);
+    EXPECT_EQ(grandchild->rootView(), root);  // propagated through
 
     delete grandchild;
     delete child;
     delete parent;
+    delete root;
 }
 
 TEST(SubViewRemoveChild, PropagatesNullToWholeDetachedSubtree) {

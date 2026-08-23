@@ -126,6 +126,25 @@ namespace newui {
         // Resolves to a real, showable HCURSOR - a system shape via the
         // enclosing kind(), or whatever handle_ currently holds when
         // kind() is Custom.
+        //
+        // Not reflectgen-registered as a property despite matching the
+        // bare-getter/matching-backing-member shape (handle_ is the same
+        // HCURSOR type) - HCURSOR (like every DECLARE_HANDLE-based Win32
+        // handle: HWND, HICON, ...) is only a *pointer-typed* handle for
+        // compile-time type safety, never a real pointer to an inspectable
+        // struct - reflectgen's own is_copy_constructible() correctly sees
+        // its pointee (HICON__, defined as `struct HICON__{int unused;}` by
+        // <ntdef.h>'s DECLARE_HANDLE macro) as a complete, copy-constructible
+        // type, since it genuinely is one - the type system has no way to
+        // tell "real pointer" and "opaque handle wearing a pointer type"
+        // apart. TypedProperty<Cursor,HICON__>::get()'s PtrGetter branch
+        // dereferencing it (`std::any(*p)`) is what actually crashes: p
+        // holds a real handle value (e.g. a low, non-address-shaped
+        // constant a system cursor's LoadCursor() returned), not a pointer
+        // to real memory - real, reproduced access violation the moment
+        // this got reachable via View::cursor() (view.h) registering as a
+        // Property.
+        //@reflect ignore=true
         HCURSOR handle() const;
 
         // True iff this Cursor has neither a loaded path() nor a

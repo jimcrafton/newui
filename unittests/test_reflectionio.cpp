@@ -8,11 +8,22 @@
 // getter/setter overload and ::propertyCollection() exist for, and the
 // ones examples/reflection2.cpp actually exercises live against the real
 // View/Frame/Application hierarchy. ObjectWriter/ObjectReader (the JSON5
-// read/write pipeline built on top of this) are deliberately out of scope
-// here - see reflection2.cpp's own demoWriter()/demoRoundTrip() for that
-// coverage instead.
+// read/write pipeline built on top of this) are mostly deliberately out of
+// scope here - see reflection2.cpp's own demoWriter()/demoRoundTrip() for
+// that coverage instead - with one exception near the bottom of this file:
+// ClassWriter::enterInstance()/exitInstance()'s cycle guard (reflection.h)
+// only actually does anything through a real ObjectWriter/ObjectReader (the
+// one concrete implementation that tracks in-progress instances), so
+// proving it stops an infinite recursion needs the real read/write pipeline
+// after all.
 
+// newui/newui.h must be the first include in this file - it defines
+// NOMINMAX before anything pulls in <windows.h> for the first time. See
+// test_shapes.cpp's own copy of this comment / feedback_no_std_minmax
+// (memory) / utils.h's own doc comment for why.
+#include "newui/newui.h"
 #include "newui/reflection.h"
+#include "newui/reflectionio.h"
 
 #include <any>
 #include <string>
@@ -351,4 +362,90 @@ TEST(ReflectionIO, TypedCreateInstanceTypedReturnsRealTypeDirectly) {
     EXPECT_EQ(s->label(), "default");
 
     delete s;
+}
+
+// ---------------------------------------------------------------------
+// ClassWriter::enterInstance()/exitInstance()'s runtime cycle guard - see
+// its own comment in reflection.h. Real, previously-reproduced bug this
+// guards against: a self-referential addressable property (e.g.
+// View::rootView() for a RootView instance, whose own constructor points
+// it right back at itself - view.h) recursing through TypedClass<T>::
+// write()/read() forever. Loop below is a minimal, deliberately-cyclic
+// stand-in with the same shape as that real case - a *reference*-returning
+// getter, no setter (RefGetter/addressable mode - see TypedProperty's own
+// comment on its four backing modes) - self_ is always live and always
+// addressable, so without the guard both write() and read() would never
+// return.
+//
+// Deliberately not a pointer-returning getter (PtrGetter mode) instead:
+// that mode always reports shouldCreateOnHeap() (TypedProperty's own
+// ctor - a PtrGetter property is "always a fresh instance on read",
+// regardless of what it currently points at, see TypedProperty::read()'s
+// own comment), so a self-referential *pointer* getter recurses into
+// Class::createInstance() building a genuinely new object every level
+// instead of re-entering the same live one - the (clazz, instancePtr)
+// guard can't catch that (each instancePtr really is different), and nothing
+// here does either; that's a real, separate, currently-theoretical gap
+// (no PtrGetter-mode getter in the real codebase is actually
+// self-referential today - View::rootView() is exactly this shape, but
+// stays ignore-annotated, see view.h - so it's never reached this way in
+// practice) worth knowing about rather than fixing blind.
+namespace {
+
+class Loop {
+public:
+    Loop() : self_(this) {}
+
+    Loop& self() { return *self_; }
+
+private:
+    Loop* self_;
+};
+
+const Class* RegisterAndGetLoopClass() {
+    static const Class* registered = [] {
+        ClassBuilder<Loop> builder;
+        builder.clazz()
+            .property("self", Scope::Public, &Loop::self)
+            .constructor<>();
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(Loop));
+    }();
+    return registered;
+}
+
+}  // namespace
+
+TEST(ReflectionIO, WriteTerminatesOnASelfReferentialAddressableProperty) {
+    RegisterAndGetLoopClass();
+    Loop loop;
+
+    ObjectWriter writer;
+    writer.write(&loop);  // would stack-overflow without the enterInstance() guard
+
+    std::string text = json5::to_string(writer.doc);
+    // The top-level object itself is still written - only the cyclic
+    // "self" property (pointing right back at the same, already-open Loop)
+    // is skipped entirely, per ClassWriter::enterInstance()'s own
+    // documented contract. json5::to_string() emits unquoted keys (e.g.
+    // `type: "Loop"`), hence the trailing ":" instead of a closing quote.
+    EXPECT_NE(text.find("type:"), std::string::npos);
+    EXPECT_EQ(text.find("self:"), std::string::npos);
+}
+
+TEST(ReflectionIO, ReadTerminatesOnASelfReferentialAddressableProperty) {
+    RegisterAndGetLoopClass();
+    Loop written;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    Loop fresh;
+    reader.read(&fresh);  // would stack-overflow without the enterInstance() guard
+
+    EXPECT_EQ(&fresh.self(), &fresh);
 }

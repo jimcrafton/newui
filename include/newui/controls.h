@@ -347,6 +347,11 @@ namespace newui {
         // read-only in case a caller wants to reach past this class's own
         // ThemedProgressBarFillStyle defaults (e.g. setStyle() a custom
         // one), though normal use never needs to touch this directly.
+        //
+        // Still reflectgen-registered - same reasoning as Slider::thumb()'s
+        // own comment: the write-time dedup (reflection.h), not an ignore
+        // annotation, is what keeps fill_ (also a real childViews entry)
+        // from being written out twice.
         SubView* fill() const { return fill_; }
 
     private:
@@ -429,6 +434,17 @@ namespace newui {
         // read-only in case a caller wants to reach past this class's own
         // ThemedTrackbarThumbStyle defaults, though normal use never
         // needs to touch this directly.
+        //
+        // Still reflectgen-registered (unlike a back-reference such as
+        // View::rootView()) - thumb_ is a real, owned child, also added via
+        // addChild() (controls.cpp), so it's reachable through the base
+        // View's own "childViews" collection too, but
+        // newui::reflection::collectionElementAddresses()/TypedClass<T>::
+        // write()'s own dedup (reflection.h) - not an ignore annotation -
+        // is what keeps it from being written out a second time as its own
+        // "thumb" key; the property stays real (e.g. for
+        // Class::property("thumb")->get(...) generic lookup), only the
+        // *serialized* duplicate is suppressed.
         SubView* thumb() const { return thumb_; }
 
         // Off by default. ThemedTrackbarTicksStyle (viewstyle.h) reserves
@@ -448,6 +464,11 @@ namespace newui {
         // The child SubView representing the tick-mark strip - nullptr
         // until the first setShowTicks(true) call (not created up front
         // the way thumb() always is, since most Sliders never use this).
+        //
+        // Still reflectgen-registered - same reasoning as thumb()'s own
+        // comment above: the write-time dedup (reflection.h), not an
+        // ignore annotation, keeps ticks_ (also a real childViews entry)
+        // from being written out twice.
         SubView* ticks() const { return ticks_; }
 
     private:
@@ -887,6 +908,11 @@ namespace newui {
         int wheelLines() const { return wheelLines_; }
         void setWheelLines(int lines) { wheelLines_ = lines; }
 
+        // Still reflectgen-registered (both) - same reasoning as Slider::
+        // thumb()'s own comment: the write-time dedup (reflection.h), not
+        // an ignore annotation, keeps vBar_/hBar_ (also real childViews
+        // entries, added via SubView::addChild(), controls.cpp) from being
+        // written out twice.
         ScrollBar* vBar() const { return vBar_; }
         ScrollBar* hBar() const { return hBar_; }
 

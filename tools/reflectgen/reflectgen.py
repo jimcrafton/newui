@@ -376,6 +376,22 @@ def is_copy_constructible(clang_type):
     decl = canon.get_declaration()
     if decl.kind not in (CursorKind.CLASS_DECL, CursorKind.STRUCT_DECL):
         return True
+    # An incomplete type (forward-declared only, e.g. Win32's own "struct
+    # HICON__;" behind the HICON/HCURSOR/HWND ... handle typedefs - never
+    # actually defined anywhere reflectgen parses) has no body for either
+    # loop below to find anything in, so both silently find nothing and
+    # this would otherwise fall through to the "no user-declared copy ctor
+    # found, assume the implicit one is fine" default - vacuously true for
+    # the wrong reason (there's no *implicit* copy ctor either; there's no
+    # definition at all to have one). Real, confirmed-by-crash case: a
+    # PtrGetter-mode property/field over a bare Win32 handle getter (e.g.
+    # Cursor::handle() returning HCURSOR) - get()'s `std::any(*p)`
+    # dereferences and copy-constructs the pointee, which for HICON__ is
+    # never a real object to begin with (an opaque handle disguised as a
+    # pointer, not a real pointer to inspectable memory) - is_definition()
+    # catches this before it ever reaches that any_cast.
+    if not decl.is_definition():
+        return False
     if qualified_name(decl) == "std::unique_ptr":
         return False
     element = reflectable_collection_element_type(canon)
@@ -456,12 +472,18 @@ def reflect_annotations(cursor):
     if not raw_comment:
         return {}
 
+    # Collapse all whitespace runs to a single space first, so how much
+    # (or what kind - space vs. tab) whitespace sits between the comment
+    # slashes and the marker never matters: "// @reflect ...",
+    # "//@reflect ...", and "//   @reflect ..." all resolve identically.
+    normalized = re.sub(r"\s+", " ", raw_comment)
+
     marker = "@reflect"
-    pos = raw_comment.find(marker)
+    pos = normalized.find(marker)
     if pos < 0:
         return {}
 
-    annotation_text = raw_comment[pos + len(marker):]
+    annotation_text = normalized[pos + len(marker):]
     return {
         m.group(1): (m.group(2) if m.group(2) is not None else "true")
         for m in REFLECT_ANNOTATION_PAIR_RE.finditer(annotation_text)
@@ -534,7 +556,8 @@ class BaseInfo:
 # that function's own comment for the exact heuristic and its guardrails.
 class PropertyAccessor:
     def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous,
-                 setter_name, setter_arg_type=None, setter_ambiguous=False, setter_is_const=False):
+                 setter_name, setter_arg_type=None, setter_ambiguous=False, setter_is_const=False,
+                 assume_copyable=True):
         self.key = key  # the property's own name, e.g. "name", "visible", "bounds"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "getName", "isVisible", "style"
@@ -556,6 +579,14 @@ class PropertyAccessor:
         # the setter reference in selectOverload<>() when this is true.
         self.setter_ambiguous = setter_ambiguous
         self.setter_is_const = setter_is_const  # vanishingly rare, checked for symmetry with getter_is_const
+        # False only for an addressable getter whose ValueT reflectgen's own
+        # is_copy_constructible() has determined isn't really copy-
+        # constructible - emit_register_function() then emits
+        # `.property<false>(...)` (ClassBuilder::property()'s AssumeCopyable
+        # override, reflection.h) instead of a bare `.property(...)`. See
+        # collect_property_accessors()'s own comment on why this only ever
+        # happens for an addressable getter.
+        self.assume_copyable = assume_copyable
 
 
 # A collection reachable only through a whole-container-returning accessor
@@ -947,7 +978,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
         # const-reference-returning getter with no setter, e.g. `MenuItem&
         # root()`, MenuBar) just returns the reference as-is - neither
         # copies ValueT there. TypedProperty::get()/set()/write()/read()
-        # are all themselves guarded by `if constexpr
+        # used to be guarded only by `if constexpr
         # (std::is_copy_constructible_v<ValueT>)`, which would make a
         # non-copy-constructible ValueT look safe in every mode... except
         # that guard is only as reliable as the trait itself, and MSVC's
@@ -970,28 +1001,58 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
         # Since reflectgen has no way to ask MSVC's real, in-compiler
         # trait evaluation whether a given ValueT is one of the types this
         # bites (only its own, more careful is_copy_constructible() -
-        # which gets MenuItem right), the only safe policy is to distrust
-        # every mode equally here rather than try to carve out the
-        # ones that are "supposed" to be safe - .method() has no such
-        # weak point (TypedMethod has no write()/read() analogue) and is
-        # always available as a fallback regardless of return shape (see
-        # method_return_type_unsupported()'s own comment for the
-        # narrower rule that applies there instead).
+        # which gets MenuItem right), reflection.h's TypedProperty now
+        # takes an explicit AssumeCopyable template argument
+        # (ClassBuilder::property()'s own AssumeCopyable, defaulted true)
+        # that reflectgen can force to false to short-circuit the
+        # (possibly-lying) trait entirely - see TypedProperty's own
+        # comment. That's only a safe substitute for a *copy*, though -
+        # get()/set()'s by-value modes still fundamentally need a live
+        # ValueT to box, no template trick gets around that - so this only
+        # ever overrides the trait for an addressable getter (PtrGetter, or
+        # a non-const-reference-returning getter with no setter): the one
+        # shape where TypedProperty's address()/write()/read() genuinely
+        # never copy ValueT at all, copy-constructible or not (see
+        # TypedProperty::read()'s own comment on why its addressable/heap
+        # branches no longer need the guard either). A non-addressable,
+        # non-copy-constructible getter (a plain by-value accessor with no
+        # live storage to point at) has no such escape - .method() stays
+        # the only fallback there, same as before (see
+        # method_return_type_unsupported()'s own comment for the narrower
+        # rule that applies there instead).
         getter_result_type = getter_cursor.result_type
         if getter_result_type.kind == cindex.TypeKind.POINTER:
             value_type = getter_result_type.get_pointee()
+            is_addressable_getter = True
         elif getter_result_type.kind in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE):
             value_type = getter_result_type.get_pointee()
+            is_addressable_getter = (
+                getter_result_type.kind == cindex.TypeKind.LVALUEREFERENCE
+                and not value_type.is_const_qualified()
+                and setter_cursor is None
+            )
         else:
             value_type = getter_result_type
+            is_addressable_getter = False
+        assume_copyable = True
         if not is_copy_constructible(value_type):
-            sys.stderr.write(
-                f"reflectgen: '{class_name}.{getter_name}' returns '{value_type.spelling}', which isn't "
-                "copy-constructible - ClassBuilder::property()'s TypedProperty<T,ValueT> can't safely be "
-                "built for it (see reflectgen's own notes on MSVC's is_copy_constructible_v reliability "
-                "here); registered as a plain method instead.\n"
-            )
-            continue
+            if is_addressable_getter:
+                assume_copyable = False
+                sys.stderr.write(
+                    f"reflectgen: '{class_name}.{getter_name}' returns '{value_type.spelling}', which isn't "
+                    "copy-constructible - registering as an addressable-only property (.property<false>(...), "
+                    "reflection.h's TypedProperty AssumeCopyable override): get()/set()'s by-value paths stay "
+                    "disabled, but address()/write()/read() work normally since none of them need to copy "
+                    "ValueT.\n"
+                )
+            else:
+                sys.stderr.write(
+                    f"reflectgen: '{class_name}.{getter_name}' returns '{value_type.spelling}', which isn't "
+                    "copy-constructible - ClassBuilder::property()'s TypedProperty<T,ValueT> can't safely be "
+                    "built for it (see reflectgen's own notes on MSVC's is_copy_constructible_v reliability "
+                    "here); registered as a plain method instead.\n"
+                )
+                continue
 
         if not has_accessor_prefix(getter_name, _GETTER_PREFIXES) and setter_cursor is None:
             if not has_matching_backing_member(stem, getter_cursor.result_type.spelling, fields):
@@ -1031,6 +1092,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             setter_arg_type=setter_arg_type,
             setter_ambiguous=setter_ambiguous,
             setter_is_const=setter_is_const,
+            assume_copyable=assume_copyable,
         ))
 
         # Every overload sharing getter_name (not just the chosen one) - a
@@ -1556,11 +1618,15 @@ def emit_register_function(info,function_listing):
 
     for pa in info.property_accessors:
         getter_expr = emit_property_getter_expr(info, pa)
+        # <false> forces reflection.h's ClassBuilder::property()/
+        # TypedProperty AssumeCopyable override off - see PropertyAccessor.
+        # assume_copyable's own comment for when/why.
+        property_call = ".property" if pa.assume_copyable else ".property<false>"
         if pa.setter_name:
             setter_expr = emit_property_setter_expr(info, pa)
-            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr}, {setter_expr})')
+            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr}, {setter_expr})')
         else:
-            chain.append(f'.property("{pa.key}", {pa.scope}, {getter_expr})')
+            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr})')
 
     # add_name without remove_name (or vice versa) is legal - a read-only
     # add, or an enumerate-only collection with neither - so args is built

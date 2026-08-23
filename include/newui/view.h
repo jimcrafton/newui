@@ -58,9 +58,13 @@ namespace newui {
             return visible_;
         }
 
-        void setName(const std::string& name) {
-            name_ = name;
-        }
+        // If this View is already attached to a RootView (rootView() !=
+        // nullptr) and name is non-empty, reserves it in that RootView's
+        // NameManager (rootView()->nameManager()) so a later auto-
+        // generated default name (see RootView::generateDefaultName())
+        // never collides with a hand-assigned one - see view.cpp; needs
+        // RootView's full definition, so this can't stay inline here.
+        void setName(const std::string& name);
 
         std::string name() const {
             return name_;
@@ -82,6 +86,17 @@ namespace newui {
         const std::vector<SubView*>& childViews() const {
             return childViews_;
         }
+
+        // Depth-first search of this View and every descendant (self
+        // first, then each child's own findView() in childViews() order)
+        // for the first View whose name() == name. Returns nullptr if
+        // nothing matches. name() has no uniqueness guarantee enforced
+        // anywhere below the RootView-assigned defaults (see
+        // RootView::generateDefaultName()) - a caller that hand-assigns
+        // duplicate names via setName() just gets whichever match this
+        // walk reaches first.
+        View* findView(const std::string& name);
+        const View* findView(const std::string& name) const;
 
         Layout* layout() const {
             return layout_.get();
@@ -393,10 +408,31 @@ namespace newui {
         virtual bool initialize();
         virtual void destroy();
 
+        // Non-owning upward back-reference (RootView::addChild()/
+        // propagateRootView() set it, never this View) - reachable downward
+        // from the real owner already (RootView/SubView's own childViews),
+        // so recursively serializing it back out through here would walk
+        // straight back into the same tree ObjectReader/ObjectWriter are
+        // already walking to reach this View in the first place. For the
+        // RootView subclass specifically this is also self-referential
+        // (RootView's own constructor calls setRootView(this)), which made
+        // this a real, reproduced infinite-recursion/stack-overflow bug the
+        // moment reflectgen started registering an addressable, non-copy-
+        // constructible getter like this as a real Property (see
+        // reflectgen.py's collect_property_accessors()) - same "back-
+        // reference, not a real owned sub-object" reasoning
+        // RootView::getFrame() (rootview.h) is already ignore-annotated
+        // for.
+        //@reflect ignore=true
         RootView* rootView() {
             return rootView_;
         }
 
+        // Same ignore reasoning as the non-const overload just above - a
+        // reflectgen "@reflect ignore=true" comment only applies to the one
+        // declaration it's directly attached to, not to sibling overloads,
+        // so the const overload needs its own.
+        //@reflect ignore=true
         const RootView* rootView() const {
             return rootView_;
         }
@@ -405,6 +441,12 @@ namespace newui {
             rootView_ = val;
         }
 
+        // Same non-owning-upward-back-reference reasoning as rootView()
+        // above - reachable downward already via the real parent's own
+        // childViews, so letting reflectgen register this as a Property
+        // would walk straight back into the same subtree ObjectReader/
+        // ObjectWriter are already recursing through to reach this View.
+        //@reflect ignore=true
         View* parent() const {
             return parent_;
         }

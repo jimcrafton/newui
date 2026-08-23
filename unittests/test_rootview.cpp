@@ -1,5 +1,6 @@
 #include "newui/rootview.h"
 #include "newui/subview.h"
+#include "newui/controls.h"
 #include "newui/keyboard_constants.h"
 
 #include <gtest/gtest.h>
@@ -569,6 +570,126 @@ TEST(RootViewSubViewRemoval, RemovingNestedGrandchildClearsHoverCaptureFocus) {
     EXPECT_EQ(root->focusedSubView(), nullptr);
 
     delete grandchild;
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDefaultNaming, FirstButtonAttachedGetsNameButton1) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* button = new newui::Button();
+    EXPECT_EQ(button->name(), "");
+
+    root->addChild(button);
+
+    EXPECT_EQ(button->name(), "button1");
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDefaultNaming, SecondButtonAttachedGetsNameButton2) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::Button();
+    auto* second = new newui::Button();
+    root->addChild(first);
+    root->addChild(second);
+
+    EXPECT_EQ(first->name(), "button1");
+    EXPECT_EQ(second->name(), "button2");
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDefaultNaming, LeavesAHandAssignedNameAlone) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* button = new newui::Button();
+    button->setName("myButton");
+
+    root->addChild(button);
+
+    EXPECT_EQ(button->name(), "myButton");
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDefaultNaming, SkipsOverAHandAssignedNameThatWouldCollide) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    // Hand-assigned before attachment - propagateRootView() must reserve
+    // it (View::propagateRootView(), view.cpp) so the next auto-named
+    // Button doesn't collide with it once attached.
+    auto* preNamed = new newui::Button();
+    preNamed->setName("button1");
+    root->addChild(preNamed);
+
+    auto* autoNamed = new newui::Button();
+    root->addChild(autoNamed);
+
+    EXPECT_EQ(preNamed->name(), "button1");
+    EXPECT_EQ(autoNamed->name(), "button2");
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDefaultNaming, NestedSubtreeGetsNamedOnAttachment) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* row = new newui::SubView();
+    auto* button = new newui::Button();
+    row->addChild(button);  // pre-built, not yet rooted
+
+    EXPECT_EQ(row->name(), "");
+    EXPECT_EQ(button->name(), "");
+
+    root->addChild(row);
+
+    EXPECT_EQ(row->name(), "subView1");
+    EXPECT_EQ(button->name(), "button1");
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewFindView, FindsAnImmediateChildByName) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* button = new newui::Button();
+    root->addChild(button);
+
+    EXPECT_EQ(root->findView("button1"), button);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewFindView, FindsANestedDescendantByName) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* row = new newui::SubView();
+    root->addChild(row);
+    auto* button = new newui::Button();
+    row->addChild(button);
+
+    EXPECT_EQ(root->findView("button1"), button);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewFindView, ReturnsNullWhenNoMatchExists) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* button = new newui::Button();
+    root->addChild(button);
+
+    EXPECT_EQ(root->findView("noSuchView"), nullptr);
+
     root->destroy();
     delete root;
 }
