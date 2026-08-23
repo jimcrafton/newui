@@ -72,6 +72,13 @@ namespace newui {
         // Read-only view of this View's direct children, in the order
         // addChild() attached them - what a Layout arranges (see
         // Layout::arrange()).
+        //
+        // @reflect collection add=addChild remove=removeChild - registers
+        // as a real newui::reflection propertyCollection (reflection.md),
+        // so ObjectReader::read() drives the live addChild()/removeChild()
+        // for each element instead of leaving "childViews" a get-only,
+        // never-reconstructed property - needed for Bundle::loadView()
+        // (bundle.h) to actually rebuild a saved child tree.
         const std::vector<SubView*>& childViews() const {
             return childViews_;
         }

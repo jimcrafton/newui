@@ -87,7 +87,7 @@ namespace newui {
 
         virtual void addChild(SubView* child);
         virtual void removeChild(SubView* child);
-
+        //@reflect ignore=true
 		Frame* getFrame() const {
 			return parentFrame_;
 		}

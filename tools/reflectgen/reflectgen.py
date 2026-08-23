@@ -810,9 +810,25 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             if c.access_specifier == AccessSpecifier.PUBLIC
             and is_getter_shaped(c)
             and reflect_annotations(c).get("ignore", "").lower() != "true"
+            # An explicit "@reflect collection" on this getter means
+            # collect_collection_accessors() (below) owns it - without this
+            # exclusion, this pass has no way to know that annotation
+            # exists at all (it only ever checks for "ignore") and happily
+            # registers the same getter as a plain, get-only .property()
+            # too. Both ending up in the same Class's properties_ isn't
+            # just redundant: Class::allProperties()'s first-name-wins
+            # merge (reflection.h) keeps whichever was registered first -
+            # this plain one, since collect_property_accessors() always
+            # runs before collect_collection_accessors() - permanently
+            # shadowing the real add()/remove()-wired collection and
+            # silently no-op'ing every read() (found via a real repro:
+            # View::childViews(), annotated "@reflect collection
+            # add=addChild remove=removeChild", never got its children
+            # reconstructed until this exclusion was added).
+            and "collection" not in reflect_annotations(c)
         ]
         if not candidates:
-            continue  # every overload opted out via "@reflect ignore=true"
+            continue  # every overload opted out via "@reflect ignore=true", or is a "@reflect collection" instead
 
         # Prefer a non-const overload - needed for an addressable/mutable
         # property (e.g. View::style()); a const-only accessor still

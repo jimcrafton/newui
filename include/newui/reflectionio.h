@@ -149,8 +149,28 @@ namespace newui::reflection {
             const Class* clazz = classinfo<InstanceT>();
             clazz->write(inst, this, std::string());
 
-            std::string text = json5::to_string(doc);
-            std::cout << "  --- ObjectWriter written JSON5 ---\n" << text << "  --- end JSON5 ---\n";
+            //std::string text = json5::to_string(doc);
+            //std::cout << "  --- ObjectWriter written JSON5 ---\n" << text << "  --- end JSON5 ---\n";
+        }
+
+        // Writes *inst as propertyName's own nested object, within
+        // whatever scope this writer already has open - the write-side
+        // mirror of ObjectReader::readNested() (reflectionio.h), for the
+        // same reason that one exists: some nested link reflection
+        // couldn't register as a real Property (e.g. Frame::rootView() -
+        // see its own comment, frame.h) still needs to land at a
+        // predictable key in the file. Only safe to call between a
+        // caller's own beginObject()/endObject() pair (depth_ > 0) -
+        // calling it as the very first thing on a fresh ObjectWriter
+        // would wrongly stamp "meta" here instead of at the true root;
+        // use write() for that case instead.
+        template <typename T>
+        void writeNested(const std::string& propertyName, T* inst) {
+            const Class* clazz = classinfo<T>();
+            if (clazz == nullptr) {
+                return;
+            }
+            clazz->write(inst, this, propertyName);
         }
 
         // One already-live instance to write as a named sibling at a
@@ -346,17 +366,74 @@ namespace newui::reflection {
             bool onHeap = false;
             clazz->read(this, "", instVal, onHeap);
 
-            // Read directly off doc's own "meta" key, not through
-            // beginObject()/readXXX() - "meta" is a sibling of the real
-            // payload at the document root (see ObjectWriter::beginObject()'s
-            // own comment), not a property any registered Class ever asks
-            // for by name, so there's no property->read() call anywhere in
-            // the walk above that would ever reach it.
-            json5::value meta = doc["meta"];
-            metadata.author = meta["author"].get_c_str("");
-            metadata.date = meta["date"].get_c_str("");
-            metadata.copyright = meta["copyright"].get_c_str("");
-            metadata.version = meta["version"].get_c_str("");
+            // "meta" is a sibling of the real payload at the document root
+            // (see ObjectWriter::beginObject()'s own comment), not a
+            // property any registered Class ever asks for by name, so
+            // there's no property->read() call anywhere in the walk above
+            // that would ever reach it - readMetaFromDoc() reads it
+            // directly off doc instead.
+            readMetaFromDoc();
+        }
+
+        // Reads doc into a freshly Class::createInstance()'d instance of
+        // whatever class its own root "type" tag names - unlike read()
+        // above (which always reads into an already-live *inst), this
+        // never touches an existing object. BaseT anchors the search: the
+        // resolved class only wins if BaseT is somewhere in its own
+        // parentClass() chain (the same polymorphic-dispatch check
+        // TypedClass<T>::read() already does for a nested property, e.g. a
+        // Shape-typed collection element tagged "type": "Circle" - see its
+        // own comment) - pass whatever real base every instance in this
+        // file could be (View, to accept a file written as a SubView, a
+        // Button, ...). Returns nullptr if "type" is missing/unregistered,
+        // doesn't derive from BaseT, or has no registered constructor
+        // Class::createInstance() can actually call.
+        template <typename BaseT>
+        BaseT* readNew() {
+            const Class* clazz = classinfo<BaseT>();
+            if (clazz == nullptr) {
+                return nullptr;
+            }
+
+            stack.clear();
+            cursorStack.clear();
+            stack.push_back(doc);
+            cursorStack.push_back(0);
+
+            std::any instVal;  // empty - clazz->read() below fresh-constructs into it
+            bool onHeap = true;  // this call path always constructs fresh - see comment above
+            void* raw = nullptr;
+            clazz->read(this, "", instVal, onHeap, &raw);
+
+            readMetaFromDoc();
+
+            return static_cast<BaseT*>(raw);
+        }
+
+        // Reads the propertyName-keyed nested object at the document's own
+        // root - e.g. "rootView" inside a file written with a Frame as the
+        // true root (Frame::rootView() registered as its own "rootView"
+        // property) - directly into *inst. Same existing-live-object
+        // contract as read() above (see its own comment on "childViews"
+        // add-only reconstruction), just starting one level below the
+        // document root instead of at it.
+        template <typename InstanceT>
+        void readNested(const std::string& propertyName, InstanceT* inst) {
+            const Class* clazz = classinfo<InstanceT>();
+            if (clazz == nullptr) {
+                return;
+            }
+
+            stack.clear();
+            cursorStack.clear();
+            stack.push_back(doc);
+            cursorStack.push_back(0);
+
+            std::any instVal(inst);
+            bool onHeap = false;
+            clazz->read(this, propertyName, instVal, onHeap);
+
+            readMetaFromDoc();
         }
 
         // One instance read back from a multi-object document - see
@@ -554,6 +631,17 @@ namespace newui::reflection {
                           << sender.name << "." << delegate->name()
                           << " - signature mismatch, not connected\n";
             }
+        }
+
+        // Shared by readNew()/readNested() below - see read()'s own comment
+        // for why this reads doc["meta"] directly rather than through
+        // beginObject()/readXXX().
+        void readMetaFromDoc() {
+            json5::value meta = doc["meta"];
+            metadata.author = meta["author"].get_c_str("");
+            metadata.date = meta["date"].get_c_str("");
+            metadata.copyright = meta["copyright"].get_c_str("");
+            metadata.version = meta["version"].get_c_str("");
         }
 
         // propertyName non-empty: a keyed scalar within the current object

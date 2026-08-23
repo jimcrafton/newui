@@ -2189,7 +2189,7 @@ namespace newui {
 
         std::unique_ptr<ListController> controller_;
         std::unique_ptr<PopupFrame> popup_;
-        ListView* popupListView_ = nullptr;  // owned by popup_->getView()'s normal addChild(), not by this class directly
+        ListView* popupListView_ = nullptr;  // owned by popup_->rootView()'s normal addChild(), not by this class directly
         std::optional<std::size_t> selectedIndex_;
 
         // Guards openPopup()'s own restore of the popup ListView's

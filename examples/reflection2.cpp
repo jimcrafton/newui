@@ -9,7 +9,7 @@
 //
 // Every class registered below is wired up using only EXISTING PUBLIC
 // accessors (View::name()/bounds()/isVisible()/style()/childViews(),
-// Frame::getTitle()/getBounds()/getView(), Application::getName()/
+// Frame::getTitle()/getBounds()/rootView(), Application::getName()/
 // getFrame(), ViewStyle::borderWidth/opacity) - no NEWUI_REFLECT_PRIVATE(),
 // no core header changes, nothing here reaches past real C++ access
 // control the way reflection1.cpp's Widget does for its private fields.
@@ -156,7 +156,7 @@ void registerSubViewReflection() {
 }
 
 // No fields of its own for this minimal slice - registered purely so
-// ObjectWriter can resolve Frame::getView()'s real runtime type
+// ObjectWriter can resolve Frame::rootView()'s real runtime type
 // (RootView, not just View) via ReflectionRegistry::getClass(typeid(RootView)).
 // Nothing ever createInstance()s a RootView, so it gets no .constructor<>().
 void registerRootViewReflection() {
@@ -170,11 +170,11 @@ void registerFrameReflection() {
     builder.clazz()
         .property("title", Scope::Public, &Frame::getTitle, &Frame::setTitle)
         .property("bounds", Scope::Public, &Frame::getBounds, &Frame::setBounds)
-        // Frame::getView() is overloaded on constness, so it needs the
+        // Frame::rootView() is overloaded on constness, so it needs the
         // same selectOverload<>() treatment "style" does above - written,
         // never reconstructed, see ObjectReader::read()'s own comment
         // (reflectionio.h) and demoWriter()'s.
-        .property("rootView", Scope::Public, selectOverload<RootView&(Frame::*)()>(&Frame::getView));
+        .property("rootView", Scope::Public, selectOverload<RootView&(Frame::*)()>(&Frame::rootView));
     ReflectionRegistry::registerClass(builder);
 }
 
@@ -230,7 +230,7 @@ SubView* demoWriter()
     frame->setBounds(Rect(100.0f, 100.0f, 640.0f, 480.0f));
     app.setFrame(frame);
 
-    RootView& root = frame->getView();
+    RootView& root = frame->rootView();
     root.style().borderWidth = 2.0f;
     root.style().opacity = 1.0f;
 

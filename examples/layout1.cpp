@@ -110,7 +110,7 @@ int main() {
     frame.setBounds(newui::Rect(10, 10, 900, 500));
     frame.onClosed += FrameClosed;
 
-    newui::RootView& root = frame.getView();
+    newui::RootView& root = frame.rootView();
     root.style().setBackgroundColor(newui::Color::fromName("white"));
 
     auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);

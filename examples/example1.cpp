@@ -73,7 +73,7 @@ int main() {
     frame.setBounds(newui::Rect(10, 10, 1200, 600));
     frame.onClosed += FrameClosed;
 
-    newui::RootView& v = frame.getView();
+    newui::RootView& v = frame.rootView();
     //v.style().backgroundFill = newui::Color::fromName("yellow").toBLRgba32();
     //v.style().borderFill = newui::Color::fromName("lightblue").toBLRgba32();
     //v.style().borderWidth = 2.0;

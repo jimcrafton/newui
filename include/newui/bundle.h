@@ -8,6 +8,15 @@
 
 namespace newui {
 
+    class Frame;
+    class Dialog;
+    class RootView;
+    class View;
+
+    namespace reflection {
+        class ObjectReader;
+    }
+
     // Resolves app resources (fonts, images, saved UI trees, ...) relative
     // to the running .exe's own directory - a flattened, Windows-idiomatic
     // analog of a macOS .app bundle's Contents/Resources/ lookup, without
@@ -63,6 +72,60 @@ namespace newui {
         // to tell those apart should use resourcePath() directly instead.
         std::string loadTextFile(const std::string& relativePath) const;
 
+        // Loads "<frame.getName()>.newui" (resolved via resourcePath(),
+        // same failure contract as loadTextFile()) into frame in place -
+        // every property the file describes, including everything under
+        // its nested "rootView" property (recursively, down through
+        // childViews), is applied directly onto the already-live frame/
+        // rootView objects; nothing here is freshly constructed. Returns
+        // false if frame.getName() is empty, the file doesn't resolve, or
+        // it isn't valid JSON5.
+        bool loadFrame(Frame& frame) const;
+
+        // Delegates to loadFrame(dialog.frame()) - see Dialog::frame().
+        bool loadDialog(Dialog& dialog) const;
+
+        // Loads just the "rootView" node of
+        // "<rootView.getFrame()->getName()>.newui" into rootView in place -
+        // the owning Frame's own properties are untouched. rootView must
+        // already be attached to a live Frame (rootView.getFrame() !=
+        // nullptr); returns false otherwise, or for any of loadFrame()'s
+        // own failure reasons.
+        bool loadRootView(RootView& rootView) const;
+
+        // Loads "<name>.newui" as a freshly Class::createInstance()'d
+        // View - the concrete type is whatever the file's own root "type"
+        // tag names (a registered, default-constructible View subclass -
+        // View itself, SubView, or any real widget), not something the
+        // caller picks. Returns nullptr if name is empty, the file doesn't
+        // resolve, isn't valid JSON5, or its "type" can't be resolved/
+        // constructed this way. Caller owns the returned View.
+        View* loadView(const std::string& name) const;
+
+        // Writes frame.getName() + ".newui" under resourcesDir() (created
+        // first if it doesn't exist yet) via ObjectWriter - frame's own
+        // registered properties (title, bounds, name, ...; its real
+        // runtime class if it's ever a Frame subclass, e.g. PopupFrame),
+        // plus its rootView (and rootView's own childViews subtree)
+        // nested under a "rootView" key - see Frame::rootView()'s own
+        // comment for why that link needs writeNested() rather than an
+        // ordinary registered property. Returns false if frame.getName()
+        // is empty or the file couldn't be written.
+        bool writeFrame(Frame& frame) const;
+
+        // Delegates to writeFrame(dialog.frame()) - see Dialog::frame().
+        bool writeDialog(Dialog& dialog) const;
+
+        // Writes "<name>.newui" under resourcesDir() from view - the
+        // written "type" tag (and full property set) comes from view's
+        // own real runtime class (classinfo(typeid(view))), not whatever
+        // static type the caller happens to hold it as, so a SubView (or
+        // any concrete widget) round-trips as itself, symmetric with
+        // loadView()'s own polymorphic reconstruction. Returns false if
+        // name is empty, view's runtime class isn't registered, or the
+        // file couldn't be written.
+        bool writeView(View& view, const std::string& name) const;
+
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).
         // appName() falls back to
@@ -80,6 +143,14 @@ namespace newui {
         Bundle();
 
         void ensureInfoLoaded() const;
+
+        // Shared by loadFrame()/loadRootView()/loadView() - see its own
+        // comment in bundle.cpp.
+        bool parseNewuiFile(const std::string& name, reflection::ObjectReader& outReader) const;
+
+        // Shared by writeFrame()/writeView() - see its own comment in
+        // bundle.cpp.
+        bool writeTextFile(const std::string& relativePath, const std::string& contents) const;
 
         std::string executableDir_;
         std::string resourcesDir_;

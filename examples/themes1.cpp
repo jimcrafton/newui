@@ -502,7 +502,7 @@ int main() {
     app.onColorizationColorChanged += &ColorizationColorChanged;
     app.onSettingChange += &SettingChanged;
 
-    newui::RootView& root = frame.getView();
+    newui::RootView& root = frame.rootView();
     g_demoRootView = &root;
     root.onKeyDown += &ScreenshotHotkey;
     // Sets root's background from whatever Light/Dark mode is active

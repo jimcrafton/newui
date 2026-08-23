@@ -73,7 +73,7 @@ namespace newui {
 
     // ------------------------------------------------------------------
     // Dialog - a top-level window hosting real newui content (via
-    // getView(), same as Frame), shown either non-modally ("floating" -
+    // rootView(), same as Frame), shown either non-modally ("floating" -
     // show() returns immediately, the caller's own RunLoop keeps pumping
     // it) or modally (showModal() blocks the caller and disables owner
     // until closed).
@@ -82,14 +82,14 @@ namespace newui {
     // creation/message handling (WndProc, handleMessage) isn't virtual,
     // so there's no seam to add modal-loop/owner-disable behavior via
     // inheritance; Dialog builds that on top of Frame's already-public
-    // onClosed delegate and setTitle()/setBounds()/getView() instead.
+    // onClosed delegate and setTitle()/setBounds()/rootView() instead.
     //
     // Single-show: once closed, its native window is torn down for good
     // (Frame itself has no way to recreate a destroyed window) - build a
-    // new Dialog to show another one. Add content via getView() any time
+    // new Dialog to show another one. Add content via rootView() any time
     // before or after the first show()/showModal() call (both lazily
     // create the native window the first time they're called), same as
-    // Frame's own getView()/setTitle()/setBounds() work before
+    // Frame's own rootView()/setTitle()/setBounds() work before
     // initialize().
     // ------------------------------------------------------------------
 
@@ -152,12 +152,30 @@ namespace newui {
             return frame_.getBounds();
         }
 
-        RootView& getView() {
-            return frame_.getView();
+        // See Frame::getName() - identifies this Dialog's own saved-layout
+        // file for Bundle::loadDialog() (bundle.h), which just forwards to
+        // Bundle::loadFrame(frame()).
+        void setName(const std::string& name) {
+            frame_.setName(name);
         }
 
-        const RootView& getView() const {
-            return frame_.getView();
+        std::string getName() const {
+            return frame_.getName();
+        }
+
+        RootView& rootView() {
+            return frame_.rootView();
+        }
+
+        const RootView& rootView() const {
+            return frame_.rootView();
+        }
+
+        // The Frame this Dialog composes - exposed so Bundle::loadDialog()
+        // (bundle.h) can delegate straight to Bundle::loadFrame() rather
+        // than duplicating that logic here.
+        Frame& frame() {
+            return frame_;
         }
 
         HWND dialogHandle() const {

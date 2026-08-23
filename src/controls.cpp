@@ -3085,7 +3085,7 @@ namespace newui {
             // method's own header. RootView::setBounds() (rootview.cpp)
             // already calls updateLayout() synchronously as part of
             // handling the real WM_SIZE that show()'s own ShowWindow()
-            // triggers - giving popup_->getView() a FlexLayout means
+            // triggers - giving popup_->rootView() a FlexLayout means
             // popupListView_ gets arranged to fill it automatically, in
             // that same synchronous call, with no separately-timed
             // setBounds() call of our own that could race show()'s
@@ -3093,14 +3093,14 @@ namespace newui {
             auto popupLayout = std::make_unique<FlexLayout>(Orientation::Vertical);
             popupLayout->setSpacing(0.0f);
             popupLayout->setPadding(0.0f);
-            popup_->getView().setLayout(std::move(popupLayout));
-            popup_->getView().addChild(popupListView_);
+            popup_->rootView().setLayout(std::move(popupLayout));
+            popup_->rootView().addChild(popupListView_);
 
             // Without an explicit background, whatever's behind an
             // unpainted RootView shows through as a solid black rect
             // (confirmed live). Matches the plain WindowBackground fill
             // the main window's own root View gets in examples/mvc1.cpp.
-            popup_->getView().style().setBackgroundColor(
+            popup_->rootView().style().setBackgroundColor(
                 UIColorManager::colorFor(UIColorRole::WindowBackground));
         }
 

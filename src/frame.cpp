@@ -39,7 +39,7 @@ namespace newui {
 			// will be, so there's nothing for the normal WM_DESTROY-driven
 			// teardown (destroy()) to wait for. Free rootView_ directly
 			// instead - safe even if the caller already built content on
-			// it via getView() (View::destroy()/SubView::destroy() need
+			// it via rootView() (View::destroy()/SubView::destroy() need
 			// no live HWND). Skips destroy()'s onDestroyed(*this) - this
 			// Frame was never actually shown, so nothing was "destroyed"
 			// in the sense any onDestroyed listener would expect.

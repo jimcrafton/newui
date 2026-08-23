@@ -122,7 +122,7 @@ int main() {
     frame.setBounds(newui::Rect(10, 10, 520, 720));
     frame.onClosed += FrameClosed;
 
-    newui::RootView& root = frame.getView();
+    newui::RootView& root = frame.rootView();
     // UIColorManager::colorFor(), not a hardcoded literal - see
     // MakeLabel()'s own comment above for why: this toolkit's native
     // controls already track Windows' OS-level Light/Dark mode setting on

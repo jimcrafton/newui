@@ -199,7 +199,7 @@ int main() {
     frame.setBounds(newui::Rect(10, 10, 620, 460));
     frame.onClosed += FrameClosed;
 
-    newui::RootView& root = frame.getView();
+    newui::RootView& root = frame.rootView();
     root.style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
     auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);

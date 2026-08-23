@@ -420,7 +420,18 @@ namespace newui::reflection {
             }
             std::any val;
             Property::readValue(name(), typeid(ValueT), val, instancePtr, reader);
-            set(instancePtr, val);
+            // val stays empty when ValueT is a type readValue() has no
+            // case for at all (not a registered Class/Enum, not one of
+            // its known scalar leaf types - e.g. a Delegate<> field
+            // reflectgen registered as a plain .field() rather than a
+            // real .delegate()) - set()'s std::any_cast<ValueT> would
+            // throw on that empty any, so this is left untouched rather
+            // than crashing the whole read, same "unrecognized data is
+            // silently skipped" contract this file already has elsewhere
+            // (e.g. an unresolvable delegate connection, reflectionio.h).
+            if (val.has_value()) {
+                set(instancePtr, val);
+            }
         }
 
     private:
@@ -886,7 +897,12 @@ namespace newui::reflection {
             }
             std::any val;
             Property::readValue(name(), type(), val, instancePtr, reader);
-            set(instancePtr, val);
+            // See TypedMemberField::read()'s own comment on why an empty
+            // val (an unsupported ValueT readValue() has no case for) must
+            // skip set() rather than crash it via std::any_cast.
+            if (val.has_value()) {
+                set(instancePtr, val);
+            }
         }
     private:
         MemberPtr member_ = nullptr;
