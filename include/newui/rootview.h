@@ -8,6 +8,7 @@
 #include <newui/newui.h>
 #include <newui/view.h>
 #include <newui/geometry.h>
+#include <newui/overlay.h>
 
 namespace newui {
     class Frame;
@@ -179,6 +180,19 @@ namespace newui {
         // windowHandle() is null).
         Point localToScreen(const Point& rootLocalPt) const;
 
+        // Painted last, on top of every child SubView - see Overlay's own
+        // class comment (overlay.h). Null (the default) means nothing
+        // extra is drawn. Takes ownership of overlay, replacing (and
+        // freeing) whatever was set before; pass nullptr to remove it.
+        // Immediately calls overlay->viewSized() with this RootView's
+        // current bounds(), so a newly-attached overlay starts in sync
+        // with the current size rather than stale until the next resize.
+        void setOverlay(std::unique_ptr<Overlay> overlay);
+
+        Overlay* overlay() const {
+            return overlay_.get();
+        }
+
     protected:
         // Win32-message-driven event entry points - protected (not
         // private) purely for testability, so a test-local subclass can
@@ -292,6 +306,8 @@ namespace newui {
         SubView* hoveredSubView_ = nullptr;
         SubView* capturedSubView_ = nullptr;
         SubView* focusedSubView_ = nullptr;
+
+        std::unique_ptr<Overlay> overlay_;
 
         // Updates hoveredSubView_ to target, firing onMouseLeft()/
         // onMouseEntered() (and toggling View::setHighlighted() +

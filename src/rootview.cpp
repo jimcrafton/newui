@@ -97,6 +97,17 @@ namespace newui {
 		}
 
 		bounds_ = bounds;
+
+		// Before onSizeChanged()/updateLayout()/resizeImageBuffer() below -
+		// none of those trigger the actual repaint synchronously except
+		// resizeImageBuffer() (via notifyRedrawNeeded()), but viewSized()
+		// is for updating overlay_'s own extra state, not for painting, so
+		// it just needs to run before that eventual repaint, same as
+		// updateLayout() needing to run before it for childViews_.
+		if (overlay_) {
+			overlay_->viewSized(bounds_);
+		}
+
 		// updateLayout() before resizeImageBuffer(): the latter is what
 		// triggers the actual repaint (via notifyRedrawNeeded()), so
 		// children need their new bounds in place first - otherwise
@@ -316,7 +327,24 @@ namespace newui {
 		// doc comment (viewstyle.h) for the concrete fix (give it an
 		// opaque backgroundFill).
 		paintChildren(ctx);
+
+		// Last, on top of every child - see Overlay's own class comment
+		// (overlay.h). Unclipped, like paintChildren() above (not confined
+		// to dirtyRect_) for the same reason: this whole function only
+		// narrows to dirtyRect_ for this RootView's own paintStyle()/
+		// paint(), never for anything drawn afterward.
+		if (overlay_ && overlay_->visible()) {
+			overlay_->paint(ctx, Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height));
+		}
+
 		ctx.end();
+	}
+
+	void RootView::setOverlay(std::unique_ptr<Overlay> overlay) {
+		overlay_ = std::move(overlay);
+		if (overlay_) {
+			overlay_->viewSized(bounds_);
+		}
 	}
 
 	void RootView::paintImageBufferToWindow(HDC hdc, const newui::Rect& paintRect) {

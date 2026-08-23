@@ -94,4 +94,10 @@ add_executable(custom_text_rndr
 
 target_link_libraries(custom_text_rndr PRIVATE newui d2d1 dwrite)
 
+add_executable(overlay1
+    overlay1.cpp
+)
+
+target_link_libraries(overlay1 PRIVATE newui)
+
 
