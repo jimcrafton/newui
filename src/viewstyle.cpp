@@ -153,6 +153,32 @@ namespace {
 		}
 	}
 
+	// Top-left offset (in fill-rect-local coordinates) an unscaled image
+	// of imgSize should be drawn at within a rect of rectSize, per a
+	// nine-way alignment anchor - see ImageAlignment's own doc comment
+	// (viewstyle.h). Can come out negative (image bigger than rectSize
+	// along that axis) - callers translate a pattern by this and then
+	// clamp/clip the actual destination rect they fill, rather than this
+	// function doing any clamping itself.
+	BLPoint alignedImageOffset(newui::ImageAlignment align, const BLSizeI& imgSize, const newui::Size& rectSize) {
+		double dx = double(rectSize.width) - double(imgSize.w);
+		double dy = double(rectSize.height) - double(imgSize.h);
+
+		double x = 0.0, y = 0.0;
+		switch (align) {
+			case newui::ImageAlignment::TopLeft:     x = 0.0;      y = 0.0;      break;
+			case newui::ImageAlignment::Top:         x = dx * 0.5; y = 0.0;      break;
+			case newui::ImageAlignment::TopRight:    x = dx;       y = 0.0;      break;
+			case newui::ImageAlignment::Left:        x = 0.0;      y = dy * 0.5; break;
+			case newui::ImageAlignment::Center:      x = dx * 0.5; y = dy * 0.5; break;
+			case newui::ImageAlignment::Right:       x = dx;       y = dy * 0.5; break;
+			case newui::ImageAlignment::BottomLeft:  x = 0.0;      y = dy;       break;
+			case newui::ImageAlignment::Bottom:      x = dx * 0.5; y = dy;       break;
+			case newui::ImageAlignment::BottomRight: x = dx;       y = dy;       break;
+		}
+		return BLPoint(x, y);
+	}
+
 }
 
 namespace newui {
@@ -319,8 +345,7 @@ namespace newui {
 		if (!background.is_null()) {
 
 			switch (fillStyle) {
-				case FillStyle::FillColor:
-				case FillStyle::FillImage: {
+				case FillStyle::FillColor: {
 					ctx.set_fill_style(background);
 					ctx.set_fill_alpha(opacity);
 
@@ -331,6 +356,103 @@ namespace newui {
 						ctx.fill_rect(BLRect(0, 0, size.width, size.height));
 					}
 
+				}
+				break;
+
+				case FillStyle::FillImage: {
+					// background may not actually hold a BLPattern (e.g.
+					// bkgFillStyle set to FillImage by hand without ever
+					// going through setBackgroundImage()) - fall back to
+					// drawing whatever's really there rather than
+					// reinterpreting it as one.
+					if (!background.is_pattern()) {
+						ctx.set_fill_style(background);
+						ctx.set_fill_alpha(opacity);
+
+						if (rectRadius != 0.0) {
+							ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+						}
+						else {
+							ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+						}
+						break;
+					}
+
+					BLPattern pattern = background.as<BLPattern>();
+					BLImage img = pattern.get_image();
+					BLSizeI imgSize = img.size();
+
+					ctx.set_fill_alpha(opacity);
+
+					if (imgSize.w <= 0 || imgSize.h <= 0) {
+						break;  // nothing decoded - no natural size to tile/stretch/align against
+					}
+
+					switch (imageFillMode) {
+						case ImageFillMode::Stretch: {
+							// Scaled to exactly cover the fill rect (ignores
+							// the image's own aspect ratio) - PAD rather
+							// than REPEAT since the transform already maps
+							// the image's own edges onto the rect's edges
+							// exactly, so PAD vs. REPEAT never actually
+							// differs in the pixels drawn; PAD is cheaper.
+							pattern.set_extend_mode(BL_EXTEND_MODE_PAD);
+							pattern.set_transform(BLMatrix2D::make_scaling(
+								double(size.width) / double(imgSize.w),
+								double(size.height) / double(imgSize.h)));
+							ctx.set_fill_style(pattern);
+
+							if (rectRadius != 0.0) {
+								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+							}
+							else {
+								ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+							}
+						}
+						break;
+
+						case ImageFillMode::Align: {
+							// Unscaled, anchored per imageAlignment - only
+							// the image's own (possibly rect-clipped)
+							// footprint is actually filled, not the whole
+							// view, so a smaller-than-the-view image
+							// doesn't get its edge pixels padded/smeared
+							// across the rest of the fill rect the way
+							// BL_EXTEND_MODE_PAD would if the fill shape
+							// were the full rect instead.
+							BLPoint offset = alignedImageOffset(imageAlignment, imgSize, size);
+							pattern.set_extend_mode(BL_EXTEND_MODE_PAD);
+							pattern.set_transform(BLMatrix2D::make_translation(offset));
+							ctx.set_fill_style(pattern);
+
+							double rx = offset.x < 0.0 ? 0.0 : offset.x;
+							double ry = offset.y < 0.0 ? 0.0 : offset.y;
+							double w = double(imgSize.w) < size.width ? double(imgSize.w) : double(size.width);
+							double h = double(imgSize.h) < size.height ? double(imgSize.h) : double(size.height);
+							if (rx + w > size.width) w = size.width - rx;
+							if (ry + h > size.height) h = size.height - ry;
+
+							if (w > 0.0 && h > 0.0) {
+								ctx.fill_rect(BLRect(rx, ry, w, h));
+							}
+						}
+						break;
+
+						case ImageFillMode::Tile:
+						default: {
+							pattern.set_extend_mode(BL_EXTEND_MODE_REPEAT);
+							pattern.reset_transform();
+							ctx.set_fill_style(pattern);
+
+							if (rectRadius != 0.0) {
+								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+							}
+							else {
+								ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+							}
+						}
+						break;
+					}
 				}
 				break;
 
@@ -360,6 +482,53 @@ namespace newui {
 		}
 
 		ctx.restore();
+	}
+
+	void ImageFillStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		bool useHighlight = highlighted && !highlightFill.is_null();
+		FillStyle fillStyle = useHighlight ? hilightFillStyle : bkgFillStyle;
+		const BLVar& background = useHighlight ? highlightFill : backgroundFill();
+
+		// Same guards ViewStyle::paint() itself applies before touching
+		// background - mirrored here since this runs *before* delegating
+		// to it, to decide whether there's even an image fill worth
+		// backing with a checkerboard in the first place.
+		if (size.width > 0.0f && size.height > 0.0f && fillStyle == FillStyle::FillImage &&
+				!background.is_null() && background.is_pattern()) {
+			BLImage img = background.as<BLPattern>().get_image();
+
+			// See this class's own comment (viewstyle.h) for why format()
+			// alone is the right "does this actually have an alpha
+			// channel" signal - blend2d's PNG decoder already resolved
+			// that question once, at load time.
+			if (img.format() == BL_FORMAT_PRGB32) {
+				double cs = double(checkerSize > 0.0f ? checkerSize : 8.0f);
+				BLRgba32 colorA = checkerColorA.toBLRgba32();
+				BLRgba32 colorB = checkerColorB.toBLRgba32();
+
+				ctx.save();
+				// Always plain SRC_OVER, fully opaque, regardless of this
+				// style's own compositingOp/opacity - the checkerboard is
+				// a neutral "you're looking at transparency" indicator,
+				// not part of the image's own painted content, so neither
+				// an exotic blend mode nor a faded opacity meant for the
+				// image itself should touch it.
+				ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+				for (double y = 0.0; y < double(size.height); y += cs) {
+					double h = (y + cs > double(size.height)) ? double(size.height) - y : cs;
+					int row = int(y / cs);
+					for (double x = 0.0; x < double(size.width); x += cs) {
+						double w = (x + cs > double(size.width)) ? double(size.width) - x : cs;
+						int col = int(x / cs);
+						ctx.set_fill_style(((row + col) % 2 == 0) ? colorA : colorB);
+						ctx.fill_rect(BLRect(x, y, w, h));
+					}
+				}
+				ctx.restore();
+			}
+		}
+
+		ViewStyle::paint(ctx, size, highlighted, clientBounds);
 	}
 
 	ThemedViewStyle::~ThemedViewStyle() {

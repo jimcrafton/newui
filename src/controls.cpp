@@ -1,5 +1,6 @@
 #include "newui/controls.h"
 #include "newui/application.h"
+#include "newui/bundle.h"
 #include "newui/color.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
@@ -1649,6 +1650,15 @@ namespace newui {
     {
         setVisible(true);
 
+        auto imageStyle = std::make_unique<ImageFillStyle>();
+        // Align/Center, not ImageFillStyle's (ViewStyle's) own inherited
+        // Tile default - see this class's own comment (controls.h) for
+        // why a dedicated image control's default should differ from the
+        // base ViewStyle default every other image-filled View shares.
+        imageStyle->imageFillMode = ImageFillMode::Align;
+        imageStyle->imageAlignment = ImageAlignment::Center;
+        setStyle(std::move(imageStyle));
+
         onImagePathChanged.add(this, &Image::updateImage);
     }
 
@@ -1660,10 +1670,43 @@ namespace newui {
         }
     }
 
+    void Image::setImageFillMode(ImageFillMode mode)
+    {
+        style().imageFillMode = mode;
+        style().markDirty();
+    }
+
+    void Image::setImageAlignment(ImageAlignment align)
+    {
+        style().imageAlignment = align;
+        style().markDirty();
+    }
+
+    // Tries newPath first as a Bundle::instance().loadImage() resource
+    // name (Resources/-relative - see bundle.h), then, only if that
+    // doesn't resolve, as a plain filesystem path via
+    // BLImage::read_from_file() - so either a bare resource name or a
+    // real path on disk works through the same setImagePath() call. An
+    // absolute path harmlessly fails the Bundle lookup first (Bundle::
+    // resourcePath() just checks a resourcesDir()-relative concatenation
+    // for existence) before falling through to the direct read.
     SyncReturn Image::updateImage(Image&, const std::string& newPath)
     {
         auto& curStyle = style();
-        curStyle.setBackgroundImage(newPath);
+
+        if (newPath.empty()) {
+            return SyncReturn::Handled;
+        }
+
+        BLImage image;
+        bool loaded = Bundle::instance().loadImage(newPath, image);
+        if (!loaded) {
+            loaded = image.read_from_file(newPath.c_str()) == BL_SUCCESS;
+        }
+
+        if (loaded) {
+            curStyle.setBackgroundImage(image);
+        }
         curStyle.markDirty();
 
         return SyncReturn::Handled;

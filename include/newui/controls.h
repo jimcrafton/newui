@@ -1016,6 +1016,15 @@ namespace newui {
         ScrollBar* hBar_ = nullptr;
     };
 
+    // Displays one image, loaded from either a plain filesystem path or a
+    // name resolved against Bundle::instance() (bundle.h) - see
+    // setImagePath()'s own comment for how updateImage() decides which.
+    // Styled with ImageFillStyle (viewstyle.h) rather than a plain
+    // ViewStyle, so a loaded PNG with a real alpha channel automatically
+    // gets a checkerboard backdrop the same way an image editor's canvas
+    // would - imageFillMode()/imageAlignment() below are just this
+    // control's own typed view onto that style's inherited
+    // ViewStyle::imageFillMode/imageAlignment fields.
     class Image : public Control {
     public:
         Image();
@@ -1026,8 +1035,26 @@ namespace newui {
 
         ImagePathChanged onImagePathChanged;
 
+        // Tried first as a Bundle::instance().loadImage() resource name
+        // (Resources/-relative), then, if that doesn't resolve, as a
+        // plain filesystem path via BLImage::read_from_file() - see
+        // updateImage() (controls.cpp). Either a bare resource name
+        // ("icon.png") or a real absolute/relative path on disk works
+        // through this one setter.
         std::string imagePath() const { return imagePath_; }
         void setImagePath(const std::string& val);
+
+        // How the loaded image maps onto this control's own bounds - see
+        // ViewStyle::ImageFillMode/ImageAlignment (viewstyle.h). Defaults
+        // to Align/Center (a plain, unscaled, centered image) rather than
+        // ViewStyle's own base default of Tile - a control meant to show
+        // one picture/icon should show it once, centered, not repeated,
+        // unless asked otherwise.
+        ImageFillMode imageFillMode() const { return style().imageFillMode; }
+        void setImageFillMode(ImageFillMode mode);
+
+        ImageAlignment imageAlignment() const { return style().imageAlignment; }
+        void setImageAlignment(ImageAlignment align);
 
 
     private:

@@ -100,4 +100,28 @@ add_executable(overlay1
 
 target_link_libraries(overlay1 PRIVATE newui)
 
+add_executable(imagefill1
+    imagefill1.cpp
+)
+
+target_link_libraries(imagefill1 PRIVATE newui)
+
+# st-enterprise-nc1701-a.png/robot1.png/robot2.png are source-tree assets
+# (not generated), used via newui::Bundle::loadImage() - Bundle resolves
+# relative to the running .exe's own directory (bundle.h's own class
+# comment), so they need to actually live next to the built exe, not just
+# in this source directory.
+add_custom_command(TARGET imagefill1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:imagefill1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/st-enterprise-nc1701-a.png"
+        "$<TARGET_FILE_DIR:imagefill1>/Resources/st-enterprise-nc1701-a.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/robot1.png"
+        "$<TARGET_FILE_DIR:imagefill1>/Resources/robot1.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/robot2.png"
+        "$<TARGET_FILE_DIR:imagefill1>/Resources/robot2.png"
+)
+
 

@@ -84,6 +84,32 @@ namespace newui {
         StrokeGradient
     };
 
+    // How an image fill (FillStyle::FillImage, on either backgroundFill
+    // or highlightFill) maps its BLImage onto the shape being filled -
+    // Tile repeats the image at its own natural size (the only behavior
+    // ViewStyle::paint() had before this enum existed); Stretch scales it
+    // to exactly cover the fill rect, ignoring the image's own aspect
+    // ratio; Align draws it once, unscaled, anchored within the fill rect
+    // per imageAlignment below (Center is just one of that enum's nine
+    // anchor points) - the area of the fill rect the image doesn't cover
+    // is left unpainted rather than smeared with the image's own edge
+    // pixels, so e.g. a small centered logo doesn't bleed a stretched-looking
+    // border into the rest of the view.
+    enum class ImageFillMode {
+        Tile,
+        Stretch,
+        Align
+    };
+
+    // The nine-way anchor grid ImageFillMode::Align positions an unscaled
+    // image at within the fill rect - same layout a docking UI or CSS's
+    // background-position keywords use.
+    enum class ImageAlignment {
+        TopLeft, Top, TopRight,
+        Left, Center, Right,
+        BottomLeft, Bottom, BottomRight
+    };
+
     //map these to BLCompOp, they could have been different but want to keep these separate
     enum CompositingFlag {
         CompNone = 0,
@@ -159,6 +185,17 @@ namespace newui {
         FillStyle bkgFillStyle = FillStyle::FillColor;
         FillStyle hilightFillStyle = FillStyle::FillColor;
         StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
+
+        // How an image fill is drawn - see ImageFillMode's own comment.
+        // Shared by backgroundFill/highlightFill (only one of which is
+        // ever actually painted per paint() call, per useHighlight
+        // there), same as opacity/compositingOp already being shared
+        // across both rather than duplicated per-fill.
+        ImageFillMode imageFillMode = ImageFillMode::Tile;
+
+        // Anchor ImageFillMode::Align positions an unscaled image fill
+        // at - ignored by Tile/Stretch.
+        ImageAlignment imageAlignment = ImageAlignment::Center;
 
         float rectRadius = 0.0;
 
@@ -481,6 +518,44 @@ namespace newui {
             ctx.restore();
         }
 
+    };
+
+    // ViewStyle plus a checkerboard backdrop drawn behind an image fill
+    // that actually carries an alpha channel (BL_FORMAT_PRGB32 - see
+    // blend2d's PNG decoder, pngcodec.cpp, which only ever picks that
+    // over BL_FORMAT_XRGB32 when the source file's own PNG color type
+    // carries alpha/palette-transparency/grayscale-alpha; a plain RGB PNG
+    // decodes as BL_FORMAT_XRGB32 and gets no checkerboard) - the classic
+    // image-editor convention (Photoshop, GIMP, ...) for making "this
+    // pixel is actually transparent" visually distinct from "this pixel
+    // just happens to be whatever plain color is behind the view",
+    // especially relevant for ImageFillMode::Align (viewstyle.h), which
+    // often only covers part of its own view to begin with. Used by
+    // controls::Image (controls.h) as its default style; nothing else in
+    // this codebase currently opts into it, so no other image fill
+    // anywhere else grows an unexpected checkerboard.
+    //
+    // Only ever draws anything when bkgFillStyle (or hilightFillStyle,
+    // while highlighted) is FillStyle::FillImage and that fill's BLImage
+    // actually has an alpha channel - every other fill kind (solid color,
+    // gradient, no fill at all, or an opaque XRGB32 image) falls straight
+    // through to the base paint() unchanged, drawing nothing extra.
+    class ImageFillStyle : public ViewStyle {
+    public:
+        ImageFillStyle() = default;
+
+        // Checkerboard square size, in device pixels - the same rough
+        // ballpark image editors use.
+        float checkerSize = 8.0f;
+
+        // Photoshop/GIMP-style light-gray/white pair by default - always
+        // drawn fully opaque, regardless of this style's own opacity (see
+        // paint()'s own comment): fading the image should reveal more of
+        // the checkerboard, not fade the checkerboard itself away too.
+        Color checkerColorA = Color(0xd0d0d0u, false);
+        Color checkerColorB = Color(0xffffffu, false);
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // Base for a second family of styles alongside ViewStyle/ButtonStyle/
