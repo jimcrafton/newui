@@ -196,6 +196,25 @@ public:
     // Moves this edge only - width()/height() (and the opposite edge's
     // position) stay fixed, same "one component of pos_/size_ at a time"
     // contract setPos()/setSize() already have for the whole Point/Size.
+    //
+    // left/top/width/height are read-only from reflectgen's perspective
+    // (setLeft/setTop/setWidth/setHeight below are all @reflect
+    // ignore=true) - pos()/size() are the two real, independently
+    // reflected properties backing the same pos_/size_ storage; before
+    // this, both the structured (pos/size) and flat (left/top/width/
+    // height) views of the identical data were separately registered as
+    // full read/write properties, so ObjectReader::read()'s per-property
+    // walk applied pos_/size_ correctly via "pos"/"size" and then
+    // immediately overwrote them again via "left"/"top"/"width"/"height" -
+    // harmless when a document happens to carry both (redundant but
+    // consistent, as Bundle::writeFrame()'s own output always does - it
+    // writes both), but a real, reproduced data-loss bug for any
+    // document (e.g. one written by hand, or by anything else that only
+    // emits "pos"/"size") that has the structured pair but not the flat
+    // one: every such bounds/clientBounds/etc. silently came back at
+    // Rect{}'s default (0,0 0x0) - see Bundle test
+    // LoadFrameAppliesBoundsAndVisibleOntoRebuiltChildren.
+    //@reflect ignore=true
     void setLeft(float value) {
         pos_.x = value;
     }
@@ -204,6 +223,7 @@ public:
         return pos_.y;
     }
 
+    //@reflect ignore=true
     void setTop(float value) {
         pos_.y = value;
     }
@@ -221,6 +241,7 @@ public:
         return size_.width;
     }
 
+    //@reflect ignore=true
     void setWidth(float value) {
         size_.width = value;
     }
@@ -229,6 +250,7 @@ public:
         return size_.height;
     }
 
+    //@reflect ignore=true
     void setHeight(float value) {
         size_.height = value;
     }

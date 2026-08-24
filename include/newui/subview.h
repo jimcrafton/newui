@@ -15,8 +15,8 @@ public:
 
 	
 
-	void setBounds(const Rect& bounds);
-	void setVisible(bool visible);
+	void setBounds(const Rect& bounds) override;
+	void setVisible(bool visible) override;
 
 	LayoutParams* layoutParams() const {
 		return layoutParams_.get();

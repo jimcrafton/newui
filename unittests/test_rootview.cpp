@@ -693,3 +693,19 @@ TEST(ViewFindView, ReturnsNullWhenNoMatchExists) {
     root->destroy();
     delete root;
 }
+
+TEST(RootViewDefaultNaming, ChildAddedToAnAlreadyRootedContainerGetsNamed) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* row = new newui::SubView();
+    root->addChild(row);  // row rooted first, while still empty
+
+    auto* button = new newui::Button();
+    row->addChild(button);  // then a child added to the already-rooted row
+
+    EXPECT_EQ(row->name(), "subView1");
+    EXPECT_EQ(button->name(), "button1");
+
+    root->destroy();
+    delete root;
+}

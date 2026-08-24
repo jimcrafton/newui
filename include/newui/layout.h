@@ -126,6 +126,16 @@ namespace newui {
     // buttons, and similar fixed relationships to the container itself.
     class AnchorLayout : public Layout {
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // reflectgen's constructor collection only ever sees a
+        // user-declared CONSTRUCTOR cursor (see FlexLayout's own comment,
+        // just above, for the fuller reasoning); an implicit default
+        // constructor is invisible to it, so this class would otherwise
+        // never get a registered .constructor<>() at all and could never
+        // be reconstructed from a saved "type": "AnchorLayout" tag (e.g.
+        // behind a View::layout() slot).
+        AnchorLayout() = default;
+
         void arrange(View& container) override;
     };
 
@@ -217,7 +227,23 @@ namespace newui {
     // exactly as this class always has.
     class FlexLayout : public Layout {
     public:
-        explicit FlexLayout(Orientation orientation = Orientation::Vertical)
+        // Two real constructors, not one defaulted-parameter constructor -
+        // Class::createInstance(void**) (reflection.cpp), the path a
+        // Reader uses to build a fresh instance of a resolved runtime
+        // type from a saved "type" tag alone (no constructor args
+        // available), only ever looks for a *registered* zero-argument
+        // constructor; reflectgen registers exactly the parameter list a
+        // constructor declares, so `explicit FlexLayout(Orientation
+        // orientation = Orientation::Vertical)` (one previous, real
+        // parameter, default value or not) never produced a zero-arg
+        // registration reflectgen/createInstance() could find, even
+        // though plain `FlexLayout()` is valid C++ - real, reproduced
+        // case: a FlexLayout behind a View::layout() slot silently failed
+        // to load back. orientation_'s own in-class default (below) keeps
+        // FlexLayout()'s behavior identical to what the old defaulted
+        // parameter gave it.
+        FlexLayout() = default;
+        explicit FlexLayout(Orientation orientation)
             : orientation_(orientation) {}
 
         Orientation orientation() const {
@@ -296,7 +322,7 @@ namespace newui {
 
 
     private:
-        Orientation orientation_;
+        Orientation orientation_ = Orientation::Vertical;
         MainAxisAlignment mainAxisAlignment_ = MainAxisAlignment::Start;
         CrossAxisAlignment crossAxisAlignment_ = CrossAxisAlignment::Stretch;
         float spacing_ = 0.0f;
@@ -319,6 +345,10 @@ namespace newui {
     // child-list change to pick up the new selection.
     class CardLayout : public Layout {
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // see AnchorLayout's own comment above for why.
+        CardLayout() = default;
+
         void arrange(View& container) override;
 
         // Selects childViews()[index] as the visible card. index is
@@ -409,6 +439,10 @@ namespace newui {
     // consecutive tracks on each axis, same idea as FlexLayout::spacing().
     class GridLayout : public Layout {
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // see AnchorLayout's own comment above for why.
+        GridLayout() = default;
+
         void addRow(GridTrack track) {
             rows_.push_back(track);
         }

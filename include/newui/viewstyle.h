@@ -138,6 +138,16 @@ namespace newui {
     protected:
         BLVar backgroundFill_;
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // reflectgen's constructor collection only ever sees a
+        // user-declared CONSTRUCTOR cursor; an implicit default
+        // constructor is invisible to it, so this class would otherwise
+        // never get a registered .constructor<>() at all and could never
+        // be reconstructed from a saved "type": "ViewStyle" tag (e.g.
+        // behind a View::style() slot - see FlexLayout's own comment,
+        // layout.h, for the fuller reasoning behind this same fix applied
+        // there first).
+        ViewStyle() = default;
         virtual ~ViewStyle() = default;
 
         
@@ -278,6 +288,10 @@ namespace newui {
     // ViewStyle::highlightFill.
     class ButtonStyle : public ViewStyle {
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // see ViewStyle's own comment above for why.
+        ButtonStyle() = default;
+
         Edge3DStyle edgeStyle = Edge3DStyle::Raised;
         float edgeWidth = 2.0f;
         BLVar edgeHighlightColor;
@@ -404,6 +418,10 @@ namespace newui {
     // checkmark drawn inside it when checked is true.
     class CheckBoxStyle : public ViewStyle {
     public:
+        // Explicit, not relying on the implicit compiler-generated one -
+        // see ViewStyle's own comment above for why.
+        CheckBoxStyle() = default;
+
         bool checked = false;
         float boxSize = 13.0f;
         Edge3DStyle boxEdgeStyle = Edge3DStyle::Sunken;

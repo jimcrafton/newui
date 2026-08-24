@@ -54,8 +54,39 @@ namespace newui {
             return bounds_;
         }
 
+        // Virtual (not pure - reflectgen's collect_class() skips pure
+        // virtual methods outright, is_pure_virtual_method(), so a `= 0`
+        // here would stay invisible to it exactly like having no
+        // declaration at all) so reflectgen sees a real getter+setter pair
+        // on View itself and registers "bounds" as a genuinely read/write
+        // property - before this, View::bounds() had no matching setter
+        // reflectgen could see in the same class scan (SubView::
+        // setBounds()/RootView::setBounds() are declared on the *derived*
+        // classes, a separate scan pass), so reflectgen registered
+        // "bounds" read-only, and Bundle::loadFrame()/loadView() silently
+        // left every reconstructed View's bounds() at Rect{}'s default -
+        // real, reproduced bug (Bundle test
+        // LoadFrameAppliesBoundsAndVisibleOntoRebuiltChildren). This base
+        // body is never actually reached in practice (View itself is
+        // never directly instantiated - SubView::setBounds()/
+        // RootView::setBounds() both override it with the real onSizeChanged()/
+        // updateLayout()-or-HWND-resize behavior the class comment above
+        // describes) - it exists purely so View stays concrete (matching
+        // its own already-registered reflectgen `.constructor<>()`) and a
+        // bare View, if one were ever constructed, still behaves sanely
+        // rather than silently ignoring setBounds() altogether.
+        virtual void setBounds(const Rect& bounds) {
+            bounds_ = bounds;
+        }
+
         bool isVisible() const {
             return visible_;
+        }
+
+        // Same reasoning as setBounds() above, and the same real bug it
+        // fixed - "visible" had exactly the same getter-only-on-View shape.
+        virtual void setVisible(bool visible) {
+            visible_ = visible;
         }
 
         // If this View is already attached to a RootView (rootView() !=

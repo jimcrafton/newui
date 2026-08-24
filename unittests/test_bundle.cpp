@@ -4,14 +4,18 @@
 #include "newui/controls.h"
 #include "newui/dialogs.h"
 #include "newui/frame.h"
+#include "newui/layout.h"
 #include "newui/property.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
 #include "newui/view.h"
+#include "newui/viewstyle.h"
 
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <memory>
+#include <typeindex>
 
 // Bundle::resourcesDir() won't already exist under a fresh build's output
 // directory - tests that need an on-disk resource create/remove it
@@ -118,6 +122,77 @@ TEST_F(NewuiFileFixture, LoadFrameAppliesTitleAndRebuildsRootViewChildren) {
     EXPECT_EQ(frame.getTitle(), "Loaded Title");
     ASSERT_EQ(frame.rootView().childViews().size(), 1u);
     EXPECT_EQ(frame.rootView().childViews()[0]->name(), "child1");
+}
+
+TEST_F(NewuiFileFixture, LoadFrameAppliesBoundsAndVisibleOntoRebuiltChildren) {
+    writeFile("BundleTestFrame1b", R"({
+        type: "Frame",
+        title: "Loaded Title",
+        name: "BundleTestFrame1b",
+        rootView: {
+            type: "RootView",
+            bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 464, height: 221 } },
+            childViews: [
+                { type: "SubView",
+                  bounds: { type: "Rect", pos: { type: "Point", x: 16, y: 16 }, size: { type: "Size", width: 432, height: 24 } },
+                  visible: true, name: "child1" },
+            ],
+        },
+    })");
+
+    newui::Frame frame;
+    frame.setName("BundleTestFrame1b");
+
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(frame));
+
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    newui::SubView* child = frame.rootView().childViews()[0];
+    EXPECT_TRUE(child->isVisible());
+    EXPECT_FLOAT_EQ(child->bounds().pos().x, 16.0f);
+    EXPECT_FLOAT_EQ(child->bounds().pos().y, 16.0f);
+    EXPECT_FLOAT_EQ(child->bounds().size().width, 432.0f);
+    EXPECT_FLOAT_EQ(child->bounds().size().height, 24.0f);
+}
+
+// Real, reproduced bug (HANDOFF.md's entry on making View::layout()/
+// style() genuinely reflected properties): a saved document that
+// predates "style"/"layout" becoming reflected (or was hand-written
+// without them) has no "style" key at all for a freshly-reconstructed
+// child - TypedClass<T>::read()'s own fallback (no resolved-subclass
+// "type" tag found under a missing key, fall back to ValueT's own Class)
+// used to unconditionally createInstance() a *blank* ViewStyle and
+// overwrite whatever real style the child's own C++ constructor had
+// already set up (e.g. Button's real ButtonStyle) - accidentally
+// harmless only while ViewStyle itself had no registered zero-arg
+// constructor (createInstance() silently failed, leaving the real style
+// alone by luck, not by design). Real crash this caused live:
+// Button::paint() reading a field ButtonStyle has but base ViewStyle
+// doesn't, off the just-substituted blank object.
+TEST_F(NewuiFileFixture, LoadFrameLeavesAFreshChildsOwnConstructorSetStyleAloneWhenTheDocumentHasNone) {
+    writeFile("BundleTestFrameNoStyle", R"({
+        type: "Frame",
+        name: "BundleTestFrameNoStyle",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "Button", name: "plainButton" },
+            ],
+        },
+    })");
+
+    newui::Frame frame;
+    frame.setName("BundleTestFrameNoStyle");
+
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(frame));
+
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    newui::SubView* button = frame.rootView().childViews()[0];
+    // Button::Button() (controls.cpp) sets up a real ThemedButtonStyle -
+    // typeid(), not dynamic_cast<ButtonStyle*>, since ThemedButtonStyle
+    // isn't a ButtonStyle subclass at all (a separate ThemedViewStyle-
+    // derived branch) - the point here is just "not the blank base
+    // ViewStyle a wrongly-reconstructed style would be".
+    EXPECT_NE(std::type_index(typeid(button->style())), std::type_index(typeid(newui::ViewStyle)));
 }
 
 TEST_F(NewuiFileFixture, LoadFrameFailsWithNoNameSet) {
@@ -272,6 +347,46 @@ TEST_F(NewuiFileFixture, WriteViewFailsWithEmptyName) {
     EXPECT_FALSE(newui::Bundle::instance().writeView(panel, ""));
 }
 
+// Real, previously-not-reflected-at-all properties (HANDOFF.md's entry on
+// teaching ClassBuilder::property()/reflectgen to pair a T*-or-T&-
+// returning getter against an ownership-taking std::unique_ptr<T> setter -
+// View::layout()/setLayout(), View::style()/setStyle()) - round-tripped
+// through the same real Bundle::writeView()/loadView() path the plain
+// tree-structure tests above already use, not just "the build didn't
+// break".
+TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
+    trackFile("BundleWriteLayoutStyle");
+
+    newui::SubView panel;
+    panel.setName("layoutStylePanel");
+    auto flex = std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal);
+    flex->setSpacing(7.0f);
+    flex->setPadding(3.0f);
+    panel.setLayout(std::move(flex));
+
+    auto label = std::make_unique<newui::LabelStyle>();
+    label->text = "Hello from style()";
+    panel.setStyle(std::move(label));
+
+    ASSERT_TRUE(newui::Bundle::instance().writeView(panel, "BundleWriteLayoutStyle"));
+
+    newui::View* reloaded = newui::Bundle::instance().loadView("BundleWriteLayoutStyle");
+    ASSERT_NE(reloaded, nullptr);
+
+    auto* reloadedLayout = dynamic_cast<newui::FlexLayout*>(reloaded->layout());
+    ASSERT_NE(reloadedLayout, nullptr);
+    EXPECT_EQ(reloadedLayout->orientation(), newui::Orientation::Horizontal);
+    EXPECT_FLOAT_EQ(reloadedLayout->spacing(), 7.0f);
+    EXPECT_FLOAT_EQ(reloadedLayout->padding(), 3.0f);
+
+    auto* reloadedStyle = dynamic_cast<newui::LabelStyle*>(&reloaded->style());
+    ASSERT_NE(reloadedStyle, nullptr);
+    EXPECT_EQ(reloadedStyle->text, "Hello from style()");
+
+    reloaded->destroy();
+    delete reloaded;
+}
+
 // ---------------------------------------------------------------------
 // Animation persistence - see HANDOFF.md's own entry on this pass. Round-
 // trips a real Animation targeting a real View-tree property (Slider::
@@ -310,6 +425,22 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAnAnimationTargetingAR
     ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
     newui::Slider* reloadedSlider = static_cast<newui::Slider*>(reloaded.rootView().childViews()[0]);
     EXPECT_EQ(reloadedSlider->name(), "mySlider");
+
+    // Real, reproduced bug (HANDOFF.md's entry on making View::layout()/
+    // style() genuinely reflected properties, which is what first
+    // exposed this): Slider's own constructor already builds and
+    // addChild()'s a real thumb_ before any reflection reading starts -
+    // childViews' add-only reconstruction used to have no way to know
+    // that, and added a second (then third, ...) duplicate thumb on
+    // every loadFrame() call. Exactly one child expected here, and it
+    // should be the SAME object Slider::thumb() itself already points
+    // at (identity preserved, not a fresh unrelated reconstruction) -
+    // this specific slider round-trips its own style() too (a real
+    // ThemedTrackbarThumbStyle on the thumb), which is what originally
+    // crashed: reconstructing thumb's style via a fresh new/delete cycle
+    // left Slider's own non-owning thumbStyle_ pointer dangling.
+    ASSERT_EQ(reloadedSlider->childViews().size(), 1u);
+    EXPECT_EQ(reloadedSlider->childViews()[0], reloadedSlider->thumb());
 
     ASSERT_EQ(newui::AnimationManager::animations().size(), 1u);
     newui::Animation* reloadedAnim = newui::AnimationManager::animations()[0].get();

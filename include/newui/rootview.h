@@ -24,8 +24,8 @@ namespace newui {
         RootView(Frame* frame, const newui::Rect& bounds, const std::string& name);
         virtual ~RootView();
 
-        void setBounds(const Rect& bounds);
-        void setVisible(bool visible);
+        void setBounds(const Rect& bounds) override;
+        void setVisible(bool visible) override;
 
         typedef Delegate<RootView> RedrawNeededDelegate;
 

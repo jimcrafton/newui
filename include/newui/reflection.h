@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -90,6 +91,30 @@ namespace newui::reflection {
 
         virtual const Class* beginObject(const std::string& name)  = 0;
         virtual void endObject(const std::string& name, const Class* clazz) = 0;
+
+        // True if propertyName actually has real data in the *source*
+        // right now (as opposed to "there was nothing there at all, but
+        // ValueT happens to be default-constructible so something could
+        // be conjured up anyway") - defaults to true (every existing
+        // ClassReader implementation that never overrides this keeps its
+        // exact prior behavior: always attempt the read). Only
+        // TypedProperty<SourceT,ValueT>::read()'s shouldCreateOnHeap()
+        // branch (reflection.h) consults this, and only to decide whether
+        // to skip reconstruction entirely rather than overwrite an
+        // already-live value with a fresh, blank default one - needed
+        // once a PtrGetter/PtrSetter-backed nested-Class property (e.g.
+        // View::layout()/style()) can genuinely be *absent* from a
+        // document (an older file predating this property becoming
+        // reflected, or one written by hand) while ValueT itself is
+        // default-constructible: without this check, TypedClass<T>::
+        // read()'s own "no resolved subclass tag found, fall back to
+        // ValueT's own Class" path still unconditionally calls
+        // createInstance() and hands the result to set() - real,
+        // reproduced bug (a Button's carefully-constructed ButtonStyle,
+        // complete with its own real Font, silently replaced by a blank
+        // default ViewStyle on load, crashing the next paint() reading a
+        // field that base ViewStyle doesn't have).
+        virtual bool hasValue(const std::string& propertyName) const { return true; }
 
 
         virtual void readInt(const std::string& propertyName, std::int32_t& val) = 0;
@@ -929,7 +954,29 @@ namespace newui::reflection {
             if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
                 if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
-                        nestedClazz->write(nestedPtr, writer, this->name());
+                        // Resolve the *actual* runtime Class of whatever's
+                        // really at nestedPtr, not just ValueT's own
+                        // (possibly base) Class - matters whenever the
+                        // live object could be a genuine polymorphic
+                        // subclass (e.g. a real FlexLayout behind a
+                        // View::layout() -> Layout* slot) - same "the real
+                        // type, not the declared one" resolution
+                        // TypedPropertyCollection::writeItem() already
+                        // does for a polymorphic pointer collection
+                        // element (typeid(*elementPtr), not elementType()'s
+                        // static declared type). Harmless, not just safe,
+                        // for every case that *isn't* actually polymorphic
+                        // in practice today (a member_-backed property's
+                        // storage can only ever literally be ValueT -
+                        // object slicing rules out anything else - so
+                        // typeid() here just resolves back to ValueT's own
+                        // type, same as nestedClazz already is): no need
+                        // to special-case which addressability mode this
+                        // came from. Falls back to nestedClazz itself if
+                        // the pointee's real runtime type was never
+                        // registered.
+                        const Class* runtimeClazz = classinfo(typeid(*static_cast<ValueT*>(nestedPtr)));
+                        (runtimeClazz != nullptr ? runtimeClazz : nestedClazz)->write(nestedPtr, writer, this->name());
                     }
                 } else if constexpr (kCopyable) {
                     if (std::any boxed = get(instancePtr); boxed.has_value()) {
@@ -977,6 +1024,60 @@ namespace newui::reflection {
                 // through here instead of silently doing nothing just
                 // because ValueT as a whole can't be copied.
                 if (shouldCreateOnHeap()) {
+                    // hasValue() first - see its own doc comment
+                    // (ClassReader, reflection.h) for the real, reproduced
+                    // bug this guards against: without it, a property
+                    // that's simply *absent* from the source (an older
+                    // document predating this property becoming
+                    // reflected, or one written by hand) but whose ValueT
+                    // happens to be default-constructible would still get
+                    // unconditionally reconstructed from scratch below and
+                    // overwrite whatever real, already-live value this
+                    // property currently holds - never reads into
+                    // existing storage the way isAddressable()'s branch
+                    // does, so there is no "safe" version of that for a
+                    // PtrGetter/PtrSetter property; skipping entirely,
+                    // leaving the existing value untouched, is the only
+                    // correct response to "nothing here to read".
+                    if (!reader->hasValue(name())) {
+                        return;
+                    }
+                    // If there's already a live value here - ptrGetter_
+                    // makes shouldCreateOnHeap() mode addressable too, so
+                    // address() finds it (e.g. a Slider's thumb_ already
+                    // has its own real ThemedTrackbarThumbStyle from
+                    // Slider's own constructor, before any reading ever
+                    // starts) - peek the saved data's resolved runtime
+                    // type first (a throwaway beginObject()/endObject()
+                    // pair; side-effect-free and safe to repeat for a
+                    // *keyed* - not array-positional - lookup) and compare
+                    // it against the existing value's own real type:
+                    //   - same type: read the saved data straight INTO
+                    //     the existing object instead of constructing a
+                    //     new one - the existing object's *identity*
+                    //     never changes, so anything else non-owningly
+                    //     pointing at it (e.g. Slider::thumbStyle_) stays
+                    //     valid. Real, reproduced bug without this:
+                    //     reconstructing thumb_'s style via a fresh
+                    //     new/delete cycle left thumbStyle_ dangling,
+                    //     crashing the next time Slider touched it.
+                    //   - different type, or no live value yet: fall
+                    //     through to the ordinary construct-fresh-and-
+                    //     set() path below - a genuine type change has to
+                    //     replace the object; nothing else can safely
+                    //     have been relying on the old one's identity
+                    //     anyway.
+                    if (void* existingPtr = address(instancePtr); existingPtr != nullptr) {
+                        const Class* resolvedClazz = reader->beginObject(name());
+                        reader->endObject(name(), resolvedClazz);
+                        if (resolvedClazz != nullptr &&
+                                resolvedClazz == classinfo(typeid(*static_cast<ValueT*>(existingPtr)))) {
+                            std::any existing(static_cast<ValueT*>(existingPtr));
+                            bool onHeap = false;
+                            nestedClazz->read(reader, name(), existing, onHeap);
+                            return;
+                        }
+                    }
                     // raw (a type-erased void*), not
                     // std::any_cast<ValueT*>(fresh) - fresh may hold a
                     // more-derived pointer than ValueT (nestedClazz->
@@ -1440,6 +1541,40 @@ namespace newui::reflection {
         void readAndAddItem(void* instance, std::size_t index, ClassReader* reader) const override {
             std::any idx(index);
             reader->beginElement(idx, std::any());
+
+            // If the owning object already has an element at this
+            // position - its own constructor may already have built and
+            // add()'d it (e.g. Slider's own thumb_, controls.cpp) before
+            // any reading ever starts - read the saved data straight INTO
+            // that same, already-live object instead of constructing a
+            // brand new one and add()'ing it as an *additional* child.
+            // Without this, every load duplicates any child a constructor
+            // already built - real, reproduced case: Slider's own thumb_
+            // doubling (then tripling, ...) on every successive
+            // loadFrame() call, self-compounding once the loaded-and-
+            // duplicated tree gets written back out - see HANDOFF.md.
+            // Position-based, not name-based: mirrors readItem()'s own
+            // "index < count -> update in place, else grow" split (just
+            // above) that the non-add/remove collection shape already
+            // relies on for the same reason. Only meaningful for a
+            // pointer-typed element - a value-typed one is never
+            // independently constructed by anything but the Reader
+            // itself, so there is never a pre-existing instance to reuse.
+            if constexpr (std::is_pointer_v<ElementT>) {
+                if (countFn_ && getAtFn_ && index < countFn_(*static_cast<SourceT*>(instance))) {
+                    if (ElementT existing = getAtFn_(*static_cast<SourceT*>(instance), index); existing != nullptr) {
+                        using PointeeT = std::remove_pointer_t<ElementT>;
+                        if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
+                            std::any existingBoxed(existing);
+                            bool onHeap = false;
+                            nestedClazz->read(reader, "", existingBoxed, onHeap);
+                        }
+                        reader->endElement(idx, std::any());
+                        return;
+                    }
+                }
+            }
+
             if (std::any fresh = readFreshElement(reader); fresh.has_value()) {
                 add(instance, fresh);
             }
@@ -2749,14 +2884,63 @@ namespace newui::reflection {
         ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr) {
             using RawResult = std::invoke_result_t<GetterT, T&>;
 
-            if constexpr (std::is_pointer_v<RawResult>) {
-                using ValueT = std::remove_pointer_t<RawResult>;
+            // A non-const T&-returning getter paired with a setter that
+            // takes ownership via std::unique_ptr<T> (e.g. View::style()/
+            // setStyle()) is handled exactly the way a T*-returning getter
+            // already is below - PtrGetter/PtrSetter, addressable
+            // regardless of setter presence, polymorphic-reconstruction-
+            // aware on read/write - just adapted via `&` since the getter
+            // itself returns a reference, not a pointer. Never true for a
+            // *const* T& (excluded the same way the plain RefGetter/no-
+            // setter case in the else branch below already excludes
+            // const), a getter with no setter at all, or a setter that
+            // doesn't actually take std::unique_ptr<T> - all of those
+            // still want the ordinary addressable-RefGetter/by-value-copy
+            // handling in the else branch below, unchanged.
+            constexpr bool isOwningRefGetter =
+                std::is_lvalue_reference_v<RawResult> &&
+                !std::is_const_v<std::remove_reference_t<RawResult>> &&
+                std::is_invocable_v<SetterT, T&, std::unique_ptr<std::remove_reference_t<RawResult>>>;
+
+            if constexpr (std::is_pointer_v<RawResult> || isOwningRefGetter) {
+                using ValueT = std::conditional_t<std::is_pointer_v<RawResult>,
+                    std::remove_pointer_t<RawResult>, std::remove_reference_t<RawResult>>;
                 using Prop = TypedProperty<T, ValueT, AssumeCopyable>;
-                typename Prop::PtrGetter ptrGetter =
-                    [getter](T& self) -> ValueT* { return std::invoke(getter, self); };
+                typename Prop::PtrGetter ptrGetter;
+                if constexpr (std::is_pointer_v<RawResult>) {
+                    ptrGetter = [getter](T& self) -> ValueT* { return std::invoke(getter, self); };
+                } else {
+                    ptrGetter = [getter](T& self) -> ValueT* { return &std::invoke(getter, self); };
+                }
                 typename Prop::PtrSetter ptrSetter = nullptr;
-                if constexpr (!std::is_same_v<SetterT, std::nullptr_t>) {
+                if constexpr (std::is_invocable_v<SetterT, T&, ValueT*>) {
+                    // The ordinary case - a real pointer-reassignment
+                    // setter (e.g. `void Application::setFrame(Frame*)`),
+                    // non-owning: this property doesn't take ownership of
+                    // what it's pointed at, it's just told to point
+                    // somewhere else.
                     ptrSetter = [setter](T& self, ValueT* value) { std::invoke(setter, self, value); };
+                } else if constexpr (std::is_invocable_v<SetterT, T&, std::unique_ptr<ValueT>>) {
+                    // A setter that takes ownership instead (e.g. `void
+                    // View::setLayout(std::unique_ptr<Layout>)`) - value
+                    // here is either a just-createInstance()'d object (a
+                    // Reader building this property fresh, possibly of a
+                    // polymorphic subclass the getter's own static ValueT
+                    // never names - see TypedProperty::read()'s
+                    // shouldCreateOnHeap() branch) or whatever the getter
+                    // itself is currently returning (a caller building a
+                    // std::any(ValueT*) by hand around a live pointer, the
+                    // ordinary write path never does this) - either way,
+                    // wrapping it in a *fresh* std::unique_ptr here and
+                    // handing that to the real setter is exactly the same
+                    // ownership transfer std::move(std::make_unique<...>())
+                    // at the call site would have done, just via a raw
+                    // pointer instead of a temporary named further back -
+                    // never a double-own/double-free, since nothing else
+                    // ever holds this exact pointer as a second owner.
+                    ptrSetter = [setter](T& self, ValueT* value) {
+                        std::invoke(setter, self, std::unique_ptr<ValueT>(value));
+                    };
                 }
                 class_->properties_.push_back(new Prop(std::move(name), scope, std::move(ptrGetter), std::move(ptrSetter)));
             } else {

@@ -334,6 +334,28 @@ namespace newui::reflection {
             cursorStack.push_back(0);
             return node.is_object() ? classinfo(std::string(node["type"].get_c_str(""))) : nullptr;
         }
+        // See ClassReader::hasValue()'s own doc comment for why this
+        // exists and who consults it. Only meaningful for a *keyed*
+        // scalar/object within the current object scope - not called for
+        // a collection element (those are always genuinely present, by
+        // construction, or beginCollection()'s own count wouldn't include
+        // them), so this doesn't need name.empty()'s positional-cursor
+        // handling the way beginObject()/valueFor() do.
+        bool hasValue(const std::string& propertyName) const override {
+            // NOT `!stack.back()[propertyName].is_null()` - json5::value's
+            // default constructor (json5.hpp) leaves its NaN-boxed
+            // union genuinely *uninitialized* (no in-class member
+            // initializer backs it), and object_view::operator[]'s own
+            // "key not found" fallback is exactly that default-
+            // constructed value() - so is_null() on a missing key is
+            // reading uninitialized memory, not a reliable null check
+            // (confirmed live: consistently, wrongly, true). find() !=
+            // end() is the real "is this key actually present" answer
+            // object_view exposes.
+            json5::object_view obj(stack.back());
+            return obj.is_valid() && obj.find(propertyName) != obj.end();
+        }
+
         void endObject(const std::string&, const Class*) override {
             stack.pop_back();
             cursorStack.pop_back();

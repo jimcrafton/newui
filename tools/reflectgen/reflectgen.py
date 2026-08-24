@@ -263,6 +263,25 @@ def reflectable_collection_element_type(clang_type):
     return canon.get_template_argument_type(idx)
 
 
+# Same clang-API shape as reflectable_collection_element_type() just above
+# (canonical type -> declaration -> qualified-name check -> template
+# argument), for the one-element std::unique_ptr<T> case specifically -
+# used by collect_property_accessors() below to recognize a `T* getter()`
+# + `void setSomething(std::unique_ptr<T>)` pair as a real, legitimate
+# property (an "observe via a plain pointer, but the setter takes
+# ownership - possibly of a polymorphic subclass" shape, e.g.
+# View::layout()/setLayout(), SubView::layoutParams()/setLayoutParams())
+# rather than rejecting it as a getter/setter type mismatch the way an
+# unrelated pair genuinely would be. Returns None for anything that isn't
+# std::unique_ptr<T>.
+def unique_ptr_element_type(clang_type):
+    canon = clang_type.get_canonical()
+    decl = canon.get_declaration()
+    if qualified_name(decl) != "std::unique_ptr" or canon.get_num_template_arguments() < 1:
+        return None
+    return canon.get_template_argument_type(0)
+
+
 def is_deleted(cursor):
     tokens = [t.spelling for t in cursor.get_tokens()]
     return "delete" in tokens[-3:]
@@ -907,14 +926,29 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
 
         setter_names = setter_names_by_stem.get(stem, [])
         setter_cursor = None
+        is_owning_setter = False
         if len(setter_names) == 1:
             setter_candidates = [
                 c for c in method_cursors_by_name[setter_names[0]]
-                if c.access_specifier == AccessSpecifier.PUBLIC and is_setter_shaped(c)
+                if c.access_specifier == AccessSpecifier.PUBLIC
+                and is_setter_shaped(c)
+                # "@reflect ignore=true" directly above the setter opts
+                # *only* the read/write pairing out, same escape hatch the
+                # getter side already has above - the getter still becomes
+                # a real, read-only Property (e.g. Rect::left()/setLeft() -
+                # setLeft() is a redundant alias for pos_.x, not
+                # independent state; letting it round-trip separately from
+                # "pos" meant ObjectReader::read()'s per-property walk
+                # applied "pos" correctly and then immediately clobbered
+                # it again with "left"'s own value - 0 whenever a document
+                # doesn't happen to also carry "left" itself. Silently
+                # excluded here, not warned about below - this is a
+                # deliberate opt-out, not an ambiguity.
+                and reflect_annotations(c).get("ignore", "").lower() != "true"
             ]
             if len(setter_candidates) == 1:
                 setter_cursor = setter_candidates[0]
-            else:
+            elif len(setter_candidates) > 1:
                 sys.stderr.write(
                     f"reflectgen: '{class_name}.{setter_names[0]}' has {len(setter_candidates)} "
                     f"overloads - ambiguous which is the setter for '{stem}'; registered read-only.\n"
@@ -941,14 +975,64 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
         if setter_cursor is not None:
             setter_arg = next(setter_cursor.get_arguments())
             setter_arg_type = setter_arg.type.spelling
-            if normalize_type_spelling(setter_arg_type) != normalize_type_spelling(getter_cursor.result_type.spelling):
+            getter_result = getter_cursor.result_type
+
+            # T* getter (or a non-const T& getter - see below) +
+            # std::unique_ptr<T> setter (by value) is a real, legitimate
+            # property shape, not a mismatch - "observe via a plain,
+            # always-addressable pointer or reference, but the setter
+            # takes ownership (of what may be a freshly-constructed,
+            # polymorphic subclass instance) instead of copying a value in
+            # place", e.g. View::layout()/setLayout(), SubView::
+            # layoutParams()/setLayoutParams(), View::style()/setStyle().
+            # ClassBuilder::property()'s pointer-or-owning-reference branch
+            # (reflection.h) recognizes this exact shape itself at compile
+            # time (std::is_invocable_v against std::unique_ptr<ValueT> as
+            # a fallback from the plain-ValueT*/ValueT& case) and wraps
+            # both the getter (via `&` when it's a reference) and the
+            # setter call accordingly - this check only needs to let it
+            # through here instead of rejecting it below, either as
+            # "doesn't match" (a unique_ptr is never itself spelled the
+            # same as the bare pointer/reference the getter returns) or as
+            # "not copy-constructible" (a unique_ptr deliberately never is -
+            # irrelevant here, since nothing gets copied; ownership is
+            # transferred exactly once). A *const* T& getter doesn't
+            # qualify - see reflection.h's own addressable-reference
+            # comment for why const excludes it the same way it already
+            # does for the no-setter RefGetter case.
+            unique_ptr_of = unique_ptr_element_type(setter_arg.type)
+            is_owning_setter = (
+                (
+                    getter_result.kind == cindex.TypeKind.POINTER
+                    or (
+                        getter_result.kind == cindex.TypeKind.LVALUEREFERENCE
+                        and not getter_result.get_pointee().is_const_qualified()
+                    )
+                )
+                and unique_ptr_of is not None
+                # qualify_type_spelling(), not a bare .spelling comparison -
+                # a template argument type extracted via
+                # get_template_argument_type() (unique_ptr_of here) tends
+                # to come back more fully-qualified than the getter's own
+                # in-context pointee spelling (e.g. "newui::Layout" vs
+                # "Layout", the latter unqualified because it's spelled
+                # from inside namespace newui itself) - same qualification
+                # mismatch qualify_type_spelling()'s own doc comment
+                # already describes for codegen; needed here too so this
+                # comparison isn't fooled into treating the identical type
+                # as two different ones.
+                and normalize_type_spelling(qualify_type_spelling(unique_ptr_of))
+                    == normalize_type_spelling(qualify_type_spelling(getter_result.get_pointee()))
+            )
+
+            if not is_owning_setter and normalize_type_spelling(setter_arg_type) != normalize_type_spelling(getter_result.spelling):
                 sys.stderr.write(
                     f"reflectgen: '{class_name}.{setter_cursor.spelling}' takes '{setter_arg_type}', which "
                     f"doesn't match getter '{getter_name}''s return type '{getter_cursor.result_type.spelling}' "
                     f"- not a real setter for '{stem}'; registered read-only.\n"
                 )
                 setter_cursor = None
-            elif (
+            elif not is_owning_setter and (
                 setter_arg.type.kind not in (cindex.TypeKind.LVALUEREFERENCE, cindex.TypeKind.RVALUEREFERENCE)
                 and not is_copy_constructible(setter_arg.type)
             ):
@@ -1029,7 +1113,14 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             is_addressable_getter = (
                 getter_result_type.kind == cindex.TypeKind.LVALUEREFERENCE
                 and not value_type.is_const_qualified()
-                and setter_cursor is None
+                # No setter at all (the plain RefGetter, edit-in-place
+                # case, e.g. MenuItem& root()) - or a setter, but only the
+                # is_owning_setter shape (View::style()/setStyle()) that
+                # PtrGetter/PtrSetter mode handles too, same as a pointer
+                # getter already always is regardless of setter presence.
+                # Any *other* real setter still means "plain by-value
+                # copy property", same as before.
+                and (setter_cursor is None or is_owning_setter)
             )
         else:
             value_type = getter_result_type
