@@ -116,6 +116,28 @@ namespace newui::reflection {
         // field that base ViewStyle doesn't have).
         virtual bool hasValue(const std::string& propertyName) const { return true; }
 
+        // The resolved runtime Class (via its "type" tag) of whichever
+        // collection element the *current* array position holds - unlike
+        // beginObject(""), which also consumes/advances that position (it
+        // has to: a scalar or object-typed element both go through it to
+        // actually get read), this only looks, never advances - safe to
+        // call any number of times, including zero, before the real
+        // beginObject("") that actually reads the element. Defaults to
+        // nullptr (every existing ClassReader implementation that never
+        // overrides this keeps its exact prior behavior: "unknown type").
+        // Only TypedPropertyCollection::readAndAddItem() (reflection.h)
+        // consults this, to decide whether an already-existing element at
+        // this position (e.g. a Slider's own thumb_, built by Slider's
+        // own constructor before any reading starts) is still the same
+        // *kind* of thing the saved data represents - reading mismatched
+        // saved data straight into a wrong-typed live object would be
+        // unsafe, so a genuine type mismatch there replaces the element
+        // instead of reusing it. A null return (type genuinely unknown -
+        // not a real position, or the reader doesn't support peeking) is
+        // treated as "assume it still matches" by that caller, not as a
+        // forced replacement - the conservative direction when there's
+        // nothing definite to compare against.
+        virtual const Class* peekElementType() const { return nullptr; }
 
         virtual void readInt(const std::string& propertyName, std::int32_t& val) = 0;
         virtual void readString(const std::string& propertyName, std::string& val) = 0;
@@ -170,6 +192,26 @@ namespace newui::reflection {
     // own name).
     namespace detail {
         template<typename T> struct ClassAccess;
+    }
+
+    // True when T has a callable, no-argument .destroy() member - used
+    // only by TypedPropertyCollection::readAndAddItem() (below) to decide
+    // whether replacing a stale, wrong-typed existing collection element
+    // needs the "destroy() then delete" two-step this codebase already
+    // uses everywhere else a View-shaped object is torn down (e.g. View::
+    // destroy()'s own childViews_ loop), rather than assuming every
+    // possible ElementT this generic template could ever be instantiated
+    // for has one - View::childViews() (add=addChild remove=removeChild)
+    // is the only real add=/remove=-registered collection in this
+    // codebase today, but this stays a genuine compile-time check instead
+    // of a View-specific assumption baked into otherwise-generic code.
+    namespace detail {
+        template<typename T, typename = void>
+        struct has_destroy_method : std::false_type {};
+        template<typename T>
+        struct has_destroy_method<T, std::void_t<decltype(std::declval<T&>().destroy())>> : std::true_type {};
+        template<typename T>
+        inline constexpr bool has_destroy_method_v = has_destroy_method<T>::value;
     }
 
     // container_traits<ContainerT> - one specialization per STL container
@@ -1561,16 +1603,50 @@ namespace newui::reflection {
             // independently constructed by anything but the Reader
             // itself, so there is never a pre-existing instance to reuse.
             if constexpr (std::is_pointer_v<ElementT>) {
+                using PointeeT = std::remove_pointer_t<ElementT>;
                 if (countFn_ && getAtFn_ && index < countFn_(*static_cast<SourceT*>(instance))) {
                     if (ElementT existing = getAtFn_(*static_cast<SourceT*>(instance), index); existing != nullptr) {
-                        using PointeeT = std::remove_pointer_t<ElementT>;
-                        if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                            std::any existingBoxed(existing);
-                            bool onHeap = false;
-                            nestedClazz->read(reader, "", existingBoxed, onHeap);
+                        // Peek the saved element's resolved runtime type
+                        // WITHOUT consuming/advancing the reader's own
+                        // array-positional cursor (see ClassReader::
+                        // peekElementType()'s own doc comment) and compare
+                        // it against the existing element's real type -
+                        // same type (or genuinely unknown - conservative
+                        // default, see peekElementType()'s own comment on
+                        // why) reads straight into the existing object,
+                        // preserving its identity (e.g. Slider::thumb_
+                        // stays exactly the object Slider itself still
+                        // points at). A real, different type means this
+                        // saved slot is no longer the same *kind* of thing
+                        // (e.g. a hand-edited file) - reading mismatched
+                        // data into the wrong-typed live object would be
+                        // unsafe, so the stale element is detached (via
+                        // the same registered remove() a genuine
+                        // removeChild() call would use - this class is
+                        // generic, never assumed View-shaped) and freed
+                        // (destroy()'d first when ElementT actually has
+                        // one, matching this codebase's own "destroy()
+                        // then delete" convention - see View::destroy()'s
+                        // own childViews_ loop) before falling through to
+                        // construct a proper replacement.
+                        const Class* resolvedClazz = reader->peekElementType();
+                        const Class* existingClazz = classinfo(typeid(*existing));
+                        if (resolvedClazz == nullptr || resolvedClazz == existingClazz) {
+                            if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
+                                std::any existingBoxed(existing);
+                                bool onHeap = false;
+                                nestedClazz->read(reader, "", existingBoxed, onHeap);
+                            }
+                            reader->endElement(idx, std::any());
+                            return;
                         }
-                        reader->endElement(idx, std::any());
-                        return;
+                        if (removeFn_) {
+                            removeFn_(*static_cast<SourceT*>(instance), existing);
+                        }
+                        if constexpr (detail::has_destroy_method_v<PointeeT>) {
+                            existing->destroy();
+                        }
+                        delete existing;
                     }
                 }
             }

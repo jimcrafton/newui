@@ -195,6 +195,54 @@ TEST_F(NewuiFileFixture, LoadFrameLeavesAFreshChildsOwnConstructorSetStyleAloneW
     EXPECT_NE(std::type_index(typeid(button->style())), std::type_index(typeid(newui::ViewStyle)));
 }
 
+// Closes the type-safety gap TypedPropertyCollection::readAndAddItem()'s
+// position-based reuse (bug #4 above) left open: reusing a childViews
+// slot by INDEX alone is only safe if the saved element is still the SAME
+// type as what's already living there. Reloading the same live Frame a
+// second time, with the document now naming a different type at the same
+// childViews[0] position, must not read Button-shaped data into the
+// still-live SubView (or vice versa) - ClassReader::peekElementType()
+// (a side-effect-free peek at the array element's "type" tag) lets
+// readAndAddItem() detect the mismatch and remove+destroy the stale
+// element before constructing a fresh, correctly-typed replacement.
+TEST_F(NewuiFileFixture, LoadFrameReplacesAChildWhoseTypeChangedAtTheSamePosition) {
+    writeFile("BundleTestFrameTypeSwap", R"({
+        type: "Frame",
+        name: "BundleTestFrameTypeSwap",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "child1" },
+            ],
+        },
+    })");
+
+    newui::Frame frame;
+    frame.setName("BundleTestFrameTypeSwap");
+
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(frame));
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    ASSERT_EQ(std::type_index(typeid(*frame.rootView().childViews()[0])), std::type_index(typeid(newui::SubView)));
+
+    writeFile("BundleTestFrameTypeSwap", R"({
+        type: "Frame",
+        name: "BundleTestFrameTypeSwap",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "Button", name: "child1Button" },
+            ],
+        },
+    })");
+
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(frame));
+
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    newui::SubView* replaced = frame.rootView().childViews()[0];
+    EXPECT_EQ(std::type_index(typeid(*replaced)), std::type_index(typeid(newui::Button)));
+    EXPECT_EQ(replaced->name(), "child1Button");
+}
+
 TEST_F(NewuiFileFixture, LoadFrameFailsWithNoNameSet) {
     newui::Frame frame;
     EXPECT_FALSE(newui::Bundle::instance().loadFrame(frame));

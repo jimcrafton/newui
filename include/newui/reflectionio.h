@@ -334,6 +334,21 @@ namespace newui::reflection {
             cursorStack.push_back(0);
             return node.is_object() ? classinfo(std::string(node["type"].get_c_str(""))) : nullptr;
         }
+
+        // See ClassReader::peekElementType()'s own doc comment - looks at
+        // the current array position's own "type" tag without touching
+        // cursorStack (a plain local i, not the `std::size_t&` beginObject()
+        // itself uses to advance), so it's safe to call before the real
+        // beginObject("") that actually consumes this same position.
+        const Class* peekElementType() const override {
+            if (!stack.back().is_array()) {
+                return nullptr;
+            }
+            std::size_t i = cursorStack.back();
+            json5::value node = stack.back()[i];
+            return node.is_object() ? classinfo(std::string(node["type"].get_c_str(""))) : nullptr;
+        }
+
         // See ClassReader::hasValue()'s own doc comment for why this
         // exists and who consults it. Only meaningful for a *keyed*
         // scalar/object within the current object scope - not called for
