@@ -144,6 +144,16 @@ target_include_directories(newui PUBLIC
 # used by UIColorManager::colorFor() for the real Windows accent color.
 target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib)
 
+# Precompiled header
+# ===================
+# Only stable, externally-owned headers live in src/newuicommon_precomp.h
+# (stdlib, vendored blend2d, and newui/newui.h itself, which hasn't changed
+# since the initial commit) - see that file's header comment for why the
+# actively-developed local headers (view.h, subview.h, rootview.h, etc.)
+# are deliberately left out of it. PRIVATE so PCH usage doesn't leak into
+# targets that link against newui.
+target_precompile_headers(newui PRIVATE src/newuicommon_precomp.h)
+
 # Resource bundles
 # =================
 # Copies resourceSourceDir next to target's built .exe as "Resources/" -
