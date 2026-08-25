@@ -116,6 +116,9 @@ add_library(newui STATIC
     "include/newui/reflectionio.h"
     "include/newui/text.h" "src/text.cpp"
     "include/newui/overlay.h" "src/overlay.cpp"
+    "include/newui/action.h"
+    "include/newui/command.h" "src/command.cpp"
+    "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)

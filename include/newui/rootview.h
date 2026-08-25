@@ -159,7 +159,24 @@ namespace newui {
         // this RootView). Set automatically on mouseDown()/
         // mouseDblClick() (clicking a SubView focuses it, clicking empty
         // space clears it), or call this directly for programmatic focus.
+        // A no-op (focusedSubView_ left unchanged, no got/lostFocus
+        // events fire) if the current focusedSubView_'s canResignFocus()
+        // or target's canBecomeFocused() (View::, view.h) returns false.
         void setFocusedSubView(SubView* target);
+
+        // Walks focusedSubView_'s own parent() chain - starting at
+        // focusedSubView_ itself, ending at this RootView - looking for
+        // the first View whose canPerformCommand(cmd)/performCommand(cmd)
+        // (View::, view.h) answers it. This is the actual "responder
+        // chain" entry point: a generic Edit menu Action can call these
+        // without knowing which concrete control type is focused - see
+        // command.h's CommandTable for how a control typically answers.
+        // performCommand() stays void, same as View's own virtual it
+        // overrides (and same as Action::perform()'s own convention) -
+        // call canPerformCommand() first if the caller needs to know
+        // whether anything will actually handle it.
+        bool canPerformCommand(const CommandId& cmd) const;
+        void performCommand(const CommandId& cmd);
 
         // Not reflectgen-registered - same reasoning as hoveredSubView()
         // above; real, reported bad output this one specifically produced

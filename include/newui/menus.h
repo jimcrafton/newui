@@ -1,6 +1,7 @@
 #pragma once
 
 #include "newui/newui.h"
+#include "newui/action.h"
 #include "newui/delegate.h"
 #include "newui/geometry.h"
 #include "newui/subview.h"
@@ -174,6 +175,19 @@ namespace newui {
         typedef Delegate<MenuItem, BLContext&, const Rect&> DrawDelegate;
         DrawDelegate onDraw;
 
+        // Non-owning - see Action's own class comment. Unlike
+        // Control::setAction(), setting this also registers action with
+        // the current Application's RunLoop (Application::instance().
+        // runLoop().registerAction() - see RunLoop::registerAction())
+        // so action's hotkey(), if any, is matched against real
+        // keystrokes - shortcutText above stays purely cosmetic, it's
+        // still on the caller to keep it in sync with action's hotkey()
+        // if both are set.
+        void setAction(Action* action);
+
+        Action* action() { return action_; }
+        const Action* action() const { return action_; }
+
         static std::unique_ptr<MenuItem> Separator() {
             auto item = std::make_unique<MenuItem>();
             item->isSeparator = true;
@@ -223,6 +237,7 @@ namespace newui {
         std::vector<std::unique_ptr<MenuItem>> children_;
         MenuItem* parent_ = nullptr;
         UINT commandId_ = 0;
+        Action* action_ = nullptr;
 
         // The exact HMENU this item was inserted into during the most
         // recent ContextMenu::show() over its parent - needed so

@@ -34,6 +34,8 @@ add_executable(newui_tests
     test_themedata.cpp
     test_shapes.cpp
     test_text.cpp
+    test_command.cpp
+    test_clipboard.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

@@ -1,4 +1,5 @@
 #include "newui/menus.h"
+#include "newui/application.h"
 #include "newui/rootview.h"
 #include "newui/frame.h"
 #include "newui/viewstyle.h"
@@ -93,6 +94,19 @@ public:
     // MenuBar::setMenuItems()).
     newui::MenuItem* menuItem = nullptr;
 
+    // Without this, RootView::mouseDown() unconditionally calls
+    // setFocusedSubView(this) the instant a menu bar button is hit -
+    // before MenuBarButtonClicked() (below) even opens the dropdown -
+    // stealing focus away from whatever document/control the user was
+    // actually working in. A command reached through that dropdown
+    // (Copy, say) that dispatches against "whatever's currently
+    // focused" (RootView::performCommand()) would then silently find
+    // nothing to act on. Real menu bars never take focus away from the
+    // document this way - matches that.
+    bool canBecomeFocused() const override {
+        return false;
+    }
+
     void paint(BLContext& ctx) override {
         if (menuItem == nullptr) {
             return;
@@ -167,6 +181,13 @@ MenuItem* MenuItem::addChild(std::unique_ptr<MenuItem> child) {
     return raw;
 }
 
+void MenuItem::setAction(Action* action) {
+    action_ = action;
+    if (action != nullptr) {
+        Application::instance().runLoop().registerAction(action);
+    }
+}
+
 // --- ContextMenu -----------------------------------------------------
 
 ContextMenu::~ContextMenu() {
@@ -180,6 +201,19 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
     for (auto& childPtr : parentItem.children_) {
         MenuItem& item = *childPtr;
         item.ownerMenu_ = hmenu;
+
+        // An item wired to an Action (setAction()) re-derives its
+        // enabled state fresh every time the menu opens - this is
+        // exactly what Action::update()/onActionUpdated is for ("so a
+        // listener can reconsider whether this Action currently makes
+        // sense", action.h) - so a caller never has to remember to
+        // call state.setEnabled() itself on every focus/content
+        // change; this one call, right before the native item is
+        // built below, is the only place that needs to.
+        if (item.action() != nullptr) {
+            item.action()->update();
+            item.state.setEnabled(item.action()->enabled());
+        }
 
         MENUITEMINFOA mii = {};
         mii.cbSize = sizeof(mii);

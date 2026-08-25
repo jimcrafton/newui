@@ -1,5 +1,6 @@
 #include "newui/rootview.h"
 #include "newui/application.h"
+#include "newui/clipboardmgr.h"
 #include "newui/frame.h"
 #include "newui/subview.h"
 #include "newui/utils.h"
@@ -539,6 +540,13 @@ namespace newui {
 			return;
 		}
 
+		if (focusedSubView_ != nullptr && !focusedSubView_->canResignFocus()) {
+			return;
+		}
+		if (target != nullptr && !target->canBecomeFocused()) {
+			return;
+		}
+
 		if (focusedSubView_ != nullptr) {
 			focusedSubView_->onLostFocus(*focusedSubView_);
 		}
@@ -547,6 +555,37 @@ namespace newui {
 
 		if (focusedSubView_ != nullptr) {
 			focusedSubView_->onGotFocus(*focusedSubView_);
+		}
+	}
+
+	bool RootView::canPerformCommand(const CommandId& cmd) const {
+		// v != this excludes RootView itself from the polymorphic walk -
+		// v->canPerformCommand(cmd) is a virtual call, and this override
+		// *is* View::canPerformCommand for a RootView, so letting the
+		// walk reach `this` and call it polymorphically would re-enter
+		// this same function (a direct child's parent() is this
+		// RootView) - infinite recursion. The explicit
+		// View::canPerformCommand(cmd) call below reaches RootView-as-
+		// leaf's own answer (defaulted false unless a subclass overrides
+		// it) via ordinary non-virtual base dispatch instead.
+		for (View* v = focusedSubView_; v != nullptr && v != this; v = v->parent()) {
+			if (v->canPerformCommand(cmd)) {
+				return true;
+			}
+		}
+		return View::canPerformCommand(cmd);
+	}
+
+	void RootView::performCommand(const CommandId& cmd) {
+		// Same v != this reasoning as canPerformCommand() above.
+		for (View* v = focusedSubView_; v != nullptr && v != this; v = v->parent()) {
+			if (v->canPerformCommand(cmd)) {
+				v->performCommand(cmd);
+				return;
+			}
+		}
+		if (View::canPerformCommand(cmd)) {
+			View::performCommand(cmd);
 		}
 	}
 
@@ -1100,6 +1139,28 @@ namespace newui {
 
 			case WM_KILLFOCUS: {
 				lostFocus();
+				result = true;
+			}
+			break;
+
+			case WM_RENDERFORMAT: {
+				// No OpenClipboard()/CloseClipboard() here - this
+				// message's own documented contract is that the
+				// clipboard is already open and owned by this window
+				// for its duration. See ClipboardManager::
+				// setDelayedRenderer()/handleRenderFormat().
+				ClipboardManager::handleRenderFormat(static_cast<UINT>(wParam));
+				result = true;
+			}
+			break;
+
+			case WM_RENDERALLFORMATS: {
+				// Fired just before this window (the clipboard owner)
+				// is destroyed - unlike WM_RENDERFORMAT, this one does
+				// need its own OpenClipboard()/CloseClipboard(), which
+				// ClipboardManager::handleRenderAllFormats() does
+				// internally.
+				ClipboardManager::handleRenderAllFormats(viewHwnd_);
 				result = true;
 			}
 			break;

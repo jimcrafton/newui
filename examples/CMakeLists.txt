@@ -125,3 +125,15 @@ add_custom_command(TARGET imagefill1 POST_BUILD
 )
 
 
+
+add_executable(command1
+    command1.cpp
+)
+
+target_link_libraries(command1 PRIVATE newui)
+
+add_executable(clipboard1
+    clipboard1.cpp
+)
+
+target_link_libraries(clipboard1 PRIVATE newui)

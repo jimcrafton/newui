@@ -1,8 +1,10 @@
 #include "newui/runloop.h"
+#include "newui/action.h"
 #include "newui/keyboard_constants.h"
 #include "newui/utils.h"
 #include "newui/Application.h"
 #include "newui/Frame.h"
+#include <algorithm>
 #include <bitset>
 
 
@@ -79,7 +81,22 @@ namespace newui {
 
 							int  keyCharVal = 0;
 							int eventType = keUndefined;
-							auto keyMask = translateKeyMask(keyData.keyMask);
+
+							// keyData.keyMask is already newui's own kmShift/
+							// kmCtrl/kmAlt bits (translateKeyEventInfo()
+							// builds it straight from GetAsyncKeyState(), not
+							// a raw Win32 MK_* mask) - do NOT re-run it
+							// through translateKeyMask(), which expects the
+							// mouse-message MK_CONTROL/MK_SHIFT encoding
+							// instead. Doing so corrupts it: kmCtrl (0x4)
+							// collides with MK_SHIFT (0x4), so a real Ctrl
+							// press gets reported as Shift while Ctrl itself
+							// never registers - see the identical fix/comment
+							// on RootView::handleMessage()'s own WM_KEYDOWN
+							// case (rootview.cpp), which hit this same bug
+							// first; this call site (registerAction()'s own
+							// hotkey matching, just below) still had it.
+							auto keyMask = static_cast<std::uint32_t>(keyData.keyMask);
 
 							keyData.VKeyCode = translateVirtualKey(msg.wParam, 0);
 
@@ -96,6 +113,13 @@ namespace newui {
 								//msgConsumed = true
 							}
 
+							for (Action* action : actions_) {
+								if (action->matchesHotkey(static_cast<std::uint32_t>(keyData.VKeyCode), keyMask)) {
+									action->perform();
+									msgConsumed = true;
+									break;
+								}
+							}
 
 							if (msgConsumed) {
 								doTranslateAndDispatch = false;
@@ -234,6 +258,23 @@ namespace newui {
         // Not finished: ::SetTimer()'s own periodic re-arm already
         // schedules the next WM_TIMER at the same interval - nothing
         // further to do here.
+    }
+
+    void RunLoop::registerAction(Action* action) {
+        if (action == nullptr) {
+            return;
+        }
+        if (std::find(actions_.begin(), actions_.end(), action) != actions_.end()) {
+            return;
+        }
+        actions_.push_back(action);
+    }
+
+    void RunLoop::unregisterAction(Action* action) {
+        if (action == nullptr) {
+            return;
+        }
+        actions_.erase(std::remove(actions_.begin(), actions_.end(), action), actions_.end());
     }
 
     void RunLoop::postTaskMsg() const

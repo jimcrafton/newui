@@ -7,6 +7,7 @@
 #include <set>
 
 #include <newui/newui.h>
+#include <newui/action.h>
 #include <newui/controllers.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
@@ -85,12 +86,24 @@ namespace newui {
 
         bool isEnabled() const { return state_.isEnabled(); }
 
+        // Non-owning - see Action's own class comment. Setting this does
+        // not by itself wire this Control's onClick to action's
+        // perform(), nor register action with a RunLoop for hotkey
+        // dispatch (see MenuItem::setAction(), which does register) -
+        // it's just storage a caller can use to keep a Control and the
+        // command it triggers associated with each other.
+        void setAction(Action* action) { action_ = action; }
+
+        Action* action() { return action_; }
+        const Action* action() const { return action_; }
+
     protected:
         Control();
 
     private:
         State state_;
         bool tracking_ = false;
+        Action* action_ = nullptr;
 
         SyncReturn handleTrackingMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleTrackingMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);

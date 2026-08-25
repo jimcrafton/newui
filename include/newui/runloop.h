@@ -11,8 +11,11 @@
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 namespace newui {
+
+class Action;
 
 // A Win32 message-loop-backed run loop. run() pumps the calling thread's
 // message queue; post() enqueues a task from any thread and wakes the loop
@@ -115,6 +118,18 @@ public:
         postQuitMsg();
     }
 
+    // Registers action so run()'s own message pump matches its
+    // hotkey()/hotkeyMask() (see Action::matchesHotkey()) against every
+    // incoming WM_KEYDOWN/WM_SYSKEYDOWN and calls its perform() on a
+    // match - see run()'s WM_KEYDOWN/WM_SYSKEYDOWN case. Not owned - a
+    // caller whose Action is about to be destroyed must unregisterAction()
+    // it first. Registering the same action twice is a no-op.
+    void registerAction(Action* action);
+
+    // Undoes registerAction() - a no-op if action isn't currently
+    // registered (or is nullptr).
+    void unregisterAction(Action* action);
+
     // Runs a nested modal message loop directly on the calling thread -
     // the same reentrant-pump technique any native Win32 modal dialog
     // uses internally - blocking until isDone() returns true. modalHandle
@@ -211,6 +226,12 @@ private:
     // called cross-thread the way tasks_/idleTasks_ do) - no mutex_
     // guarding this one.
     std::unordered_map<TimerHandle, std::function<bool()>> timerTasks_;
+
+    // registerAction()'d Actions - checked against every WM_KEYDOWN/
+    // WM_SYSKEYDOWN in run(). Not owned; see registerAction()'s own doc
+    // comment. Only ever touched from this RunLoop's own thread, same
+    // as timerTasks_ above.
+    std::vector<Action*> actions_;
 
     // Set for the duration of run(), cleared on return - lets the static
     // TimerProc() below find its way back to whichever RunLoop instance

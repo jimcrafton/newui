@@ -6,6 +6,7 @@
 #include <blend2d/blend2d.h>
 
 #include <newui/newui.h>
+#include <newui/command.h>
 #include <newui/cursor.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
@@ -435,6 +436,27 @@ namespace newui {
 		KeyEventDelegate onKeyPress;
         KeyEventDelegate onKeyDown;
         KeyEventDelegate onKeyUp;
+
+        // Asked by RootView::setFocusedSubView() (rootview.h) before
+        // taking focus away from this View / handing it to this View,
+        // respectively - default true (no veto) so existing overrides
+        // are unaffected. Returning false from either leaves
+        // focusedSubView_ unchanged and fires no got/lostFocus event -
+        // e.g. a control mid-validation with an invalid value can
+        // refuse to give up focus until that's resolved.
+        virtual bool canResignFocus() const { return true; }
+        virtual bool canBecomeFocused() const { return true; }
+
+        // Answers whether this View itself (not its children) can
+        // currently carry out cmd - default false, so a View that
+        // doesn't override either of these simply isn't part of the
+        // chain RootView::canPerformCommand()/performCommand()
+        // (rootview.h) walks. A View that wants to answer several
+        // commands typically implements both by forwarding to a
+        // CommandTable member (command.h) rather than writing its own
+        // if/else chain over CommandId.
+        virtual bool canPerformCommand(const CommandId& cmd) const { return false; }
+        virtual void performCommand(const CommandId& cmd) {}
 
         virtual bool initialize();
         virtual void destroy();

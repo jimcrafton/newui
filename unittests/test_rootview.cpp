@@ -468,6 +468,181 @@ TEST(RootViewKeyEvents, KeyEventIsNotRoutedToASubViewWhenNothingIsFocused) {
 }
 
 // ---------------------------------------------------------------------------
+// setFocusedSubView() veto hooks (canResignFocus()/canBecomeFocused()) and
+// the canPerformCommand()/performCommand() responder-chain walk.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class VetoableSubView : public newui::SubView {
+public:
+    bool allowResign = true;
+    bool allowBecome = true;
+
+    bool canResignFocus() const override { return allowResign; }
+    bool canBecomeFocused() const override { return allowBecome; }
+};
+
+class CommandAnsweringSubView : public newui::SubView {
+public:
+    explicit CommandAnsweringSubView(newui::CommandId id) : handledId_(std::move(id)) {}
+
+    int performCount = 0;
+
+    bool canPerformCommand(const newui::CommandId& cmd) const override {
+        return cmd == handledId_;
+    }
+    void performCommand(const newui::CommandId& cmd) override {
+        if (cmd == handledId_) {
+            ++performCount;
+        }
+    }
+
+private:
+    newui::CommandId handledId_;
+};
+
+}  // namespace
+
+TEST(RootViewFocusTransfer, VetoingResignFocusLeavesFocusedSubViewUnchanged) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new VetoableSubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    root->addChild(first);
+
+    auto* second = new newui::SubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    root->addChild(second);
+
+    root->setFocusedSubView(first);
+    ASSERT_EQ(root->focusedSubView(), first);
+
+    first->allowResign = false;
+    root->setFocusedSubView(second);
+
+    EXPECT_EQ(root->focusedSubView(), first);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusTransfer, VetoingBecomeFocusedLeavesFocusedSubViewUnchanged) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    root->addChild(first);
+
+    auto* second = new VetoableSubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    second->allowBecome = false;
+    root->addChild(second);
+
+    root->setFocusedSubView(first);
+    ASSERT_EQ(root->focusedSubView(), first);
+
+    root->setFocusedSubView(second);
+
+    EXPECT_EQ(root->focusedSubView(), first);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusTransfer, AllowingBothTransfersFocusAndFiresEvents) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new VetoableSubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    root->addChild(first);
+
+    auto* second = new VetoableSubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    root->addChild(second);
+
+    root->setFocusedSubView(first);
+
+    int lostCount = 0;
+    int gotCount = 0;
+    first->onLostFocus.add([&lostCount](newui::View&) { ++lostCount; return newui::SyncReturn::Handled; });
+    second->onGotFocus.add([&gotCount](newui::View&) { ++gotCount; return newui::SyncReturn::Handled; });
+
+    root->setFocusedSubView(second);
+
+    EXPECT_EQ(root->focusedSubView(), second);
+    EXPECT_EQ(lostCount, 1);
+    EXPECT_EQ(gotCount, 1);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewCommandDispatch, CanPerformCommandChecksFocusedSubViewFirst) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new CommandAnsweringSubView(newui::commands::copy);
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    root->setFocusedSubView(child);
+
+    EXPECT_TRUE(root->canPerformCommand(newui::commands::copy));
+    EXPECT_FALSE(root->canPerformCommand(newui::commands::paste));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewCommandDispatch, WalksUpParentChainWhenFocusedSubViewDoesNotHandleIt) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* parent = new CommandAnsweringSubView(newui::commands::copy);
+    parent->setBounds(newui::Rect(0, 0, 100, 100));
+    parent->setVisible(true);
+    root->addChild(parent);
+
+    auto* child = new newui::SubView();  // doesn't answer anything itself
+    child->setBounds(newui::Rect(0, 0, 20, 20));
+    child->setVisible(true);
+    parent->addChild(child);
+
+    root->setFocusedSubView(child);
+
+    EXPECT_TRUE(root->canPerformCommand(newui::commands::copy));
+
+    root->performCommand(newui::commands::copy);
+    EXPECT_EQ(parent->performCount, 1);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewCommandDispatch, PerformCommandIsANoOpWhenNothingInTheChainHandlesIt) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    root->setFocusedSubView(child);
+
+    EXPECT_FALSE(root->canPerformCommand(newui::commands::copy));
+    root->performCommand(newui::commands::copy);  // must not throw or crash
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
 // cursorTargetAt() - drives handleMessage()'s WM_SETCURSOR case (a real
 // HWND is needed to test that message handler end-to-end, so this only
 // covers the pure "which View's cursor applies here" logic it delegates
