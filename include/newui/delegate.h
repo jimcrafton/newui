@@ -340,6 +340,16 @@ public:
     }
 
 public:
+    // True if nothing is currently connected - checkable without invoking
+    // anything, e.g. so a caller can decide whether it's worth doing real
+    // work to build the arguments a call would need (COMDropTarget's own
+    // per-View drop negotiation, dragndrop.cpp, checks this against
+    // View::dropTarget()'s delegates before bothering to extract a
+    // payload that's about to go nowhere).
+    bool empty() const {
+        return std::atomic_load(&slots_)->empty();
+    }
+
     // Every currently-connected slot's own descriptor, skipping any that
     // connected through an undescribed add() (empty descriptor - see
     // add(descriptor, Callback)'s own comment) - what

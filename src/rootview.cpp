@@ -1,7 +1,9 @@
 #include "newui/rootview.h"
 #include "newui/application.h"
 #include "newui/clipboardmgr.h"
+#include "newui/dragndrop.h"
 #include "newui/frame.h"
+#include "newui/mouse_constants.h"
 #include "newui/subview.h"
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
@@ -662,6 +664,23 @@ namespace newui {
 		if (target != nullptr) {
 			target->onMouseDown(*target, localPt, btnMask, keyMask);
 		}
+
+		// Arms a potential outgoing drag - only for a left-button press on
+		// a View that actually has a DropSource with something listening
+		// (View::dragSource(), never allocated just by asking - see its
+		// own comment, view.h). mouseMove() below decides whether this
+		// turns into a real drag once the movement threshold is crossed;
+		// always (re)assigned here, including back to nullptr, so a stale
+		// arm from an unrelated earlier press never lingers.
+		DropSource* dragSource = (target != nullptr) ? target->dragSource() : nullptr;
+		bool hasDragPayload = dragSource != nullptr
+			&& (!dragSource->onProvideFiles.empty() || !dragSource->onProvideText.empty());
+		if (hasDragPayload && (btnMask & mbmLeftButton) != 0) {
+			activeDragView_ = target;
+			activeDragLocalPt_ = localPt;
+		} else {
+			activeDragView_ = nullptr;
+		}
 	}
 
 	void RootView::mouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
@@ -676,6 +695,63 @@ namespace newui {
 		if (dispatchTarget != nullptr) {
 			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
 			dispatchTarget->onMouseMove(*dispatchTarget, localPt, btnMask, keyMask);
+		}
+
+		// Outgoing-drag gesture detection - only while a drag is actually
+		// armed (mouseDown() above set this on a View with a DropSource
+		// listener) and the left button is still held. Re-fetches
+		// dragSource() rather than trusting one captured at arm time,
+		// since it's a plain settable pointer application code could in
+		// principle clear mid-gesture.
+		if (activeDragView_ != nullptr) {
+			DropSource* dragSource = activeDragView_->dragSource();
+			if (dragSource == nullptr || (btnMask & mbmLeftButton) == 0) {
+				activeDragView_ = nullptr;
+			} else {
+				Point currentLocalPt = pt - accumulatedOffset(activeDragView_);
+				Point delta = currentLocalPt - activeDragLocalPt_;
+				const float thresholdSquared = 16.0f;  // ~4px - distinguishes a drag from a click
+				if ((delta.x * delta.x + delta.y * delta.y) >= thresholdSquared) {
+					SubView* dragView = activeDragView_;
+					activeDragView_ = nullptr;
+
+					// Files take priority over text, matching DropTarget's
+					// own CF_HDROP-before-CF_UNICODETEXT convention
+					// (dragndrop.h) - only one kind of drag can actually
+					// start per gesture.
+					std::vector<VirtualFile> files;
+					std::wstring text;
+					bool providingFiles = dragSource->onProvideFiles.syncCallFirst(*dragSource, files).handled();
+					bool providingText = !providingFiles
+						&& dragSource->onProvideText.syncCallFirst(*dragSource, text).handled();
+
+					if (providingFiles || providingText) {
+						// DoDragDrop() (inside StartDragOperation()/
+						// StartVirtualFileDrag()) does its own mouse
+						// tracking/capture internally - release this
+						// RootView's own Win32 capture first rather than
+						// leaving two independent capture holders active at
+						// once (capturedSubView_ itself is left as-is;
+						// DoDragDrop() consumes the terminating button-up
+						// directly, so it never sees a matching mouseUp() -
+						// a known, harmless rough edge until this class
+						// learns to let go of its own bookkeeping around a
+						// drag more deliberately).
+						::ReleaseCapture();
+
+						Point windowPt = accumulatedOffset(dragView) + currentLocalPt;
+						POINT ptClient{ static_cast<LONG>(windowPt.x), static_cast<LONG>(windowPt.y) };
+
+						DWORD rawEffect = DROPEFFECT_NONE;
+						if (providingFiles) {
+							StartVirtualFileDrag(windowHandle(), std::move(files), ptClient, DROPEFFECT_COPY, &rawEffect);
+						} else {
+							StartDragOperation(windowHandle(), text, ptClient, DROPEFFECT_COPY, &rawEffect);
+						}
+						dragSource->onDragComplete(*dragSource, toDropEffect(rawEffect));
+					}
+				}
+			}
 		}
 	}
 
@@ -740,6 +816,7 @@ namespace newui {
 		}
 
 		capturedSubView_ = nullptr;
+		activeDragView_ = nullptr;
 
 		if (target != nullptr) {
 			target->onMouseUp(*target, localPt, btnMask, keyMask);
@@ -1275,12 +1352,38 @@ namespace newui {
 	void RootView::viewCreated()
 	{
 		onCreated(*this);
+
+		// Every window gets exactly one real IDropTarget, registered
+		// automatically - see comDropTarget_'s own comment (rootview.h).
+		// RegisterDragDrop() needs OLE initialized on this thread -
+		// RunLoop::run() does that, but only once it actually starts
+		// (Application::run() calls Frame::initialize() - which is what
+		// gets here via WM_CREATE - before runLoop_.run() even begins, so
+		// this genuinely fires first). OleInitialize() is reference-
+		// counted per thread, so calling it again here is safe/idempotent
+		// even once RunLoop::run() goes on to make its own call - matched
+		// by OleUninitialize() in destroy() below. Both OleInitialize()
+		// and RegisterDragDrop() can fail gracefully (a still-not-fatal
+		// stance - same as CoCreateInstance failures throughout
+		// dragndrop.cpp) - comDropTarget_ just stays null either way.
+		if (SUCCEEDED(::OleInitialize(nullptr))) {
+			comDropTarget_ = Microsoft::WRL::Make<COMDropTarget>(*this);
+			if (FAILED(::RegisterDragDrop(viewHwnd_, comDropTarget_.Get()))) {
+				comDropTarget_.Reset();
+				::OleUninitialize();
+			}
+		}
 	}
 
 	void RootView::destroy() {
 		View::destroy();
 
 		if (nullptr != viewHwnd_) {
+			if (comDropTarget_) {
+				::RevokeDragDrop(viewHwnd_);
+				comDropTarget_.Reset();
+				::OleUninitialize();
+			}
 			DestroyWindow(viewHwnd_);
 			viewHwnd_ = nullptr;
 		}

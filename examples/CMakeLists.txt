@@ -137,3 +137,9 @@ add_executable(clipboard1
 )
 
 target_link_libraries(clipboard1 PRIVATE newui)
+
+add_executable(dragdrop1
+    dragdrop1.cpp
+)
+
+target_link_libraries(dragdrop1 PRIVATE newui)

@@ -9,6 +9,7 @@
 #include <newui/command.h>
 #include <newui/cursor.h>
 #include <newui/delegate.h>
+#include <newui/dragndrop.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
 #include <newui/viewstyle.h>
@@ -458,6 +459,26 @@ namespace newui {
         virtual bool canPerformCommand(const CommandId& cmd) const { return false; }
         virtual void performCommand(const CommandId& cmd) {}
 
+        // Per-View association for outgoing/incoming OLE drag-and-drop -
+        // see newui::DropSource/newui::DropTarget's own class comments
+        // (dragndrop.h). Null until explicitly opted into via
+        // setDragSource()/setDropTarget() - most Views never call either,
+        // so this costs nothing beyond one null pointer per View (same
+        // "null until set" convention layout_ already uses below) rather
+        // than every View paying for a DropSource/DropTarget's worth of
+        // Delegates it will never use. COMDropTarget's own per-View
+        // hit-testing walk and RootView's drag-gesture detection both
+        // check these getters directly - neither one ever allocates.
+        // @reflect ignore=true
+        DropSource* dragSource() const { return dragSource_.get(); }
+        // @reflect ignore=true
+        void setDragSource(std::unique_ptr<DropSource> dragSource) { dragSource_ = std::move(dragSource); }
+
+        // @reflect ignore=true
+        DropTarget* dropTarget() const { return dropTarget_.get(); }
+        // @reflect ignore=true
+        void setDropTarget(std::unique_ptr<DropTarget> dropTarget) { dropTarget_ = std::move(dropTarget); }
+
         virtual bool initialize();
         virtual void destroy();
 
@@ -534,6 +555,9 @@ namespace newui {
         Cursor cursor_;
 
         std::unique_ptr<Layout> layout_;
+
+        std::unique_ptr<DropSource> dragSource_;
+        std::unique_ptr<DropTarget> dropTarget_;
 
         std::vector<SubView*> childViews_;
 

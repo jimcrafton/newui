@@ -47,6 +47,13 @@ set(ASMJIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/asmjit CACHE PATH "" FORCE)
 
 add_subdirectory(3rdparty/blend2d)
 
+# WIL - Dependency
+# =================
+# Vendored under 3rdparty/ as a permanent part of the project (microsoft/wil,
+# tag v1.0.260126.7, MIT, header-only) - RAII wrappers (wil::unique_hglobal,
+# wil::com_ptr, etc.) used by the OLE drag-and-drop implementation (see
+# include/newui/dragndrop.h).
+
 # json5 - Dependency
 # ==================
 # Vendored under 3rdparty/ as a permanent part of the project (P-i-N/json5,
@@ -119,6 +126,9 @@ add_library(newui STATIC
     "include/newui/action.h"
     "include/newui/command.h" "src/command.cpp"
     "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
+    "include/newui/dibimage.h" "src/dibimage.cpp"
+    "include/newui/dragndrop.h" "src/dragndrop.cpp"
+    "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
@@ -136,6 +146,7 @@ target_include_directories(newui PUBLIC
     include
     ${CMAKE_CURRENT_BINARY_DIR}/include
     3rdparty/json5/include
+    3rdparty/wil/include
 )
 
 # Ole32/Uuid: COM (CoCreateInstance/CoInitializeEx and the CLSID_FileOpenDialog/
@@ -145,7 +156,9 @@ target_include_directories(newui PUBLIC
 # RegGetValueW, used by UIColorManager::isDarkMode() (uicolormanager.cpp)
 # to read HKCU's AppsUseLightTheme value. Dwmapi: DwmGetColorizationColor,
 # used by UIColorManager::colorFor() for the real Windows accent color.
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib)
+# Shlwapi: SHCreateMemStream, used by VirtualFileDataObject (dragndrop.cpp)
+# to hand Explorer an in-memory CFSTR_FILECONTENTS IStream per virtual file.
+target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib)
 
 # Precompiled header
 # ===================

@@ -1,5 +1,6 @@
 #include "newui/clipboardmgr.h"
 
+#include "newui/dibimage.h"
 #include "newui/rootview.h"
 #include "newui/view.h"
 
@@ -519,28 +520,10 @@ ClipboardManager::DropEffect ClipboardManager::getPreferredDropEffect() {
 }
 
 bool ClipboardManager::setImage(const BLImage& image, View* owner) {
-    if (image.size().w <= 0 || image.size().h <= 0) {
+    std::vector<std::uint8_t> dibBytes;
+    if (!imageToDibBytes(image, dibBytes)) {
         return false;
     }
-
-    BLImageCodec codec;
-    if (codec.find_by_name("BMP") != BL_SUCCESS) {
-        return false;
-    }
-
-    BLArray<std::uint8_t> bmpBytes;
-    if (image.write_to_data(bmpBytes, codec) != BL_SUCCESS) {
-        return false;
-    }
-    if (bmpBytes.size() <= sizeof(BITMAPFILEHEADER)) {
-        return false;
-    }
-
-    // A BMP file is exactly a 14-byte BITMAPFILEHEADER followed by
-    // CF_DIB's own real payload (BITMAPINFOHEADER + pixel data) - strip
-    // the file header off.
-    std::vector<std::uint8_t> dibBytes(bmpBytes.data() + sizeof(BITMAPFILEHEADER),
-        bmpBytes.data() + bmpBytes.size());
     return setCustomData(CF_DIB, dibBytes, owner);
 }
 
@@ -549,36 +532,7 @@ bool ClipboardManager::getImage(BLImage& outImage) {
     if (!getCustomData(CF_DIB, dibBytes)) {
         return false;
     }
-    if (dibBytes.size() < sizeof(BITMAPINFOHEADER)) {
-        return false;
-    }
-
-    // Reverse of setImage() - reconstruct a full BMP file by
-    // synthesizing the 14-byte BITMAPFILEHEADER CF_DIB doesn't carry.
-    // bfOffBits has to point past the BITMAPINFOHEADER *and* any color
-    // table to where the real pixel data starts (only relevant for
-    // <=8bpp images - anything Blend2D itself writes is 24/32bpp, but
-    // getImage() may just as well be reading a DIB some other
-    // application put on the clipboard).
-    const auto* infoHeader = reinterpret_cast<const BITMAPINFOHEADER*>(dibBytes.data());
-    std::size_t headerAndColorsSize = infoHeader->biSize;
-    if (infoHeader->biBitCount != 0 && infoHeader->biBitCount <= 8) {
-        std::size_t colorsCount = (infoHeader->biClrUsed != 0)
-            ? infoHeader->biClrUsed
-            : (static_cast<std::size_t>(1) << infoHeader->biBitCount);
-        headerAndColorsSize += colorsCount * sizeof(RGBQUAD);
-    }
-
-    BITMAPFILEHEADER fileHeader = {};
-    fileHeader.bfType = 0x4D42; // 'BM'
-    fileHeader.bfSize = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + dibBytes.size());
-    fileHeader.bfOffBits = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + headerAndColorsSize);
-
-    std::vector<std::uint8_t> bmpBytes(sizeof(BITMAPFILEHEADER) + dibBytes.size());
-    std::memcpy(bmpBytes.data(), &fileHeader, sizeof(BITMAPFILEHEADER));
-    std::memcpy(bmpBytes.data() + sizeof(BITMAPFILEHEADER), dibBytes.data(), dibBytes.size());
-
-    return outImage.read_from_data(bmpBytes.data(), bmpBytes.size()) == BL_SUCCESS;
+    return dibBytesToImage(dibBytes, outImage);
 }
 
 ClipboardManager& ClipboardManager::instance() {

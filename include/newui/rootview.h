@@ -372,11 +372,34 @@ namespace newui {
 
         bool mouseEnteredControl_ = false;
 
+        // Registered as this window's one real IDropTarget in
+        // viewCreated() (RegisterDragDrop()) and revoked in destroy()
+        // (RevokeDragDrop(), before DestroyWindow()) - see COMDropTarget's
+        // own class comment (dragndrop.h) for why there's exactly one of
+        // these per window regardless of how many (or how few) Views
+        // actually register their own DropTarget. Every RootView gets one
+        // automatically - pure listening plumbing with zero behavioral
+        // effect until some View actually calls setDropTarget(), so there's
+        // no reason to make this opt-in per window.
+        Microsoft::WRL::ComPtr<COMDropTarget> comDropTarget_;
+
         // Mouse/keyboard routing state - see hoveredSubView()/
         // capturedSubView()/focusedSubView() above for what each means.
         SubView* hoveredSubView_ = nullptr;
         SubView* capturedSubView_ = nullptr;
         SubView* focusedSubView_ = nullptr;
+
+        // Tracks a single potential outgoing drag from mouseDown() to
+        // either a drag actually starting (activeDragView_'s own
+        // View::dragSource() - if it has one - gets asked once the
+        // movement threshold is crossed in mouseMove(); StartDragOperation()
+        // only actually runs if that's handled) or the button coming back
+        // up first (an ordinary click, never armed) - see mouseDown()/
+        // mouseMove()/mouseUp() (rootview.cpp). activeDragLocalPt_ is in
+        // activeDragView_'s own local space, same convention
+        // capturedSubView_'s dispatch already uses.
+        SubView* activeDragView_ = nullptr;
+        Point activeDragLocalPt_;
 
         std::unique_ptr<Overlay> overlay_;
 
