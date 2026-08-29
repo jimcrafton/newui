@@ -930,8 +930,29 @@ namespace newui {
 			}
 			break;
 
+			case WM_SIZE: {
+				// Only for a standalone RootView (no Frame) - Windows
+				// delivers this directly when something else (e.g. a VSIX
+				// host) resizes this RootView's own real HWND, and nothing
+				// external does that C++-side setBounds() call for it the
+				// way Frame::updateViewBounds() does in the Frame-owned
+				// case. Explicitly gated on parentFrame_ rather than relying
+				// on setBounds()'s own "bounds == bounds_" early-out to make
+				// a Frame-owned call here harmless - Frame is already the
+				// one true owner of this RootView's bounds in that case, and
+				// this stays a deliberate no-op (falls through to
+				// DefWindowProcA) rather than a second, merely-redundant
+				// path to the same result.
+				if (nullptr == parentFrame_) {
+					Size sz(LOWORD(lParam), HIWORD(lParam));
+					setBounds(Rect(Point(0, 0), sz));
+					result = true;
+				}
+			}
+			break;
+
 			case WM_PAINT: {
-				
+
 				//this checks if we truly have work to do,
 				//if non zero return then returns with no painting
 				if (!GetUpdateRect(viewHwnd_, NULL, FALSE)) {
@@ -943,11 +964,22 @@ namespace newui {
 
 				PAINTSTRUCT ps;
 				HDC hdc = ::BeginPaint(viewHwnd_, &ps);
-				
+
 				newui::Rect paintRect = ps.rcPaint;
 
 				paintImageBufferToWindow(hdc, paintRect);
 				::EndPaint(viewHwnd_, &ps);
+				result = true;
+			}
+			break;
+
+			case WM_ERASEBKGND: {
+				// paintImageBufferToWindow() (WM_PAINT above) always covers
+				// the whole client area from imageBuffer_ - a separate erase
+				// first just flashes the window class's own background brush
+				// before that real paint overwrites it, causing visible
+				// flicker on every resize/redraw.
+				outLRESULT = 1;
 				result = true;
 			}
 			break;
