@@ -2,8 +2,6 @@
 #include "newui/action.h"
 #include "newui/keyboard_constants.h"
 #include "newui/utils.h"
-#include "newui/Application.h"
-#include "newui/Frame.h"
 #include <algorithm>
 #include <bitset>
 
@@ -100,18 +98,7 @@ namespace newui {
 
 							keyData.VKeyCode = translateVirtualKey(msg.wParam, 0);
 
-							auto [frameTarget,viewTarget] = Application::instance().getFrame()->getTarget(msg.hwnd);
-
 							bool msgConsumed = false;
-
-							if (frameTarget != nullptr) {
-								//do nothing ....
-							}
-							else if (viewTarget != nullptr) {
-								//figure out if the view or sub view handles things
-								//if they process the msg then
-								//msgConsumed = true
-							}
 
 							for (Action* action : actions_) {
 								if (action->matchesHotkey(static_cast<std::uint32_t>(keyData.VKeyCode), keyMask)) {

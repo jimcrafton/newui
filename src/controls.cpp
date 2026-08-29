@@ -1040,7 +1040,11 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        Application::instance().runLoop().postIdle([this, alive]() {
+        RunLoop* loop = RunLoop::current();
+        if (nullptr == loop) {
+            return;
+        }
+        loop->postIdle([this, alive]() {
             if (!*alive || !repeating_) {
                 return true;  // destroyed, or the press already ended - stop
             }
@@ -1272,7 +1276,11 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        Application::instance().runLoop().postIdle([this, alive]() {
+        RunLoop* loop = RunLoop::current();
+        if (nullptr == loop) {
+            return;
+        }
+        loop->postIdle([this, alive]() {
             if (!*alive || !repeating_) {
                 return true;  // destroyed, or the press already ended - stop
             }
@@ -1912,7 +1920,9 @@ namespace newui {
     }
 
     SyncReturn TextController::handleGotFocus() {
-        caret_.start(Application::instance().runLoop());
+        if (RunLoop* loop = RunLoop::current()) {
+            caret_.start(*loop);
+        }
         // start()/setPosition() below deliberately don't fire
         // onVisibilityChanged themselves (see Caret's own doc comment -
         // "the caller already knows the outcome at the call site") - this

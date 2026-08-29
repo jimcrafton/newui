@@ -589,19 +589,23 @@ namespace newui {
         return loadFrame(dialog.frame());
     }
 
-    bool Bundle::loadRootView(RootView& rootView) const {
-        Frame* frame = rootView.getFrame();
-        if (frame == nullptr || frame->getName().empty()) {
+    bool Bundle::loadRootView(RootView& rootView, const std::string& bundleName) const {
+        if (bundleName.empty()) {
             return false;
         }
 
         reflection::ObjectReader reader;
-        if (!parseNewuiFile(frame->getName(), reader)) {
+        if (!parseNewuiFile(bundleName, reader)) {
             return false;
         }
 
         reader.readNested("rootView", &rootView);
         return true;
+    }
+
+    bool Bundle::loadRootView(RootView& rootView) const {
+        Frame* frame = rootView.getFrame();
+        return loadRootView(rootView, frame ? frame->getName() : std::string());
     }
 
     bool Bundle::loadAnimations(Frame& frame) const {

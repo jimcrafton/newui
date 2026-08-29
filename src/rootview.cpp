@@ -87,6 +87,15 @@ namespace newui {
 		setRootView(this);
 	}
 
+	RootView::RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
+		: externalParentHwnd_(externalParentHwnd), externalInstanceHandle_(instanceHandle) {
+		bounds_ = bounds;
+		name_ = name;
+
+		// Same reasoning as the Frame-owned constructor above.
+		setRootView(this);
+	}
+
 	RootView::~RootView() {
 		// See aliveFlag_'s own doc comment (rootview.h) - a repaint task
 		// posted via scheduleRepaint() can still be sitting in RunLoop's
@@ -264,13 +273,15 @@ namespace newui {
 		// check below) alive independently of *this*, which this queued
 		// task may outlive - see aliveFlag_'s own doc comment (rootview.h).
 		std::shared_ptr<bool> alive = aliveFlag_;
-		Application::instance().runLoop().postIdle([this, alive]() {
-			if (*alive) {
-				repaintScheduled_ = false;
-				notifyRedrawNeeded();
-			}
-			return true; // one-shot - done after running once
-		});
+		if (RunLoop* loop = RunLoop::current()) {
+			loop->postIdle([this, alive]() {
+				if (*alive) {
+					repaintScheduled_ = false;
+					notifyRedrawNeeded();
+				}
+				return true; // one-shot - done after running once
+			});
+		}
 	}
 
 	void RootView::notifyRedrawNeeded() {
@@ -1288,7 +1299,10 @@ namespace newui {
 	{
 		bool result = true;
 
-		if (nullptr == parentFrame_) {
+		HWND parent = parentFrame_ ? parentFrame_->frameHandle() : externalParentHwnd_;
+		HINSTANCE hinst = parentFrame_ ? Application::instance().instanceHandle() : externalInstanceHandle_;
+
+		if (nullptr == parent) {
 			return false;
 		}
 
@@ -1304,7 +1318,7 @@ namespace newui {
 		wcex.lpfnWndProc = (WNDPROC)RootView::WndProc;
 		wcex.cbClsExtra = 0;
 		wcex.cbWndExtra = 0;
-		wcex.hInstance = Application::instance().instanceHandle();
+		wcex.hInstance = hinst;
 		wcex.hIcon = NULL;
 		wcex.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
 		wcex.hbrBackground = (HBRUSH)(COLOR_HIGHLIGHT+1);
@@ -1314,15 +1328,15 @@ namespace newui {
 
 		RegisterClassExA(&wcex);
 
-		auto hwnd = ::CreateWindowExA( 0, className.c_str(), "", 
+		auto hwnd = ::CreateWindowExA( 0, className.c_str(), "",
 						SIMPLE_VIEW,
-						bounds_.left(), 
-						bounds_.top(), 
-						bounds_.size().width, 
+						bounds_.left(),
+						bounds_.top(),
+						bounds_.size().width,
 						bounds_.size().height,
-						parentFrame_->frameHandle(),
+						parent,
 						NULL,
-						Application::instance().instanceHandle(),
+						hinst,
 						this
 					);
 

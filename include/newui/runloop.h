@@ -33,6 +33,23 @@ public:
 
     void run();
 
+    // The RunLoop actively pumping messages on the calling thread right
+    // now, or nullptr if none is - thread-local, set for the whole
+    // duration of whichever RunLoop instance's run() is executing on this
+    // thread (see run()'s own implementation). Works the same regardless
+    // of who owns that instance - Application's own runLoop_ member (the
+    // usual case), or a standalone RunLoop a caller constructs and runs
+    // itself on its own dedicated thread with no Application/Frame
+    // involved at all (e.g. a RootView hosted inside another process's
+    // HWND). Lets code that needs "whatever loop is live right now"
+    // (scheduleRepaint()'s idle task, Caret's blink timer, ScrollBar/
+    // Stepper auto-repeat, hotkey Action registration, ...) work
+    // correctly in either configuration without hardcoding
+    // Application::instance().runLoop().
+    static RunLoop* current() {
+        return t_currentRunLoop;
+    }
+
     void waitUntilStarted() {
         std::unique_lock<std::mutex> lock(mutex_);
         startedCv_.wait(lock, [this] { return started_; });

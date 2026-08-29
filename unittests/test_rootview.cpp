@@ -884,3 +884,38 @@ TEST(RootViewDefaultNaming, ChildAddedToAnAlreadyRootedContainerGetsNamed) {
     root->destroy();
     delete root;
 }
+
+// RootView's standalone (Frame-less) constructor - for hosting a RootView
+// directly inside a parent HWND some other process/toolkit owns, used
+// with a caller-owned RunLoop rather than Application/Frame. Needs a real
+// throwaway top-level window to stand in for that external parent - same
+// technique test_runloop.cpp's RunLoopRunModal tests already use to
+// exercise real Win32 window relationships headlessly, with no actual
+// newui::Frame/Application involved.
+TEST(RootViewStandaloneConstruction, InitializeSucceedsAgainstAnExternalParentHwnd) {
+    HINSTANCE moduleHandle = ::GetModuleHandleA(nullptr);
+    HWND externalParent = ::CreateWindowExA(0, "STATIC", "", WS_POPUP,
+        0, 0, 0, 0, nullptr, nullptr, moduleHandle, nullptr);
+    ASSERT_NE(externalParent, nullptr);
+
+    newui::RootView root(externalParent, moduleHandle, newui::Rect(0, 0, 100, 100), "standaloneRoot");
+
+    // No Frame - getFrame() must stay null (the already-safe, tested case
+    // MenuBar's own popup code and Bundle's Frame-based loadRootView()
+    // overload both already null-check).
+    EXPECT_EQ(root.getFrame(), nullptr);
+
+    ASSERT_TRUE(root.initialize());
+    EXPECT_NE(root.windowHandle(), nullptr);
+    EXPECT_EQ(::GetParent(root.windowHandle()), externalParent);
+
+    root.destroy();
+    ::DestroyWindow(externalParent);
+}
+
+TEST(RootViewStandaloneConstruction, InitializeFailsWithNoParentAtAll) {
+    newui::RootView root(nullptr, nullptr, newui::Rect(0, 0, 100, 100), "standaloneRootNoParent");
+
+    EXPECT_FALSE(root.initialize());
+    EXPECT_EQ(root.windowHandle(), nullptr);
+}

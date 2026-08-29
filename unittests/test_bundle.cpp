@@ -299,6 +299,34 @@ TEST_F(NewuiFileFixture, LoadRootViewOnlyTouchesRootViewNotFramesOwnProperties) 
     EXPECT_EQ(frame.rootView().childViews()[0]->name(), "onlyChild");
 }
 
+// Frame-less overload - for a standalone RootView (see RootView's
+// Frame-less constructor), which has no Frame to pull the bundle name
+// from, so the caller supplies it explicitly instead.
+TEST_F(NewuiFileFixture, LoadRootViewWithExplicitBundleNameWorksWithNoFrame) {
+    writeFile("BundleTestFrameless", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_EQ(root.getFrame(), nullptr);
+
+    EXPECT_TRUE(newui::Bundle::instance().loadRootView(root, "BundleTestFrameless"));
+
+    ASSERT_EQ(root.childViews().size(), 1u);
+    EXPECT_EQ(root.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithExplicitBundleNameFailsWhenNameIsEmpty) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+
+    EXPECT_FALSE(newui::Bundle::instance().loadRootView(root, ""));
+}
+
 TEST_F(NewuiFileFixture, LoadViewConstructsAFreshInstanceWithChildren) {
     writeFile("BundleTestPanel", R"({
         type: "SubView",

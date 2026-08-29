@@ -22,6 +22,22 @@ namespace newui {
     class RootView : public View {
     public:
         RootView(Frame* frame, const newui::Rect& bounds, const std::string& name);
+
+        // Standalone construction - no Frame at all, for hosting this
+        // RootView's HWND directly inside a parent window some other
+        // process/toolkit owns (e.g. a Visual Studio-hosted editor
+        // control), used together with a caller-owned RunLoop rather
+        // than Application/Frame. externalParentHwnd becomes
+        // initialize()'s CreateWindowExA parent; instanceHandle becomes
+        // its window class/window hInstance - both used in place of
+        // parentFrame_->frameHandle()/Application::instance()
+        // .instanceHandle() (see initialize()). getFrame() correctly
+        // keeps returning nullptr for a RootView built this way - already
+        // the safe, tested case (MenuBar's own popup code, Bundle's
+        // Frame-based loadRootView() overload) - both already null-check
+        // it.
+        RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name);
+
         virtual ~RootView();
 
         void setBounds(const Rect& bounds) override;
@@ -304,6 +320,12 @@ namespace newui {
     private:
 	    Frame* parentFrame_ = nullptr;
 		HWND viewHwnd_ = nullptr;
+
+		// Only set when constructed via the standalone (Frame-less)
+		// constructor above - parentFrame_ stays nullptr in that case.
+		// See initialize()'s parent/hInstance resolution.
+		HWND externalParentHwnd_ = nullptr;
+		HINSTANCE externalInstanceHandle_ = nullptr;
 
         // imageBuffer_ wraps a CreateDIBSection()-allocated buffer directly
         // (via BLImage::create_from_data(), not BLImage::create() - blend2d

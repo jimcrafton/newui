@@ -1,4 +1,6 @@
+#include "newui/action.h"
 #include "newui/delegate.h"
+#include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
 
 #include <gtest/gtest.h>
@@ -530,6 +532,131 @@ TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
         EXPECT_LE(callCount, callCountAtCancel + 1);
     }
 
+    runLoop.quit();
+    loopThread.join();
+}
+
+// RunLoop::current() - lets code reach "whichever RunLoop is actively
+// pumping this thread right now" without going through
+// Application::instance().runLoop(), so RootView/Caret/ScrollBar/Stepper/
+// ViewController auto-repeat and idle-task scheduling work identically
+// whether the running loop is Application's own owned instance or a
+// standalone one a caller constructs and runs itself (no Application/
+// Frame involved at all).
+
+TEST(RunLoopCurrent, NullWhenNoLoopIsRunningOnThisThread) {
+    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+}
+
+TEST(RunLoopCurrent, ResolvesToTheInstanceActuallyRunningOnThatThread) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+    newui::RunLoop* seenFromLoopThread = nullptr;
+
+    runLoop.post([&]() {
+        seenFromLoopThread = newui::RunLoop::current();
+        {
+            std::lock_guard<std::mutex> lock(doneMutex);
+            ran = true;
+        }
+        doneCv.notify_all();
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(seenFromLoopThread, &runLoop);
+    // Never set on this (the calling/test) thread, regardless of what's
+    // running on loopThread - thread-local, not process-global.
+    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopCurrent, NullAgainAfterRunReturns) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    runLoop.quit();
+    loopThread.join();
+
+    // t_currentRunLoop is thread-local to loopThread, which has already
+    // exited - this checks the test thread's own slot never got set by a
+    // loop running on a different thread (same "thread-local, not
+    // process-global" property as above, from the other direction).
+    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+}
+
+// Regression coverage for the RunLoop::run() WM_KEYDOWN/WM_SYSKEYDOWN case
+// unconditionally dereferencing Application::instance().getFrame() (now
+// removed - that call was dead code, its result never actually used) -
+// this is what made hotkey matching, and therefore any standalone RunLoop
+// with no Application/Frame at all, crash on the very first keystroke.
+// No newui::Application/Frame is touched anywhere in this test.
+TEST(RunLoopRegisterAction, MatchesHotkeyOnRealKeydownWithNoApplicationOrFrame) {
+    newui::RunLoop runLoop;
+    std::thread loopThread([&runLoop]() { runLoop.run(); });
+    runLoop.waitUntilStarted();
+
+    newui::Action action("test action");
+    action.setHotkey(newui::vkF1);
+    runLoop.registerAction(&action);
+
+    std::atomic<int> performCount{0};
+    action.onActionPerformed.add([&](newui::Action&) {
+        ++performCount;
+        return newui::SyncReturn::Handled;
+        });
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+
+    runLoop.post([&]() {
+        // Real, plain (non-newui) window - a synthetic WM_KEYDOWN has to
+        // target a window actually owned by loopThread, same reasoning as
+        // RunLoopRunModal's own window-creation tests above.
+        HINSTANCE moduleHandle = ::GetModuleHandleA(nullptr);
+        HWND hwnd = ::CreateWindowExA(0, "STATIC", "", WS_POPUP,
+            0, 0, 0, 0, nullptr, nullptr, moduleHandle, nullptr);
+
+        ::PostMessage(hwnd, WM_KEYDOWN, VK_F1, 0);
+
+        // A postIdle task only runs once run()'s own do-while loop has
+        // fully drained the message queue (see RunLoop::run()'s idle
+        // loop) - the queued WM_KEYDOWN above, posted first, is
+        // guaranteed to already have been retrieved and dispatched by
+        // then. Sleeping here instead would block this same loop thread
+        // from ever pumping GetMessage() to retrieve it in the first
+        // place - postIdle is the correct way to sequence after it.
+        runLoop.postIdle([&, hwnd]() {
+            ::DestroyWindow(hwnd);
+            {
+                std::lock_guard<std::mutex> lock(doneMutex);
+                ran = true;
+            }
+            doneCv.notify_all();
+            return true;  // one-shot
+            });
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(performCount.load(), 1);
+
+    runLoop.unregisterAction(&action);
     runLoop.quit();
     loopThread.join();
 }

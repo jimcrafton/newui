@@ -85,12 +85,20 @@ namespace newui {
         // Delegates to loadFrame(dialog.frame()) - see Dialog::frame().
         bool loadDialog(Dialog& dialog) const;
 
+        // Loads just the "rootView" node of "<bundleName>.newui" into
+        // rootView in place - no Frame required, for a standalone
+        // RootView (see RootView's Frame-less constructor). Returns false
+        // for any of loadFrame()'s own failure reasons (bundleName empty,
+        // file missing/invalid).
+        bool loadRootView(RootView& rootView, const std::string& bundleName) const;
+
         // Loads just the "rootView" node of
         // "<rootView.getFrame()->getName()>.newui" into rootView in place -
         // the owning Frame's own properties are untouched. rootView must
         // already be attached to a live Frame (rootView.getFrame() !=
         // nullptr); returns false otherwise, or for any of loadFrame()'s
-        // own failure reasons.
+        // own failure reasons. Thin wrapper over the bundleName overload
+        // above.
         bool loadRootView(RootView& rootView) const;
 
         // Loads just the "animations" block of "<frame.getName()>.newui"
