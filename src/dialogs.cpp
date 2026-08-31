@@ -350,12 +350,12 @@ DialogResult Dialog::showModal(Frame* owner) {
 
     HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
 
-    RunLoop* loop = RunLoop::current();
-    if (nullptr == loop) {
+    
+    if (!RunLoop::current()) {
         throw std::runtime_error("newui::Dialog::showModal: no RunLoop is running on this thread");
     }
 
-    bool completedNormally = loop->runModal(
+    bool completedNormally = RunLoop::current().runModal(
         frame_.frameHandle(), ownerHandle, [this]() { return closed_; });
     if (!completedNormally) {
         // runModal() gave up because WM_QUIT reached this thread (the app

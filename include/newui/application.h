@@ -80,7 +80,7 @@ public:
     // whether the loop has started pumping yet, so registering early is
     // safe (see RunLoop::postIdle()'s comment).
     RunLoop& runLoop() {
-        return runLoop_;
+        return RunLoop::current();
     }
 
     HINSTANCE instanceHandle() const {
@@ -159,7 +159,7 @@ private:
     Frame* frame_ = nullptr;
 	HWND dummyWindowHandle_ = nullptr;
     HINSTANCE instanceHandle_ = nullptr;
-    RunLoop runLoop_;
+    
     std::unordered_map<std::string, std::string> customValues_;
 
     static LRESULT CALLBACK DummyWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);

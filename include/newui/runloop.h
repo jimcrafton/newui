@@ -35,9 +35,14 @@ public:
     typedef Delegate<RunLoop> RunLoopDelegate;
     typedef Delegate<RunLoop, bool&> RunLoopEndingDelegate;
 
-    DWORD threadId() const { return threadId_; }
+    size_t threadId() const { return threadId_; }
 
     bool started() const { return started_; }
+    bool isRunning() const { return started(); }
+
+    operator bool() const {
+        return isRunning();
+    }
 
     void run();
 
@@ -54,9 +59,9 @@ public:
     // Stepper auto-repeat, hotkey Action registration, ...) work
     // correctly in either configuration without hardcoding
     // Application::instance().runLoop().
-    static RunLoop* current() {
-        return t_currentRunLoop;
-    }
+    static RunLoop& current();
+
+    static RunLoop* runLoopFromThread(size_t threadId);
 
     void waitForStart();
 
@@ -180,19 +185,12 @@ public:
     RunLoopDelegate onModalEnd;
 private:
 
-    void drainTasks() {
-        std::deque<std::function<void()>> pending;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            pending.swap(tasks_);
-        }
-        for (auto& task : pending) {
-            task();
-        }
-    }
+    RunLoop();
+    ~RunLoop();
 
+    void drainTasks();
 
-    DWORD threadId_ = 0;
+    size_t threadId_ = 0;
 
     std::mutex mutex_;
     std::condition_variable startedCv_;
@@ -212,17 +210,7 @@ private:
     // comment. Only ever touched from this RunLoop's own thread, same
     // as timerTasks_ above.
     std::vector<Action*> actions_;
-
-    // Set for the duration of run(), cleared on return - lets the static
-    // TimerProc() below find its way back to whichever RunLoop instance
-    // is actually running on the current thread, since a Win32 TIMERPROC
-    // carries no user-data slot of its own. Safe as thread_local rather
-    // than needing to be keyed by thread id itself: TimerProc() for a
-    // given timer is only ever invoked on the thread that called
-    // ::SetTimer() for it, which is always the same thread currently
-    // running this RunLoop's own run().
-    static thread_local RunLoop* t_currentRunLoop;
-
+    
     static void CALLBACK TimerProc(HWND hwnd, UINT message, UINT_PTR idEvent, DWORD dwTime);
 
     void checkCalledFromLoopThread(const char* what);

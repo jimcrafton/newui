@@ -124,15 +124,17 @@ namespace newui
             return;
         }
 
-        if (RunLoop* loop = RunLoop::current()) {
-            loop->postIdle([this, animation, onComplete]() {
+        RunLoop& loop = RunLoop::current();
+        if (loop) {
+            loop.postIdle([this, animation, onComplete]() {
                 if (AnimationManager::currentFrame() < animation->endTime()) {
                     return false;
                 }
                 (this->*onComplete)();
                 return true;
-            });
+                });
         }
+        
     }
 
     // ---------------------------------------------------------------------

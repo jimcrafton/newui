@@ -4,11 +4,34 @@
 #include "newui/utils.h"
 #include <algorithm>
 #include <bitset>
+#include <unordered_map>
 
 
 namespace newui {
+    std::unordered_map<size_t, RunLoop*> g_runLoopMap;
+    
 
-    thread_local RunLoop* RunLoop::t_currentRunLoop = nullptr;
+    RunLoop::RunLoop()
+    {
+        threadId_ = ::GetCurrentThreadId();
+        g_runLoopMap.emplace(threadId_, this);
+    }
+
+    RunLoop::~RunLoop()
+    {
+
+    }
+
+    void RunLoop::drainTasks() {
+        std::deque<std::function<void()>> pending;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pending.swap(tasks_);
+        }
+        for (auto& task : pending) {
+            task();
+        }
+    }
 
     void RunLoop::waitForStart()
     {
@@ -18,11 +41,27 @@ namespace newui {
         }   
     }
 
+    RunLoop& RunLoop::current()
+    {
+        thread_local RunLoop currentThreadRunLoop;        
+        return currentThreadRunLoop;
+    }
+
+    RunLoop* RunLoop::runLoopFromThread(size_t threadId)
+    {
+        RunLoop* result = nullptr;
+
+        auto found = g_runLoopMap.find(threadId);
+        if (found != g_runLoopMap.end()) {
+            result = found->second;
+        }
+
+        return result;
+    }
+
     void RunLoop::run() {
 
-        threadId_ = ::GetCurrentThreadId();
-        t_currentRunLoop = this;
-
+        
         HRESULT hr = OleInitialize(NULL);
         if (!SUCCEEDED(hr)) {
             throw std::runtime_error("newui::RunLoop: OleInitialize failed");
@@ -181,7 +220,7 @@ namespace newui {
             ::KillTimer(nullptr, entry.first);
         }
         timerTasks_.clear();
-        t_currentRunLoop = nullptr;
+        
 
 		onEnd(*this);
 
@@ -233,13 +272,13 @@ namespace newui {
     }
 
     void CALLBACK RunLoop::TimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
-        RunLoop* loop = t_currentRunLoop;
-        if (loop == nullptr) {
+        
+        if (RunLoop::current()) {
             return;
         }
-
-        auto it = loop->timerTasks_.find(idEvent);
-        if (it == loop->timerTasks_.end()) {
+        auto& loop = RunLoop::current();
+        auto it = loop.timerTasks_.find(idEvent);
+        if (it == loop.timerTasks_.end()) {
             return;
         }
 
@@ -253,7 +292,7 @@ namespace newui {
         bool finished = task();
         if (finished) {
             ::KillTimer(nullptr, idEvent);
-            loop->timerTasks_.erase(idEvent);
+            loop.timerTasks_.erase(idEvent);
         }
         // Not finished: ::SetTimer()'s own periodic re-arm already
         // schedules the next WM_TIMER at the same interval - nothing

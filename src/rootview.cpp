@@ -273,8 +273,8 @@ namespace newui {
 		// check below) alive independently of *this*, which this queued
 		// task may outlive - see aliveFlag_'s own doc comment (rootview.h).
 		std::shared_ptr<bool> alive = aliveFlag_;
-		if (RunLoop* loop = RunLoop::current()) {
-			loop->postIdle([this, alive]() {
+		if (RunLoop::current()) {
+			RunLoop::current().postIdle([this, alive]() {
 				if (*alive) {
 					repaintScheduled_ = false;
 					notifyRedrawNeeded();

@@ -99,11 +99,11 @@ namespace newui {
 
 
 
-		virtual bool initialize();
-        virtual void destroy();
+		virtual bool initialize() override;
+        virtual void destroy() override;
 
-        virtual void addChild(SubView* child);
-        virtual void removeChild(SubView* child);
+        virtual void addChild(SubView* child) override;
+        virtual void removeChild(SubView* child) override;
         //@reflect ignore=true
 		Frame* getFrame() const {
 			return parentFrame_;
@@ -191,8 +191,8 @@ namespace newui {
         // overrides (and same as Action::perform()'s own convention) -
         // call canPerformCommand() first if the caller needs to know
         // whether anything will actually handle it.
-        bool canPerformCommand(const CommandId& cmd) const;
-        void performCommand(const CommandId& cmd);
+        bool canPerformCommand(const CommandId& cmd) const override;
+        void performCommand(const CommandId& cmd) override;
 
         // Not reflectgen-registered - same reasoning as hoveredSubView()
         // above; real, reported bad output this one specifically produced

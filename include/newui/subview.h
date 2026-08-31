@@ -48,11 +48,11 @@ public:
 		return parentView_;
 	}
 
-	virtual bool initialize();
-	virtual void destroy();
+	virtual bool initialize() override;
+	virtual void destroy() override;
 
-	virtual void addChild(SubView* child);
-	virtual void removeChild(SubView* child);
+	virtual void addChild(SubView* child) override;
+	virtual void removeChild(SubView* child) override;
 private:
     RootView* parentView_ = nullptr;
 

@@ -1040,32 +1040,31 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        RunLoop* loop = RunLoop::current();
-        if (nullptr == loop) {
-            return;
+        RunLoop& loop = RunLoop::current();
+        if (loop) {
+            loop.postIdle([this, alive]() {
+                if (!*alive || !repeating_) {
+                    return true;  // destroyed, or the press already ended - stop
+                }
+
+                auto now = std::chrono::steady_clock::now();
+                if (now < repeatNextTime_) {
+                    return false;  // not time for the next tick yet - keep polling
+                }
+                repeatNextTime_ = now + kRepeatInterval;
+
+                if (trackRepeat_ && thumbRect_.contains(trackClickPt_)) {
+                    // The thumb has caught up to (or passed) the original
+                    // click point - real Win32 track-click paging stops here
+                    // on its own, without needing a release.
+                    repeating_ = false;
+                    return true;
+                }
+
+                setValue(value_ + repeatAmount_);
+                return false;
+                });
         }
-        loop->postIdle([this, alive]() {
-            if (!*alive || !repeating_) {
-                return true;  // destroyed, or the press already ended - stop
-            }
-
-            auto now = std::chrono::steady_clock::now();
-            if (now < repeatNextTime_) {
-                return false;  // not time for the next tick yet - keep polling
-            }
-            repeatNextTime_ = now + kRepeatInterval;
-
-            if (trackRepeat_ && thumbRect_.contains(trackClickPt_)) {
-                // The thumb has caught up to (or passed) the original
-                // click point - real Win32 track-click paging stops here
-                // on its own, without needing a release.
-                repeating_ = false;
-                return true;
-            }
-
-            setValue(value_ + repeatAmount_);
-            return false;
-        });
     }
 
     void ScrollBar::stopRepeat() {
@@ -1276,11 +1275,9 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        RunLoop* loop = RunLoop::current();
-        if (nullptr == loop) {
-            return;
-        }
-        loop->postIdle([this, alive]() {
+        RunLoop& loop = RunLoop::current();
+        
+        loop.postIdle([this, alive]() {
             if (!*alive || !repeating_) {
                 return true;  // destroyed, or the press already ended - stop
             }
@@ -1920,9 +1917,11 @@ namespace newui {
     }
 
     SyncReturn TextController::handleGotFocus() {
-        if (RunLoop* loop = RunLoop::current()) {
-            caret_.start(*loop);
+        
+        if (RunLoop::current()) {
+            caret_.start(RunLoop::current());
         }
+        
         // start()/setPosition() below deliberately don't fire
         // onVisibilityChanged themselves (see Caret's own doc comment -
         // "the caller already knows the outcome at the call site") - this
