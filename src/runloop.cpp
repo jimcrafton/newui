@@ -10,6 +10,14 @@ namespace newui {
 
     thread_local RunLoop* RunLoop::t_currentRunLoop = nullptr;
 
+    void RunLoop::waitForStart()
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!started_) {
+            startedCv_.wait(lock, [this] { return started_; });
+        }   
+    }
+
     void RunLoop::run() {
 
         threadId_ = ::GetCurrentThreadId();
@@ -176,6 +184,11 @@ namespace newui {
         t_currentRunLoop = nullptr;
 
 		onEnd(*this);
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            started_ = false;
+        }
     }
 
     void RunLoop::checkCalledFromLoopThread(const char* what) {
@@ -380,4 +393,27 @@ namespace newui {
 		std::lock_guard<std::mutex> lock(mutex_);
 		return !idleTasks_.empty();
 	}
+
+    void RunLoop::runTillNotified(std::condition_variable& cv, std::mutex& mtx)
+    {
+        for (;;)
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            auto waitMs = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            auto success = cv.wait_until(lock, waitMs);
+
+
+            if (success == std::cv_status::no_timeout)
+            {
+                return;
+            }
+
+            MSG msg;
+            while (::PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            {
+                ::TranslateMessage(&msg);
+                ::DispatchMessageW(&msg);
+            }
+        }
+    }
 }
