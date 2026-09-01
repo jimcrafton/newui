@@ -8,13 +8,14 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <stdexcept>
-#include <unordered_map>
-#include <vector>
 #include <thread>
 #include <type_traits>
-
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 
 namespace newui {
@@ -45,6 +46,22 @@ public:
     }
 
     void run();
+
+    // Returned by runThreaded() - loop is the new thread's own
+    // RunLoop::current(), thread is the std::thread actually running it
+    // (owned by the caller; move-only, same as std::thread itself). A
+    // plain struct rather than std::pair<RunLoop*, std::thread> so
+    // callers get named .loop/.thread instead of .first/.second.
+    struct RunLoopThread {
+        RunLoop* loop = nullptr;
+        std::thread thread;
+    };
+
+    // Variation on run(): spawns a new std::thread that becomes that
+    // thread's RunLoop::current() and run()s it, returning as soon as
+    // the pointer is valid (not once the loop has actually started
+    // pumping - call waitForStart() on it first before post()/postIdle()).
+    static RunLoopThread runThreaded();
 
     // The RunLoop actively pumping messages on the calling thread right
     // now, or nullptr if none is - thread-local, set for the whole

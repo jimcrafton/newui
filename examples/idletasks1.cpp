@@ -24,9 +24,9 @@
 void demoOneShotIdleTask() {
     std::cout << "\n== Demo 1: one-shot idle task ==\n";
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -62,9 +62,9 @@ void demoOneShotIdleTask() {
 void demoMultiStepIdleTask() {
     std::cout << "\n== Demo 2: idle task spread across multiple idle passes ==\n";
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -101,9 +101,9 @@ void demoMultiStepIdleTask() {
 void demoRoundRobinIdleTasks() {
     std::cout << "\n== Demo 3: multiple idle tasks interleave round-robin ==\n";
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -143,9 +143,9 @@ void demoRoundRobinIdleTasks() {
 void demoIdleYieldsToRealMessages() {
     std::cout << "\n== Demo 4: idle work yields to a posted task ==\n";
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;

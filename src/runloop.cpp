@@ -8,18 +8,21 @@
 
 
 namespace newui {
+    std::mutex g_runLoopMapMutex;
     std::unordered_map<size_t, RunLoop*> g_runLoopMap;
-    
+
 
     RunLoop::RunLoop()
     {
         threadId_ = ::GetCurrentThreadId();
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
         g_runLoopMap.emplace(threadId_, this);
     }
 
     RunLoop::~RunLoop()
     {
-
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
+        g_runLoopMap.erase(threadId_);
     }
 
     void RunLoop::drainTasks() {
@@ -43,14 +46,33 @@ namespace newui {
 
     RunLoop& RunLoop::current()
     {
-        thread_local RunLoop currentThreadRunLoop;        
+        thread_local RunLoop currentThreadRunLoop;
         return currentThreadRunLoop;
+    }
+
+    RunLoop::RunLoopThread RunLoop::runThreaded()
+    {
+        std::promise<RunLoop*> loopPromise;
+        std::future<RunLoop*> loopFuture = loopPromise.get_future();
+
+        std::thread t([promise = std::move(loopPromise)]() mutable {
+            RunLoop& loop = RunLoop::current();
+            // threadId_ is already set (RunLoop::current()'s constructor
+            // ran above) - safe to hand the pointer out now, before
+            // run() itself has actually started pumping.
+            promise.set_value(&loop);
+            loop.run();
+            });
+
+        RunLoop* loop = loopFuture.get();
+        return RunLoopThread{ loop, std::move(t) };
     }
 
     RunLoop* RunLoop::runLoopFromThread(size_t threadId)
     {
         RunLoop* result = nullptr;
 
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
         auto found = g_runLoopMap.find(threadId);
         if (found != g_runLoopMap.end()) {
             result = found->second;
@@ -272,11 +294,10 @@ namespace newui {
     }
 
     void CALLBACK RunLoop::TimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
-        
-        if (RunLoop::current()) {
+        auto& loop = RunLoop::current();
+        if (!loop) {
             return;
         }
-        auto& loop = RunLoop::current();
         auto it = loop.timerTasks_.find(idEvent);
         if (it == loop.timerTasks_.end()) {
             return;

@@ -39,9 +39,9 @@ TEST(RunLoopPostCall, RunsOnLoopThreadAndCompletesAsyncReturn) {
     g_lastValue = 0;
     g_callbackThreadId = std::thread::id();
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     newui::Delegate<int> delegate;
@@ -63,9 +63,9 @@ TEST(RunLoopPostCall, RunsOnLoopThreadAndCompletesAsyncReturn) {
 TEST(RunLoopPostCall, StopsAtFirstError) {
     g_secondCallCount = 0;
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::Delegate<int> delegate;
     delegate.add(&FailOnLoop);
@@ -83,9 +83,9 @@ TEST(RunLoopPostCall, StopsAtFirstError) {
 }
 
 TEST(RunLoopPostIdle, RunsQueuedIdleTaskOnLoopThread) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::atomic<bool> ran{false};
@@ -116,9 +116,9 @@ TEST(RunLoopPostIdle, RunsQueuedIdleTaskOnLoopThread) {
 }
 
 TEST(RunLoopPostIdle, RunsMultipleQueuedIdleTasksInOrder) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -148,9 +148,9 @@ TEST(RunLoopPostIdle, RunsMultipleQueuedIdleTasksInOrder) {
 }
 
 TEST(RunLoopPostIdle, TaskIsRequeuedUntilItReturnsTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -195,15 +195,18 @@ TEST(RunLoopPostIdle, TaskIsRequeuedUntilItReturnsTrue) {
 // started" guard, which is safely testable without either.
 
 TEST(RunLoopRunModal, ThrowsIfCalledBeforeRun) {
-    newui::RunLoop runLoop;
+    // current() on this (the test's own) thread, never run() here -
+    // matches the "before run()" scenario this test wants without
+    // needing a second thread.
+    newui::RunLoop& runLoop = newui::RunLoop::current();
 
     EXPECT_THROW(runLoop.runModal(nullptr, nullptr, [] { return true; }), std::runtime_error);
 }
 
 TEST(RunLoopRunModal, ThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     // Called from this test's own thread, not loopThread - runModal()
     // should refuse rather than silently pump some other thread's queue.
@@ -214,9 +217,9 @@ TEST(RunLoopRunModal, ThrowsIfCalledFromDifferentThreadThanRun) {
 }
 
 TEST(RunLoopRunModal, ReturnsTrueImmediatelyWhenIsDoneIsAlreadyTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::mutex doneMutex;
@@ -262,9 +265,9 @@ TEST(RunLoopRunModal, ReturnsTrueImmediatelyWhenIsDoneIsAlreadyTrue) {
 // real Win32 objects headlessly" precedent as TestableContextMenu in
 // test_menus.cpp.
 TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -343,15 +346,18 @@ TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
 // tests cover runModal()'s guard, above.
 
 TEST(RunLoopPostDelayed, ThrowsIfCalledBeforeRun) {
-    newui::RunLoop runLoop;
+    // current() on this (the test's own) thread, never run() here -
+    // matches the "before run()" scenario this test wants without
+    // needing a second thread.
+    newui::RunLoop& runLoop = newui::RunLoop::current();
 
     EXPECT_THROW(runLoop.postDelayed(std::chrono::milliseconds(10), [] { return true; }), std::runtime_error);
 }
 
 TEST(RunLoopPostDelayed, ThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     // Called from this test's own thread, not loopThread - a Win32 timer
     // is thread-affine, so postDelayed() should refuse here the same way
@@ -364,9 +370,9 @@ TEST(RunLoopPostDelayed, ThrowsIfCalledFromDifferentThreadThanRun) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     EXPECT_THROW(runLoop.cancelDelayed(1), std::runtime_error);
 
@@ -375,9 +381,9 @@ TEST(RunLoopPostDelayed, CancelDelayedThrowsIfCalledFromDifferentThreadThanRun) 
 }
 
 TEST(RunLoopPostDelayed, RunsOnLoopThreadAfterInterval) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::mutex doneMutex;
@@ -413,9 +419,9 @@ TEST(RunLoopPostDelayed, RunsOnLoopThreadAfterInterval) {
 }
 
 TEST(RunLoopPostDelayed, TaskIsRescheduledUntilItReturnsTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -456,9 +462,9 @@ TEST(RunLoopPostDelayed, TaskIsRescheduledUntilItReturnsTrue) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedStopsATimerBeforeItsFirstTick) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex mutex;
     int callCount = 0;
@@ -489,9 +495,9 @@ TEST(RunLoopPostDelayed, CancelDelayedStopsATimerBeforeItsFirstTick) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex mutex;
     std::condition_variable cv;
@@ -544,14 +550,18 @@ TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
 // standalone one a caller constructs and runs itself (no Application/
 // Frame involved at all).
 
-TEST(RunLoopCurrent, NullWhenNoLoopIsRunningOnThisThread) {
-    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+TEST(RunLoopCurrent, NotRunningWhenNoLoopIsRunningOnThisThread) {
+    // current() is now always a valid reference (a thread-local singleton,
+    // auto-created on first access) rather than a nullable pointer - the
+    // meaningful check is whether it's actually running, via operator
+    // bool()/isRunning(), not identity against nullptr.
+    EXPECT_FALSE(newui::RunLoop::current());
 }
 
 TEST(RunLoopCurrent, ResolvesToTheInstanceActuallyRunningOnThatThread) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -559,7 +569,7 @@ TEST(RunLoopCurrent, ResolvesToTheInstanceActuallyRunningOnThatThread) {
     newui::RunLoop* seenFromLoopThread = nullptr;
 
     runLoop.post([&]() {
-        seenFromLoopThread = newui::RunLoop::current();
+        seenFromLoopThread = &newui::RunLoop::current();
         {
             std::lock_guard<std::mutex> lock(doneMutex);
             ran = true;
@@ -573,27 +583,29 @@ TEST(RunLoopCurrent, ResolvesToTheInstanceActuallyRunningOnThatThread) {
     }
 
     EXPECT_EQ(seenFromLoopThread, &runLoop);
-    // Never set on this (the calling/test) thread, regardless of what's
-    // running on loopThread - thread-local, not process-global.
-    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+    // This (the calling/test) thread's own current() is a distinct
+    // instance, never run() here, regardless of what's running on
+    // loopThread - thread-local, not process-global.
+    EXPECT_NE(&newui::RunLoop::current(), &runLoop);
+    EXPECT_FALSE(newui::RunLoop::current());
 
     runLoop.quit();
     loopThread.join();
 }
 
-TEST(RunLoopCurrent, NullAgainAfterRunReturns) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+TEST(RunLoopCurrent, NotRunningOnThisThreadAfterAnotherThreadsLoopReturns) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     runLoop.quit();
     loopThread.join();
 
-    // t_currentRunLoop is thread-local to loopThread, which has already
-    // exited - this checks the test thread's own slot never got set by a
+    // current() is thread-local to loopThread, which has already exited -
+    // this checks the test thread's own instance never got started by a
     // loop running on a different thread (same "thread-local, not
     // process-global" property as above, from the other direction).
-    EXPECT_EQ(newui::RunLoop::current(), nullptr);
+    EXPECT_FALSE(newui::RunLoop::current());
 }
 
 // Regression coverage for the RunLoop::run() WM_KEYDOWN/WM_SYSKEYDOWN case
@@ -603,9 +615,9 @@ TEST(RunLoopCurrent, NullAgainAfterRunReturns) {
 // with no Application/Frame at all, crash on the very first keystroke.
 // No newui::Application/Frame is touched anywhere in this test.
 TEST(RunLoopRegisterAction, MatchesHotkeyOnRealKeydownWithNoApplicationOrFrame) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::Action action("test action");
     action.setHotkey(newui::vkF1);
@@ -662,9 +674,9 @@ TEST(RunLoopRegisterAction, MatchesHotkeyOnRealKeydownWithNoApplicationOrFrame) 
 }
 
 TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;

@@ -272,9 +272,9 @@ TEST(Caret, StopWhenNotActiveIsANoOp) {
 }
 
 TEST(Caret, StartMakesItActiveAndVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -307,9 +307,9 @@ TEST(Caret, StartMakesItActiveAndVisible) {
 }
 
 TEST(Caret, SecondStartWhileAlreadyActiveIsANoOp) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -342,9 +342,9 @@ TEST(Caret, SecondStartWhileAlreadyActiveIsANoOp) {
 }
 
 TEST(Caret, StopMakesItInactiveAndNotVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -374,9 +374,9 @@ TEST(Caret, StopMakesItInactiveAndNotVisible) {
 }
 
 TEST(Caret, BlinksBetweenVisibleAndHiddenOverTime) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -438,9 +438,9 @@ TEST(Caret, OnVisibilityChangedFiresOnEachBlinkTick) {
     // something *else* (e.g. a mouse-hover repaint) incidentally
     // repainted it too (confirmed live via examples/controls1.cpp - the
     // caret only blinked while the mouse was moving).
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -486,9 +486,9 @@ TEST(Caret, DrawDoesNothingWhenNotVisible) {
 }
 
 TEST(Caret, DrawPaintsASystemWidthBarWhenVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
