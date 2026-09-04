@@ -29,6 +29,51 @@ TEST(Bundle, ExecutableDirAndResourcesDirAreSane) {
     EXPECT_EQ(bundle.resourcesDir(), bundle.executableDir() + "\\Resources");
 }
 
+// Bundle is a shared singleton - every test here that calls
+// setExecutableDirOverride() must restore the real value ("") before
+// returning, or every later test in this binary (most of which rely on
+// resourcesDir() pointing at the real build output) breaks.
+TEST(Bundle, ExecutableDirOverrideChangesResourcesDirToo) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    const std::string realExecutableDir = bundle.executableDir();
+
+    bundle.setExecutableDirOverride("C:\\SomeOverriddenRoot");
+    EXPECT_EQ(bundle.executableDir(), "C:\\SomeOverriddenRoot");
+    EXPECT_EQ(bundle.resourcesDir(), "C:\\SomeOverriddenRoot\\Resources");
+
+    bundle.setExecutableDirOverride("");
+    EXPECT_EQ(bundle.executableDir(), realExecutableDir);
+}
+
+TEST(Bundle, ExecutableDirOverrideAffectsResourcePathResolution) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    const std::string realExecutableDir = bundle.executableDir();
+
+    char tempPathBuf[MAX_PATH]{};
+    ::GetTempPathA(MAX_PATH, tempPathBuf);
+    const std::string overrideRoot = std::string(tempPathBuf) + "BundleOverrideTest";
+    const std::string overrideResources = overrideRoot + "\\Resources";
+    ::CreateDirectoryA(overrideRoot.c_str(), nullptr);
+    ::CreateDirectoryA(overrideResources.c_str(), nullptr);
+
+    const std::string filePath = overrideResources + "\\overrideProbe.txt";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "hello from override root";
+    }
+
+    bundle.setExecutableDirOverride(overrideRoot);
+    EXPECT_EQ(bundle.loadTextFile("overrideProbe.txt"), "hello from override root");
+
+    bundle.setExecutableDirOverride("");
+    EXPECT_EQ(bundle.executableDir(), realExecutableDir);
+    EXPECT_TRUE(bundle.loadTextFile("overrideProbe.txt").empty());  // no longer resolves once restored
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(overrideResources.c_str());
+    ::RemoveDirectoryA(overrideRoot.c_str());
+}
+
 TEST(Bundle, ResourcePathReturnsEmptyForMissingFile) {
     EXPECT_TRUE(newui::Bundle::instance().resourcePath("NoSuchFile.txt").empty());
 }
@@ -378,6 +423,65 @@ TEST_F(NewuiFileFixture, WriteFrameRoundTripsTitleAndRootViewChildren) {
 TEST_F(NewuiFileFixture, WriteFrameFailsWithNoNameSet) {
     newui::Frame frame;
     EXPECT_FALSE(newui::Bundle::instance().writeFrame(frame));
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewRoundTripsChildrenWithNoExistingFile) {
+    trackFile("BundleWriteRootViewFresh");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* child = new newui::SubView();
+    child->setName("writtenChild");
+    root.addChild(child);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(root, "BundleWriteRootViewFresh"));
+
+    newui::RootView reloaded(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(reloaded, "BundleWriteRootViewFresh"));
+    ASSERT_EQ(reloaded.childViews().size(), 1u);
+    EXPECT_EQ(reloaded.childViews()[0]->name(), "writtenChild");
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFailsWithEmptyBundleName) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().writeRootView(root, ""));
+}
+
+// The real point of writeRootView() over writeView(): a Frame-shaped file
+// already on disk (title/bounds, as a real Frame elsewhere would still
+// loadFrame() from) keeps its other top-level keys when only the
+// rootView is re-saved through a Frame-less DesignerEditor-style edit.
+TEST_F(NewuiFileFixture, WriteRootViewPreservesOtherTopLevelKeysFromAnExistingFile) {
+    trackFile("BundleWriteRootViewMerge");
+
+    newui::Frame originalFrame;
+    originalFrame.setName("BundleWriteRootViewMerge");
+    originalFrame.setTitle("Original Frame Title");
+    originalFrame.setBounds(newui::Rect(5, 6, 400, 300));
+    newui::SubView* oldChild = new newui::SubView();
+    oldChild->setName("oldChild");
+    originalFrame.rootView().addChild(oldChild);
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(originalFrame));
+
+    // A totally separate, Frame-less RootView - standing in for
+    // DesignerEditor's own standalone tree - with different content.
+    newui::RootView editedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* newChild = new newui::SubView();
+    newChild->setName("newChild");
+    editedRoot.addChild(newChild);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(editedRoot, "BundleWriteRootViewMerge"));
+
+    newui::Frame reloadedFrame;
+    reloadedFrame.setName("BundleWriteRootViewMerge");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloadedFrame));
+
+    // title/bounds survived - never touched by writeRootView().
+    EXPECT_EQ(reloadedFrame.getTitle(), "Original Frame Title");
+    EXPECT_EQ(reloadedFrame.getBounds(), newui::Rect(5, 6, 400, 300));
+
+    // rootView reflects the new edit, not the old content.
+    ASSERT_EQ(reloadedFrame.rootView().childViews().size(), 1u);
+    EXPECT_EQ(reloadedFrame.rootView().childViews()[0]->name(), "newChild");
 }
 
 TEST_F(NewuiFileFixture, WriteDialogDelegatesToUnderlyingFrame) {

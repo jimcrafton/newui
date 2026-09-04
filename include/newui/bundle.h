@@ -44,10 +44,25 @@ namespace newui {
         Bundle& operator=(const Bundle&) = delete;
 
         // Directory containing the running .exe (no trailing slash),
-        // computed once via GetModuleFileNameA() and cached.
+        // computed once via GetModuleFileNameA() and cached - unless
+        // overridden, see setExecutableDirOverride() below.
         const std::string& executableDir() const {
             return executableDir_;
         }
+
+        // Overrides executableDir() (and, via it, resourcesDir()) for a
+        // host where the running process's own exe directory isn't the
+        // right root - e.g. NativeEditControls.dll hosted inside
+        // devenv.exe, whose own exe directory has nothing to do with
+        // whichever project's .newui files are actually being edited.
+        // Pass "" to reset to the real, OS-derived value. Mutates this
+        // shared singleton, so it isn't safe for two callers needing
+        // different roots active at the same time - a real limitation
+        // for two Designer documents from different projects open at
+        // once, accepted for now rather than making Bundle non-singleton.
+        // Also invalidates the cached Info.json read (appName()/
+        // appVersion()), since that resolves against executableDir() too.
+        void setExecutableDirOverride(const std::string& dir);
 
         // executableDir() + "\Resources".
         const std::string& resourcesDir() const {
@@ -148,6 +163,17 @@ namespace newui {
         // name is empty, view's runtime class isn't registered, or the
         // file couldn't be written.
         bool writeView(View& view, const std::string& name) const;
+
+        // Write-side counterpart to loadRootView(RootView&, bundleName) -
+        // for a standalone RootView with no owning Frame. Unlike
+        // writeFrame() (which always writes the whole Frame fresh),
+        // this preserves every other top-level key an existing
+        // "<bundleName>.newui" already has (title, bounds, animations,
+        // ...) - only "rootView" is replaced - so editing a Frame-less
+        // view of a file a real Frame elsewhere still loadFrame()s from
+        // doesn't silently drop that Frame's own data. Returns false if
+        // bundleName is empty or the file couldn't be written.
+        bool writeRootView(RootView& rootView, const std::string& bundleName) const;
 
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).

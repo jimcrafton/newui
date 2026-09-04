@@ -11,6 +11,7 @@
 
 #include <json5/json5.hpp>
 #include <json5/json5_input.hpp>
+#include <json5/json5_output.hpp>
 
 #include <any>
 #include <fstream>
@@ -512,6 +513,12 @@ namespace newui {
         resourcesDir_ = executableDir_ + "\\Resources";
     }
 
+    void Bundle::setExecutableDirOverride(const std::string& dir) {
+        executableDir_ = dir.empty() ? directoryOf(getExecutablePath()) : dir;
+        resourcesDir_ = executableDir_ + "\\Resources";
+        infoLoaded_ = false;  // Info.json now resolves against the new root too
+    }
+
     Bundle& Bundle::instance() {
         static Bundle bundle;
         return bundle;
@@ -685,6 +692,45 @@ namespace newui {
         return writeFrame(dialog.frame());
     }
 
+    namespace {
+        // json5::builder only produces a valid, dereferenceable object/
+        // array payload once a build finishes (document::assign_root(),
+        // called from the outermost builder::pop()) - a value taken
+        // straight from an already-finalized *different* document can't
+        // just be attached by reference into a still-mid-construction one
+        // (confirmed the hard way - it corrupts the mid-construction
+        // index scheme and crashes in to_string()). So a foreign value
+        // has to be rebuilt through the destination's own builder
+        // instead - this walks it recursively, reading only leaf content
+        // (strings/numbers/bools) from source, never its raw payload.
+        json5::value rebuildValue(const json5::value& source, json5::builder& destBuilder) {
+            if (source.is_object()) {
+                destBuilder.push_object();
+                for (const auto& [key, value] : json5::object_view(source)) {
+                    destBuilder[key] = rebuildValue(value, destBuilder);
+                }
+                return destBuilder.pop();
+            }
+            if (source.is_array()) {
+                destBuilder.push_array();
+                for (const json5::value& element : json5::array_view(source)) {
+                    destBuilder += rebuildValue(element, destBuilder);
+                }
+                return destBuilder.pop();
+            }
+            if (source.is_string()) {
+                return destBuilder.new_string(source.get_c_str());
+            }
+            if (source.is_boolean()) {
+                return json5::value(source.get_bool());
+            }
+            if (source.is_number()) {
+                return json5::value(source.get<double>());
+            }
+            return json5::value(nullptr);
+        }
+    }
+
     bool Bundle::writeView(View& view, const std::string& name) const {
         if (name.empty()) {
             return false;
@@ -699,6 +745,33 @@ namespace newui {
         clazz->write(&view, &writer, std::string());
 
         return writeTextFile(name + ".newui", json5::to_string(writer.doc));
+    }
+
+    bool Bundle::writeRootView(RootView& rootView, const std::string& bundleName) const {
+        if (bundleName.empty()) {
+            return false;
+        }
+
+        json5::document existingDoc;
+        std::string existingText = loadTextFile(bundleName + ".newui");
+        bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
+
+        reflection::ObjectWriter writer;
+        writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
+
+        if (hasExisting) {
+            for (const auto& [key, value] : json5::object_view(existingDoc)) {
+                std::string keyStr(key);
+                if (keyStr != "rootView" && keyStr != "meta") {
+                    writer.builder[keyStr] = rebuildValue(value, writer.builder);
+                }
+            }
+        }
+
+        writer.writeNested("rootView", &rootView);
+        writer.endObject(std::string(), nullptr);
+
+        return writeTextFile(bundleName + ".newui", json5::to_string(writer.doc));
     }
 
     void Bundle::ensureInfoLoaded() const {
