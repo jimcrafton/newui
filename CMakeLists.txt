@@ -131,6 +131,7 @@ add_library(newui STATIC
     "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
     "include/newui/component.h"
     "include/newui/undostack.h" "src/undostack.cpp"
+    "include/newui/viewbuilder.h"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
