@@ -134,6 +134,20 @@ namespace newui {
         // explicitly. Bundle has no built-in notion of which T "means"
         // design-time - that's the caller's call, not something to infer
         // from T here.
+        //
+        // IMPORTANT, real trap already hit once: this only actually
+        // matters for a target tree that stays *unattached* to any
+        // RootView (Component::isDesignTime() is what reads the flag this
+        // sets). The moment a loaded child is addChild()'d onto a real
+        // RootView, View::isDesignTime() takes over (it hides Component's
+        // own method by name, not override) and unconditionally defers to
+        // rootView_->isDesignTime() instead - so designMode's per-child
+        // propagation is silently moot for anything actually hosted in a
+        // window. For that case (e.g. DesignerEditor's own RootViewProxy,
+        // itself a child of a real, hosting RootView), call
+        // rootView->setDesignTime(true) once on that outer, real RootView
+        // instead - every attached descendant already defers to it, no
+        // per-load propagation needed at all.
         template<typename T>
         bool loadRootView(T& target, const std::string& bundleName, bool designMode = false) const;
 
