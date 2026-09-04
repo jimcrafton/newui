@@ -477,8 +477,12 @@ def has_reflect_friend(class_cursor):
 # "@reflect ignore=true" and "@reflect property"/"@reflect collection") -
 # a bare key's captured value is None, mapped to "true" by
 # reflect_annotations() below, same as an explicit "=true" would be.
+# Value group also allows "," (unlike a bare key) - needed for
+# "@reflect tags=filepath,pathlike" (see PropertyAccessor.tags); every
+# other annotation's value stays a plain identifier, and "," in one just
+# rides along unused.
 REFLECT_ANNOTATION_PAIR_RE = re.compile(
-    r"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*([A-Za-z_][A-Za-z_0-9]*))?"
+    r"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*([A-Za-z_][A-Za-z_0-9,]*))?"
 )
 
 
@@ -541,9 +545,12 @@ class Field:
 
 
 class DelegateField:
-    def __init__(self, name, scope):
+    def __init__(self, name, scope, tags=None):
         self.name = name
         self.scope = scope
+        # From "@reflect tags=..." on the delegate field itself - see
+        # PropertyAccessor.tags's own comment.
+        self.tags = tags or []
 
 
 class Method:
@@ -576,7 +583,7 @@ class BaseInfo:
 class PropertyAccessor:
     def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous,
                  setter_name, setter_arg_type=None, setter_ambiguous=False, setter_is_const=False,
-                 assume_copyable=True):
+                 assume_copyable=True, tags=None):
         self.key = key  # the property's own name, e.g. "name", "visible", "bounds"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "getName", "isVisible", "style"
@@ -606,6 +613,12 @@ class PropertyAccessor:
         # collect_property_accessors()'s own comment on why this only ever
         # happens for an addressable getter.
         self.assume_copyable = assume_copyable
+        # From "@reflect tags=filepath,pathlike" on the getter - semantic
+        # hints a consumer (e.g. cpp_codetools's PropertyEditorRegistry)
+        # can key an editor off directly, since the property's own C++
+        # type (e.g. plain std::string) often isn't distinctive enough on
+        # its own. Empty for the overwhelming majority of properties.
+        self.tags = tags or []
 
 
 # A collection reachable only through a whole-container-returning accessor
@@ -641,6 +654,9 @@ class ClassInfo:
         self.collection_accessors = []
         self.ctors = []
         self.bases = []
+        # From "@reflect tags=..." directly above the class declaration -
+        # see PropertyAccessor.tags's own comment for the general idea.
+        self.tags = []
 
 
 class EnumValue:
@@ -1149,8 +1165,10 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             if not has_matching_backing_member(stem, getter_cursor.result_type.spelling, fields):
                 continue  # not enough signal - stays a plain .method()
 
-        annotation_value = reflect_annotations(getter_cursor).get("property", "true")
+        annotations = reflect_annotations(getter_cursor)
+        annotation_value = annotations.get("property", "true")
         key = derive_property_key(getter_name) if annotation_value.lower() == "true" else annotation_value
+        tags = [t for t in annotations.get("tags", "").split(",") if t]
 
         # setter_ambiguous covers both the ordinary "this setter name also
         # has other overloads" case and the same-name-as-the-getter
@@ -1184,6 +1202,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             setter_ambiguous=setter_ambiguous,
             setter_is_const=setter_is_const,
             assume_copyable=assume_copyable,
+            tags=tags,
         ))
 
         # Every overload sharing getter_name (not just the chosen one) - a
@@ -1291,6 +1310,7 @@ def collect_class(cursor):
     name = qualified_name(cursor)
     has_friend = has_reflect_friend(cursor)
     info = ClassInfo(name, has_friend)
+    info.tags = [t for t in reflect_annotations(cursor).get("tags", "").split(",") if t]
 
     method_name_counts = {}
     method_cursors = []
@@ -1371,7 +1391,8 @@ def collect_class(cursor):
             ):
                 # Never a Property, even though it's a member variable -
                 # see Delegate's class comment in reflection.h.
-                info.delegates.append(DelegateField(child.spelling, SCOPE_NAMES[access]))
+                delegate_tags = [t for t in reflect_annotations(child).get("tags", "").split(",") if t]
+                info.delegates.append(DelegateField(child.spelling, SCOPE_NAMES[access], tags=delegate_tags))
             elif is_delegate_field_type(child.type):
                 # Still a real Delegate<...> field, just either with a
                 # Sender fixed to some other class (see
@@ -1686,6 +1707,10 @@ def emit_register_function(info,function_listing):
         # as a hand-written registration function would via derived(true).
         chain.append(".derived(true)")
 
+    if info.tags:
+        tags_expr = "{" + ", ".join(f'"{t}"' for t in info.tags) + "}"
+        chain.append(f".tags({tags_expr})")
+
     # A plain member variable with no accessor methods at all - static or
     # not - is a Field, never a Property (see Field's own "raw access,
     # never through a method" comment in reflection.h) - `&Class::name`
@@ -1702,10 +1727,12 @@ def emit_register_function(info,function_listing):
             chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
 
     for d in info.delegates:
-        if d.scope == "Scope::Public":
-            chain.append(f'.delegate("{d.name}", {d.scope}, &{info.name}::{d.name})')
+        delegate_ref = f"&{info.name}::{d.name}" if d.scope == "Scope::Public" else f"detail::ClassAccess<{info.name}>::{d.name}()"
+        if d.tags:
+            tags_expr = "{" + ", ".join(f'"{t}"' for t in d.tags) + "}"
+            chain.append(f'.delegate("{d.name}", {d.scope}, {delegate_ref}, {tags_expr})')
         else:
-            chain.append(f'.delegate("{d.name}", {d.scope}, detail::ClassAccess<{info.name}>::{d.name}())')
+            chain.append(f'.delegate("{d.name}", {d.scope}, {delegate_ref})')
 
     for pa in info.property_accessors:
         getter_expr = emit_property_getter_expr(info, pa)
@@ -1713,11 +1740,20 @@ def emit_register_function(info,function_listing):
         # TypedProperty AssumeCopyable override off - see PropertyAccessor.
         # assume_copyable's own comment for when/why.
         property_call = ".property" if pa.assume_copyable else ".property<false>"
+        tags_expr = None
+        if pa.tags:
+            tags_expr = "{" + ", ".join(f'"{t}"' for t in pa.tags) + "}"
         if pa.setter_name:
             setter_expr = emit_property_setter_expr(info, pa)
-            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr}, {setter_expr})')
+            args = [f'"{pa.key}"', pa.scope, getter_expr, setter_expr]
         else:
-            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr})')
+            # tags needs the setter slot filled explicitly to reach its
+            # own trailing position - ClassBuilder::property()'s setter
+            # parameter comes before tags positionally (reflection.h).
+            args = [f'"{pa.key}"', pa.scope, getter_expr] + (["nullptr"] if tags_expr else [])
+        if tags_expr:
+            args.append(tags_expr)
+        chain.append(f'{property_call}({", ".join(args)})')
 
     # add_name without remove_name (or vice versa) is legal - a read-only
     # add, or an enumerate-only collection with neither - so args is built

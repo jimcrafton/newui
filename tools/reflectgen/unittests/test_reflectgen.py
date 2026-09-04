@@ -581,5 +581,90 @@ class QualifiedNameTest(ClangSnippetTestCase):
         self.assertEqual(rg.qualified_name(cursor), "GlobalWidget")
 
 
+class ReflectAnnotationsTagsTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect tags=filepath,pathlike
+        class Thing {
+        public:
+            // @reflect tags=urlvalue
+            std::string getPath() const;
+            void setPath(std::string);
+
+            // @reflect ignore=true
+            int getSkipped() const;
+        };
+    }
+    """
+
+    def test_class_level_tags_are_parsed_as_a_comma_joined_value(self):
+        cursor = self.find("Thing")
+        self.assertEqual(rg.reflect_annotations(cursor).get("tags"), "filepath,pathlike")
+
+    def test_property_level_tags_are_parsed(self):
+        cursor = self.find("getPath")
+        self.assertEqual(rg.reflect_annotations(cursor).get("tags"), "urlvalue")
+
+    def test_broadened_value_charset_does_not_break_a_plain_annotation(self):
+        # REFLECT_ANNOTATION_PAIR_RE's value group now also allows "," (for
+        # tags=...) - confirms an ordinary identifier-shaped value (no
+        # comma at all) still parses exactly as before.
+        cursor = self.find("getSkipped")
+        self.assertEqual(rg.reflect_annotations(cursor).get("ignore"), "true")
+
+
+class CollectClassTagsTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        template<typename SenderT, typename... Args>
+        class Delegate {};
+
+        // @reflect tags=file,pathlike
+        class Document {
+        public:
+            // @reflect tags=filepath
+            std::string getPath() const;
+            void setPath(std::string);
+
+            // @reflect tags=notification
+            Delegate<Document> onChanged;
+        };
+    }
+    """
+
+    def test_class_level_tags_land_on_class_info(self):
+        info = rg.collect_class(self.find("Document"))
+        self.assertEqual(info.tags, ["file", "pathlike"])
+
+    def test_property_level_tags_land_on_the_accessor(self):
+        info = rg.collect_class(self.find("Document"))
+        matching = [pa for pa in info.property_accessors if pa.key == "path"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].tags, ["filepath"])
+
+    def test_delegate_level_tags_land_on_the_delegate_field(self):
+        info = rg.collect_class(self.find("Document"))
+        matching = [d for d in info.delegates if d.name == "onChanged"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].tags, ["notification"])
+
+    def test_emitted_registration_includes_all_three_tags_calls(self):
+        info = rg.collect_class(self.find("Document"))
+        source = rg.emit_register_function(info, [])
+        lines = source.splitlines()
+
+        self.assertIn('.tags({"file", "pathlike"})', source)
+
+        property_lines = [l for l in lines if '.property("path"' in l]
+        self.assertEqual(len(property_lines), 1)
+        self.assertIn('{"filepath"}', property_lines[0])
+
+        delegate_lines = [l for l in lines if '.delegate("onChanged"' in l]
+        self.assertEqual(len(delegate_lines), 1)
+        self.assertIn('{"notification"}', delegate_lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()

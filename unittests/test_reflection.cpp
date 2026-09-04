@@ -272,6 +272,57 @@ TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
     EXPECT_TRUE((PropertyFlags::None & PropertyFlags::Collection) == PropertyFlags::None);
 }
 
+namespace {
+    // Hand-registered, same "small class registered by hand" pattern as
+    // ReflectedBase/ReflectedDerived above - isolated from real newui
+    // classes so this test doesn't depend on which of those happen to
+    // carry a real "@reflect tags=..." annotation (none do yet).
+    struct TaggedThing {
+        std::string path;
+        std::string getPath() const { return path; }
+        void setPath(std::string v) { path = std::move(v); }
+
+        newui::Delegate<TaggedThing> onChanged;
+    };
+}
+
+TEST(Reflection, TagsRoundTripOnClassPropertyAndDelegate) {
+    ClassBuilder<TaggedThing> builder;
+    builder.clazz()
+        .tags({"file", "pathlike"})
+        .property("path", Scope::Public, &TaggedThing::getPath, &TaggedThing::setPath, {"filepath"})
+        .delegate("onChanged", Scope::Public, &TaggedThing::onChanged, {"notification"});
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(TaggedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->tags(), (std::vector<std::string>{"file", "pathlike"}));
+
+    ASSERT_EQ(clazz->properties().size(), 1u);
+    EXPECT_EQ(clazz->properties()[0]->tags(), (std::vector<std::string>{"filepath"}));
+
+    ASSERT_EQ(clazz->delegates().size(), 1u);
+    EXPECT_EQ(clazz->delegates()[0]->tags(), (std::vector<std::string>{"notification"}));
+}
+
+TEST(Reflection, TagsDefaultToEmptyWhenNotGiven) {
+    struct Untagged {
+        int value = 0;
+        int getValue() const { return value; }
+        void setValue(int v) { value = v; }
+    };
+
+    ClassBuilder<Untagged> builder;
+    builder.clazz().property("value", Scope::Public, &Untagged::getValue, &Untagged::setValue);
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(Untagged));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->tags().empty());
+    ASSERT_EQ(clazz->properties().size(), 1u);
+    EXPECT_TRUE(clazz->properties()[0]->tags().empty());
+}
+
 // ---------------------------------------------------------------------
 // registerReflectionData() (generated) - real classes/base chains, not
 // the hand-rolled ReflectedBase/ReflectedDerived pair above. Regression

@@ -664,6 +664,15 @@ namespace newui::reflection {
         std::type_index type() const { return type_; }
         Scope scope() const { return scope_; }
         PropertyFlags flags() const { return flags_; }
+
+        // From "@reflect tags=..." (reflectgen.py) or set directly via
+        // ClassBuilder::property(...)'s trailing tags parameter - semantic
+        // hints a consumer can key an editor/behavior off directly, since
+        // this property's own type() (e.g. plain std::string) is often not
+        // distinctive enough alone. Empty for most properties.
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
+
         bool isCollection() const { return (flags_ & PropertyFlags::Collection) != PropertyFlags::None; }
         bool isAssociative() const { return (flags_ & PropertyFlags::Associative) != PropertyFlags::None; }
         bool shouldCreateOnHeap() const { return (flags_ & PropertyFlags::CreatedOnHeap) != PropertyFlags::None; }
@@ -731,6 +740,7 @@ namespace newui::reflection {
         std::type_index type_;
         Scope scope_;
         PropertyFlags flags_;
+        std::vector<std::string> tags_;
     };
 
     // T-aware TypedProperty<SourceT,ValueT> - the one place a void* instance
@@ -1872,6 +1882,11 @@ namespace newui::reflection {
         std::type_index senderType() const { return senderType_; }
         const std::vector<Argument>& arguments() const { return arguments_; }
 
+        // From "@reflect tags=..." on the delegate member (reflectgen.py) -
+        // same semantic-hint role as Property::tags()/Class::tags().
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
+
         virtual void* address(void* instance) const { return address_ ? address_(instance) : nullptr; }
 
         // Boxes args and triggers the delegate's syncCall(instance, args...)
@@ -1930,6 +1945,7 @@ namespace newui::reflection {
         std::vector<Argument> arguments_;
         AddressFn address_;
         InvokeFn invoke_;
+        std::vector<std::string> tags_;
     };
 
     // T-aware TypedDelegate<SourceT,Args...> - stores a pointer-to-member
@@ -2322,6 +2338,15 @@ namespace newui::reflection {
         const std::string& name() const { return name_; }
         const std::string& namespaceName() const { return namespaceName_; }
 
+        // From "@reflect tags=..." directly above the class declaration
+        // (reflectgen.py), or ClassBuilder::tags()'s own fluent call for a
+        // hand-written registration - same semantic-hint role as
+        // Property::tags()/Delegate::tags(), for cases where the type
+        // itself doesn't distinguish enough (e.g. tagging a designer-only
+        // helper class). Empty for most classes.
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
+
         // namespaceName() + name(), e.g. "newui::Rect" - namespaceName()
         // already carries its own trailing "::" (see extractNamespace()),
         // so this is a plain concatenation. classinfo()/getClass() accept
@@ -2516,12 +2541,13 @@ namespace newui::reflection {
         std::type_index type_;
         std::uint32_t flags_;
         std::string name_;
-        std::string namespaceName_;        
+        std::string namespaceName_;
         std::vector<Property*> properties_;
         std::vector<Field*> fields_;
         std::vector<Method*> methods_;
         std::vector<Delegate*> delegates_;
         std::vector<Constructor*> constructors_;
+        std::vector<std::string> tags_;
     };
 
     // Every live pointer already reachable through one of `properties`' own
@@ -2854,6 +2880,7 @@ namespace newui::reflection {
         ClassBuilder& abstract(bool value = true) { class_->setIsAbstract(value); return *this; }
         ClassBuilder& isStruct(bool value = true) { class_->setIsStruct(value); return *this; }
         ClassBuilder& singleton(bool value = true) { class_->setIsSingleton(value); return *this; }
+        ClassBuilder& tags(std::vector<std::string> tags) { class_->setTags(std::move(tags)); return *this; }
 
         // Links this class to its base class BaseT's already-registered
         // Class (Class::parentClass()) and marks this class derived() -
@@ -2898,12 +2925,13 @@ namespace newui::reflection {
         // dedicated compile error, not a working property). Excluded
         // here so a member-function pointer only ever resolves there.
         template<typename ValueT, typename = std::enable_if_t<!std::is_function_v<ValueT>>>
-        ClassBuilder& property(std::string name, Scope scope, ValueT T::* member) {
+        ClassBuilder& property(std::string name, Scope scope, ValueT T::* member, std::vector<std::string> tags = {}) {
             if constexpr (detail::is_reflectable_collection_v<ValueT>) {
                 class_->properties_.push_back(new TypedPropertyCollection<T, ValueT>(std::move(name), scope, member));
             } else {
                 class_->properties_.push_back(new TypedProperty<T, ValueT>(std::move(name), scope, member));
             }
+            class_->properties_.back()->setTags(std::move(tags));
             return *this;
         }
 
@@ -2957,7 +2985,8 @@ namespace newui::reflection {
         // constructible() has determined isn't really copy-constructible.
         template<bool AssumeCopyable = true, typename GetterT, typename SetterT = std::nullptr_t,
                   typename = std::enable_if_t<!std::is_member_object_pointer_v<GetterT>>>
-        ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr) {
+        ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr,
+                                std::vector<std::string> tags = {}) {
             using RawResult = std::invoke_result_t<GetterT, T&>;
 
             // A non-const T&-returning getter paired with a setter that
@@ -3054,6 +3083,7 @@ namespace newui::reflection {
                     }
                 }
             }
+            class_->properties_.back()->setTags(std::move(tags));
             return *this;
         }
 
@@ -3223,14 +3253,18 @@ namespace newui::reflection {
 
         ClassBuilder& delegate(std::string name, Scope scope, std::type_index senderType,
                                     std::vector<Argument> arguments,
-                                    Delegate::AddressFn address, Delegate::InvokeFn invoke) {
+                                    Delegate::AddressFn address, Delegate::InvokeFn invoke,
+                                    std::vector<std::string> tags = {}) {
             class_->delegates_.push_back(new Delegate(std::move(name), scope, senderType, std::move(arguments), address, invoke));
+            class_->delegates_.back()->setTags(std::move(tags));
             return *this;
         }
 
         template<typename... Args>
-        ClassBuilder& delegate(std::string name, Scope scope, newui::Delegate<T, Args...> T::* member) {
+        ClassBuilder& delegate(std::string name, Scope scope, newui::Delegate<T, Args...> T::* member,
+                                std::vector<std::string> tags = {}) {
             class_->delegates_.push_back(new TypedDelegate<T, Args...>(std::move(name), scope, member));
+            class_->delegates_.back()->setTags(std::move(tags));
             return *this;
         }
 
