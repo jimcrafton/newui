@@ -101,11 +101,41 @@ namespace newui {
         bool loadDialog(Dialog& dialog) const;
 
         // Loads just the "rootView" node of "<bundleName>.newui" into
-        // rootView in place - no Frame required, for a standalone
-        // RootView (see RootView's Frame-less constructor). Returns false
-        // for any of loadFrame()'s own failure reasons (bundleName empty,
-        // file missing/invalid).
-        bool loadRootView(RootView& rootView, const std::string& bundleName) const;
+        // target in place - no Frame required, for a standalone RootView
+        // (see RootView's Frame-less constructor). Returns false for any
+        // of loadFrame()'s own failure reasons (bundleName empty, file
+        // missing/invalid).
+        //
+        // Templated (defined + explicitly instantiated in bundle.cpp, not
+        // inline here - same "declare in the header, define + explicitly
+        // instantiate in the .cpp" shape as any templated member that
+        // doesn't need to be usable for every possible T at every call
+        // site) so a registered proxy class (Class::proxy()/proxyFor(),
+        // reflection.h - e.g. RootViewProxy, cpp_codetools' own
+        // design-time stand-in for a real RootView, which can't be loaded
+        // through this as a real RootView& at all since it's a genuinely
+        // different, unrelated type - see RootViewProxy's own class
+        // comment) can be loaded the same way a real RootView is, reusing
+        // this method's own file-resolution/parsing, not a hand-rolled
+        // duplicate. Add a new explicit instantiation in bundle.cpp for
+        // any future T that needs this.
+        //
+        // designMode, when true, propagates Component::setDesignTime(true)
+        // (via Class::trySetDesignTime()) onto every freshly-constructed
+        // child read while rebuilding target's own childViews - readNested()
+        // itself never consults a "type" tag for target's own top-level
+        // node (it always trusts T, this call's own static type - see
+        // reflection.h's readNested()), so designMode only ever affects
+        // target's *descendants*, not target itself. Defaults to false
+        // (ordinary, non-design-time load) - a real running app loading its
+        // own RootView normally should never mark its own content as
+        // design-time; a design-time caller (e.g. cpp_codetools' own
+        // DesignerEditor, loading into a RootViewProxy) passes true
+        // explicitly. Bundle has no built-in notion of which T "means"
+        // design-time - that's the caller's call, not something to infer
+        // from T here.
+        template<typename T>
+        bool loadRootView(T& target, const std::string& bundleName, bool designMode = false) const;
 
         // Loads just the "rootView" node of
         // "<rootView.getFrame()->getName()>.newui" into rootView in place -
@@ -164,16 +194,30 @@ namespace newui {
         // file couldn't be written.
         bool writeView(View& view, const std::string& name) const;
 
-        // Write-side counterpart to loadRootView(RootView&, bundleName) -
-        // for a standalone RootView with no owning Frame. Unlike
-        // writeFrame() (which always writes the whole Frame fresh),
-        // this preserves every other top-level key an existing
-        // "<bundleName>.newui" already has (title, bounds, animations,
-        // ...) - only "rootView" is replaced - so editing a Frame-less
-        // view of a file a real Frame elsewhere still loadFrame()s from
-        // doesn't silently drop that Frame's own data. Returns false if
-        // bundleName is empty or the file couldn't be written.
-        bool writeRootView(RootView& rootView, const std::string& bundleName) const;
+        // Write-side counterpart to loadRootView(T&, bundleName) - for a
+        // standalone RootView (or registered proxy - see loadRootView()'s
+        // own comment) with no owning Frame. Unlike writeFrame() (which
+        // always writes the whole Frame fresh), this preserves every
+        // other top-level key an existing "<bundleName>.newui" already
+        // has (title, bounds, animations, ...) - only "rootView" is
+        // replaced - so editing a Frame-less view of a file a real Frame
+        // elsewhere still loadFrame()s from doesn't silently drop that
+        // Frame's own data. Returns false if bundleName is empty or the
+        // file couldn't be written. Same templated/explicit-instantiation
+        // shape as loadRootView() - see its own comment.
+        //
+        // designMode, when true, writes target's real Class::proxyFor()
+        // name (e.g. "RootView") as the "rootView" node's own "type" tag
+        // instead of target's actual class name (e.g. "RootViewProxy") -
+        // see ObjectWriter::isDesignMode()/Class::proxyFor()'s own
+        // comments - so a file written from a design-time proxy tree still
+        // reads as an ordinary RootView-shaped document. A no-op for a T
+        // with no registered proxyFor() (RootView itself, in particular),
+        // so callers that never use proxies don't need to pass this at
+        // all. Defaults to false, same reasoning as loadRootView()'s own
+        // designMode parameter.
+        template<typename T>
+        bool writeRootView(T& target, const std::string& bundleName, bool designMode = false) const;
 
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).

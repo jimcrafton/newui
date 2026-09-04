@@ -7,6 +7,7 @@
 #include "newui/layout.h"
 #include "newui/property.h"
 #include "newui/rootview.h"
+#include "newui/rootviewproxy.h"
 #include "newui/subview.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
@@ -370,6 +371,90 @@ TEST_F(NewuiFileFixture, LoadRootViewWithExplicitBundleNameFailsWhenNameIsEmpty)
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
 
     EXPECT_FALSE(newui::Bundle::instance().loadRootView(root, ""));
+}
+
+// loadRootView()/writeRootView() are templated (Bundle::loadRootView<T>()/
+// writeRootView<T>()) specifically so a registered proxy class (Class::
+// proxy()/proxyFor()) can be loaded/written the same way a real RootView
+// is - RootViewProxy (newui/rootviewproxy.h) can't be loaded as a real
+// RootView& at all (unrelated, non-inheriting types - see its own class
+// comment), so this is the real, only way DesignerEditor (cpp_codetools)
+// can load a document into one.
+TEST_F(NewuiFileFixture, LoadRootViewIntoARegisteredProxyTypeAlsoWorks) {
+    writeFile("BundleTestProxyLoad", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    EXPECT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyLoad"));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_EQ(proxy.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithDesignModePropagatesDesignTimeOntoFreshChildren) {
+    writeFile("BundleTestProxyDesignMode", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyDesignMode", /*designMode=*/true));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_TRUE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithoutDesignModeLeavesFreshChildrenNotDesignTime) {
+    writeFile("BundleTestProxyNoDesignMode", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyNoDesignMode"));  // designMode defaults false
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_FALSE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFromAProxyWithDesignModeWritesTheRealClassName) {
+    trackFile("BundleTestProxyWriteDesignMode");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(proxy, "BundleTestProxyWriteDesignMode", /*designMode=*/true));
+
+    // A real running app's own loadRootView(RootView&, name) never actually
+    // consults this "type" tag (readNested() always trusts its own static
+    // T - see its own comment, reflectionio.h), so this is really about
+    // the saved file being human-legible/consistent, not correctness of
+    // any real load path - still worth locking down explicitly.
+    std::string written = newui::Bundle::instance().loadTextFile("BundleTestProxyWriteDesignMode.newui");
+    EXPECT_NE(written.find("RootView"), std::string::npos);
+    EXPECT_EQ(written.find("RootViewProxy"), std::string::npos);
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFromAProxyWithoutDesignModeWritesItsOwnClassName) {
+    trackFile("BundleTestProxyWriteNoDesignMode");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(proxy, "BundleTestProxyWriteNoDesignMode"));  // designMode defaults false
+
+    std::string written = newui::Bundle::instance().loadTextFile("BundleTestProxyWriteNoDesignMode.newui");
+    EXPECT_NE(written.find("RootViewProxy"), std::string::npos);
 }
 
 TEST_F(NewuiFileFixture, LoadViewConstructsAFreshInstanceWithChildren) {

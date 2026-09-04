@@ -5,6 +5,7 @@
 #include "newui/frame.h"
 #include "newui/reflectionio.h"
 #include "newui/rootview.h"
+#include "newui/rootviewproxy.h"
 #include "newui/view.h"
 #include "newui/viewpath.h"
 #include "newui/viewstyle.h"
@@ -596,7 +597,8 @@ namespace newui {
         return loadFrame(dialog.frame());
     }
 
-    bool Bundle::loadRootView(RootView& rootView, const std::string& bundleName) const {
+    template<typename T>
+    bool Bundle::loadRootView(T& target, const std::string& bundleName, bool designMode) const {
         if (bundleName.empty()) {
             return false;
         }
@@ -606,9 +608,13 @@ namespace newui {
             return false;
         }
 
-        reader.readNested("rootView", &rootView);
+        reader.setDesignMode(designMode);
+        reader.readNested("rootView", &target);
         return true;
     }
+
+    template bool Bundle::loadRootView<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::loadRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
 
     bool Bundle::loadRootView(RootView& rootView) const {
         Frame* frame = rootView.getFrame();
@@ -747,7 +753,8 @@ namespace newui {
         return writeTextFile(name + ".newui", json5::to_string(writer.doc));
     }
 
-    bool Bundle::writeRootView(RootView& rootView, const std::string& bundleName) const {
+    template<typename T>
+    bool Bundle::writeRootView(T& target, const std::string& bundleName, bool designMode) const {
         if (bundleName.empty()) {
             return false;
         }
@@ -757,6 +764,7 @@ namespace newui {
         bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
 
         reflection::ObjectWriter writer;
+        writer.setDesignMode(designMode);
         writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
 
         if (hasExisting) {
@@ -768,11 +776,14 @@ namespace newui {
             }
         }
 
-        writer.writeNested("rootView", &rootView);
+        writer.writeNested("rootView", &target);
         writer.endObject(std::string(), nullptr);
 
         return writeTextFile(bundleName + ".newui", json5::to_string(writer.doc));
     }
+
+    template bool Bundle::writeRootView<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::writeRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
 
     void Bundle::ensureInfoLoaded() const {
         if (infoLoaded_) {
