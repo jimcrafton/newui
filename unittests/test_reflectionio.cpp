@@ -449,3 +449,165 @@ TEST(ReflectionIO, ReadTerminatesOnASelfReferentialAddressableProperty) {
 
     EXPECT_EQ(&fresh.self(), &fresh);
 }
+
+namespace {
+
+struct ProxiedReal {};
+
+struct ProxyStandIn {};
+
+const Class* RegisterProxyClasses() {
+    static const Class* registered = [] {
+        ClassBuilder<ProxyStandIn> standInBuilder;
+        standInBuilder.clazz().proxyFor("ProxiedReal");
+        ReflectionRegistry::registerClass(standInBuilder);
+
+        ClassBuilder<ProxiedReal> realBuilder;
+        realBuilder.clazz().proxy("ProxyStandIn");
+        ReflectionRegistry::registerClass(realBuilder);
+
+        return classinfo(typeid(ProxiedReal));
+    }();
+    return registered;
+}
+
+// A minimal type with a real, registered "setDesignTime" Method, standing
+// in for newui::Component without this test file needing to depend on it -
+// Class::trySetDesignTime() (reflection.h) looks the method up by name
+// through the ordinary reflection API, same as Component::setDesignTime()
+// itself already is (its own @reflect ignore=true only excludes it from
+// Property-pairing, not Method registration - see component.h and the
+// generated newui_reflection_generated.cpp, which already emits
+// .method("setDesignTime", ...) for it).
+struct DesignAwareThing {
+    bool designTime = false;
+    void setDesignTime(bool v) { designTime = v; }
+};
+
+const Class* RegisterDesignAwareThing() {
+    static const Class* registered = [] {
+        ClassBuilder<DesignAwareThing> builder;
+        builder.clazz()
+            .constructor<>()
+            .method("setDesignTime", Scope::Public, &DesignAwareThing::setDesignTime);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(DesignAwareThing));
+    }();
+    return registered;
+}
+
+// Base/derived pair mirroring the real Component/View relationship -
+// setDesignTime lives only on the base, never redeclared on the derived
+// class, so trySetDesignTime() must walk parentClass() to find it.
+struct DesignAwareBase {
+    bool designTime = false;
+    void setDesignTime(bool v) { designTime = v; }
+};
+
+struct DesignAwareDerived : DesignAwareBase {};
+
+void RegisterDesignAwareBaseAndDerived() {
+    static bool done = [] {
+        ClassBuilder<DesignAwareBase> baseBuilder;
+        baseBuilder.clazz()
+            .constructor<>()
+            .method("setDesignTime", Scope::Public, &DesignAwareBase::setDesignTime);
+        ReflectionRegistry::registerClass(baseBuilder);
+
+        ClassBuilder<DesignAwareDerived> derivedBuilder;
+        derivedBuilder.clazz().constructor<>().base<DesignAwareBase>();
+        ReflectionRegistry::registerClass(derivedBuilder);
+        return true;
+    }();
+    (void)done;
+}
+
+}  // namespace
+
+TEST(ReflectionIO, TrySetDesignTimeWalksParentClassToFindTheMethod) {
+    RegisterDesignAwareBaseAndDerived();
+
+    DesignAwareDerived instance;
+    const Class* derivedClazz = classinfo(typeid(DesignAwareDerived));
+    ASSERT_NE(derivedClazz, nullptr);
+
+    // Confirms the premise: the derived class's own method() lookup alone
+    // (no parentClass() walk) would find nothing.
+    ASSERT_EQ(derivedClazz->method("setDesignTime"), nullptr);
+
+    derivedClazz->trySetDesignTime(&instance, true);
+    EXPECT_TRUE(instance.designTime);
+}
+
+TEST(ReflectionIO, DesignModeWriteSubstitutesProxyForRealClassName) {
+    RegisterProxyClasses();
+    ProxyStandIn instance;
+
+    ObjectWriter writer;
+    writer.setDesignMode(true);
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"ProxiedReal\""), std::string::npos);
+    EXPECT_EQ(text.find("ProxyStandIn"), std::string::npos);
+}
+
+TEST(ReflectionIO, NonDesignModeWriteKeepsTheProxysOwnClassName) {
+    RegisterProxyClasses();
+    ProxyStandIn instance;
+
+    ObjectWriter writer;  // setDesignMode() never called - defaults to false
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"ProxyStandIn\""), std::string::npos);
+}
+
+TEST(ReflectionIO, WriteWithNoProxyForIsUnaffectedByDesignMode) {
+    RegisterDesignAwareThing();
+    DesignAwareThing instance;
+
+    ObjectWriter writer;
+    writer.setDesignMode(true);
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"DesignAwareThing\""), std::string::npos);
+}
+
+TEST(ReflectionIO, DesignModeReadNewPropagatesDesignTimeOntoFreshInstance) {
+    const Class* clazz = RegisterDesignAwareThing();
+    DesignAwareThing written;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    reader.setDesignMode(true);
+    DesignAwareThing* fresh = reader.readNew<DesignAwareThing>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->designTime);
+    delete fresh;
+    (void)clazz;
+}
+
+TEST(ReflectionIO, NonDesignModeReadNewLeavesDesignTimeUnset) {
+    RegisterDesignAwareThing();
+    DesignAwareThing written;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    // setDesignMode() never called - defaults to false.
+    DesignAwareThing* fresh = reader.readNew<DesignAwareThing>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_FALSE(fresh->designTime);
+    delete fresh;
+}

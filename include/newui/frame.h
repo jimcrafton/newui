@@ -9,6 +9,7 @@
 
 namespace newui {
 
+// @reflect proxy=FrameProxy
 class Frame {
 public:
     Frame();

@@ -75,6 +75,10 @@ namespace newui::reflection {
         // by write() itself - see DocumentMetadata's own comment for why.
         DocumentMetadata metadata;
 
+        // See ClassWriter::isDesignMode()'s own comment.
+        void setDesignMode(bool value) { designMode_ = value; }
+        bool isDesignMode() const override { return designMode_; }
+
         void beginObject(const std::string& name, const Class* clazz) override {
             builder.push_object();
 
@@ -98,7 +102,16 @@ namespace newui::reflection {
             // with, and it isn't meant to look like a reconstructable
             // instance on read anyway).
             if (clazz) {
-                builder["type"] = builder.new_string(clazz->name());
+                // Design-mode proxy substitution (see Class::proxyFor()'s
+                // own comment): a FrameProxy/RootViewProxy instance writes
+                // "type": "Frame"/"RootView" instead of its own class name,
+                // so a file saved from a design-time proxy tree still reads
+                // as an ordinary Frame/RootView-shaped document to anything
+                // (a real running app, in particular) that has no idea
+                // proxies exist.
+                const std::string& typeName =
+                    (designMode_ && !clazz->proxyFor().empty()) ? clazz->proxyFor() : clazz->name();
+                builder["type"] = builder.new_string(typeName);
             }
 
             ++depth_;
@@ -282,6 +295,7 @@ namespace newui::reflection {
 
         int depth_ = 0;
         std::set<std::pair<const Class*, void*>> inProgress_;
+        bool designMode_ = false;
     };
 
 
@@ -317,6 +331,10 @@ namespace newui::reflection {
     // class write() already tagged the node with.
     class ObjectReader : public ClassReader {
     public:
+        // See ClassReader::isDesignMode()'s own comment.
+        void setDesignMode(bool value) { designMode_ = value; }
+        bool isDesignMode() const override { return designMode_; }
+
         const Class* beginObject(const std::string& name) override {
             json5::value node;
             if (!name.empty()) {
@@ -759,6 +777,7 @@ namespace newui::reflection {
         std::vector<json5::value> stack;
         std::vector<std::size_t> cursorStack;
         std::set<std::pair<const Class*, void*>> inProgress_;
+        bool designMode_ = false;
     };
 
 

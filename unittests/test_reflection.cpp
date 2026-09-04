@@ -305,6 +305,55 @@ TEST(Reflection, TagsRoundTripOnClassPropertyAndDelegate) {
     EXPECT_EQ(clazz->delegates()[0]->tags(), (std::vector<std::string>{"notification"}));
 }
 
+namespace {
+    struct DummyReal {};
+    struct DummyRealProxy {};
+}
+
+TEST(Reflection, ProxyAndProxyForRoundTripAndResolveByNameLazily) {
+    // Registered in "backwards" order deliberately - DummyRealProxy first,
+    // DummyReal second - to prove proxy()/proxyFor() store plain name
+    // strings, not eagerly-resolved Class* (which would require the
+    // referenced class to already be registered, same ordering
+    // requirement ClassBuilder<T>::base<BaseT>() has).
+    ClassBuilder<DummyRealProxy> proxyBuilder;
+    proxyBuilder.clazz().proxyFor("DummyReal");
+    ReflectionRegistry::registerClass(proxyBuilder);
+
+    ClassBuilder<DummyReal> realBuilder;
+    realBuilder.clazz().proxy("DummyRealProxy");
+    ReflectionRegistry::registerClass(realBuilder);
+
+    const Class* real = classinfo(typeid(DummyReal));
+    const Class* proxy = classinfo(typeid(DummyRealProxy));
+    ASSERT_NE(real, nullptr);
+    ASSERT_NE(proxy, nullptr);
+
+    EXPECT_EQ(real->proxy(), "DummyRealProxy");
+    EXPECT_TRUE(real->proxyFor().empty());
+    EXPECT_EQ(proxy->proxyFor(), "DummyReal");
+    EXPECT_TRUE(proxy->proxy().empty());
+
+    // The whole point - resolve lazily, by name, at actual use time.
+    EXPECT_EQ(ReflectionRegistry::getClass(real->proxy()), proxy);
+    EXPECT_EQ(ReflectionRegistry::getClass(proxy->proxyFor()), real);
+}
+
+TEST(Reflection, ProxyAndProxyForDefaultToEmptyWhenNotGiven) {
+    // A fresh, locally-registered struct, not TaggedThing (registered by a
+    // different TEST body above) - relying on that would only pass when
+    // tests run in file order, not under a filter that skips it.
+    struct UnproxiedThing {};
+    ClassBuilder<UnproxiedThing> builder;
+    builder.clazz();
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(UnproxiedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->proxy().empty());
+    EXPECT_TRUE(clazz->proxyFor().empty());
+}
+
 TEST(Reflection, TagsDefaultToEmptyWhenNotGiven) {
     struct Untagged {
         int value = 0;

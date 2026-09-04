@@ -666,5 +666,73 @@ class CollectClassTagsTest(ClangSnippetTestCase):
         self.assertIn('{"notification"}', delegate_lines[0])
 
 
+class ReflectProxyAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect proxy=AppFrameProxy
+        class AppFrame {
+        public:
+            void setTitle(std::string);
+            std::string getTitle() const;
+        };
+
+        // @reflect proxyfor=AppFrame
+        class AppFrameProxy {
+        public:
+            void setTitle(std::string);
+            std::string getTitle() const;
+        };
+
+        // Neither annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    # NOTE: this snippet's real classes are deliberately named AppFrame/
+    # AppFrameProxy, not Frame/FrameProxy (which is what the real newui
+    # header uses) - #include <string> transitively pulls in MSVC's
+    # <setjmp.h>, whose x64 _JUMP_BUFFER struct has a real register-save
+    # field literally named "Frame". _find_named() (this file's own
+    # helper) matches by cursor spelling alone, any kind, anywhere in the
+    # parsed tree - so self.find("Frame") silently resolved to that field
+    # instead of this snippet's own class, a real, reproduced collision.
+
+    def test_proxy_annotation_is_parsed(self):
+        cursor = self.find("AppFrame")
+        self.assertEqual(rg.reflect_annotations(cursor).get("proxy"), "AppFrameProxy")
+
+    def test_proxyfor_annotation_is_parsed(self):
+        cursor = self.find("AppFrameProxy")
+        self.assertEqual(rg.reflect_annotations(cursor).get("proxyfor"), "AppFrame")
+
+    def test_proxy_lands_on_class_info(self):
+        info = rg.collect_class(self.find("AppFrame"))
+        self.assertEqual(info.proxy, "AppFrameProxy")
+        self.assertEqual(info.proxy_for, "")
+
+    def test_proxyfor_lands_on_class_info(self):
+        info = rg.collect_class(self.find("AppFrameProxy"))
+        self.assertEqual(info.proxy_for, "AppFrame")
+        self.assertEqual(info.proxy, "")
+
+    def test_neither_annotation_leaves_both_empty(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertEqual(info.proxy, "")
+        self.assertEqual(info.proxy_for, "")
+
+    def test_emitted_registration_includes_proxy_call(self):
+        info = rg.collect_class(self.find("AppFrame"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.proxy("AppFrameProxy")', source)
+        self.assertNotIn(".proxyFor(", source)
+
+    def test_emitted_registration_includes_proxyfor_call(self):
+        info = rg.collect_class(self.find("AppFrameProxy"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.proxyFor("AppFrame")', source)
+        self.assertNotIn(".proxy(", source)
+
+
 if __name__ == "__main__":
     unittest.main()

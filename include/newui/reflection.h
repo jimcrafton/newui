@@ -82,6 +82,14 @@ namespace newui::reflection {
         // implementation that does.
         virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
         virtual void exitInstance(const Class* clazz, void* instancePtr) {}
+
+        // True while this writer is producing a design-time document (see
+        // Class::proxy()/proxyFor()'s own comments) - ObjectWriter
+        // (reflectionio.h) is the one real implementation that makes this
+        // settable; every other ClassWriter defaults to false (ordinary,
+        // non-design-time output), same "default no-op, only a real
+        // implementation overrides" shape as enterInstance() above.
+        virtual bool isDesignMode() const { return false; }
     };
 
 
@@ -170,6 +178,12 @@ namespace newui::reflection {
         // enterInstance()'s own comment.
         virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
         virtual void exitInstance(const Class* clazz, void* instancePtr) {}
+
+        // See ClassWriter::isDesignMode()'s own comment - same shape, read
+        // side. TypedClass<T>::read() (below) consults this to decide
+        // whether a resolved "type" tag's Class::proxy() should be
+        // substituted in before constructing a fresh instance.
+        virtual bool isDesignMode() const { return false; }
     };
     // Forward-declared, never given a generic body - referencing
     // ClassAccess<T> for a T nobody ever explicitly specialized is a hard
@@ -2347,6 +2361,34 @@ namespace newui::reflection {
         const std::vector<std::string>& tags() const { return tags_; }
         void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
 
+        // From "@reflect proxy=<ClassName>" directly above the class
+        // declaration (reflectgen.py), or ClassBuilder::proxy()'s own
+        // fluent call - names this class's design-time stand-in (e.g.
+        // Frame's proxy() is "FrameProxy"), for a class that genuinely
+        // can't be nested as an ordinary SubView child (Frame/RootView -
+        // see FrameProxy/RootViewProxy's own class comments). A plain
+        // class-name string, not a resolved Class* - the proxy class is
+        // very likely registered *after* this one (reflectgen has no
+        // reason to order them any particular way relative to each
+        // other), so resolving eagerly here would hit the same forward-
+        // reference ordering problem ClassBuilder<T>::base<BaseT>() avoids
+        // by requiring bases registered first; resolve lazily instead, via
+        // ReflectionRegistry::getClass(name), only when actually needed
+        // (ObjectReader's design-mode dynamic-type substitution). Empty
+        // for every class with no proxy.
+        const std::string& proxy() const { return proxy_; }
+        void setProxy(std::string proxyClassName) { proxy_ = std::move(proxyClassName); }
+
+        // The inverse relationship - from "@reflect proxyfor=<ClassName>"
+        // on the proxy class itself (e.g. FrameProxy's proxyFor() is
+        // "Frame"). ObjectWriter consults this in design mode to write the
+        // *real* class's name as the "type" tag instead of the proxy's own
+        // name, so a file saved from a design-time proxy tree still reads
+        // as an ordinary Frame/RootView-shaped document to anything that
+        // doesn't know proxies exist.
+        const std::string& proxyFor() const { return proxyFor_; }
+        void setProxyFor(std::string realClassName) { proxyFor_ = std::move(realClassName); }
+
         // namespaceName() + name(), e.g. "newui::Rect" - namespaceName()
         // already carries its own trailing "::" (see extractNamespace()),
         // so this is a plain concatenation. classinfo()/getClass() accept
@@ -2508,6 +2550,36 @@ namespace newui::reflection {
         // Defaulted so every existing call site is unaffected.
         virtual void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
                             bool& instanceOnHeap, void** outRawInstance = nullptr) const = 0;
+
+        // Invokes a registered "setDesignTime" Method on instancePtr, if
+        // this class (or any of its parentClass() ancestors) has one - a
+        // no-op otherwise. Goes through the ordinary reflection Method
+        // lookup/invoke machinery (same as any other .method("...")->
+        // invoke() call site) rather than a dedicated virtual/SFINAE
+        // mechanism - reflection.h has no dependency on component.h and
+        // doesn't need one: Component::setDesignTime(bool) is already a
+        // plain registered Method (its @reflect ignore=true only excludes
+        // it from Property-pairing, not Method registration - see
+        // component.h), so this needs nothing new from any class, existing
+        // or future, beyond what registerReflectionData() already does.
+        // method() itself only searches this class's own methods_, not its
+        // ancestors (see its own definition, reflection.cpp) - hence the
+        // explicit parentClass() walk here, same most-derived-first search
+        // TypedClass<T>::allProperties()/Class::allDelegates() already use.
+        // Non-virtual and defined once on Class, not per-TypedClass<T> -
+        // nothing here depends on the compile-time T a caller started
+        // from, only on whichever real Class the caller already resolved.
+        // Used by ObjectReader's design-mode read path to propagate
+        // isDesignTime() onto every freshly-constructed instance - see
+        // TypedClass<T>::read()'s own call site.
+        void trySetDesignTime(void* instancePtr, bool value) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                if (const Method* m = c->method("setDesignTime"); m != nullptr) {
+                    m->invoke(instancePtr, { std::any(value) });
+                    return;
+                }
+            }
+        }
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -2548,6 +2620,8 @@ namespace newui::reflection {
         std::vector<Delegate*> delegates_;
         std::vector<Constructor*> constructors_;
         std::vector<std::string> tags_;
+        std::string proxy_;
+        std::string proxyFor_;
     };
 
     // Every live pointer already reachable through one of `properties`' own
@@ -2759,6 +2833,23 @@ namespace newui::reflection {
             // implementation is expected to do with propertyName).
             const Class* clazz = reader->beginObject(propertyName);
 
+            // NOTE: deliberately no design-mode Class::proxy() substitution
+            // here, unlike the ordinary subclass-of-T resolution just below.
+            // Every caller that reaches the fresh-construct branch below
+            // (readFreshElement()/readNew<BaseT>(), reflectionio.h) captures
+            // the constructed object as a raw void* and then
+            // static_cast<DeclaredT*>(raw)'s it back to the *statically*
+            // declared type - safe for genuine polymorphism (Circle:Shape,
+            // real single non-virtual inheritance, same layout at offset 0)
+            // but real undefined behavior for a proxy substitution, since a
+            // proxy class (FrameProxy) is deliberately NOT a real subclass
+            // of what it proxies (Frame) - unrelated layouts entirely.
+            // Proxy substitution only belongs at a call site that never
+            // does that static_cast-back-to-declared-type step - no such
+            // safe call site exists yet (readNested<InstanceT>(), the one
+            // DesignerEditor actually needs, already reads directly into an
+            // explicitly-chosen InstanceT like RootViewProxy and never
+            // reaches this branch at all - see its own comment above).
             bool useResolvedClazz = false;
             if (clazz != nullptr && clazz != static_cast<const Class*>(this) && !outInstance.has_value()) {
                 for (const Class* c = clazz; c != nullptr; c = c->parentClass()) {
@@ -2788,6 +2879,15 @@ namespace newui::reflection {
                 }
                 instancePtr = raw;
                 instanceOnHeap = true;
+
+                // Propagate design mode onto every freshly-constructed
+                // instance (proxy-substituted or not) - see Class::
+                // trySetDesignTime()'s own comment for why this goes
+                // through clazz (the resolved, possibly-more-derived
+                // class), not this class's own T.
+                if (reader->isDesignMode()) {
+                    clazz->trySetDesignTime(instancePtr, true);
+                }
             }
 
             // See ClassReader::enterInstance()'s own comment - skips
@@ -2881,6 +2981,10 @@ namespace newui::reflection {
         ClassBuilder& isStruct(bool value = true) { class_->setIsStruct(value); return *this; }
         ClassBuilder& singleton(bool value = true) { class_->setIsSingleton(value); return *this; }
         ClassBuilder& tags(std::vector<std::string> tags) { class_->setTags(std::move(tags)); return *this; }
+
+        // See Class::proxy()/proxyFor()'s own comments.
+        ClassBuilder& proxy(std::string proxyClassName) { class_->setProxy(std::move(proxyClassName)); return *this; }
+        ClassBuilder& proxyFor(std::string realClassName) { class_->setProxyFor(std::move(realClassName)); return *this; }
 
         // Links this class to its base class BaseT's already-registered
         // Class (Class::parentClass()) and marks this class derived() -

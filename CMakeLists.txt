@@ -132,6 +132,9 @@ add_library(newui STATIC
     "include/newui/component.h"
     "include/newui/undostack.h" "src/undostack.cpp"
     "include/newui/viewbuilder.h"
+    "include/newui/frameproxy.h" "src/frameproxy.cpp"
+    "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
+    "include/newui/splitter.h" "src/splitter.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)

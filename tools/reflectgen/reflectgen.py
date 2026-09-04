@@ -657,6 +657,12 @@ class ClassInfo:
         # From "@reflect tags=..." directly above the class declaration -
         # see PropertyAccessor.tags's own comment for the general idea.
         self.tags = []
+        # From "@reflect proxy=<ClassName>"/"@reflect proxyfor=<ClassName>" -
+        # see Class::proxy()/proxyFor()'s own comments (reflection.h).
+        # Empty string ("") for a class with no proxy relationship, same
+        # "absent means empty, not None" convention self.tags already uses.
+        self.proxy = ""
+        self.proxy_for = ""
 
 
 class EnumValue:
@@ -1311,6 +1317,8 @@ def collect_class(cursor):
     has_friend = has_reflect_friend(cursor)
     info = ClassInfo(name, has_friend)
     info.tags = [t for t in reflect_annotations(cursor).get("tags", "").split(",") if t]
+    info.proxy = reflect_annotations(cursor).get("proxy", "")
+    info.proxy_for = reflect_annotations(cursor).get("proxyfor", "")
 
     method_name_counts = {}
     method_cursors = []
@@ -1710,6 +1718,11 @@ def emit_register_function(info,function_listing):
     if info.tags:
         tags_expr = "{" + ", ".join(f'"{t}"' for t in info.tags) + "}"
         chain.append(f".tags({tags_expr})")
+
+    if info.proxy:
+        chain.append(f'.proxy("{info.proxy}")')
+    if info.proxy_for:
+        chain.append(f'.proxyFor("{info.proxy_for}")')
 
     # A plain member variable with no accessor methods at all - static or
     # not - is a Field, never a Property (see Field's own "raw access,
