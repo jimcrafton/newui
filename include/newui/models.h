@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "newui/newui.h"
+#include "newui/component.h"
 #include "newui/delegate.h"
 
 
@@ -22,7 +23,7 @@ namespace newui {
     // Controller, controllers.h) exist for the more complex case: a widget
     // (or a whole screen, via ViewController) whose content is driven by
     // real data rather than just its own visual state.
-    class Model {
+    class Model : public Component {
     public:
         enum UpdateFlags {
             NoFlags = 0x00,

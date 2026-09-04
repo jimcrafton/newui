@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "newui/newui.h"
+#include "newui/component.h"
 #include "newui/models.h"
 
 namespace newui {
@@ -33,7 +34,7 @@ namespace newui {
     // collaborators rather than one class doing both jobs. ViewController
     // is the one place this codebase does inherit from Controller directly:
     // a screen-level controller genuinely *is* one, not just "has one."
-    class Controller {
+    class Controller : public Component {
     public:
         Controller() = default;
         virtual ~Controller();

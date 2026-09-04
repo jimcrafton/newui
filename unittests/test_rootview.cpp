@@ -869,6 +869,63 @@ TEST(ViewFindView, ReturnsNullWhenNoMatchExists) {
     delete root;
 }
 
+TEST(ViewIsDesignTime, DefaultsFalseOnAFreshRootView) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    EXPECT_FALSE(root->isDesignTime());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsDesignTime, RootViewReflectsItsOwnSetDesignTime) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    root->setDesignTime(true);
+    EXPECT_TRUE(root->isDesignTime());
+
+    root->setDesignTime(false);
+    EXPECT_FALSE(root->isDesignTime());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsDesignTime, ChildViewDefersToItsRootViewsFlag) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* button = new newui::Button();
+    root->addChild(button);
+
+    EXPECT_FALSE(button->isDesignTime());
+    root->setDesignTime(true);
+    EXPECT_TRUE(button->isDesignTime());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsDesignTime, NestedDescendantDefersToTheSameRootViewsFlag) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* row = new newui::SubView();
+    root->addChild(row);
+    auto* button = new newui::Button();
+    row->addChild(button);
+
+    root->setDesignTime(true);
+    EXPECT_TRUE(button->isDesignTime());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsDesignTime, DefaultsFalseOnAViewNotAttachedToAnyRootView) {
+    auto* button = new newui::Button();
+
+    EXPECT_FALSE(button->isDesignTime());
+
+    delete button;
+}
+
 TEST(RootViewDefaultNaming, ChildAddedToAnAlreadyRootedContainerGetsNamed) {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 

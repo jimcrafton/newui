@@ -292,17 +292,20 @@ TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
 // ---------------------------------------------------------------------
 
 TEST(Reflection, GeneratedDataLinksViewControlButtonChain) {
+    const Class* componentClass = classinfo(typeid(newui::Component));
     const Class* viewClass = classinfo(typeid(newui::View));
     const Class* subViewClass = classinfo(typeid(newui::SubView));
     const Class* controlClass = classinfo(typeid(newui::Control));
     const Class* buttonClass = classinfo(typeid(newui::Button));
 
+    ASSERT_NE(componentClass, nullptr);
     ASSERT_NE(viewClass, nullptr);
     ASSERT_NE(subViewClass, nullptr);
     ASSERT_NE(controlClass, nullptr);
     ASSERT_NE(buttonClass, nullptr);
 
-    EXPECT_EQ(viewClass->parentClass(), nullptr);
+    EXPECT_EQ(componentClass->parentClass(), nullptr);
+    EXPECT_EQ(viewClass->parentClass(), componentClass);
     EXPECT_EQ(subViewClass->parentClass(), viewClass);
     EXPECT_EQ(controlClass->parentClass(), subViewClass);
     EXPECT_EQ(buttonClass->parentClass(), controlClass);

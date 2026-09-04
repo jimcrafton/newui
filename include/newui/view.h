@@ -7,6 +7,7 @@
 
 #include <newui/newui.h>
 #include <newui/command.h>
+#include <newui/component.h>
 #include <newui/cursor.h>
 #include <newui/delegate.h>
 #include <newui/dragndrop.h>
@@ -28,7 +29,7 @@ namespace newui {
     // owns via a raw pointer (a parent's childViews_, PropertyManager's
     // properties_, Frame's rootView_, ...) and frees explicitly - see
     // View::destroy().
-    class View {
+    class View : public Component {
     public:
 
         View();
@@ -97,11 +98,13 @@ namespace newui {
         // generated default name (see RootView::generateDefaultName())
         // never collides with a hand-assigned one - see view.cpp; needs
         // RootView's full definition, so this can't stay inline here.
+        // Overrides Component::setName() to also reserve the name in
+        // this View's RootView (if attached) - defined in view.cpp,
+        // needs RootView's full definition. Redeclares name() too so
+        // reflectgen pairs a real getter+setter on View itself, same
+        // reason setBounds()/setVisible() above are redeclared here.
         void setName(const std::string& name);
-
-        std::string name() const {
-            return name_;
-        }
+        std::string name() const { return Component::name(); }
 
         virtual void addChild(SubView* child);
         virtual void removeChild(SubView* child);
@@ -515,6 +518,11 @@ namespace newui {
             rootView_ = val;
         }
 
+        // Overrides Component::isDesignTime() - defers to the owning
+        // RootView's flag. Defined in view.cpp (needs RootView).
+        //@reflect ignore=true
+        bool isDesignTime() const;
+
         // Same non-owning-upward-back-reference reasoning as rootView()
         // above - reachable downward already via the real parent's own
         // childViews, so letting reflectgen register this as a Property
@@ -542,7 +550,6 @@ namespace newui {
     protected:
         Rect bounds_;
         bool visible_ = false;
-        std::string name_;
 
         std::optional<Size> desiredSizeOverride_;
 

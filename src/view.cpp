@@ -72,7 +72,11 @@ namespace newui {
 		if (rootView_ != nullptr && !name.empty()) {
 			rootView_->nameManager().reserve(name);
 		}
-		name_ = name;
+		Component::setName(name);
+	}
+
+	bool View::isDesignTime() const {
+		return rootView_ ? rootView_->isDesignTime() : Component::isDesignTime();
 	}
 
 	void View::propagateRootView(RootView* root) {

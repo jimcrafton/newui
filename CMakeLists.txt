@@ -129,6 +129,7 @@ add_library(newui STATIC
     "include/newui/dibimage.h" "src/dibimage.cpp"
     "include/newui/dragndrop.h" "src/dragndrop.cpp"
     "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
+    "include/newui/component.h"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
