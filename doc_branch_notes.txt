@@ -1,0 +1,1 @@
+Go over all the source files and reduce the verbosity of the documentation. In some case get rid of it entirely. To be done once things have stabilized a bit
