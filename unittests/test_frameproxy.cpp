@@ -22,6 +22,13 @@ TEST(FrameProxy, IsARealSubViewUsableTheOrdinaryAddChildWay) {
     delete parent;
 }
 
+TEST(FrameProxy, IsVisibleByDefault) {
+    // Real, caught bug - see RootViewProxy's own identical test for why.
+    auto* proxy = new newui::FrameProxy();
+    EXPECT_TRUE(proxy->isVisible());
+    delete proxy;
+}
+
 TEST(FrameProxy, TitleDefaultsEmptyAndRoundTripsThroughSetTitle) {
     auto* proxy = new newui::FrameProxy();
     EXPECT_TRUE(proxy->title().empty());

@@ -22,6 +22,18 @@ TEST(RootViewProxy, IsARealSubViewUsableTheOrdinaryAddChildWay) {
     delete parent;  // deletes proxy too, same as every other SubView child
 }
 
+TEST(RootViewProxy, IsVisibleByDefault) {
+    // Real, caught bug: View::visible_ defaults to false, and every other
+    // interactive/visual newui control (ScrollBar, Button, Progress, ...)
+    // explicitly calls setVisible(true) in its own constructor - missing
+    // it here silently made FlexLayout::arrange() skip this proxy entirely
+    // wherever it was a Splitter/FlexLayout-managed child (it filters out
+    // invisible children), leaving it stuck at zero-sized bounds forever.
+    auto* proxy = new newui::RootViewProxy();
+    EXPECT_TRUE(proxy->isVisible());
+    delete proxy;
+}
+
 TEST(RootViewProxy, PaintsAContentAreaBackgroundColor) {
     auto* proxy = new newui::RootViewProxy();
     // Not null/transparent - a real color was actually set, not left at

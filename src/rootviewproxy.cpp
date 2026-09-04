@@ -4,6 +4,7 @@
 namespace newui {
 
 RootViewProxy::RootViewProxy() {
+    setVisible(true);
     style().setBackgroundColor(UIColorManager::colorFor(UIColorRole::WindowBackground));
 }
 

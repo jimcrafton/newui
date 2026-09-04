@@ -4,6 +4,7 @@
 namespace newui {
 
 FrameProxy::FrameProxy() {
+    setVisible(true);
     titleFont_ = FontManager::getSystemFont(SystemUIFont::Caption);
     style().setBackgroundColor(UIColorManager::colorFor(UIColorRole::ControlBackground));
 }
