@@ -784,5 +784,39 @@ class ReflectCategoryAnnotationTest(ClangSnippetTestCase):
         self.assertNotIn(".categories(", source)
 
 
+class GeneratedRegisterFunctionIsSelfGuardingTest(unittest.TestCase):
+    # Real bug this guards against: two independent call sites in
+    # cpp_codetools each called registerReflectionData() directly - the
+    # second call replaced (deleted) already-registered Class objects a
+    # consumer (CodeToolsVsix::ToolboxRegistry::categories()) had already
+    # cached const Class* pointers into. Fixed at the actual source (here,
+    # the generator) rather than in every consumer - the public function
+    # is now a thin, self-guarding wrapper around the real (renamed)
+    # registration work. Only this one aggregate function is guarded -
+    # each per-class register_*Reflection() function (emit_register_
+    # function(), tested elsewhere in this file) is untouched and still
+    # only ever called once, from inside the renamed Impl function.
+    def test_public_function_delegates_to_a_separate_impl_function(self):
+        source = rg.generate([], [], ["dummy.h"], [])
+        self.assertIn("void registerReflectionDataImpl()", source)
+        self.assertIn("void registerReflectionData()", source)
+
+    def test_public_function_only_calls_impl_once_via_a_static_guard(self):
+        source = rg.generate([], [], ["dummy.h"], [])
+        # The public function's own body - textually isolate it from
+        # registerReflectionDataImpl()'s (which legitimately calls every
+        # per-class register_*() function, unrelated to this guard).
+        public_fn_start = source.index("void registerReflectionData()\n")
+        public_fn_body = source[public_fn_start:]
+        self.assertIn("static bool registered", public_fn_body)
+        self.assertIn("registerReflectionDataImpl();", public_fn_body)
+
+    def test_respects_a_custom_register_function_name(self):
+        source = rg.generate([], [], ["dummy.h"], [], register_function_name="customRegister")
+        self.assertIn("void customRegisterImpl()", source)
+        self.assertIn("void customRegister()", source)
+        self.assertIn("customRegisterImpl();", source)
+
+
 if __name__ == "__main__":
     unittest.main()

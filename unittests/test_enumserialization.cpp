@@ -53,7 +53,19 @@ private:
 
 void RegisterEnums() {
     static bool registered = [] {
-        ReflectionRegistry::registerEnum(EnumBuilder<Orientation>("Orientation")
+        // "TestSerializationOrientation", not the bare "Orientation" a
+        // literal read of this local enum's own C++ name would suggest -
+        // real newui::Orientation is also registered (registerReflectionData())
+        // under that exact bare string in the same shared, global
+        // ReflectionRegistry, and a plain unordered_map's "last write
+        // wins" made this test-local one silently shadow it whenever this
+        // ran after that real registration - only ever unmasked once
+        // registerReflectionData() became genuinely idempotent (2026-09-04,
+        // this exact collision is what surfaced then: --gtest_repeat's
+        // second pass no longer re-registers the real Orientation to
+        // "undo" this shadowing, since real registration now only ever
+        // happens once per process, as intended).
+        ReflectionRegistry::registerEnum(EnumBuilder<Orientation>("TestSerializationOrientation")
             .addValue("Horizontal", 0)
             .addValue("Vertical", 1)
             .build());

@@ -1958,7 +1958,7 @@ def generate(classes, enums, sources, extra_includes, register_function_name=DEF
 
     out.append("")
 
-    out.append(f"void {register_function_name}()")
+    out.append(f"void {register_function_name}Impl()")
     out.append("{\n")
 
     for funcname in order_registration_calls(function_listing):
@@ -1967,6 +1967,26 @@ def generate(classes, enums, sources, extra_includes, register_function_name=DEF
     #out.append("\n")
     #out.append(f"\tReflectionRegistry::addInitFunction(&{register_function_name});")
 
+    out.append("}\n\n")
+
+    # Guards against being called more than once per process -
+    # ReflectionRegistry::registerClass() replaces (deletes) an already-
+    # registered Class on a second call, which would dangle any const
+    # Class* a caller captured from the first registration (real bug: two
+    # independent call sites in cpp_codetools each called this directly,
+    # and the second replaced Class objects CodeToolsVsix::
+    # ToolboxRegistry::categories() had already cached pointers into). A
+    # function-local static's initializer is guaranteed exactly-once and
+    # thread-safe by the C++11 standard itself - no separate mutex needed,
+    # unlike a hand-rolled "if (!flag) { flag = true; ... }" guard, which
+    # would race under concurrent first calls.
+    out.append(f"void {register_function_name}()")
+    out.append("{")
+    out.append("\tstatic bool registered = []() {")
+    out.append(f"\t\t{register_function_name}Impl();")
+    out.append("\t\treturn true;")
+    out.append("\t}();")
+    out.append("\t(void)registered;")
     out.append("}\n\n")
     return "\n".join(out)
 
