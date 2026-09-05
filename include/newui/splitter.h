@@ -31,6 +31,17 @@ namespace newui {
 // use for Control's click/enabled-state machinery in the first place (it
 // only ever cares about one narrow region, the divider), so avoiding
 // Control entirely sidesteps the mismatch rather than working around it.
+// Which pane keeps a fixed size across an ordinary container resize (a
+// window resize, or a resize cascading down from some other Splitter
+// higher up the tree being dragged) - the other pane always absorbs the
+// difference. Independent of which side First/Second land on visually
+// (First is always the near/left-or-top pane, same as before) - this is
+// purely about resize behavior, matching the standard docking-IDE
+// convention: a fixed-size dock stays fixed, the flexible content area
+// fills whatever's left. Dragging the divider itself always works
+// identically either way - only setBounds()-driven resizes differ.
+enum class SplitterFixedPane { First, Second };
+
 class Splitter : public SubView {
 public:
     explicit Splitter(Orientation orientation = Orientation::Horizontal);
@@ -39,9 +50,13 @@ public:
     Orientation orientation() const { return orientation_; }
     void setOrientation(Orientation orientation);
 
-    // Distance from this Splitter's own left (Horizontal) or top (Vertical)
-    // client edge to the divider's near edge - clamped on every set/drag
-    // to keep both panes at least minPaneSize() along the split axis.
+    // First (the default - matches every pre-existing caller/test
+    // unchanged): distance from this Splitter's own left (Horizontal) or
+    // top (Vertical) client edge to the divider's near edge, i.e. pane[0]'s
+    // own size. Second: the same value instead measures pane[1]'s own size
+    // from the *far* edge - see fixedPane()'s own comment. Either way,
+    // clamped on every set/drag to keep both panes at least minPaneSize()
+    // along the split axis.
     float splitPosition() const { return splitPosition_; }
     void setSplitPosition(float position);
 
@@ -51,6 +66,9 @@ public:
     float minPaneSize() const { return minPaneSize_; }
     void setMinPaneSize(float size);
 
+    SplitterFixedPane fixedPane() const { return fixedPane_; }
+    void setFixedPane(SplitterFixedPane pane);
+
     void setBounds(const Rect& bounds) override;
     void addChild(SubView* child) override;
     void removeChild(SubView* child) override;
@@ -59,6 +77,9 @@ public:
 
 private:
     void arrangePanes();
+    // pane[0]'s own size given bounds and the current fixedPane() mode -
+    // shared by arrangePanes()/dividerRect() so they can never disagree.
+    float firstPaneSize(const Rect& bounds) const;
     float clampSplitPosition(float position) const;
     Rect dividerRect() const;
     bool isPointInDivider(const Point& localPt) const;
@@ -72,6 +93,7 @@ private:
     float splitPosition_ = 200.0f;
     float dividerThickness_ = 6.0f;
     float minPaneSize_ = 40.0f;
+    SplitterFixedPane fixedPane_ = SplitterFixedPane::First;
     bool dragging_ = false;
 };
 

@@ -27,6 +27,15 @@ void Splitter::setOrientation(Orientation orientation) {
     redraw();
 }
 
+void Splitter::setFixedPane(SplitterFixedPane pane) {
+    if (fixedPane_ == pane) {
+        return;
+    }
+    fixedPane_ = pane;
+    arrangePanes();
+    redraw();
+}
+
 void Splitter::setSplitPosition(float position) {
     splitPosition_ = clampSplitPosition(position);
     arrangePanes();
@@ -92,10 +101,24 @@ float Splitter::clampSplitPosition(float position) const {
     return (std::min)((std::max)(position, minPaneSize_), maxPos);
 }
 
+float Splitter::firstPaneSize(const Rect& bounds) const {
+    if (fixedPane_ == SplitterFixedPane::First) {
+        return splitPosition_;
+    }
+    // Second: splitPosition_ instead means pane[1]'s own fixed size -
+    // pane[0] gets whatever's left, recomputed fresh from bounds (the
+    // *current* container size) every call rather than stored, so it
+    // naturally grows/shrinks with any resize - a window resize, or one
+    // cascading down from some other Splitter higher up the tree being
+    // dragged - with no separate resize hook needed.
+    float mainAxisSize = (orientation_ == Orientation::Horizontal) ? bounds.size().width : bounds.size().height;
+    return (std::max)(0.0f, mainAxisSize - splitPosition_ - dividerThickness_);
+}
+
 void Splitter::arrangePanes() {
     const std::vector<SubView*>& children = childViews();
     Rect bounds = getClientBounds();
-    float pos = splitPosition_;
+    float pos = firstPaneSize(bounds);
 
     if (orientation_ == Orientation::Horizontal) {
         if (children.size() >= 1) {
@@ -120,10 +143,15 @@ void Splitter::arrangePanes() {
 
 Rect Splitter::dividerRect() const {
     Rect bounds = getClientBounds();
+    // The divider's near edge always sits right after pane[0], regardless
+    // of which pane fixedPane() says stays a fixed size - same helper
+    // arrangePanes() uses, so this can never disagree with where the panes
+    // themselves actually got placed.
+    float pos = firstPaneSize(bounds);
     if (orientation_ == Orientation::Horizontal) {
-        return Rect(bounds.left() + splitPosition_, bounds.top(), dividerThickness_, bounds.size().height);
+        return Rect(bounds.left() + pos, bounds.top(), dividerThickness_, bounds.size().height);
     }
-    return Rect(bounds.left(), bounds.top() + splitPosition_, bounds.size().width, dividerThickness_);
+    return Rect(bounds.left(), bounds.top() + pos, bounds.size().width, dividerThickness_);
 }
 
 bool Splitter::isPointInDivider(const Point& localPt) const {
@@ -164,11 +192,22 @@ SyncReturn Splitter::handleMouseMove(View& /*sender*/, const Point& pt,
     }
     // Mouse capture (RootView::mouseDown()'s capturedSubView_ handling)
     // keeps this drag routed here regardless of where the cursor strays,
-    // same as ScrollBar's own thumb drag - splitPosition_ is measured from
-    // this Splitter's own client edge, so pt (already this Splitter's own
-    // local point) is exactly what setSplitPosition() wants.
-    float newPos = (orientation_ == Orientation::Horizontal) ? pt.x : pt.y;
-    setSplitPosition(newPos - dividerThickness_ * 0.5f);
+    // same as ScrollBar's own thumb drag - pt is already this Splitter's
+    // own local point. pane0Size is what splitPosition_ would mean under
+    // fixedPane() == First (pane[0]'s own size, measured from the near
+    // edge) - for Second, that same cursor position instead means pane[1]
+    // shrinks/grows the complementary amount, so it's converted via the
+    // current bounds before being handed to setSplitPosition() (which
+    // always expects "whatever splitPosition_ means right now").
+    Rect bounds = getClientBounds();
+    float cursorMain = (orientation_ == Orientation::Horizontal) ? pt.x : pt.y;
+    float pane0Size = cursorMain - dividerThickness_ * 0.5f;
+    if (fixedPane_ == SplitterFixedPane::First) {
+        setSplitPosition(pane0Size);
+    } else {
+        float mainAxisSize = (orientation_ == Orientation::Horizontal) ? bounds.size().width : bounds.size().height;
+        setSplitPosition(mainAxisSize - pane0Size - dividerThickness_);
+    }
     return SyncReturn::Handled;
 }
 
