@@ -49,20 +49,9 @@ void FrameProxy::paint(BLContext& ctx) {
     Rect barBounds(x0, y0, w, kTitleBarHeight);
 
     // The title bar follows the body's own top-left/top-right rounding but
-    // stays square along its own bottom edge, where it meets the body -
-    // BLRoundRect only supports one uniform radius on all four corners, so
-    // this shape is built by hand (top corners via arc_quadrant_to(),
-    // bottom corners left square).
-    double barBottom = y0 + kTitleBarHeight;
+    // stays square along its own bottom edge, where it meets the body.
     BLPath barPath;
-    barPath.move_to(x0 + r, y0);
-    barPath.line_to(x0 + w - r, y0);
-    barPath.arc_quadrant_to(BLPoint(x0 + w, y0), BLPoint(x0 + w, y0 + r));
-    barPath.line_to(x0 + w, barBottom);
-    barPath.line_to(x0, barBottom);
-    barPath.line_to(x0, y0 + r);
-    barPath.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + r, y0));
-    barPath.close();
+    shapes::buildPartiallyRoundedRectPath(barPath, barBounds, r, /*roundTop=*/true, /*roundBottom=*/false);
 
     ctx.save();
     ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());

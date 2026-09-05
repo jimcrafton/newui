@@ -310,6 +310,19 @@ namespace newui::shapes {
         float radiusY_ = 4.0f;
     };
 
+    // Builds a rectangle path whose top-left/top-right corners are rounded
+    // by radius only if roundTop is true, and whose bottom-left/bottom-
+    // right corners are rounded only if roundBottom is true - the shape a
+    // "this fill meets a square seam on one side" view needs (FrameProxy's
+    // own title bar, meeting its body below; RootViewProxy's own body fill
+    // when hosted under a FrameProxy, meeting its title bar above) that a
+    // plain BLRoundRect can't express (one uniform radius on all four
+    // corners). radius <= 0, or neither flag set, degenerates to a plain
+    // rectangle. A free function, not a Shape - both real callers build
+    // this directly into their own paint()'s BLPath, not through a
+    // ShapeLayer.
+    void buildPartiallyRoundedRectPath(BLPath& path, const Rect& r, float radius, bool roundTop, bool roundBottom);
+
     class Circle : public Shape {
     public:
         Circle() = default;

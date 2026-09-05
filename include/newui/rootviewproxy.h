@@ -20,6 +20,25 @@ class RootViewProxy : public SubView {
 public:
     RootViewProxy();
     virtual ~RootViewProxy() = default;
+
+    void paint(BLContext& ctx) override;
+
+    // Rounds this view's own bottom-left/bottom-right corners by this
+    // radius when painting its background - its top edge is assumed to
+    // always meet a square seam (a FrameProxy's own title bar sitting
+    // directly above it), never independently rounded. 0 (the default)
+    // paints a plain square background, correct for a standalone
+    // RootViewProxy with no FrameProxy above it. A FrameProxy sets this to
+    // match its own body's corner radius once it addChild()s a
+    // RootViewProxy under itself - otherwise the RootViewProxy's own square
+    // background fill (painted after the FrameProxy's own paint(), since
+    // it's a child) would overwrite the FrameProxy body's already-rounded
+    // bottom corners.
+    float cornerRadius() const { return cornerRadius_; }
+    void setCornerRadius(float radius) { cornerRadius_ = radius; redraw(); }
+
+private:
+    float cornerRadius_ = 0.0f;
 };
 
 }

@@ -2,7 +2,19 @@
 #include "newui/rootview.h"
 #include "newui/reflection.h"
 
+#include <blend2d/blend2d.h>
+
 #include <gtest/gtest.h>
+
+namespace {
+    // A pixel is "painted" if any of its 4 PRGB32 bytes is nonzero - true
+    // regardless of channel order, since a premultiplied-alpha-0 pixel also
+    // has its RGB components forced to 0.
+    bool isPixelPainted(const BLImageData& data, int x, int y) {
+        const uint8_t* px = static_cast<const uint8_t*>(data.pixel_data) + y * data.stride + x * 4;
+        return px[0] != 0 || px[1] != 0 || px[2] != 0 || px[3] != 0;
+    }
+}
 
 using namespace newui::reflection;
 
@@ -35,10 +47,76 @@ TEST(RootViewProxy, IsVisibleByDefault) {
 }
 
 TEST(RootViewProxy, PaintsAContentAreaBackgroundColor) {
+    // paint() fills its own background directly (not via
+    // style().setBackgroundColor()) so cornerRadius() can round just its
+    // bottom two corners - see RootViewProxy::paint()'s own comment.
+    // Verified here by actually rendering, not by inspecting style().
     auto* proxy = new newui::RootViewProxy();
-    // Not null/transparent - a real color was actually set, not left at
-    // ViewStyle's own default-constructed (unset) backgroundFill.
-    EXPECT_FALSE(proxy->style().backgroundFill().is_null());
+    proxy->setBounds(newui::Rect(0.0f, 0.0f, 40.0f, 40.0f));
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(40, 40, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    proxy->paint(ctx);
+    ctx.end();
+
+    BLImageData data;
+    surface.get_data(&data);
+    EXPECT_TRUE(isPixelPainted(data, 20, 20));
+
+    delete proxy;
+}
+
+TEST(RootViewProxy, CornerRadiusDefaultsToZeroAndPaintsAPlainSquareBackground) {
+    auto* proxy = new newui::RootViewProxy();
+    EXPECT_FLOAT_EQ(proxy->cornerRadius(), 0.0f);
+    proxy->setBounds(newui::Rect(0.0f, 0.0f, 40.0f, 40.0f));
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(40, 40, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    proxy->paint(ctx);
+    ctx.end();
+
+    BLImageData data;
+    surface.get_data(&data);
+    // Every corner is square by default - even the very corner pixel is
+    // painted.
+    EXPECT_TRUE(isPixelPainted(data, 0, 0));
+    EXPECT_TRUE(isPixelPainted(data, 39, 39));
+
+    delete proxy;
+}
+
+TEST(RootViewProxy, CornerRadiusRoundsOnlyTheBottomTwoCorners) {
+    // A hosting FrameProxy's own body has all 4 corners rounded, but its
+    // title bar sits flush on top of RootViewProxy - only RootViewProxy's
+    // own bottom corners are ever meant to be rounded (its top always
+    // meets that square seam), see setCornerRadius()'s own comment.
+    auto* proxy = new newui::RootViewProxy();
+    proxy->setBounds(newui::Rect(0.0f, 0.0f, 40.0f, 40.0f));
+    proxy->setCornerRadius(10.0f);
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(40, 40, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    proxy->paint(ctx);
+    ctx.end();
+
+    BLImageData data;
+    surface.get_data(&data);
+    // Top corners: not rounded, still painted right at the corner pixel.
+    EXPECT_TRUE(isPixelPainted(data, 0, 0));
+    EXPECT_TRUE(isPixelPainted(data, 39, 0));
+    // Bottom corners: rounded away - the very corner pixel is untouched.
+    EXPECT_FALSE(isPixelPainted(data, 0, 39));
+    EXPECT_FALSE(isPixelPainted(data, 39, 39));
+    // Well inside the rect - always painted regardless of rounding.
+    EXPECT_TRUE(isPixelPainted(data, 20, 20));
+
     delete proxy;
 }
 

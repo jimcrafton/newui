@@ -422,6 +422,38 @@ namespace newui::shapes {
         path.add_round_rect(BLRoundRect(double(x()), double(y()), double(width()), double(height()), double(radiusX_), double(radiusY_)));
     }
 
+    void buildPartiallyRoundedRectPath(BLPath& path, const Rect& r, float radius, bool roundTop, bool roundBottom) {
+        double x0 = double(r.left());
+        double y0 = double(r.top());
+        double x1 = double(r.right());
+        double y1 = double(r.bottom());
+        double rad = double(radius);
+
+        if (rad <= 0.0 || (!roundTop && !roundBottom)) {
+            path.add_rect(BLRect(x0, y0, r.size().width, r.size().height));
+            return;
+        }
+
+        path.move_to(roundTop ? x0 + rad : x0, y0);
+        path.line_to(roundTop ? x1 - rad : x1, y0);
+        if (roundTop) {
+            path.arc_quadrant_to(BLPoint(x1, y0), BLPoint(x1, y0 + rad));
+        }
+        path.line_to(x1, roundBottom ? y1 - rad : y1);
+        if (roundBottom) {
+            path.arc_quadrant_to(BLPoint(x1, y1), BLPoint(x1 - rad, y1));
+        }
+        path.line_to(roundBottom ? x0 + rad : x0, y1);
+        if (roundBottom) {
+            path.arc_quadrant_to(BLPoint(x0, y1), BLPoint(x0, y1 - rad));
+        }
+        path.line_to(x0, roundTop ? y0 + rad : y0);
+        if (roundTop) {
+            path.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + rad, y0));
+        }
+        path.close();
+    }
+
     void Circle::buildPath(BLPath& path) const {
         path.add_circle(BLCircle(double(centerX_), double(centerY_), double(radius_)));
     }
