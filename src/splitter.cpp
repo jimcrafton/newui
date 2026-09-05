@@ -68,10 +68,26 @@ float Splitter::clampSplitPosition(float position) const {
     float maxPos = mainAxisSize - dividerThickness_ - minPaneSize_;
     if (maxPos < minPaneSize_) {
         // Not enough room for two real panes plus the divider yet (e.g.
-        // before this Splitter's own first layout pass) - clamp to
-        // whatever's non-negative rather than producing a negative-sized
-        // pane.
-        return (std::max)(0.0f, mainAxisSize * 0.5f);
+        // before this Splitter's own first real layout pass, when bounds
+        // are still the default {0,0,0,0} - real, hit case: ViewBuilder's
+        // configure<Splitter>(fn) calling setSplitPosition() right after
+        // construction, before attachment). Every setter routes through
+        // here and stores the result back into splitPosition_ - previously
+        // this branch returned a value computed from today's degenerate
+        // bounds (0, or half of them), permanently discarding whatever the
+        // caller actually requested. That's unrecoverable: once real
+        // bounds do arrive, setBounds() below re-clamps via this same
+        // function, but only ever shrinks/floors the stored value - it
+        // never grows a too-small one back up, so the real, intended split
+        // position (e.g. 560.0f) was already lost for good. Returning
+        // position unchanged here instead defers the real clamp until
+        // there's an actual range to clamp into - arrangePanes() is a
+        // documented no-op with fewer than 2 children (the only way this
+        // branch is reached with children already attached is another
+        // Splitter's own premature arrangePanes() during the same
+        // construction dance, itself equally transient and superseded once
+        // real bounds cascade down for real).
+        return position;
     }
     return (std::min)((std::max)(position, minPaneSize_), maxPos);
 }

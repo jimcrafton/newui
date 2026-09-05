@@ -174,6 +174,28 @@ TEST(Splitter, ResizingAPaneCascadesIntoThatPanesOwnAttachedLayout) {
     delete splitter;
 }
 
+TEST(Splitter, SetSplitPositionBeforeRealBoundsSurvivesUntilTheyArrive) {
+    // Reproduces newui::ViewBuilder<Splitter>::configure(fn) calling
+    // setSplitPosition() right after construction, before this Splitter is
+    // attached to anything or has ever been given real bounds (bounds_
+    // defaults to {0,0,0,0} - View's own default). clampSplitPosition()
+    // used to treat that degenerate size as "not enough room for two real
+    // panes yet" and permanently overwrite splitPosition_ with a value
+    // computed from today's zero bounds - unrecoverable once real bounds
+    // later arrived, since setBounds() below only ever re-clamps
+    // (shrinks/floors), never grows a too-small stored value back up. Real
+    // bug: every Workspace pane split (cpp_codetools) configured this way
+    // silently collapsed to minPaneSize() instead of the intended split.
+    auto* splitter = new newui::Splitter();
+    splitter->setSplitPosition(560.0f);  // still {0,0,0,0} bounds at this point
+
+    splitter->setBounds(newui::Rect(0, 0, 800, 200));  // real bounds finally arrive
+
+    EXPECT_FLOAT_EQ(splitter->splitPosition(), 560.0f);
+
+    delete splitter;
+}
+
 TEST(Splitter, MouseMoveWithNoActiveDragIsIgnored) {
     auto* splitter = new newui::Splitter();
     splitter->setBounds(newui::Rect(0, 0, 400, 200));
