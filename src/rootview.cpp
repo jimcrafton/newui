@@ -556,8 +556,22 @@ namespace newui {
 		if (focusedSubView_ != nullptr && !focusedSubView_->canResignFocus()) {
 			return;
 		}
-		if (target != nullptr && !target->canBecomeFocused()) {
-			return;
+
+		if (target != nullptr) {
+			// A design-time SubView (e.g. content loaded into a Designer's
+			// RootViewProxy) is never a valid real-interaction target -
+			// vetoed here, not just at mouseDown()'s own already-gated call
+			// site, so every other caller (mouseDblClick(), Tab-focus-
+			// cycling in controls.cpp, ...) gets the same guarantee for
+			// free. keyEvent() only ever dispatches to focusedSubView_, so
+			// this is also what keeps keyboard input out of a design-time
+			// subtree.
+			if (target->isDesignTime()) {
+				return;
+			}
+			if (!target->canBecomeFocused()) {
+				return;
+			}
 		}
 
 		if (focusedSubView_ != nullptr) {
@@ -663,12 +677,17 @@ namespace newui {
 	// target - hit-tested under the cursor, or capturedSubView_/
 	// focusedSubView_ where capture/focus semantics apply (see
 	// hoveredSubView()/capturedSubView()/focusedSubView() in rootview.h).
+	SubView* RootView::resolveInteractiveHit(const Point& pt, Point& outLocalPt) const {
+		SubView* hit = hitTestChildren(pt, outLocalPt);
+		return (hit != nullptr && !hit->isDesignTime()) ? hit : nullptr;
+	}
+
 	void RootView::mouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
 	{
 		onMouseDown(*this, pt, btnMask, keyMask);
 
 		Point localPt;
-		SubView* target = hitTestChildren(pt, localPt);
+		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
 		setFocusedSubView(target);
 
@@ -699,7 +718,7 @@ namespace newui {
 		onMouseMove(*this, pt, btnMask, keyMask);
 
 		Point hoverLocalPt;
-		SubView* hoverTarget = hitTestChildren(pt, hoverLocalPt);
+		SubView* hoverTarget = resolveInteractiveHit(pt, hoverLocalPt);
 		updateHoveredSubView(hoverTarget, pt);
 
 		SubView* dispatchTarget = capturedSubView_ != nullptr ? capturedSubView_ : hoverTarget;
@@ -771,7 +790,7 @@ namespace newui {
 		onMouseWheel(*this, pt, mouseDelta);
 
 		Point localPt;
-		SubView* target = hitTestChildren(pt, localPt);
+		SubView* target = resolveInteractiveHit(pt, localPt);
 
 		// Bubbles from the deepest hit-tested view up through its
 		// ancestors (mirroring accumulatedOffset()'s own per-level walk -
@@ -823,7 +842,7 @@ namespace newui {
 		if (target != nullptr) {
 			localPt = pt - accumulatedOffset(target);
 		} else {
-			target = hitTestChildren(pt, localPt);
+			target = resolveInteractiveHit(pt, localPt);
 		}
 
 		capturedSubView_ = nullptr;
@@ -844,7 +863,7 @@ namespace newui {
 		// otherwise a click-drag starting on a double-click would have no
 		// capturedSubView_ to route through.
 		Point localPt;
-		SubView* target = hitTestChildren(pt, localPt);
+		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
 		setFocusedSubView(target);
 

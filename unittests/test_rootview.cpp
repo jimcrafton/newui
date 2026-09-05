@@ -468,6 +468,116 @@ TEST(RootViewKeyEvents, KeyEventIsNotRoutedToASubViewWhenNothingIsFocused) {
 }
 
 // ---------------------------------------------------------------------------
+// A design-time SubView (isDesignTime(), e.g. content loaded into a
+// Designer's RootViewProxy) is never a valid real-interaction target -
+// resolveInteractiveHit() (mouseDown/mouseMove/mouseUp/mouseDblClick/
+// mouseWheel) and setFocusedSubView() (keyEvent() only ever dispatches to
+// focusedSubView_) both gate on it, so it never hovers, captures, clicks, or
+// takes keyboard focus. hitTestChildren() itself stays ungated - a
+// Designer's own selection code needs the real hit target either way.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewDesignTimeGating, MouseDownIgnoresADesignTimeChildEntirely) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->setDesignTime(true);
+    child->onMouseDown += RecordDown;
+    root->addChild(child);
+
+    root->mouseDown(newui::Point(20, 20), 1, 0);
+
+    EXPECT_EQ(g_downEvent.count, 0);
+    EXPECT_EQ(root->capturedSubView(), nullptr);
+    EXPECT_EQ(root->focusedSubView(), nullptr);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDesignTimeGating, MouseMoveNeverHoversADesignTimeChild) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->setDesignTime(true);
+    child->onMouseMove += RecordMove;
+    root->addChild(child);
+
+    root->mouseMove(newui::Point(20, 20), 0, 0);
+
+    EXPECT_EQ(g_moveEvent.count, 0);
+    EXPECT_EQ(root->hoveredSubView(), nullptr);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDesignTimeGating, MouseUpWithoutCaptureIgnoresADesignTimeChild) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->setDesignTime(true);
+    child->onMouseUp += RecordUp;
+    root->addChild(child);
+
+    root->mouseUp(newui::Point(20, 20), 1, 0);
+
+    EXPECT_EQ(g_upEvent.count, 0);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDesignTimeGating, MouseDblClickIgnoresADesignTimeChildEntirely) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->setDesignTime(true);
+    root->addChild(child);
+
+    root->mouseDblClick(newui::Point(20, 20), 1, 0);
+
+    EXPECT_EQ(root->capturedSubView(), nullptr);
+    EXPECT_EQ(root->focusedSubView(), nullptr);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewDesignTimeGating, SetFocusedSubViewRefusesADesignTimeTarget) {
+    ResetKeyEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->setDesignTime(true);
+    child->onKeyDown += RecordKeyDown;
+    root->addChild(child);
+
+    root->setFocusedSubView(child);
+    EXPECT_EQ(root->focusedSubView(), nullptr);
+
+    root->keyEvent(newui::keKeyDown, 0, 'A', 1, 65);
+    EXPECT_EQ(g_keyDownEvent.count, 0);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
 // setFocusedSubView() veto hooks (canResignFocus()/canBecomeFocused()) and
 // the canPerformCommand()/performCommand() responder-chain walk.
 // ---------------------------------------------------------------------------

@@ -439,6 +439,17 @@ namespace newui {
         // no-op if target is already the current hoveredSubView_.
         void updateHoveredSubView(SubView* target, const Point& rootPt);
 
+        // The one choke point every real mouse-dispatch site (mouseDown/
+        // mouseMove/mouseUp/mouseDblClick/mouseWheel) routes its hit-test
+        // through, instead of calling hitTestChildren() directly - a
+        // design-time SubView (isDesignTime(), e.g. content loaded into a
+        // Designer's RootViewProxy) is never a valid real-interaction
+        // target, so this returns nullptr for one exactly as if nothing
+        // were hit at all. hitTestChildren() itself stays ungated - a
+        // Designer's own selection code needs the *real* hit target,
+        // design-time or not (that's the whole point of selecting it).
+        SubView* resolveInteractiveHit(const Point& pt, Point& outLocalPt) const;
+
         bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
 
         static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
