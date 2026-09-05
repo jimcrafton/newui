@@ -75,10 +75,6 @@ namespace newui {
 		Component::setName(name);
 	}
 
-	bool View::isDesignTime() const {
-		return rootView_ ? rootView_->isDesignTime() : Component::isDesignTime();
-	}
-
 	void View::propagateRootView(RootView* root) {
 		setRootView(root);
 		if (root != nullptr) {

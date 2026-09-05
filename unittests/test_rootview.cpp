@@ -891,20 +891,30 @@ TEST(ViewIsDesignTime, RootViewReflectsItsOwnSetDesignTime) {
     delete root;
 }
 
-TEST(ViewIsDesignTime, ChildViewDefersToItsRootViewsFlag) {
+TEST(ViewIsDesignTime, ChildViewDoesNotInheritItsRootViewsFlag) {
+    // A View reports only its own explicitly-set flag - it does NOT defer
+    // to an owning RootView's flag (an earlier version did; found to make
+    // no sense once a design-time host needed some of its own attached
+    // chrome to stay permanently non-design-time regardless of its
+    // RootView's own state - see CodeToolsVsix::Workspace/DesignerEditor
+    // for the real case this was found from). Whoever wants a given View
+    // to be design-time sets it there directly.
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
     auto* button = new newui::Button();
     root->addChild(button);
 
-    EXPECT_FALSE(button->isDesignTime());
     root->setDesignTime(true);
+    EXPECT_FALSE(button->isDesignTime());
+
+    button->setDesignTime(true);
     EXPECT_TRUE(button->isDesignTime());
+    EXPECT_TRUE(root->isDesignTime());  // unaffected either way - no shared state
 
     root->destroy();
     delete root;
 }
 
-TEST(ViewIsDesignTime, NestedDescendantDefersToTheSameRootViewsFlag) {
+TEST(ViewIsDesignTime, NestedDescendantDoesNotInheritAnAncestorsFlag) {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
     auto* row = new newui::SubView();
     root->addChild(row);
@@ -912,6 +922,10 @@ TEST(ViewIsDesignTime, NestedDescendantDefersToTheSameRootViewsFlag) {
     row->addChild(button);
 
     root->setDesignTime(true);
+    row->setDesignTime(true);
+    EXPECT_FALSE(button->isDesignTime());  // neither ancestor's flag propagates down
+
+    button->setDesignTime(true);
     EXPECT_TRUE(button->isDesignTime());
 
     root->destroy();

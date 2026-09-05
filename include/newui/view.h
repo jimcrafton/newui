@@ -518,11 +518,6 @@ namespace newui {
             rootView_ = val;
         }
 
-        // Overrides Component::isDesignTime() - defers to the owning
-        // RootView's flag. Defined in view.cpp (needs RootView).
-        //@reflect ignore=true
-        bool isDesignTime() const;
-
         // Same non-owning-upward-back-reference reasoning as rootView()
         // above - reachable downward already via the real parent's own
         // childViews, so letting reflectgen register this as a Property

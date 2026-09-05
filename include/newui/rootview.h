@@ -282,12 +282,6 @@ namespace newui {
             return nameManager_;
         }
 
-        // Overrides Component::isDesignTime()/View::isDesignTime() -
-        // this RootView owns the real flag directly (Component's own
-        // designTime_), rather than deferring to itself via rootView_.
-        //@reflect ignore=true
-        bool isDesignTime() const { return Component::isDesignTime(); }
-
     protected:
         // Win32-message-driven event entry points - protected (not
         // private) purely for testability, so a test-local subclass can
