@@ -1,6 +1,7 @@
 #include "newui/rootviewproxy.h"
 #include "newui/rootview.h"
 #include "newui/reflection.h"
+#include "newui/reflectionio.h"
 
 #include <blend2d/blend2d.h>
 
@@ -118,6 +119,29 @@ TEST(RootViewProxy, CornerRadiusRoundsOnlyTheBottomTwoCorners) {
     EXPECT_TRUE(isPixelPainted(data, 20, 20));
 
     delete proxy;
+}
+
+TEST(RootViewProxy, LoadingADocumentWithNoCornerRadiusKeyDoesNotResetAPreSetValue) {
+    // Regression test for a real bug: cornerRadius()/setCornerRadius()'s
+    // getter/setter naming matched reflectgen's property-naming convention
+    // closely enough to get auto-registered as a real Property before the
+    // @reflect ignore=true annotations were added - Bundle::loadRootView()
+    // would then silently reset it back to 0 (a loaded file has no
+    // "cornerRadius" key at all), clobbering whatever a hosting FrameProxy
+    // had set beforehand. See setCornerRadius()'s own comment.
+    newui::RootViewProxy blank;  // a document with none of this instance's own state
+    ObjectWriter writer;
+    writer.write(&blank);
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    newui::RootViewProxy proxy;
+    proxy.setCornerRadius(8.0f);
+
+    reader.read(&proxy);
+
+    EXPECT_FLOAT_EQ(proxy.cornerRadius(), 8.0f);
 }
 
 TEST(RootViewProxy, ReflectgenRegisteredProxyForPointsAtRootView) {

@@ -34,7 +34,24 @@ public:
     // background fill (painted after the FrameProxy's own paint(), since
     // it's a child) would overwrite the FrameProxy body's already-rounded
     // bottom corners.
+    //
+    // Not reflectable (real bug this comment exists to prevent
+    // rediscovering): this getter/setter pair matches reflectgen's
+    // property-naming convention closely enough to get auto-registered,
+    // and a loaded file with no "cornerRadius" key would then reset it
+    // back to 0 via Bundle::loadRootView()'s ordinary property-application
+    // - silently undoing whatever a hosting FrameProxy set here before
+    // load(), the same "reflection round-trip clobbers a value set
+    // programmatically" bug class bundle.h's own isDesignTime() trap
+    // documents. It also isn't real document state to begin with - purely
+    // a live Designer-chrome coupling to whatever FrameProxy happens to be
+    // hosting this instance - so writeRootView()'s design-mode "type":
+    // "RootView" substitution would otherwise leak a "cornerRadius" key
+    // into a file pretending to be an ordinary RootView, a type with no
+    // such property at all.
+    //@reflect ignore=true
     float cornerRadius() const { return cornerRadius_; }
+    //@reflect ignore=true
     void setCornerRadius(float radius) { cornerRadius_ = radius; redraw(); }
 
 private:
