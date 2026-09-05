@@ -1,4 +1,5 @@
 #include "newui/frameproxy.h"
+#include "newui/shapes.h"
 #include "newui/uicolormanager.h"
 
 namespace newui {
@@ -6,7 +7,12 @@ namespace newui {
 FrameProxy::FrameProxy() {
     setVisible(true);
     titleFont_ = FontManager::getSystemFont(SystemUIFont::Caption);
-    style().setBackgroundColor(UIColorManager::colorFor(UIColorRole::ControlBackground));
+    // Body/title-bar background are painted directly in paint() as a
+    // rounded shape, not via style().setBackgroundColor() - View::
+    // paintStyle() always runs before paint() (view.cpp's paintChildren()),
+    // so a plain style background fill here would square off exactly the
+    // corners this class exists to round, underneath whatever paint()
+    // draws on top.
 }
 
 void FrameProxy::paint(BLContext& ctx) {
@@ -15,11 +21,52 @@ void FrameProxy::paint(BLContext& ctx) {
         return;
     }
 
-    Rect barBounds(clientBounds.left(), clientBounds.top(), clientBounds.size().width, kTitleBarHeight);
+    double x0 = clientBounds.left();
+    double y0 = clientBounds.top();
+    double w = clientBounds.size().width;
+    double h = clientBounds.size().height;
+    double r = kCornerRadius;
+
+    // A real shapes::RoundRect (not a plain ctx.fill_round_rect()) - reuses
+    // Shape::render()'s already-existing shadow/fill/stroke pipeline
+    // (paintEffect()'s mask-blur-blit, the same real mechanism a
+    // ShapeLayer's own shapes already get) instead of hand-rolling a blur,
+    // so the artboard reads as genuinely floating above canvasWell_'s
+    // pasteboard. Built fresh each paint() call - clientBounds can change
+    // on resize, and this is cheap (no heap state to keep in sync).
+    shapes::RoundRect bodyShape;
+    bodyShape.setX(float(x0));
+    bodyShape.setY(float(y0));
+    bodyShape.setWidth(float(w));
+    bodyShape.setHeight(float(h));
+    bodyShape.setRadiusX(float(r));
+    bodyShape.setRadiusY(float(r));
+    bodyShape.style().fill().setColor(UIColorManager::colorFor(UIColorRole::ControlBackground));
+    bodyShape.style().fill().setKind(gfx::PaintKind::Color);
+    bodyShape.style().dropShadow().setEnabled(true);
+    bodyShape.render(ctx);
+
+    Rect barBounds(x0, y0, w, kTitleBarHeight);
+
+    // The title bar follows the body's own top-left/top-right rounding but
+    // stays square along its own bottom edge, where it meets the body -
+    // BLRoundRect only supports one uniform radius on all four corners, so
+    // this shape is built by hand (top corners via arc_quadrant_to(),
+    // bottom corners left square).
+    double barBottom = y0 + kTitleBarHeight;
+    BLPath barPath;
+    barPath.move_to(x0 + r, y0);
+    barPath.line_to(x0 + w - r, y0);
+    barPath.arc_quadrant_to(BLPoint(x0 + w, y0), BLPoint(x0 + w, y0 + r));
+    barPath.line_to(x0 + w, barBottom);
+    barPath.line_to(x0, barBottom);
+    barPath.line_to(x0, y0 + r);
+    barPath.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + r, y0));
+    barPath.close();
 
     ctx.save();
     ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
-    ctx.fill_rect(BLRect(barBounds));
+    ctx.fill_path(barPath);
     ctx.restore();
 
     if (title_.empty()) {
@@ -32,12 +79,12 @@ void FrameProxy::paint(BLContext& ctx) {
     }
 
     const BLFontMetrics& fontMetrics = blFont->metrics();
-    double x = barBounds.left() + 8.0;
-    double y = barBounds.top() + (kTitleBarHeight - (fontMetrics.ascent + fontMetrics.descent)) * 0.5 + fontMetrics.ascent;
+    double tx = barBounds.left() + 8.0;
+    double ty = barBounds.top() + (kTitleBarHeight - (fontMetrics.ascent + fontMetrics.descent)) * 0.5 + fontMetrics.ascent;
 
     ctx.save();
     ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightText).toBLRgba32());
-    ctx.fill_utf8_text(BLPoint(x, y), *blFont, title_.c_str(), title_.size());
+    ctx.fill_utf8_text(BLPoint(tx, ty), *blFont, title_.c_str(), title_.size());
     ctx.restore();
 }
 

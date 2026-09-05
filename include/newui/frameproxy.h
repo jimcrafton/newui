@@ -26,6 +26,7 @@ namespace newui {
 class FrameProxy : public SubView {
 public:
     static constexpr float kTitleBarHeight = 28.0f;
+    static constexpr float kCornerRadius = 8.0f;
 
     FrameProxy();
     virtual ~FrameProxy() = default;
