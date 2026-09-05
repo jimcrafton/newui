@@ -160,6 +160,51 @@ TEST(ShapesReflection, CircleRoundTripsItsOwnGeometryTransformAndStyle) {
     EXPECT_FLOAT_EQ(fresh->style().stroke().width(), 2.5f);
 }
 
+// Regression coverage for a real crash: Shape::paintEffect() (the drop-
+// shadow/glow blur pass) handed BLContext::blit_image() a fractional
+// destination position - style().dropShadow()'s own defaults alone already
+// produce one (softness=6, offset=(4,4), the default 1px stroke width all
+// feed into paintEffect()'s pad calculation, landing at a half-pixel
+// offset even for perfectly integer shape bounds). Rendering into a
+// BLContext whose surface format matches the effect mask's own PRGB32
+// exactly (the same condition FrameProxy's real drop shadow hit live) picks
+// Blend2D's FetchType::kPatternAlignedBlit fast path (compoppart.cpp) - a
+// fractional destination there disagrees with the fill's own unaligned-box
+// classification, tripping BL_ASSERT(is_rect_fill()) in fetchpatternpart.cpp
+// in a debug build (rootview.cpp's own snappedToPixels() documents hitting
+// this identical assertion once before, for the same "fractional coordinate
+// reaches a pattern/image fetch" root cause). Fixed by flooring the mask's
+// own position to a whole pixel before creating/blitting it - this test
+// exists to keep that call path alive and exercised, not just fixed once.
+TEST(ShapeRenderRegression, DropShadowWithFractionalPadRendersIntoAMatchingFormatSurfaceWithoutAsserting) {
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+
+    shapes::RoundRect rect;
+    rect.setX(8.0f);
+    rect.setY(8.0f);
+    rect.setWidth(48.0f);
+    rect.setHeight(48.0f);
+    rect.setRadiusX(8.0f);
+    rect.setRadiusY(8.0f);
+    rect.style().fill().setColor(Color(0.8f, 0.8f, 0.8f, 1.0f));
+    rect.style().fill().setKind(gfx::PaintKind::Color);
+    rect.style().dropShadow().setEnabled(true);
+
+    rect.render(ctx);
+    ctx.end();
+
+    BLImageData data;
+    surface.get_data(&data);
+    bool anyPixelPainted = false;
+    const uint8_t* bytes = static_cast<const uint8_t*>(data.pixel_data);
+    for (int i = 0; i < data.stride * 64 && !anyPixelPainted; ++i) {
+        anyPixelPainted = bytes[i] != 0;
+    }
+    EXPECT_TRUE(anyPixelPainted);
+}
+
 // The real target: a ShapeLayer holding a mix of concrete Shape subtypes,
 // round-tripped as a whole - shapes() is a std::vector<Shape*> (a
 // polymorphic-by-pointer collection, see ShapeLayer's own class comment),

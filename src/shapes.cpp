@@ -321,8 +321,20 @@ namespace newui::shapes {
         float pad = style_.stroke().width() * 0.5f + softness * kBlurPadFactor + offsetMag + 2.0f;
 
         Rect maskBoundsLocal = bounds.deflate(-pad);
-        int maskW = int(std::ceil(maskBoundsLocal.width()));
-        int maskH = int(std::ceil(maskBoundsLocal.height()));
+        // Floored to a whole pixel - blit_image() below hands this
+        // straight to BLContext as its destination position, and a
+        // fractional one trips a real Blend2D JIT limitation: with no
+        // rotation/extend mode in play, FetchSimplePatternPart::_init_part()
+        // takes its "aligned blit" fast path (is_aligned_blit()) based only
+        // on scale/rotation, but a sub-pixel-offset blit still needs
+        // bilinear resampling - is_rect_fill() then disagrees, and
+        // BL_ASSERT(is_rect_fill()) fires in a debug build (rootview.cpp's
+        // own snappedToPixels() hit and documented this same assertion for
+        // its dirty-rect clip; this is the same fix, applied here instead).
+        double maskLeft = std::floor(maskBoundsLocal.left());
+        double maskTop = std::floor(maskBoundsLocal.top());
+        int maskW = int(std::ceil(maskBoundsLocal.right() - maskLeft));
+        int maskH = int(std::ceil(maskBoundsLocal.bottom() - maskTop));
         if (maskW <= 0 || maskH <= 0) {
             return;
         }
@@ -335,7 +347,7 @@ namespace newui::shapes {
         {
             BLContext maskCtx(mask);
             maskCtx.clear_all();
-            maskCtx.translate(double(-maskBoundsLocal.left() + offset.x), double(-maskBoundsLocal.top() + offset.y));
+            maskCtx.translate(double(-maskLeft + offset.x), double(-maskTop + offset.y));
 
             BLRgba32 solid = color.toBLRgba32();
             if (style_.fill().kind() != gfx::PaintKind::None) {
@@ -357,7 +369,7 @@ namespace newui::shapes {
         ctx.save();
         ctx.set_comp_op(toBLCompOp(compOp));
         ctx.set_global_alpha(double(amount));
-        ctx.blit_image(BLPoint(double(maskBoundsLocal.left()), double(maskBoundsLocal.top())), mask);
+        ctx.blit_image(BLPoint(maskLeft, maskTop), mask);
         ctx.restore();
     }
 
