@@ -734,5 +734,55 @@ class ReflectProxyAnnotationTest(ClangSnippetTestCase):
         self.assertNotIn(".proxy(", source)
 
 
+class ReflectCategoryAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    namespace newui {
+        // @reflect category=basic
+        class Widget {};
+
+        // @reflect category=basic,input
+        class MultiCategoryWidget {};
+
+        // No annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    def test_category_annotation_is_parsed(self):
+        cursor = self.find("Widget")
+        self.assertEqual(rg.reflect_annotations(cursor).get("category"), "basic")
+
+    def test_multi_category_annotation_is_parsed_as_a_comma_joined_value(self):
+        cursor = self.find("MultiCategoryWidget")
+        self.assertEqual(rg.reflect_annotations(cursor).get("category"), "basic,input")
+
+    def test_category_lands_on_class_info(self):
+        info = rg.collect_class(self.find("Widget"))
+        self.assertEqual(info.categories, ["basic"])
+
+    def test_multi_category_lands_on_class_info_as_a_list(self):
+        info = rg.collect_class(self.find("MultiCategoryWidget"))
+        self.assertEqual(info.categories, ["basic", "input"])
+
+    def test_missing_category_is_an_empty_list_not_none(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertEqual(info.categories, [])
+
+    def test_emitted_registration_includes_the_categories_call(self):
+        info = rg.collect_class(self.find("Widget"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.categories({"basic"})', source)
+
+    def test_emitted_registration_includes_all_categories(self):
+        info = rg.collect_class(self.find("MultiCategoryWidget"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.categories({"basic", "input"})', source)
+
+    def test_no_categories_call_emitted_when_there_are_no_categories(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        source = rg.emit_register_function(info, [])
+        self.assertNotIn(".categories(", source)
+
+
 if __name__ == "__main__":
     unittest.main()

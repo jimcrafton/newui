@@ -23,6 +23,7 @@ namespace newui {
     // Heap-only, like every other SubView (see View's class comment) -
     // construct with new TabControl(...), add into your own tree via
     // addChild() exactly like any other SubView.
+    // @reflect category=containers
     class TabControl : public SubView {
     public:
         explicit TabControl(ThemedTabItemStyle::TabAlignment alignment = ThemedTabItemStyle::TabAlignment::Top);

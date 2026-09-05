@@ -123,6 +123,7 @@ namespace newui {
     // only ever gets set on whichever SubView RootView actually considers
     // hovered. Drawing text directly in this Button's own paint() means
     // there's nothing else that could steal the hover.
+    // @reflect category=basic
     class Button : public Control {
     public:
         Button();
@@ -210,6 +211,7 @@ namespace newui {
     // a caller wanting real radio-group behavior across several Toggles
     // wires that up itself, e.g. each Toggle's onCheckedChanged calling
     // setChecked(false) on the rest of the group.
+    // @reflect category=basic
     class Toggle : public Control {
     public:
         Toggle();
@@ -278,6 +280,7 @@ namespace newui {
     // hover, regardless of hotLink() - matches Control's own "no clicks
     // while disabled" behavior extending to "no hyperlink invitation
     // either".
+    // @reflect category=basic
     class Label : public Control {
     public:
         Label();
@@ -334,6 +337,7 @@ namespace newui {
     // doc comment: "how much of the bar is filled isn't a field there -
     // that's the caller's job via ordinary bounds" - this class is that
     // caller.
+    // @reflect category=textinput
     class Progress : public Control {
     public:
         Progress();
@@ -400,6 +404,7 @@ namespace newui {
     // string) - a caller wanting to show the current value pairs this
     // with its own Label, refreshed from onValueChanged(), the same way
     // controls1.cpp's demo already pairs a Progress with a caption Label.
+    // @reflect category=textinput
     class Slider : public Control {
     public:
         Slider();
@@ -774,6 +779,7 @@ namespace newui {
     // Pair with a sibling EditControl/Label showing the live value() the
     // same way a caller is expected to pair Slider with its own value
     // display (see its class comment) - Stepper draws no text of its own.
+    // @reflect category=textinput
     class Stepper : public Control {
     public:
         Stepper();
@@ -883,6 +889,7 @@ namespace newui {
     // hooks, not policy" spirit as DocumentController not dictating
     // unsaved-changes UI - the caller (who actually knows their content's
     // real size) sets it explicitly, once, whenever it changes.
+    // @reflect category=containers
     class ScrollView : public Control {
     public:
         ScrollView();
@@ -1038,6 +1045,7 @@ namespace newui {
     // would - imageFillMode()/imageAlignment() below are just this
     // control's own typed view onto that style's inherited
     // ViewStyle::imageFillMode/imageAlignment fields.
+    // @reflect category=basic
     class Image : public Control {
     public:
         Image();
@@ -1087,6 +1095,7 @@ namespace newui {
     // reason Button is: the toggle behavior needs Control's own click-
     // tracking (onMouseDown/onMouseUp -> onClick on a down-then-up-
     // inside gesture), not something worth reimplementing here.
+    // @reflect category=menutoolbar
     class ToolbarButton : public Control {
     public:
         ToolbarButton();
@@ -1135,6 +1144,7 @@ namespace newui {
     // dividing line - see ThemedToolbarSeparatorStyle's own doc comment);
     // Toolbar's addChild() doesn't enforce this since a ToolbarSeparator
     // is just an ordinary child from Toolbar's point of view.
+    // @reflect category=menutoolbar
     class ToolbarSeparator : public SubView {
     public:
         ToolbarSeparator();
@@ -1159,6 +1169,7 @@ namespace newui {
     // Background is ThemedRebarBandStyle (REBAR/RP_BAND) - the same
     // native chrome a real toolbar sits inside of when hosted in a
     // rebar control.
+    // @reflect category=menutoolbar
     class Toolbar : public SubView {
     public:
         explicit Toolbar(Orientation orientation = Orientation::Horizontal);
@@ -1571,6 +1582,7 @@ namespace newui {
     // (rootview.cpp) automatically selecting whichever SubView a click
     // hit-tests to - this class only reacts to the resulting onGotFocus/
     // onLostFocus, it doesn't request focus itself.
+    // @reflect category=textinput
     class TextField : public Control {
     public:
         TextField();
@@ -1706,6 +1718,7 @@ namespace newui {
     // onQueryContentSize) reach an actual scrollbar - see ScrollView's
     // own class comment (controls.h) for how it detects and drives a
     // virtualized child.
+    // @reflect category=textinput
     class TextControl : public Control {
     public:
         TextControl();
@@ -1855,6 +1868,7 @@ namespace newui {
     // error, no visible clue why. Call `extern void registerReflectionData();
     // registerReflectionData();` once at application startup (before
     // constructing any ListView) if nothing else in the app already does.
+    // @reflect category=data
     class ListView : public Control {
     public:
         ListView();
@@ -2061,6 +2075,7 @@ namespace newui {
     // Same registerReflectionData() trap ListView's own class comment
     // documents applies here too - TreeController::createItem() also
     // constructs its Item via reflection.
+    // @reflect category=data
     class TreeView : public Control {
     public:
         TreeView();
@@ -2170,6 +2185,7 @@ namespace newui {
     // Item::setStyle()). Persistent afterward (see PopupFrame's own class
     // comment) - opening/closing repeatedly just shows/hides the same
     // window rather than recreating it.
+    // @reflect category=textinput
     class DropDownList : public Control {
     public:
         DropDownList();

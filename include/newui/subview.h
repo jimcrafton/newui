@@ -8,6 +8,7 @@ namespace newui {
 
 // Heap-only, like View - see View's class comment. Construct with
 // new SubView(...), not on the stack.
+// @reflect category=containers
 class SubView : public View {
 public:
     SubView();

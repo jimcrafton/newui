@@ -1,5 +1,8 @@
 #include "newui/reflection.h"
 
+#include <algorithm>
+#include <set>
+
 namespace newui::reflection {
 
     // Reads back a "0x..." hex token - the fallback Property::writeValue()
@@ -170,6 +173,59 @@ namespace newui::reflection {
             return nullptr;
         }
         return getClass(found->second);
+    }
+
+    std::vector<const Class*> ReflectionRegistry::allClasses() {
+        auto& reg = instance();
+        std::vector<const Class*> result;
+        result.reserve(reg.classesByType_.size());
+        for (auto& [type, classPtr] : reg.classesByType_) {
+            result.push_back(classPtr);
+        }
+        return result;
+    }
+
+    std::vector<const Class*> ReflectionRegistry::classesWithTag(const std::string& tag) {
+        std::vector<const Class*> result;
+        for (const Class* clazz : allClasses()) {
+            const auto& tags = clazz->tags();
+            if (std::find(tags.begin(), tags.end(), tag) != tags.end()) {
+                result.push_back(clazz);
+            }
+        }
+        return result;
+    }
+
+    std::vector<const Class*> ReflectionRegistry::classesWithCategory(const std::string& category) {
+        std::vector<const Class*> result;
+        for (const Class* clazz : allClasses()) {
+            const auto& categories = clazz->categories();
+            if (std::find(categories.begin(), categories.end(), category) != categories.end()) {
+                result.push_back(clazz);
+            }
+        }
+        return result;
+    }
+
+    namespace {
+        std::vector<std::string> uniqueSorted(const std::vector<const Class*>& classes,
+                const std::vector<std::string>& (Class::*accessor)() const) {
+            std::set<std::string> unique;
+            for (const Class* clazz : classes) {
+                for (const std::string& value : (clazz->*accessor)()) {
+                    unique.insert(value);
+                }
+            }
+            return std::vector<std::string>(unique.begin(), unique.end());
+        }
+    }
+
+    std::vector<std::string> ReflectionRegistry::allTags() {
+        return uniqueSorted(allClasses(), &Class::tags);
+    }
+
+    std::vector<std::string> ReflectionRegistry::allCategories() {
+        return uniqueSorted(allClasses(), &Class::categories);
     }
 
     const Enum* ReflectionRegistry::getEnum(std::type_index type) {

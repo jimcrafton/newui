@@ -2361,6 +2361,17 @@ namespace newui::reflection {
         const std::vector<std::string>& tags() const { return tags_; }
         void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
 
+        // From "@reflect category=..." directly above the class
+        // declaration (reflectgen.py), or ClassBuilder::categories()'s own
+        // fluent call - same shape as tags() (comma-separated, a class can
+        // land in more than one grouping), just a different semantic role:
+        // groupings like "Basic"/"Data"/"Menu & Toolbar" a consumer like
+        // CodeToolsVsix::ToolboxRegistry enumerates ReflectionRegistry for,
+        // rather than hardcoding a per-class list by hand. Empty for a
+        // class that isn't meant to be browsed that way (most classes).
+        const std::vector<std::string>& categories() const { return categories_; }
+        void setCategories(std::vector<std::string> categories) { categories_ = std::move(categories); }
+
         // From "@reflect proxy=<ClassName>" directly above the class
         // declaration (reflectgen.py), or ClassBuilder::proxy()'s own
         // fluent call - names this class's design-time stand-in (e.g.
@@ -2620,6 +2631,7 @@ namespace newui::reflection {
         std::vector<Delegate*> delegates_;
         std::vector<Constructor*> constructors_;
         std::vector<std::string> tags_;
+        std::vector<std::string> categories_;
         std::string proxy_;
         std::string proxyFor_;
     };
@@ -2981,6 +2993,7 @@ namespace newui::reflection {
         ClassBuilder& isStruct(bool value = true) { class_->setIsStruct(value); return *this; }
         ClassBuilder& singleton(bool value = true) { class_->setIsSingleton(value); return *this; }
         ClassBuilder& tags(std::vector<std::string> tags) { class_->setTags(std::move(tags)); return *this; }
+        ClassBuilder& categories(std::vector<std::string> categories) { class_->setCategories(std::move(categories)); return *this; }
 
         // See Class::proxy()/proxyFor()'s own comments.
         ClassBuilder& proxy(std::string proxyClassName) { class_->setProxy(std::move(proxyClassName)); return *this; }
@@ -3497,6 +3510,24 @@ namespace newui::reflection {
 
         static const Class* getClass(std::type_index type);
         static const Class* getClass(const std::string& name);
+
+        // Every currently-registered Class, in unspecified order - for a
+        // consumer that needs to *scan* the registry rather than look up
+        // one class it already knows the name/type of. classesWithTag()/
+        // classesWithCategory() below are the same scan, pre-filtered on
+        // the query every real consumer so far actually wants (a specific
+        // known tag/category value, not "has any tag at all").
+        static std::vector<const Class*> allClasses();
+        static std::vector<const Class*> classesWithTag(const std::string& tag);
+        static std::vector<const Class*> classesWithCategory(const std::string& category);
+
+        // Every distinct tag/category value currently in use across all
+        // registered classes, sorted - lets a consumer (e.g.
+        // CodeToolsVsix::ToolboxRegistry) discover what categories()
+        // values actually exist without hardcoding the set, before
+        // grouping classesWithCategory() results under each one.
+        static std::vector<std::string> allTags();
+        static std::vector<std::string> allCategories();
 
         static const Enum* getEnum(std::type_index type);
         static const Enum* getEnum(const std::string& name);

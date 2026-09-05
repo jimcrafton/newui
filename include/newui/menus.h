@@ -367,6 +367,7 @@ namespace newui {
     // addChild() exactly like any other SubView (e.g.
     // rootView.addChild(menuBar)) - ownership from then on is the normal
     // View/SubView tree ownership, nothing MenuBar-specific to manage.
+    // @reflect category=menutoolbar
     class MenuBar : public SubView {
     public:
         MenuBar();

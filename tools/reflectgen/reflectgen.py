@@ -657,6 +657,10 @@ class ClassInfo:
         # From "@reflect tags=..." directly above the class declaration -
         # see PropertyAccessor.tags's own comment for the general idea.
         self.tags = []
+        # From "@reflect category=..." directly above the class
+        # declaration - see Class::categories()'s own comment
+        # (reflection.h). Same comma-separated shape as self.tags.
+        self.categories = []
         # From "@reflect proxy=<ClassName>"/"@reflect proxyfor=<ClassName>" -
         # see Class::proxy()/proxyFor()'s own comments (reflection.h).
         # Empty string ("") for a class with no proxy relationship, same
@@ -1317,6 +1321,7 @@ def collect_class(cursor):
     has_friend = has_reflect_friend(cursor)
     info = ClassInfo(name, has_friend)
     info.tags = [t for t in reflect_annotations(cursor).get("tags", "").split(",") if t]
+    info.categories = [c for c in reflect_annotations(cursor).get("category", "").split(",") if c]
     info.proxy = reflect_annotations(cursor).get("proxy", "")
     info.proxy_for = reflect_annotations(cursor).get("proxyfor", "")
 
@@ -1718,6 +1723,10 @@ def emit_register_function(info,function_listing):
     if info.tags:
         tags_expr = "{" + ", ".join(f'"{t}"' for t in info.tags) + "}"
         chain.append(f".tags({tags_expr})")
+
+    if info.categories:
+        categories_expr = "{" + ", ".join(f'"{c}"' for c in info.categories) + "}"
+        chain.append(f".categories({categories_expr})")
 
     if info.proxy:
         chain.append(f'.proxy("{info.proxy}")')

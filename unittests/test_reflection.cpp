@@ -1,6 +1,7 @@
 #include "newui/reflection.h"
 #include "newui/controls.h"
 
+#include <algorithm>
 #include <array>
 #include <any>
 #include <map>
@@ -303,6 +304,93 @@ TEST(Reflection, TagsRoundTripOnClassPropertyAndDelegate) {
 
     ASSERT_EQ(clazz->delegates().size(), 1u);
     EXPECT_EQ(clazz->delegates()[0]->tags(), (std::vector<std::string>{"notification"}));
+}
+
+namespace {
+    // Isolated from real newui classes, same reasoning as TaggedThing above.
+    struct CategorizedThing {};
+    struct UncategorizedThing {};
+}
+
+TEST(Reflection, CategoriesRoundTripsOnClass) {
+    ClassBuilder<CategorizedThing> builder;
+    builder.clazz().categories({"basic", "input"});
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(CategorizedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->categories(), (std::vector<std::string>{"basic", "input"}));
+}
+
+TEST(Reflection, CategoriesIsEmptyWhenNeverSet) {
+    ClassBuilder<UncategorizedThing> builder;
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(UncategorizedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->categories().empty());
+}
+
+namespace {
+    // ReflectionRegistry is a real process-wide singleton shared by every
+    // test in this binary - deliberately unique tag/category values below
+    // (not "basic"/"input", already used by CategorizedThing above) so
+    // these tests check for exactly the classes they themselves
+    // registered, not however many other classes elsewhere happen to
+    // share a common tag/category value.
+    struct QueryableWidgetA {};
+    struct QueryableWidgetB {};
+    struct QueryableWidgetUnrelated {};
+}
+
+TEST(ReflectionRegistry, ClassesWithTagFindsOnlyMatchingClasses) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().tags({"zzq_widget_tag"});
+    ReflectionRegistry::registerClass(a);
+
+    ClassBuilder<QueryableWidgetB> b;
+    b.clazz().tags({"zzq_widget_tag", "other"});
+    ReflectionRegistry::registerClass(b);
+
+    ClassBuilder<QueryableWidgetUnrelated> unrelated;
+    ReflectionRegistry::registerClass(unrelated);
+
+    std::vector<const Class*> found = ReflectionRegistry::classesWithTag("zzq_widget_tag");
+    EXPECT_EQ(found.size(), 2u);
+    EXPECT_NE(std::find(found.begin(), found.end(), classinfo(typeid(QueryableWidgetA))), found.end());
+    EXPECT_NE(std::find(found.begin(), found.end(), classinfo(typeid(QueryableWidgetB))), found.end());
+}
+
+TEST(ReflectionRegistry, ClassesWithCategoryFindsOnlyMatchingClasses) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().categories({"zzq_widget_category"});
+    ReflectionRegistry::registerClass(a);
+
+    ClassBuilder<QueryableWidgetUnrelated> unrelated;
+    ReflectionRegistry::registerClass(unrelated);
+
+    std::vector<const Class*> found = ReflectionRegistry::classesWithCategory("zzq_widget_category");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0], classinfo(typeid(QueryableWidgetA)));
+}
+
+TEST(ReflectionRegistry, AllClassesIncludesEverythingRegisteredSoFar) {
+    ClassBuilder<QueryableWidgetA> a;
+    ReflectionRegistry::registerClass(a);
+
+    std::vector<const Class*> all = ReflectionRegistry::allClasses();
+    EXPECT_NE(std::find(all.begin(), all.end(), classinfo(typeid(QueryableWidgetA))), all.end());
+}
+
+TEST(ReflectionRegistry, AllTagsAndAllCategoriesIncludeValuesJustRegistered) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().tags({"zzq_only_tag"}).categories({"zzq_only_category"});
+    ReflectionRegistry::registerClass(a);
+
+    std::vector<std::string> tags = ReflectionRegistry::allTags();
+    std::vector<std::string> categories = ReflectionRegistry::allCategories();
+    EXPECT_NE(std::find(tags.begin(), tags.end(), "zzq_only_tag"), tags.end());
+    EXPECT_NE(std::find(categories.begin(), categories.end(), "zzq_only_category"), categories.end());
 }
 
 namespace {
