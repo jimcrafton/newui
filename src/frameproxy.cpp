@@ -27,12 +27,16 @@ void FrameProxy::paint(BLContext& ctx) {
     double h = clientBounds.size().height;
     double r = kCornerRadius;
 
-    // A real shapes::RoundRect (not a plain ctx.fill_round_rect()) - reuses
-    // Shape::render()'s already-existing shadow/fill/stroke pipeline
-    // (paintEffect()'s mask-blur-blit, the same real mechanism a
-    // ShapeLayer's own shapes already get) instead of hand-rolling a blur,
-    // so the artboard reads as genuinely floating above canvasWell_'s
-    // pasteboard. Built fresh each paint() call - clientBounds can change
+    // A real shapes::RoundRect (not a plain ctx.fill_round_rect()) for the
+    // fill/stroke pipeline consistency, though not for its dropShadow -
+    // View::paintChildren() (view.cpp) clips every child to exactly its
+    // own bounding box before calling paint(), which cuts off a shadow's
+    // blurred mask (it needs to bleed outside these bounds) entirely. A
+    // real, caught bug: FrameProxy's own would-be shadow here silently
+    // never showed up live. Whatever hosts a FrameProxy (e.g. cpp_codetools'
+    // own CanvasWell) casts its shadow instead, in a paint() pass that
+    // isn't clipped to FrameProxy's own tiny bounds - see CanvasWell.cpp's
+    // own comment. Built fresh each paint() call - clientBounds can change
     // on resize, and this is cheap (no heap state to keep in sync).
     shapes::RoundRect bodyShape;
     bodyShape.setX(float(x0));
@@ -43,7 +47,6 @@ void FrameProxy::paint(BLContext& ctx) {
     bodyShape.setRadiusY(float(r));
     bodyShape.style().fill().setColor(UIColorManager::colorFor(UIColorRole::ControlBackground));
     bodyShape.style().fill().setKind(gfx::PaintKind::Color);
-    bodyShape.style().dropShadow().setEnabled(true);
     bodyShape.render(ctx);
 
     Rect barBounds(x0, y0, w, kTitleBarHeight);
