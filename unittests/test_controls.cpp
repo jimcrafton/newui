@@ -1583,6 +1583,58 @@ TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
     delete treeView;
 }
 
+TEST(TreeView, RectForPathIsNulloptWhenNotCurrentlyVisible) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    // {0}'s own children are collapsed away by default.
+    EXPECT_FALSE(treeView->rectForPath({ 0u, 0u }).has_value());
+    // Doesn't exist in the model at all.
+    EXPECT_FALSE(treeView->rectForPath({ 5u }).has_value());
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RectForPathMatchesTheOnScreenRowWithNoScroll) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    std::optional<Rect> rect = treeView->rectForPath({ 1u });
+    ASSERT_TRUE(rect.has_value());
+    Rect clientBounds = treeView->getClientBounds();
+    EXPECT_FLOAT_EQ(rect->left(), clientBounds.left());
+    EXPECT_FLOAT_EQ(rect->top(), clientBounds.top() + treeView->rowHeight());
+    EXPECT_FLOAT_EQ(rect->width(), clientBounds.width());
+    EXPECT_FLOAT_EQ(rect->height(), treeView->rowHeight());
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RectForPathAccountsForTheCurrentScrollOffset) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
+
+    treeView->onScrollOffsetChanged(*treeView, Point(0.0f, treeView->rowHeight()));
+
+    // {0,1} is visible row 2 - content-space Y is 2*rowHeight, minus the
+    // 1*rowHeight scroll offset just applied above.
+    std::optional<Rect> rect = treeView->rectForPath({ 0u, 1u });
+    ASSERT_TRUE(rect.has_value());
+    EXPECT_FLOAT_EQ(rect->top(), treeView->getClientBounds().top() + treeView->rowHeight());
+
+    treeView->destroy();
+    delete treeView;
+}
+
 TEST(TreeView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     auto* scrollView = new ScrollView();
     scrollView->setBounds(Rect(0, 0, 100, 60));

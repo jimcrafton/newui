@@ -2892,6 +2892,22 @@ namespace newui {
         }
     }
 
+    std::optional<Rect> TreeView::rectForPath(const std::vector<std::size_t>& path) const {
+        std::optional<std::size_t> visibleIndex = controller_->visibleIndexOf(path);
+        if (!visibleIndex.has_value()) {
+            return std::nullopt;
+        }
+
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return std::nullopt;
+        }
+
+        float y = controller_->itemOffset(*visibleIndex) - scrollOffsetY_;
+        float height = controller_->itemHeight(*visibleIndex);
+        return Rect(clientBounds.left(), clientBounds.top() + y, clientBounds.width(), height);
+    }
+
     std::optional<std::size_t> TreeView::visibleIndexAtY(float localY) const {
         if (localY < 0.0f) {
             return std::nullopt;

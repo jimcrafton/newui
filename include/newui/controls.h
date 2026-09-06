@@ -2135,6 +2135,21 @@ namespace newui {
         // highlighted set the same way, released immediately after.
         void paint(BLContext& ctx) override;
 
+        // Where visible row path is drawn right now, in this TreeView's
+        // own local coordinate space - the same space a live child SubView
+        // added directly to it (addChild()/setBounds()) would expect,
+        // already accounting for the current scroll offset the same way
+        // paint()'s own per-row loop does (see handleScrollOffsetChanged()).
+        // std::nullopt if path isn't currently visible (collapsed away,
+        // doesn't exist, or this TreeView currently has degenerate client
+        // bounds) - same "not visible right now" contract as
+        // TreeController::visibleIndexOf(). A real, generically useful
+        // query - any TreeView consumer wanting "where is row X right now"
+        // (a live editor widget overlaid on a selected row, a tooltip, a
+        // drag indicator) needs exactly this, not anything specific to one
+        // particular caller.
+        std::optional<Rect> rectForPath(const std::vector<std::size_t>& path) const;
+
     private:
         // Row index + path for whatever visible row pt's Y lands on -
         // shared by handleMouseDown()/handleMouseMove() so the same
