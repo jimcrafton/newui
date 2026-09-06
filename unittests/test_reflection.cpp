@@ -266,6 +266,144 @@ TEST(Reflection, BaseThrowsIfBaseClassNotYetRegistered) {
     EXPECT_THROW(builder.clazz().base<UnregisteredBase>(), std::logic_error);
 }
 
+// ---------------------------------------------------------------------
+// Property::getClass() / TypedProperty<T,U>::getClass() - resolves the
+// real *runtime* Class of a property's current value, not just its
+// declared ValueT. Matters for a property shaped like newui::View::
+// layout() (Layout* getter, unique_ptr<Layout> setter) - the declared
+// class (Layout) has no properties of its own, only a concrete subclass
+// (FlexLayout, here mirrored by ShapeBase/CircleShape) does.
+// ---------------------------------------------------------------------
+
+namespace {
+
+class ShapeBase {
+public:
+    virtual ~ShapeBase() = default;
+};
+
+class CircleShape : public ShapeBase {
+public:
+    float radius = 0.0f;
+};
+
+class ShapeHolder {
+public:
+    ShapeBase* shape() const { return shape_.get(); }
+    void setShape(std::unique_ptr<ShapeBase> shape) { shape_ = std::move(shape); }
+
+    // A plain by-value getter/setter property (not addressable at all) -
+    // see GetClassOnANonAddressablePropertyFallsBackToTheDeclaredClass.
+    std::string label() const { return label_; }
+    void setLabel(std::string v) { label_ = std::move(v); }
+
+private:
+    std::unique_ptr<ShapeBase> shape_;
+    std::string label_;
+};
+
+const Class* RegisterAndGetShapeBaseClass() {
+    static const Class* registered = [] {
+        ClassBuilder<ShapeBase> builder;
+        builder.clazz();  // no properties of its own, same as newui::Layout
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ShapeBase));
+    }();
+    return registered;
+}
+
+const Class* RegisterAndGetCircleShapeClass() {
+    RegisterAndGetShapeBaseClass();  // base<ShapeBase>() below needs this registered first
+    static const Class* registered = [] {
+        ClassBuilder<CircleShape> builder;
+        builder.clazz()
+            .base<ShapeBase>()
+            .property("radius", Scope::Public, &CircleShape::radius);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(CircleShape));
+    }();
+    return registered;
+}
+
+const Class* RegisterAndGetShapeHolderClass() {
+    RegisterAndGetCircleShapeClass();
+    static const Class* registered = [] {
+        ClassBuilder<ShapeHolder> builder;
+        builder.clazz()
+            .property("shape", Scope::Public, &ShapeHolder::shape, &ShapeHolder::setShape)
+            .property("label", Scope::Public, &ShapeHolder::label, &ShapeHolder::setLabel);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ShapeHolder));
+    }();
+    return registered;
+}
+
+const Property* FindShapeHolderShapeProperty() {
+    std::vector<const Property*> props;
+    RegisterAndGetShapeHolderClass()->allProperties(props);
+    for (const Property* p : props) {
+        if (p->name() == "shape") {
+            return p;
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+TEST(Reflection, GetClassResolvesTheRuntimeSubclassBehindAPolymorphicPtrGetterProperty) {
+    const Property* shapeProp = FindShapeHolderShapeProperty();
+    ASSERT_NE(shapeProp, nullptr);
+    EXPECT_TRUE(shapeProp->isAddressable());
+
+    ShapeHolder holder;
+    holder.setShape(std::make_unique<CircleShape>());
+
+    // The declared type only ever resolves to ShapeBase, which has no
+    // properties - the real per-subclass data is unreachable through it.
+    const Class* declared = classinfo(shapeProp->type());
+    ASSERT_NE(declared, nullptr);
+    EXPECT_EQ(declared->name(), "ShapeBase");
+
+    const Class* runtime = shapeProp->getClass(&holder);
+    ASSERT_NE(runtime, nullptr);
+    EXPECT_EQ(runtime->name(), "CircleShape");
+    EXPECT_NE(runtime, declared);
+
+    std::vector<const Property*> radiusProps;
+    runtime->allProperties(radiusProps);
+    ASSERT_EQ(radiusProps.size(), 1u);
+    EXPECT_EQ(radiusProps[0]->name(), "radius");
+}
+
+TEST(Reflection, GetClassFallsBackToTheDeclaredClassWhenNothingIsAttached) {
+    const Property* shapeProp = FindShapeHolderShapeProperty();
+    ASSERT_NE(shapeProp, nullptr);
+
+    ShapeHolder holder;  // shape_ left null
+
+    const Class* runtime = shapeProp->getClass(&holder);
+    ASSERT_NE(runtime, nullptr);
+    EXPECT_EQ(runtime->name(), "ShapeBase");
+}
+
+TEST(Reflection, GetClassOnANonAddressablePropertyFallsBackToTheDeclaredClass) {
+    const Class* holderClass = RegisterAndGetShapeHolderClass();
+    std::vector<const Property*> props;
+    holderClass->allProperties(props);
+    const Property* labelProp = nullptr;
+    for (const Property* p : props) {
+        if (p->name() == "label") {
+            labelProp = p;
+        }
+    }
+    ASSERT_NE(labelProp, nullptr);
+    EXPECT_FALSE(labelProp->isAddressable());
+
+    ShapeHolder holder;
+    EXPECT_EQ(labelProp->getClass(&holder), classinfo(labelProp->type()));
+}
+
 TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
     PropertyFlags flags = PropertyFlags::Collection | PropertyFlags::Associative;
     EXPECT_TRUE((flags & PropertyFlags::Collection) != PropertyFlags::None);

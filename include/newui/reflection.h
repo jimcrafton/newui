@@ -732,6 +732,25 @@ namespace newui::reflection {
         // for real in its RefGetter/PtrGetter branches only.
         virtual void* addressableValue(void* instance) const { return nullptr; }
 
+        // The Class that should actually be used to read/write/enumerate
+        // this property's *current* value on `instance`, resolved via its
+        // real runtime type rather than just its declared ValueT - e.g.
+        // Layout/LayoutParams, whose real data only ever lives on a
+        // concrete subclass like FlexLayout/AnchorLayoutParams, never the
+        // abstract base itself. See TypedProperty<T,U>::getClass() for the
+        // real implementation (the same "typeid on the real live pointer,
+        // not the declared type" technique write() already relies on
+        // internally, see its own runtimeClazz) and why it's safe - the
+        // pointee genuinely already is that runtime type, this just asks
+        // what it is via ordinary RTTI rather than fabricating a
+        // substitute the way the (rejected) proxy read-side substitution
+        // once tried to. Base default is nullptr, not classinfo(type()) -
+        // a caller can't tell "not overridden" apart from "genuinely no
+        // Class" otherwise, and every concrete Property today
+        // (TypedProperty) does override this for real.
+        // (Named getClass(), not class(), since class is a keyword.)
+        virtual const Class* getClass(void* instance) const { return nullptr; }
+
         // Convenience for a caller that already knows T at compile time -
         // just std::any_cast<T> on top of get(), still throws
         // std::bad_any_cast on a mismatch rather than silently misreading.
@@ -879,6 +898,26 @@ namespace newui::reflection {
             }
             throw std::logic_error("TypedProperty::address(): '" + name() +
                 "' is a by-value getter/setter property, not addressable");
+        }
+
+        // See Property::getClass()'s own comment - same typeid-on-the-
+        // real-live-pointer technique write() already uses internally
+        // (this->write()'s own runtimeClazz, further below), exposed here
+        // as the general-purpose override every TypedProperty gets for
+        // free. Harmless for a ValueT that isn't actually polymorphic in
+        // practice (typeid(*ptr) just resolves back to ValueT's own
+        // static type, identical to classinfo(type())) - no need to
+        // special-case which addressability mode this came from.
+        const Class* getClass(void* instance) const override {
+            if (!isAddressable()) {
+                return classinfo(type());
+            }
+            void* addr = address(instance);
+            if (addr == nullptr) {
+                return classinfo(type());
+            }
+            const Class* runtimeClazz = classinfo(typeid(*static_cast<ValueT*>(addr)));
+            return runtimeClazz != nullptr ? runtimeClazz : classinfo(type());
         }
 
         // See Property::addressableValue()'s own comment for why this is
