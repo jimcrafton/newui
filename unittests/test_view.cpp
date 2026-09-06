@@ -637,3 +637,46 @@ TEST(SubViewRemoveChild, PropagatesNullToWholeDetachedSubtree) {
     root->destroy();
     delete root;
 }
+
+// Rect::snappedOutwardToPixels() - see its own comment (geometry.h) for
+// why View::paintChildren() needs this for every child's bounds before
+// translating/clipping by them: a themed child (ThemedViewStyle::paint(),
+// viewstyle.cpp) positioned at a generically-fractional coordinate (e.g.
+// a Slider's thumb) otherwise leaves ctx's clip with fractional edges,
+// which trips a real BL_ASSERT(is_rect_fill()) in Blend2D's
+// fetchpatternpart.cpp - a real, reproduced crash this fixes.
+
+TEST(RectSnappedOutwardToPixels, AlreadyWholePixelRectIsUnchanged) {
+    newui::Rect r(10.0f, 20.0f, 30.0f, 40.0f);
+    EXPECT_EQ(r.snappedOutwardToPixels(), r);
+}
+
+TEST(RectSnappedOutwardToPixels, FractionalEdgesFloorLeadingAndCeilTrailing) {
+    newui::Rect r(10.25f, 20.75f, 30.5f, 40.5f);  // right = 40.75, bottom = 61.25
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_FLOAT_EQ(snapped.left(), 10.0f);
+    EXPECT_FLOAT_EQ(snapped.top(), 20.0f);
+    EXPECT_FLOAT_EQ(snapped.right(), 41.0f);
+    EXPECT_FLOAT_EQ(snapped.bottom(), 62.0f);
+}
+
+TEST(RectSnappedOutwardToPixels, NegativeOriginStillFloorsTowardNegativeInfinity) {
+    newui::Rect r(-10.25f, -20.75f, 5.0f, 5.0f);
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_FLOAT_EQ(snapped.left(), -11.0f);
+    EXPECT_FLOAT_EQ(snapped.top(), -21.0f);
+}
+
+TEST(RectSnappedOutwardToPixels, ResultNeverShrinksTheOriginalRect) {
+    // "Outward" - every edge only ever moves away from the rect's own
+    // center, so nothing real gets clipped off by the snap itself.
+    newui::Rect r(10.1f, 20.9f, 30.3f, 40.7f);
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_LE(snapped.left(), r.left());
+    EXPECT_LE(snapped.top(), r.top());
+    EXPECT_GE(snapped.right(), r.right());
+    EXPECT_GE(snapped.bottom(), r.bottom());
+}

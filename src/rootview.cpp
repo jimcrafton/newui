@@ -15,25 +15,17 @@
 
 namespace {
 
-	// Snaps a rect outward to whole pixel boundaries (floor the leading
-	// edges, ceil the trailing ones, so it only ever grows, never shrinks
-	// and clips off a partial pixel). dirtyRect_ accumulates through
-	// float position math (accumulatedOffset()'s repeated +=, min()/max()
-	// unions of several views' bounds, ...) and generally ends up with
-	// fractional coordinates - fine for InvalidateRect/StretchDIBits
-	// (Win32 truncates to int anyway) but not for
-	// ctx.clip_to_rect(dirtyRect_): a fractional-edged clip stops
-	// Blend2D's JIT from taking its fast axis-aligned "box fill" pipeline
-	// (FillType::kBoxA - see pipedefs_p.h), and something about a themed
-	// control's pattern/image fill running under the resulting non-box
-	// path trips 'is_rect_fill()' assertions in fetchpatternpart.cpp
-	// (reproduced live via mouse hover before this fix).
+	// dirtyRect_ accumulates through float position math (accumulatedOffset()'s
+	// repeated +=, min()/max() unions of several views' bounds, ...) and
+	// generally ends up with fractional coordinates - fine for
+	// InvalidateRect/StretchDIBits (Win32 truncates to int anyway) but not
+	// for ctx.clip_to_rect(dirtyRect_), for the same reason
+	// Rect::snappedOutwardToPixels()'s own comment (geometry.h) describes
+	// in full - this was that fix's own original, narrower use site,
+	// before View::paintChildren() needed the identical logic too
+	// (view.cpp) and it got promoted to a shared Rect method.
 	newui::Rect snappedToPixels(const newui::Rect& r) {
-		float left = std::floor(r.left());
-		float top = std::floor(r.top());
-		float right = std::ceil(r.right());
-		float bottom = std::ceil(r.bottom());
-		return newui::Rect(left, top, right - left, bottom - top);
+		return r.snappedOutwardToPixels();
 	}
 
 	// Recurses view and every descendant SubView, dropping the cached

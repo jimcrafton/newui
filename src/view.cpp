@@ -140,7 +140,20 @@ namespace newui {
 				continue;
 			}
 
-			const Rect& bounds = child->bounds();
+			// Snapped outward to whole pixels before translating/clipping -
+			// a real, reproduced crash otherwise: a child positioned at a
+			// generically-fractional coordinate (e.g. a Slider's thumb,
+			// proportional to its current value) leaves ctx's clip with
+			// fractional edges, which stops Blend2D's JIT from taking its
+			// fast axis-aligned "box fill" pipeline - a themed child's own
+			// buffered-paint blit_image() (ThemedViewStyle::paint(),
+			// viewstyle.cpp) running under the resulting non-box path trips
+			// a real BL_ASSERT(is_rect_fill()) in fetchpatternpart.cpp. See
+			// Rect::snappedOutwardToPixels()'s own comment (geometry.h) -
+			// same root-cause class rootview.cpp's own (now-shared)
+			// snappedToPixels() already documented once, just never
+			// applied here too until this crash surfaced it.
+			Rect bounds = child->bounds().snappedOutwardToPixels();
 
 			ctx.save();
 			ctx.translate(bounds.left(), bounds.top());

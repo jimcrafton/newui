@@ -10,6 +10,8 @@
 #include "newui/newui.h"
 #include <blend2d/blend2d.h>
 
+#include <cmath>
+
 
 namespace newui {
 
@@ -273,6 +275,28 @@ public:
     // Uniform inset on all four sides.
     Rect deflate(float amount) const {
         return deflate(amount, amount, amount, amount);
+    }
+
+    // Snaps outward to whole-pixel boundaries - floors the leading edges,
+    // ceils the trailing ones, so the result only ever grows, never
+    // shrinks and clips off a partial pixel (same recipe as rootview.cpp's
+    // own file-local snappedToPixels(), promoted here once a second real
+    // consumer needed the identical logic - View::paintChildren()'s own
+    // per-child translate/clip_to_rect(), view.cpp). Matters because a
+    // fractional-edged ctx.clip_to_rect() stops Blend2D's JIT from taking
+    // its fast axis-aligned "box fill" pipeline (FillType::kBoxA), and a
+    // themed control's buffered-paint blit_image() running under the
+    // resulting non-box path trips a real 'is_rect_fill()' assertion in
+    // fetchpatternpart.cpp - reproduced live (a Slider's thumb, positioned
+    // at a generically-fractional proportional X, painting through
+    // ThemedTrackbarThumbStyle inside a parent paintChildren() that
+    // translated/clipped by that same unsnapped fractional bounds).
+    Rect snappedOutwardToPixels() const {
+        float snappedLeft = std::floor(left());
+        float snappedTop = std::floor(top());
+        float snappedRight = std::ceil(right());
+        float snappedBottom = std::ceil(bottom());
+        return Rect(snappedLeft, snappedTop, snappedRight - snappedLeft, snappedBottom - snappedTop);
     }
 
     bool operator==(const Rect& other) const {
