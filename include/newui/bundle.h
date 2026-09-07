@@ -131,6 +131,18 @@ namespace newui {
         // Delegates to loadFrame(dialog.frame()) - see Dialog::frame().
         bool loadDialog(Dialog& dialog) const;
 
+        // Same as loadFrame() above, but reads absolutePath directly -
+        // never touches executableDir()/resourcesDir() at all. For a
+        // document that lives in its own tree, entirely unrelated to this
+        // app's own resource bundle (a user's project file, opened via a
+        // file picker) - see loadRootViewFromFile()'s own comment for why
+        // that case doesn't fit the bundleName-based overload above, even
+        // via setExecutableDirOverride(). frame.getName() is not consulted
+        // for resolution here (unlike loadFrame()); it's still read back
+        // afterward as an ordinary property if the file sets one. Returns
+        // false if absolutePath doesn't resolve or isn't valid JSON5.
+        bool loadFrameFromFile(Frame& frame, const std::string& absolutePath) const;
+
         // Loads just the "rootView" node of "<bundleName>.newui" into
         // target in place - no Frame required, for a standalone RootView
         // (see RootView's Frame-less constructor). Returns false for any
@@ -181,6 +193,23 @@ namespace newui {
         // per-load propagation needed at all.
         template<typename T>
         bool loadRootView(T& target, const std::string& bundleName, bool designMode = false) const;
+
+        // Same as loadRootView(T&, bundleName, designMode) above, but
+        // resolves directly against absolutePath instead of resourcesDir()
+        // + bundleName - never touches executableDir()/resourcesDir() at
+        // all. This is the intended way to load a document that lives
+        // outside this app's own resource bundle entirely (e.g. a user's
+        // project file, wherever it happens to live) - setExecutableDirOverride()
+        // was previously (mis)used for this by temporarily repointing the
+        // whole Bundle singleton's app-resource root at the document's own
+        // directory, which also broke every unrelated resourcesDir()-relative
+        // lookup (icons, ...) for as long as the override was in effect,
+        // since Bundle is meant to resolve *this app's own* resources only,
+        // never a per-document root. Same templated/explicit-instantiation
+        // shape and designMode semantics as the bundleName overload - see
+        // its own comment.
+        template<typename T>
+        bool loadRootViewFromFile(T& target, const std::string& absolutePath, bool designMode = false) const;
 
         // Loads just the "rootView" node of
         // "<rootView.getFrame()->getName()>.newui" into rootView in place -
@@ -263,6 +292,22 @@ namespace newui {
         // designMode parameter.
         template<typename T>
         bool writeRootView(T& target, const std::string& bundleName, bool designMode = false) const;
+
+        // Write-side counterpart to loadRootViewFromFile() - same
+        // "preserve every other top-level key, only replace rootView"
+        // behavior as writeRootView(T&, bundleName, ...) above, just
+        // resolved directly against absolutePath instead of resourcesDir()
+        // + bundleName. See loadRootViewFromFile()'s own comment for why
+        // this exists as a separate entry point rather than routed through
+        // setExecutableDirOverride(). Unlike writeTextFile() (used by the
+        // bundleName-based writers), this never creates absolutePath's own
+        // containing directory - a document living in its own, unrelated
+        // tree is expected to already exist there (the user picked its
+        // location via a save dialog), not something Bundle should be
+        // scaffolding. Returns false if absolutePath is empty or the file
+        // couldn't be written.
+        template<typename T>
+        bool writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode = false) const;
 
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).
