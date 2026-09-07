@@ -135,6 +135,7 @@ add_library(newui STATIC
     "include/newui/frameproxy.h" "src/frameproxy.cpp"
     "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
     "include/newui/splitter.h" "src/splitter.cpp"
+    "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
