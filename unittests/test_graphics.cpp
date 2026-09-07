@@ -1,7 +1,9 @@
 #include "newui/graphics.h"
+#include "newui/svgimage.h"
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <utility>
 
 namespace {
@@ -13,6 +15,17 @@ void WriteTestPNG(const std::string& path, int width, int height) {
     ctx.fill_all();
     ctx.end();
     ASSERT_EQ(image.write_to_file(path.c_str()), BL_SUCCESS);
+}
+
+// A tiny, fast, deterministic SVG - a single opaque red rect filling its
+// own 10x10 viewBox - rather than svgandme's own (much larger, much
+// slower to parse/render) gallery samples, since these tests only care
+// that ".svg" actually routes through renderSvgFile() and comes back with
+// real, correctly-sized/colored pixels.
+void WriteTestSVG(const std::string& path) {
+    std::ofstream file(path, std::ios::binary);
+    file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+            "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
 }
 
 }  // namespace
@@ -80,6 +93,73 @@ TEST(Image, LoadFromFileRoundTripsARealPNGFile) {
     ASSERT_TRUE(image.isValid());
     EXPECT_EQ(image.width(), 10);
     EXPECT_EQ(image.height(), 6);
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Image, SvgPathWithNoSizeRasterizesAtTheFixedDefaultSize) {
+    const std::string path = "graphics_test_image.svg";
+    WriteTestSVG(path);
+
+    newui::gfx::Image image(path);
+
+    ASSERT_TRUE(image.isValid());
+    EXPECT_EQ(image.width(), newui::kDefaultSvgRasterSize);
+    EXPECT_EQ(image.height(), newui::kDefaultSvgRasterSize);
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Image, SvgPathWithExplicitSizeRasterizesAtThatSize) {
+    const std::string path = "graphics_test_image_sized.svg";
+    WriteTestSVG(path);
+
+    newui::gfx::Image image(path, 20, 12);
+
+    ASSERT_TRUE(image.isValid());
+    EXPECT_EQ(image.width(), 20);
+    EXPECT_EQ(image.height(), 12);
+
+    // The whole viewBox is a solid opaque red rect, so the center pixel of
+    // the rasterized result should come back opaque red regardless of the
+    // requested size.
+    BLImageData data;
+    image.blImage().get_data(&data);
+    const auto* row = static_cast<const uint8_t*>(data.pixel_data) + 6 * data.stride;
+    const uint32_t centerPixel = reinterpret_cast<const uint32_t*>(row)[10];
+    EXPECT_EQ(centerPixel, 0xFFFF0000u);  // premultiplied ARGB, opaque red
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Image, SvgPathFailsForAMissingFile) {
+    newui::gfx::Image image("NoSuchImageFile.svg", 16, 16);
+
+    EXPECT_FALSE(image.isValid());
+}
+
+TEST(Image, SizedConstructorRescalesANonSvgFormatToo) {
+    const std::string path = "graphics_test_image_rescale.png";
+    WriteTestPNG(path, 10, 6);
+
+    newui::gfx::Image image(path, 20, 12);
+
+    ASSERT_TRUE(image.isValid());
+    EXPECT_EQ(image.width(), 20);
+    EXPECT_EQ(image.height(), 12);
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Image, SizedConstructorInvalidForZeroOrNegativeSize) {
+    const std::string path = "graphics_test_image_badsize.png";
+    WriteTestPNG(path, 10, 6);
+
+    newui::gfx::Image zero(path, 0, 10);
+    newui::gfx::Image negative(path, 10, -1);
+
+    EXPECT_FALSE(zero.isValid());
+    EXPECT_FALSE(negative.isValid());
 
     ::DeleteFileA(path.c_str());
 }

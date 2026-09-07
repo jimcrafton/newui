@@ -46,7 +46,27 @@ namespace newui::gfx {
         // BL_FORMAT_PRGB32 first if the decoded image isn't already that
         // format. isValid() is false afterward if the file couldn't be
         // read/decoded.
+        //
+        // A ".svg" path instead rasterizes via renderSvgFile() (svgimage.h)
+        // at a fixed kDefaultSvgRasterSize x kDefaultSvgRasterSize default -
+        // svgandme (the vendored parser/renderer) has no reliable, canvas-
+        // independent way to ask an SVG for its own "natural" size, so this
+        // doesn't attempt to guess one.
+        // Use the (path, width, height) constructor below for an actual
+        // target size - the common case for a toolbar/button icon, since
+        // those are almost always requested at a specific pixel size
+        // anyway.
         explicit Image(const std::string& path);
+
+        // Same decode as above, but rasterized/resized to an explicit
+        // width x height instead of whatever size the source naturally
+        // is. For a ".svg" path this is the real rasterization target
+        // (renderSvgFile() renders directly at width x height - not a
+        // post-hoc scale); for any other format, the file is decoded at
+        // its native size first and then scaled into width x height via a
+        // BLContext blit. isValid() is false afterward on any failure,
+        // including a non-positive width or height.
+        Image(const std::string& path, int width, int height);
 
         // Copies source's pixel data into a fresh DIB-backed buffer
         // (converting to BL_FORMAT_PRGB32 first if needed) - source keeps

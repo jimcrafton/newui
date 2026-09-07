@@ -124,6 +124,23 @@ add_custom_command(TARGET imagefill1 POST_BUILD
         "$<TARGET_FILE_DIR:imagefill1>/Resources/robot2.png"
 )
 
+add_executable(svgimage1
+    svgimage1.cpp
+)
+
+target_link_libraries(svgimage1 PRIVATE newui)
+
+# peacockspider.svg is a source-tree asset (svgandme's own gallery/ sample,
+# wiladams/svgandme), used via both newui::gfx::Image's ".svg" constructors
+# and newui::Bundle::loadImage() - same Resources/-relative post-build copy
+# as imagefill1's photos above.
+add_custom_command(TARGET svgimage1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:svgimage1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/peacockspider.svg"
+        "$<TARGET_FILE_DIR:svgimage1>/Resources/peacockspider.svg"
+)
+
 
 
 add_executable(command1

@@ -1,0 +1,2862 @@
+// filter_program_exec_b2d.h
+
+#pragma once
+
+#include <memory>
+#include <unordered_map>
+#include <cstdint>
+#include <cmath>
+
+#include "core_nametable.h"
+#include "render_blend2d.h"
+
+#include "svgstructuretypes.h"
+
+#include "filter_types.h"
+#include "filter_program_exec.h"   
+#include "filter_noise.h"
+#include "svg_attribute_viewport.h"
+
+
+#include "filter_feblend.h"
+#include "filter_fecolormatrix.h"
+#include "filter_fecomponenttransfer.h"
+#include "filter_fecomposite.h"
+#include "filter_fediffuselight.h"
+#include "filter_fedisplacement.h"
+#include "filter_fegaussian.h"
+#include "filter_femorphology.h"
+#include "filter_fespecularlight.h"
+
+namespace waavs
+{
+    struct IAmGroot;
+
+    static INLINE BLCompOp blendModeToCompOp(FilterBlendMode mode) noexcept
+    {
+        static constexpr BLCompOp map[] =
+        {
+            BL_COMP_OP_SRC_OVER,      // NORMAL
+            BL_COMP_OP_MULTIPLY,
+            BL_COMP_OP_SCREEN,
+            BL_COMP_OP_DARKEN,
+            BL_COMP_OP_LIGHTEN,
+            BL_COMP_OP_OVERLAY,
+            BL_COMP_OP_COLOR_DODGE,
+            BL_COMP_OP_COLOR_BURN,
+            BL_COMP_OP_HARD_LIGHT,
+            BL_COMP_OP_SOFT_LIGHT,
+            BL_COMP_OP_DIFFERENCE,
+            BL_COMP_OP_EXCLUSION
+        };
+
+        uint32_t i = (uint32_t)mode;
+        if (i >= sizeof(map) / sizeof(map[0]))
+            return BL_COMP_OP_SRC_OVER;
+
+        return map[i];
+    }
+
+}
+
+namespace waavs
+{
+    template<class SurfaceT>
+    struct B2DFilterResourceResolver : public IFilterResourceResolver<SurfaceT>
+    {
+        //using Surface = SurfaceT;
+        using ResourceHandle = std::unique_ptr<SurfaceT>;
+
+        IAmGroot* fGroot{ nullptr };
+        IDrawGraphics* fRender{ nullptr };
+        IAmFroot<SurfaceT>* fFroot{ nullptr };
+
+
+        B2DFilterResourceResolver(
+            IAmGroot* groot,
+            IDrawGraphics* render,
+            IAmFroot<SurfaceT>* froot) noexcept
+            : fGroot(groot)
+            , fRender(render)
+            , fFroot(froot)
+        {
+        }
+
+
+
+        Surface createFilterSurface(const FilterRunState& runState) noexcept
+        {
+            if (!fFroot)
+                return {};
+
+            const int w = (int)std::ceil(runState.filterRectUS.w);
+            const int h = (int)std::ceil(runState.filterRectUS.h);
+
+            if (w <= 0 || h <= 0)
+                return {};
+
+            return fFroot->createSurfaceHandle((size_t)w, (size_t)h);
+        }
+
+        WGRectD computeReferencedViewBox(IViewable* elem) noexcept
+        {
+            if (!elem || !fRender || !fGroot)
+                return {};
+
+            // First-pass policy:
+            // use object bounding box of referenced subtree as the source viewBox.
+            return elem->objectBoundingBox();
+        }
+
+        static INLINE PreserveAspectRatio makePAR(
+            AspectRatioAlignKind align,
+            AspectRatioMeetOrSliceKind mos) noexcept
+        {
+            PreserveAspectRatio par;
+            par.setAlign(align);
+            par.setMeetOrSlice(mos);
+            return par;
+        }
+
+        static INLINE WGMatrix3x3 makeUserToSurfaceMatrix(const FilterRunState& runState) noexcept
+        {
+            WGMatrix3x3 m = WGMatrix3x3::makeIdentity();
+            m.translate(-runState.filterRectUS.x, -runState.filterRectUS.y);
+            return m;
+        }
+
+        bool renderReferencedSubtree(SVGB2DDriver& ctx, IViewable* elem) noexcept
+        {
+            if (!elem || !fGroot)
+                return false;
+
+            elem->draw(&ctx, fGroot);
+
+            return true;
+        }
+
+        Surface resolveFeImage(
+            InternedKey imageKey,
+            const FilterRunState& runState,
+            const WGRectD& subr,
+            AspectRatioAlignKind align,
+            AspectRatioMeetOrSliceKind meetOrSlice) noexcept override
+        {
+            if (!fGroot || !fRender || !fFroot)
+                return {};
+
+            if (!imageKey)
+                return {};
+
+            ByteSpan href = imageKey;
+
+
+            // First-pass implementation: local fragment refs only.
+            if (href[0] != '#')
+                return {};
+
+            auto node = fGroot->findNodeByHref(href);
+            if (!node)
+                return {};
+
+            auto elem = std::dynamic_pointer_cast<IViewable>(node);
+            if (!elem)
+                return {};
+
+            if (!wg_rectD_is_valid(runState.filterRectUS))
+                return {};
+
+            WGRectD dstRect = subr; 
+            if (!wg_rectD_is_valid(dstRect))
+                return {};
+
+            auto out = createFilterSurface(runState);
+            if (out.empty())
+                return {};
+            wg_surface_clear(out);
+
+            //PreserveAspectRatio par = makePAR(align, meetOrSlice);
+            WGMatrix3x3 fit = WGMatrix3x3::makeIdentity();
+
+            //if (!computeViewBoxToViewport(dstRect, srcViewBox, par, fit))
+            //    return {};
+
+            WGMatrix3x3 userToSurface = makeUserToSurfaceMatrix(runState);
+
+            SVGB2DDriver ctx{};
+            ctx.attach(out, 1);
+            ctx.renew();
+
+            //ctx.blendMode(BL_COMP_OP_SRC_OVER);
+
+            ctx.push();
+
+            // Shift user-space filter region origin to surface origin.
+            ctx.setTransform(userToSurface);
+
+            // Fit referenced content into the destination viewport.
+            ctx.setTransform(fit);
+
+            if (!renderReferencedSubtree(ctx, elem.get()))
+            {
+                ctx.pop();
+                ctx.detach();
+                return {};
+            }
+
+            ctx.pop();
+            ctx.detach();
+
+            return out;
+        }
+    };
+}
+
+namespace waavs {
+    //============================================================
+    // B2DFilterExecutor
+    // Header-only reference implementation:
+    //   - owns a key->Surface registry (unique_ptr)
+    //   - renders SourceGraphic into offscreen Surface
+    //   - executes FilterProgramStream using FilterProgramExecutor decoding
+    //   - blits final (lastKey) result back into destination
+    //============================================================
+
+
+    struct B2DFilterExecutor final : FilterProgramExecutor, IAmFroot<Surface>
+    {
+        std::unique_ptr<B2DFilterResourceResolver<Surface> > fResolver{ nullptr };
+
+        // --------------------------------------------------------
+        // Registry storage
+        // --------------------------------------------------------
+        //using Handle = typename IAmFroot<Surface>::ImageHandle;
+
+        std::unordered_map<InternedKey, Surface, InternedKeyHash, InternedKeyEquivalent> fImages{};
+        InternedKey fLastKey{};
+
+        // ----------------------------------------------
+        // Space management
+        // ----------------------------------------------
+        FilterSpace fSpace{};
+
+
+        // --------------------------------------------------------
+        // IAmFrootBase / IAmFroot<PixelArray>
+        // --------------------------------------------------------
+        InternedKey lastKey() const noexcept override { return fLastKey; }
+        void setLastKey(InternedKey k) noexcept override { fLastKey = k; }
+
+        bool hasImage(InternedKey key) const noexcept override
+        {
+            return fImages.find(key) != fImages.end();
+        }
+
+
+        Surface getStoredImage(InternedKey key) const noexcept
+        {
+            auto it = fImages.find(key);
+            if (it == fImages.end())
+                return Surface{};
+            return it->second;
+        }
+
+        //virtual ImageT getImage(InternedKey key) noexcept = 0;
+        //virtual const ImageT getImage(InternedKey key) const noexcept = 0;
+        Surface getOrCreateAlphaImage(InternedKey alphaKey, InternedKey graphicKey) noexcept
+        {
+            // Try to get the stored image.  If it exists,
+            // return it, we're done
+            Surface srcGraphic = getStoredImage(graphicKey);
+            if (srcGraphic.empty())
+                return {};
+
+            Surface srcAlpha = makeSourceAlpha(srcGraphic);
+            if (srcAlpha.empty())
+                return {};
+
+            putImage(alphaKey, srcAlpha);
+            return srcAlpha;
+        }
+
+
+        Surface getImage(InternedKey inKey) noexcept override
+        {
+            // If the key is empty, resolve as lastKey()
+            // This does not handle the case where the key specified
+            // does not exist.  We handle that later
+            if (!inKey)
+                inKey = lastKey();
+
+            // Try to get the stored image.  If it exists,
+            // return it, we're done
+            Surface in = getStoredImage(inKey);
+            if (!in.empty())
+                return in;
+
+            // We haven't found it yet, so, see if the key is one of
+            // our specially named items
+            if (inKey == filter::SourceAlpha())
+                return getOrCreateAlphaImage(filter::SourceAlpha(), filter::SourceGraphic());
+
+            if (inKey == filter::BackgroundAlpha())
+                return getOrCreateAlphaImage(filter::BackgroundAlpha(), filter::BackgroundImage());
+
+            // Last chance, return the image related to last key
+            return getStoredImage(lastKey());
+
+        }
+
+        
+        //const Surface getImage_const(InternedKey inKey) const noexcept override
+        //{
+        //    return getImage(inKey);
+        //}
+        
+
+
+
+        bool putImage(InternedKey key, Surface img) noexcept override
+        {
+            fImages[key] = img;
+            return true;
+        }
+
+        void eraseImage(InternedKey key) noexcept override
+        {
+            fImages.erase(key);
+            if (fLastKey == key)
+                fLastKey = {};
+        }
+
+        void clearSurfaces() noexcept override
+        {
+            fImages.clear();
+            fLastKey = {};
+        }
+
+        Surface createSurfaceHandle(size_t w, size_t h) noexcept override
+        {
+            Surface img = Surface::createOwned(w, h);
+            return img;
+        }
+
+        Surface createLikeSurfaceHandle(const Surface& like) noexcept override
+        {
+            auto img = Surface::createOwned(like.width(), like.height());
+            return img;
+        }
+
+        // Make a copy of the surface
+        Surface copySurfaceHandle(const Surface& src) noexcept override
+        {
+            auto img = createLikeSurfaceHandle(src);
+            if (img.empty())
+                return {};
+
+            wg_blit_copy(img, src, 0, 0);
+
+            return img;
+        }
+
+        // --------------------------------------------------------
+        // Helpers
+        // --------------------------------------------------------
+        WGRectD resolveSubregionUS(
+            const FilterPrimitiveSubregion& subr,
+            double padUserX = 0.0,
+            double padUserY = 0.0) const noexcept
+        {
+            WGRectD ur{};
+
+            if (!subr.isValid)
+            {
+                ur = fRunState.filterRectUS;
+            }
+            else
+            {
+                const auto& x = subr.x;
+                const auto& y = subr.y;
+                const auto& w = subr.w;
+                const auto& h = subr.h;
+
+                switch (fRunState.primitiveUnits)
+                {
+
+
+                case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                {
+                    const WGRectD& bb = fRunState.objectBBoxUS;
+
+                    const double fx = numberOrPercent_resolvePosition(x, bb.x, bb.w);
+                    const double fy = numberOrPercent_resolvePosition(y, bb.y, bb.h);
+                    const double fw = numberOrPercent_resolveRange(w, bb.w);
+                    const double fh = numberOrPercent_resolveRange(h, bb.h);
+
+                    ur = WGRectD(fx, fy, fw, fh);
+                    break;
+                }
+
+                default:
+                case SpaceUnitsKind::SVG_SPACE_USER:
+                {
+                    const WGRectD& fr = fRunState.filterRectUS;
+
+                    const double fx = numberOrPercent_resolvePosition(x, fr.x, fr.w);
+                    const double fy = numberOrPercent_resolvePosition(y, fr.y, fr.h);
+                    const double fw = numberOrPercent_resolveRange(w, fr.w);
+                    const double fh = numberOrPercent_resolveRange(h, fr.h);
+
+                    ur = WGRectD(fx, fy, fw, fh);
+                    break;
+                }
+                }
+            }
+
+            if (!(ur.w > 0.0) || !(ur.h > 0.0))
+                return WGRectD{};
+
+            if (padUserX > 0.0 || padUserY > 0.0)
+            {
+                ur.x -= padUserX;
+                ur.y -= padUserY;
+                ur.w += 2.0 * padUserX;
+                ur.h += 2.0 * padUserY;
+            }
+
+            return ur;
+        }
+
+ 
+
+        WGRectI resolveSubregionPx(
+            const FilterPrimitiveSubregion& subr,
+            const Surface& like,
+            double padUserX = 0.0,
+            double padUserY = 0.0) const noexcept
+        {
+            const int W = int(like.width());
+            const int H = int(like.height());
+
+            const WGRectI surfArea{ 0, 0, W, H };
+
+            const WGRectD ur =
+                resolveSubregionUS(subr, padUserX, padUserY);
+
+            if (!(ur.w > 0.0) || !(ur.h > 0.0))
+                return WGRectI{};
+
+            const WGRectD subrPX = mapRectAABB(fSpace.ctm, ur);
+
+            const int ix0 = int(std::floor(subrPX.x - fSpace.filterRectPX.x));
+            const int iy0 = int(std::floor(subrPX.y - fSpace.filterRectPX.y));
+            const int ix1 = int(std::ceil((subrPX.x + subrPX.w) - fSpace.filterRectPX.x));
+            const int iy1 = int(std::ceil((subrPX.y + subrPX.h) - fSpace.filterRectPX.y));
+
+            const WGRectI subArea{ ix0, iy0, ix1 - ix0, iy1 - iy0 };
+
+            return rectI_intersection(subArea, surfArea);
+        }
+
+
+        // --------------------------------------
+        // SourceAlpha implementation
+        // --------------------------------------
+
+        static  void extractAlpha_row_scalar( uint32_t* dst, const uint32_t* src, size_t n) noexcept
+        {
+            for (size_t i = 0; i < n; ++i)
+                dst[i] = src[i] & 0xFF000000u;
+        }
+
+#if WAAVS_HAS_NEON
+        static INLINE void extractAlpha_row_neon(
+            uint32_t* dst,
+            const uint32_t* src,
+            size_t n) noexcept
+        {
+            const uint32x4_t kAlphaMask = vdupq_n_u32(0xFF000000u);
+
+            size_t i = 0;
+            for (; i + 4 <= n; i += 4)
+            {
+                const uint32x4_t px = vld1q_u32(src + i);
+                const uint32x4_t a = vandq_u32(px, kAlphaMask);
+                vst1q_u32(dst + i, a);
+            }
+
+            // cleanup tail
+            for (; i < n; ++i)
+                dst[i] = src[i] & 0xFF000000u;
+        }
+#endif
+
+        static  void extractAlpha_row(
+            uint32_t* dst,
+            const uint32_t* src,
+            size_t n) noexcept
+        {
+#if WAAVS_HAS_NEON
+            extractAlpha_row_neon(dst, src, n);
+#else
+            extractAlpha_row_scalar(dst, src, n);
+#endif
+        }
+
+
+
+        Surface makeSourceAlpha(const Surface& src)
+        {
+            auto out = createLikeSurfaceHandle(src);
+            if (out.empty())
+                return {};
+
+            Surface_ARGB32 srcInfo = src.info();
+            Surface_ARGB32 outInfo = out.info();
+
+            if (srcInfo.contiguous && outInfo.contiguous)
+            {
+                extractAlpha_row(
+                    reinterpret_cast<uint32_t*>(outInfo.data),
+                    reinterpret_cast<const uint32_t*>(srcInfo.data),
+                    src.width() * src.height());
+                return out;
+            }
+
+            wg_surface_rows_apply_unary_unchecked(
+                outInfo,
+                srcInfo,
+                [](uint32_t* d, const uint32_t* s, int w) noexcept
+                {
+                    extractAlpha_row(d, s, size_t(w));
+                });
+
+            return out;
+        }
+
+        // --------------------------------------
+        // getBackgroundLocal()
+        //
+        //   - Reads the current target from the context, and extracts 
+        //      the portion that intersects the filter region into the output surface.
+        // 
+        // Note:  This just creates a sub-region, it does NOT make a copy
+        // So, it's essentially 'free' to call.
+        //
+        bool getBackgroundLocal(
+            IDrawGraphics* ctx,
+            const WGRectI& filterRectPX,
+            Surface& out) noexcept
+        {
+            out = {};
+
+            if (!ctx)
+                return false;
+
+            if (filterRectPX.w <= 0 || filterRectPX.h <= 0)
+                return false;
+
+            out = Surface::createOwned(filterRectPX.w, filterRectPX.h);
+
+            wg_surface_clear(out);
+
+            // Make sure pending renderer work is visible before reading the target.
+            ctx->flush();
+
+            BLImage* bkgImage = ctx->currentTarget();
+            if (!bkgImage)
+                return true; // Valid transparent background.
+
+            Surface bkgSurf = surfaceFromBLImage(*bkgImage);
+            if (bkgSurf.empty())
+                return true; // Valid transparent background.
+
+            const WGRectI srcBounds = bkgSurf.boundsI();
+            const WGRectI clippedSrc = rectI_intersection(srcBounds, filterRectPX);
+
+            if (clippedSrc.w <= 0 || clippedSrc.h <= 0)
+                return true; // Filter tile lies outside current target.
+
+            Surface srcView = bkgSurf.getView(clippedSrc);
+            if (srcView.empty())
+                return true;
+
+            const int dstX = clippedSrc.x - filterRectPX.x;
+            const int dstY = clippedSrc.y - filterRectPX.y;
+
+            wg_blit_copy(out, srcView, dstX, dstY);
+
+            return true;
+        }
+
+
+        // --------------------------------------------------------
+        // applyFilter()
+        //
+        //
+        // SubtreeT requirements:
+        //   WGRectD objectBoundingBox() const noexcept;
+        //   void draw(IDrawGraphics*, IAmGroot*);
+        // --------------------------------------------------------
+        
+        template<class SubtreeT>
+        WGResult applyFilterToSurface(
+            IDrawGraphics* ctx,
+            IAmGroot* groot,
+            SubtreeT* subtree,
+            const WGRectD& objectBBoxUS,
+            const WGRectD& filterRectUS,
+            const WGRectI& filterRectPX,
+            const FilterProgramStream& program,
+            Surface & srcGraphic,
+            RenderFlags rFlags = RenderFeature::RF_All) noexcept
+        {
+            if (!ctx || !groot || !subtree)
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            if (!(objectBBoxUS.w > 0.0) || !(objectBBoxUS.h > 0.0))
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            if (!(filterRectUS.w > 0.0) || !(filterRectUS.h > 0.0))
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            if (filterRectPX.w <= 0 || filterRectPX.h <= 0)
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            const WGMatrix3x3 ctm = ctx->state().getTransform();
+
+            // --------------------------------------------------
+            // Reset executor state
+            // --------------------------------------------------
+
+            clearSurfaces();
+            setLastKey({});
+
+            // --------------------------------------------------
+            // Setup run state
+            // --------------------------------------------------
+
+            fRunState.filterUnits = program.filterUnits;
+            fRunState.primitiveUnits = program.primitiveUnits;
+            fRunState.colorInterpolation = program.colorInterpolation;
+            fRunState.filterRectUS = filterRectUS;
+            fRunState.objectBBoxUS = objectBBoxUS;
+
+            // --------------------------------------------------
+            // Setup filter space
+            // --------------------------------------------------
+
+            fSpace = {};
+            fSpace.filterRectUS = filterRectUS;
+            fSpace.filterExtentUS = WGRectD{
+                0.0,
+                0.0,
+                filterRectUS.w,
+                filterRectUS.h
+            };
+
+            fSpace.filterRectPX = filterRectPX;
+            fSpace.ctm = ctm;
+            fSpace.invCtm = ctm;
+            (void)fSpace.invCtm.invert();
+
+            {
+                const double xvx = ctm.m00;
+                const double xvy = ctm.m01;
+                const double yvx = ctm.m10;
+                const double yvy = ctm.m11;
+
+                fSpace.sx = std::sqrt(xvx * xvx + xvy * xvy);
+                fSpace.sy = std::sqrt(yvx * yvx + yvy * yvy);
+
+                if (!(fSpace.sx > 0.0))
+                    fSpace.sx = 1.0;
+
+                if (!(fSpace.sy > 0.0))
+                    fSpace.sy = 1.0;
+            }
+
+            // --------------------------------------------------
+            // Setup resource resolver
+            // --------------------------------------------------
+
+            fResolver = std::make_unique<B2DFilterResourceResolver<Surface>>(
+                groot,
+                ctx,
+                this);
+
+            // --------------------------------------------------
+            // Render SourceGraphic into tile-local surface
+            // --------------------------------------------------
+
+            //Surface srcGraphic{};
+
+            IsolatedSubtreeRequest req{};
+            SVGDrawingState & ds = ctx->state();
+            req.drawingState = ds;
+            req.userRect = filterRectUS;
+            req.pixelRect = filterRectPX;
+            req.ctm = ctm;
+            req.objectBBoxUS = objectBBoxUS;
+            req.renderMode = RF_Content;
+
+            renderSubtreeToSurface(groot, subtree, req, srcGraphic);
+
+            if (srcGraphic.empty())
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            if (!putImage(filter::SourceGraphic(), srcGraphic))
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            // --------------------------------------------------
+            // Register BackgroundImage, if available
+            // --------------------------------------------------
+
+            Surface backgroundLocal{};
+
+            if (!getBackgroundLocal(ctx, filterRectPX, backgroundLocal))
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            if (!backgroundLocal.empty()) {
+                if (!putImage(filter::BackgroundImage(), backgroundLocal))
+                    return WGErrorCode::WG_ERROR_Invalid_Argument;
+            }
+
+            // --------------------------------------------------
+            // Execute filter program
+            // --------------------------------------------------
+
+            if (!FilterProgramExecutor::execute(program, *this))
+                return WGErrorCode::WG_ERROR_Invalid_Argument;
+
+            // --------------------------------------------------
+            // Resolve final output
+            // --------------------------------------------------
+
+            InternedKey outKey = lastKey();
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            srcGraphic = getImage(outKey);
+
+            if (srcGraphic.empty())
+                srcGraphic = getImage(filter::SourceGraphic());
+
+            return WG_SUCCESS;
+        }
+
+
+
+        // --------------------------------------------------------
+        // FilterProgramExecutor hooks
+        // --------------------------------------------------------
+        bool onBeginProgram(const FilterProgramStream&) noexcept override
+        {
+            // If caller didn't set last, default to SourceGraphic if present.
+            if (!lastKey() && hasImage(filter::SourceGraphic()))
+                setLastKey(filter::SourceGraphic());
+            return true;
+        }
+
+        // =============================================
+        // feBlend
+        // =============================================
+
+        bool onBlend(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            FilterBlendMode mode) noexcept override
+        {
+            InternedKey in1Key = resolveBinaryInput1Key(io);
+            InternedKey in2Key = resolveBinaryInput2Key(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in1 = getImage(in1Key);
+            Surface in2 = getImage(in2Key);
+            if (in1.empty() || in2.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in1);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            const WGRectI area = resolveSubregionPx(subr, in1);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            const WGBlendMode wgMode = to_wg_blend_mode(mode);
+            const WGFilterColorSpace wgColorSpace =
+                to_WGFilterColorSpace(io.colorInterp);
+
+            Surface_ARGB32 outInfo = out.info();
+            Surface_ARGB32 in1Info = in1.info();
+            Surface_ARGB32 in2Info = in2.info();
+
+            WGResult res = wg_blit_blend_rect(
+                outInfo,
+                in1Info,
+                in2Info,
+                area,
+                wgMode,
+                wgColorSpace);
+
+            if (res != WG_SUCCESS)
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+        //==================================================
+        // ------------------------------------------
+        // onColorMatrix
+        // unary
+        // integer / half way to NEON
+        // -------------------------------------------
+        
+        bool onColorMatrix(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            FilterColorMatrixType type,
+            float param,
+            F32Span matrix) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            //Surface_ARGB32 outInfo = out.info();
+            //Surface_ARGB32 inInfo = in.info();
+
+            // Preserve behavior: copy full input first
+            //if (wg_blit_copy(outInfo, inInfo, 0, 0) != WG_SUCCESS)
+            //  return false;
+            wg_surface_clear(out);
+
+            const WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            const WGFilterColorSpace cs =
+                to_WGFilterColorSpace(io.colorInterp);
+
+            ColorMatrixPrepared M{};
+            if (!prepare_colormatrix(M, type, param, matrix, cs))
+                return false;
+
+            if (wg_colormatrix_rect(out, in, area, M) != WG_SUCCESS)
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+        // ----------------------------------------
+        // onComponentTransfer()
+        // unary
+        // ----------------------------------------
+
+        bool onComponentTransfer(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            const ComponentFunc& rF,
+            const ComponentFunc& gF,
+            const ComponentFunc& bF,
+            const ComponentFunc& aF) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            //Surface_ARGB32 outInfo = out.info();
+            //Surface_ARGB32 inInfo = in.info();
+
+            // Preserve input, modify only the primitive subregion.
+            //if (wg_blit_copy(outInfo, inInfo, 0, 0) != WG_SUCCESS)
+            //    return false;
+            wg_surface_clear(out);
+
+
+            const WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            const WGFilterColorSpace cs =
+                to_WGFilterColorSpace(io.colorInterp);
+
+            if (wg_rect_componenttransfer(
+                out,
+                in,
+                area,
+                rF,
+                gF,
+                bF,
+                aF,
+                cs) != WG_SUCCESS)
+            {
+                return false;
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+        //-----------------------------------------
+        // onComposite()
+        // binary
+        // -----------------------------------------
+        static WGCompositeOp WGCompositeOpFromFilterCompositeOp(FilterCompositeOp op) noexcept
+        {
+            switch (op)
+            {
+            case FILTER_COMPOSITE_OVER: return WG_COMP_SRC_OVER; break;
+            case FILTER_COMPOSITE_IN:   return WG_COMP_SRC_IN;   break;
+            case FILTER_COMPOSITE_OUT:  return WG_COMP_SRC_OUT;  break;
+            case FILTER_COMPOSITE_ATOP: return WG_COMP_SRC_ATOP; break;
+            case FILTER_COMPOSITE_XOR:  return WG_COMP_SRC_XOR;  break;
+            default: return WG_COMP_SRC_COPY;
+            }
+
+            return WG_COMP_SRC_COPY;
+        }
+
+
+
+        bool onComposite(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            FilterCompositeOp op,
+            float k1,
+            float k2,
+            float k3,
+            float k4) noexcept override
+        {
+            InternedKey in1Key = resolveBinaryInput1Key(io);
+            InternedKey in2Key = resolveBinaryInput2Key(io);
+
+            Surface in1 = getImage(in1Key);
+            Surface in2 = getImage(in2Key);
+
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            if (in1.empty() || in2.empty())
+                return false;
+
+            auto out = createLikeSurfaceHandle(in1);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            WGRectI area = resolveSubregionPx(subr, in1);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            Surface_ARGB32 outInfo = out.info();
+            Surface_ARGB32 in1Info = in1.info();
+            Surface_ARGB32 in2Info = in2.info();
+
+            Surface_ARGB32 outView{};
+            Surface_ARGB32 in1View{};
+            Surface_ARGB32 in2View{};
+
+            if (wg_surface_resolve_rect_binary(outInfo, in1Info, in2Info, area, outView, in1View, in2View) != WG_SUCCESS)
+            {
+                return false;
+            }
+
+
+
+            if (op == FILTER_COMPOSITE_ARITHMETIC)
+            {
+                const ArithmeticCompositeKind arithmeticKind =
+                    classifyArithmetic(k1, k2, k3, k4);
+
+                const ArithmeticCoeffFx fx =
+                    makeArithmeticCoeffFx(k1, k2, k3, k4);
+
+                WGResult res = wg_surface_rows_apply_binary_unchecked(
+                    outView,
+                    in1View,
+                    in2View,
+                    [arithmeticKind, fx](
+                        uint32_t* d,
+                        const uint32_t* s1,
+                        const uint32_t* s2,
+                        int w) noexcept
+                    {
+                        const size_t n = size_t(w);
+
+                        switch (arithmeticKind)
+                        {
+                        case ARITH_ZERO:
+                            arithmetic_fill_prgb32_row(d, n, 0);
+                            break;
+
+                        case ARITH_K1_ONLY:
+                            arithmetic_k1_only_prgb32_row(d, s1, s2, n, fx);
+                            break;
+
+                        case ARITH_K2_ONLY:
+                            if (arithmetic_is_zero(fx.k2))
+                                arithmetic_zero_prgb32_row(d, n);
+                            else if (arithmetic_is_one(fx.k2, fx.shift))
+                                copy_prgb32_row(d, s1, n);
+                            else
+                                arithmetic_k2_only_prgb32_row(d, s1, n, fx);
+                            break;
+
+                        case ARITH_K3_ONLY:
+                            if (arithmetic_is_zero(fx.k3))
+                                arithmetic_zero_prgb32_row(d, n);
+                            else if (arithmetic_is_one(fx.k3, fx.shift))
+                                copy_prgb32_row(d, s2, n);
+                            else
+                                arithmetic_k3_only_prgb32_row(d, s2, n, fx);
+                            break;
+
+                        case ARITH_K4_ONLY:
+                        {
+                            const uint8_t c = arith_k4_only_u8(fx.k4, fx.shift);
+                            const uint32_t px = argb32_pack_u8(c, c, c, c);
+                            arithmetic_fill_prgb32_row(d, n, px);
+                            break;
+                        }
+
+                        case ARITH_K2_K3:
+                            if (arithmetic_is_zero(fx.k2) &&
+                                arithmetic_is_zero(fx.k3))
+                            {
+                                arithmetic_zero_prgb32_row(d, n);
+                            }
+                            else if (arithmetic_is_one(fx.k2, fx.shift) &&
+                                arithmetic_is_zero(fx.k3))
+                            {
+                                copy_prgb32_row(d, s1, n);
+                            }
+                            else if (arithmetic_is_zero(fx.k2) &&
+                                arithmetic_is_one(fx.k3, fx.shift))
+                            {
+                                copy_prgb32_row(d, s2, n);
+                            }
+                            else
+                            {
+                                arithmetic_k2_k3_prgb32_row(d, s1, s2, n, fx);
+                            }
+                            break;
+
+                        case ARITH_K1_K2_K3:
+                            arithmetic_k1_k2_k3_prgb32_row(d, s1, s2, n, fx);
+                            break;
+
+                        case ARITH_GENERAL:
+                        default:
+                            arithmetic_general_prgb32_row(d, s1, s2, n, fx);
+                            break;
+                        }
+                    });
+
+                if (res != WG_SUCCESS)
+                    return false;
+            }
+            else
+            {
+                const WGCompositeOp surfOp =
+                    WGCompositeOpFromFilterCompositeOp(op);
+
+                WGResult res = wg_surface_composite_binary_unchecked(
+                    outView,
+                    in1View,
+                    in2View,
+                    surfOp);
+
+                if (res != WG_SUCCESS)
+                    return false;
+
+                //if (wg_blit_copy_unchecked(outView, in2View) != WG_SUCCESS)
+                //    return false;
+
+                //if (wg_blit_composite_unchecked(outView, in1View, surfOp) != WG_SUCCESS)
+                //    return false;
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+        // ----------------------------------------
+        // onConvolveMatrix
+        // ----------------------------------------
+        bool onConvolveMatrix(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            uint32_t orderX,
+            uint32_t orderY,
+            F32Span kernel,
+            float divisor,
+            float bias,
+            uint32_t targetX,
+            uint32_t targetY,
+            FilterEdgeMode edgeMode,
+            float kernelUnitLengthX,
+            float kernelUnitLengthY,
+            bool preserveAlpha) noexcept override
+        {
+            (void)kernelUnitLengthX;
+            (void)kernelUnitLengthY;
+
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            if (!orderX || !orderY)
+                return false;
+
+            if (!kernel.p || kernel.n != orderX * orderY)
+                return false;
+
+            if (targetX >= orderX || targetY >= orderY)
+                return false;
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            const WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            if (divisor == 0.0f)
+            {
+                float sum = 0.0f;
+                for (uint32_t i = 0; i < kernel.n; ++i)
+                    sum += kernel.p[i];
+
+                divisor = (sum != 0.0f) ? sum : 1.0f;
+            }
+
+            Surface_ARGB32 outInfo = out.info();
+            Surface_ARGB32 inInfo = in.info();
+
+            Surface_ARGB32 outView{};
+            Surface_ARGB32 inView{};
+
+            if (wg_surface_resolve_rect_unary(
+                outInfo,
+                inInfo,
+                area,
+                outView,
+                inView) != WG_SUCCESS)
+            {
+                return false;
+            }
+
+            if (outView.width <= 0 || outView.height <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            PixelNeighborhood_ARGB32 nb{};
+            nb.src = &inInfo;
+
+            auto clamp_to_premul_invariant = [](float& a, float& r, float& g, float& b) noexcept
+                {
+                    a = clamp01f(a);
+                    r = clamp01f(r);
+                    g = clamp01f(g);
+                    b = clamp01f(b);
+
+                    if (r > a) r = a;
+                    if (g > a) g = a;
+                    if (b > a) b = a;
+                };
+
+            WGResult res = wg_surface_rows_apply_unchecked(
+                outView,
+                [&](uint32_t* drow, int w, int yLocal) noexcept
+                {
+                    const int y = area.y + yLocal;
+
+                    for (int xLocal = 0; xLocal < w; ++xLocal)
+                    {
+                        const int x = area.x + xLocal;
+
+                        float accR = 0.0f;
+                        float accG = 0.0f;
+                        float accB = 0.0f;
+                        float accA = 0.0f;
+
+                        uint32_t kidx = 0;
+
+                        for (uint32_t ky = 0; ky < orderY; ++ky)
+                        {
+                            const int sy = y + int(targetY) - int(ky);
+
+                            for (uint32_t kx = 0; kx < orderX; ++kx, ++kidx)
+                            {
+                                const int sx = x + int(targetX) - int(kx);
+                                const uint32_t px =
+                                    sample_edge_mode(nb, sx, sy, edgeMode);
+
+                                const float kw = kernel.p[kidx];
+
+                                float a, r, g, b;
+
+                                if (preserveAlpha)
+                                {
+                                    argb32_unpack_dequantized_straight(px, a, r, g, b);
+                                    accR += r * kw;
+                                    accG += g * kw;
+                                    accB += b * kw;
+                                }
+                                else {
+                                    argb32_unpack_dequantized_prgba(px, a, r, g, b);
+                                    accR += r * kw;
+                                    accG += g * kw;
+                                    accB += b * kw;
+                                    accA += a * kw;
+                                }
+
+                            }
+                        }
+
+                        float aa;
+                        float rr;
+                        float gg;
+                        float bb;
+
+                        if (preserveAlpha)
+                        {
+                            const uint32_t srcPx =
+                                nb.sample_clamp(x, y);
+
+                            aa = dequantize0_255((srcPx >> 24) & 0xFFu);
+
+                            rr = accR / divisor + bias;
+                            gg = accG / divisor + bias;
+                            bb = accB / divisor + bias;
+
+                            rr = clamp01f(rr);
+                            gg = clamp01f(gg);
+                            bb = clamp01f(bb);
+                            aa = clamp01f(aa);
+
+                            rr *= aa;
+                            gg *= aa;
+                            bb *= aa;
+                        }
+                        else
+                        {
+                            rr = accR / divisor + bias;
+                            gg = accG / divisor + bias;
+                            bb = accB / divisor + bias;
+                            aa = accA / divisor + bias;
+
+                            clamp_to_premul_invariant(aa, rr, gg, bb);
+                        }
+
+                        drow[xLocal] = argb32_pack_u8(
+                            quantize0_255(aa),
+                            quantize0_255(rr),
+                            quantize0_255(gg),
+                            quantize0_255(bb));
+                    }
+                });
+
+            if (res != WG_SUCCESS)
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+        // ------------------------------------------
+        // onDiffuseLighting
+        // Type: lighting
+        // 
+        // -------------------------------------------
+
+        bool onDiffuseLighting(const FilterIO& io, const FilterPrimitiveSubregion& subr,
+            const ColorSRGB & lightingColor, 
+            float surfaceScale, 
+            float diffuseConstant,
+            float kernelUnitLengthX, float kernelUnitLengthY,
+            uint32_t lightType, 
+            const LightPayload& light) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+            Surface_ARGB32 inInfo = in.info();
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+			// The lightingColor comes in as the authored sRGB value.
+            // We want to convert it to whichever color space we're using
+            // for calculations, which may be sRGB or linear RGB, depending 
+            // on the color interpolation setting.
+            float lcR, lcG, lcB;
+            resolveColorInterpolationRGB(lightingColor, io.colorInterp, lcR, lcG, lcB);
+
+            PixelToFilterUserMap map = makeLightingPixelMap(inInfo, fSpace.filterRectUS);
+
+            LightPayload localLight = localizeLightingPayload(light, lightType, fSpace.filterRectUS);
+
+
+
+            float defaultDux = 1.0f;
+            float defaultDuy = 1.0f;
+            computeLightingLocalPixelStep(map, area.x, area.y, defaultDux, defaultDuy);
+
+            const float dux = (kernelUnitLengthX > 0.0f) ? kernelUnitLengthX : defaultDux;
+            const float duy = (kernelUnitLengthY > 0.0f) ? kernelUnitLengthY : defaultDuy;
+
+
+            const int W = int(in.width());
+            const int H = int(in.height());
+
+            const int yBeg = area.y;
+            const int yEnd = area.y + area.h;
+            const int xBeg = area.x;
+            const int xCount = area.w;
+
+            // Row kernel
+            for (int y = yBeg; y < yEnd; ++y)
+            {
+                const int y0 = clamp(y - 1, 0, H - 1);
+                const int y1 = clamp(y, 0, H - 1);
+                const int y2 = clamp(y + 1, 0, H - 1);
+
+                // we grab three row pointers at a time, since the diffuse
+                // kernel needs to sample the 3x3 neighborhood.
+                const uint32_t* row0 = (const uint32_t*)in.rowPointer((size_t)y0);
+                const uint32_t* row1 = (const uint32_t*)in.rowPointer((size_t)y1);
+                const uint32_t* row2 = (const uint32_t*)in.rowPointer((size_t)y2);
+
+                // setup the output row pointer for this scanline
+                uint32_t* drow = (uint32_t*)out.rowPointer((size_t)y);
+
+                DiffuseLightingRowParams p{};
+                p.surfaceScale = surfaceScale;
+                p.diffuseConstant = diffuseConstant;
+                p.lcR = lcR;
+                p.lcG = lcG;
+                p.lcB = lcB;
+                p.dux = dux;
+                p.duy = duy;
+                p.uxPerPixel = map.uxPerPixel;
+                p.uyPerPixel = map.uyPerPixel;
+                p.rowUy = (float(y) + 0.5f) * map.uyPerPixel;
+                p.lightType = lightType;
+                p.localLight = localLight;
+                p.colorInterp = io.colorInterp;
+
+                diffuseLighting_row(
+                    drow+xBeg,
+                    row0,
+                    row1,
+                    row2,
+                    xBeg,
+                    xCount,
+                    W,
+                    p);
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+        // ------------------------------------------
+        // onDisplacementMap
+        // Type: binary
+        // -------------------------------------------
+
+        bool onDisplacementMap(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            float scale,
+            FilterChannelSelector xChannel,
+            FilterChannelSelector yChannel) noexcept override
+        {
+            InternedKey in1Key = resolveBinaryInput1Key(io);
+            InternedKey in2Key = resolveBinaryInput2Key(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in1 = getImage(in1Key);
+            Surface in2 = getImage(in2Key);
+
+            if (in1.empty() || in2.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            Surface out = createLikeSurfaceHandle(in1);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            double scaleUS = double(scale);
+
+            switch (fRunState.primitiveUnits)
+            {
+            default:
+            case SpaceUnitsKind::SVG_SPACE_USER:
+                break;
+
+            case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                scaleUS *= 0.5 * (fRunState.objectBBoxUS.w + fRunState.objectBBoxUS.h);
+                break;
+
+            case SpaceUnitsKind::SVG_SPACE_STROKEWIDTH:
+                break;
+            }
+
+            const float scaleX = float(scaleUS * fSpace.sx);
+            const float scaleY = float(scaleUS * fSpace.sy);
+
+            Surface_ARGB32 srcInfo = in1.info();
+            Surface_ARGB32 mapInfo = in2.info();
+            Surface_ARGB32 outInfo = out.info();
+
+            WGRectI area = resolveSubregionPx(subr, in1);
+            area = rectI_intersection(area, Surface_ARGB32_bounds(outInfo));
+            area = rectI_intersection(area, Surface_ARGB32_bounds(mapInfo));
+
+            if (area.w > 0 && area.h > 0)
+            {
+                Surface_ARGB32 outView{};
+                Surface_ARGB32 mapView{};
+
+                outView = Surface_ARGB32_subview(outInfo, area);
+                if (!Surface_ARGB32_is_valid(outView))
+                    return false;
+
+                mapView = Surface_ARGB32_subview(mapInfo, area);
+                if (!Surface_ARGB32_is_valid(mapView))
+                    return false;
+
+                DisplacementMapProgram prog{};
+                prog.src = &srcInfo;
+                prog.srcW = srcInfo.width;
+                prog.srcH = srcInfo.height;
+                prog.x0 = area.x;
+                prog.y0 = area.y;
+                prog.scaleX = scaleX;
+                prog.scaleY = scaleY;
+                prog.xChannel = xChannel;
+                prog.yChannel = yChannel;
+
+                for (int row = 0; row < area.h; ++row)
+                {
+                    uint32_t* dstRow =
+                        Surface_ARGB32_row_pointer(outView, row);
+
+                    const uint32_t* mapRow =
+                        Surface_ARGB32_row_pointer_const(mapView, row);
+
+                    displacementmap_prgb32_row_scalar(
+                        dstRow,
+                        mapRow,
+                        area.w,
+                        prog,
+                        area.y + row);
+                }
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+        // ------------------------------------------
+        // onDropShadow
+        // Type: drop shadow
+        // -------------------------------------------
+        bool onDropShadow(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            float dx, float dy,
+            float sx, float sy,
+            ColorSRGB srgb) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            auto shadow0 = createLikeSurfaceHandle(in);
+            if (shadow0.empty())
+                return false;
+
+            auto shadow1 = createLikeSurfaceHandle(in);
+            if (shadow1.empty())
+                return false;
+
+            wg_surface_clear(out);
+            wg_surface_clear(shadow0);
+            wg_surface_clear(shadow1);
+
+            // -------------------------------------------------
+            // Resolve subregion (ONLY authority)
+            // -------------------------------------------------
+            const WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            //const int W = int(in.width());
+            //const int H = int(in.height());
+
+            // -------------------------------------------------
+            // Build shadow from alpha
+            // -------------------------------------------------
+            {
+                const Pixel_ARGB32 px =
+                    Pixel_ARGB32_premultiplied_from_ColorSRGB(srgb);
+
+                uint8_t floodA, floodR, floodG, floodB;
+                argb32_unpack_u8(px, floodA, floodR, floodG, floodB);
+
+                for (int y = area.y; y < area.y + area.h; ++y)
+                {
+                    const uint32_t* srow =
+                        (const uint32_t*)in.rowPointer((size_t)y);
+
+                    uint32_t* drow =
+                        (uint32_t*)shadow0.rowPointer((size_t)y);
+
+                    for (int x = area.x; x < area.x + area.w; ++x)
+                    {
+                        const uint8_t sa = (uint8_t)((srow[x] >> 24) & 0xFFu);
+
+                        const uint8_t a = (uint8_t)(mul255_round_u8(sa, floodA));
+                        const uint8_t r = (uint8_t)(mul255_round_u8(sa, floodR));
+                        const uint8_t g = (uint8_t)(mul255_round_u8(sa, floodG));
+                        const uint8_t b = (uint8_t)(mul255_round_u8(sa, floodB));
+
+                        drow[x] = argb32_pack_u8(a, r, g, b);
+                    }
+                }
+            }
+
+            // -------------------------------------------------
+            // Resolve stdDeviation -> pixel space
+            // -------------------------------------------------
+            double stdXUS = sx;
+            double stdYUS = sy;
+
+            switch (fRunState.primitiveUnits)
+            {
+            case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                stdXUS *= fRunState.objectBBoxUS.w;
+                stdYUS *= fRunState.objectBBoxUS.h;
+                break;
+            default:
+                break;
+            }
+
+            const double stdXPx = stdXUS * fSpace.sx;
+            const double stdYPx = stdYUS * fSpace.sy;
+
+            Surface finalShadow = shadow0;
+
+            // -------------------------------------------------
+            // Blur (unchanged pipeline, but region-aware)
+            // -------------------------------------------------
+            if (stdXPx > 0.0 || stdYPx > 0.0)
+            {
+                int boxX[3] = { 1, 1, 1 };
+                int boxY[3] = { 1, 1, 1 };
+
+                boxesForGauss(stdXPx, 3, boxX);
+                boxesForGauss(stdYPx, 3, boxY);
+
+                int spreadX = 0;
+                int spreadY = 0;
+
+                for (int i = 0; i < 3; ++i)
+                {
+                    spreadX += (boxX[i] - 1) / 2;
+                    spreadY += (boxY[i] - 1) / 2;
+                }
+
+                // Expand via resolver (pixel padding -> user padding)
+                const double padUserX = spreadX / fSpace.sx;
+                const double padUserY = spreadY / fSpace.sy;
+
+                const WGRectI sampleArea =
+                    resolveSubregionPx(subr, in, padUserX, padUserY);
+
+                if (sampleArea.w > 0 && sampleArea.h > 0)
+                {
+                    Surface curSrc = shadow0;
+                    Surface curDst = shadow1;
+
+                    for (int pass = 0; pass < 3; ++pass)
+                    {
+                        const int rx = (boxX[pass] - 1) / 2;
+                        const int ry = (boxY[pass] - 1) / 2;
+
+                        if (rx > 0)
+                        {
+                            wg_surface_clear(curDst);
+                            boxBlurH_PRGB32(curDst, curSrc, rx, sampleArea);
+                            curSrc = curDst;
+                            curDst = (curDst == shadow0) ? shadow1 : shadow0;
+                        }
+
+                        if (ry > 0)
+                        {
+                            wg_surface_clear(curDst);
+                            boxBlurV_PRGB32(curDst, curSrc, ry, sampleArea);
+                            curSrc = curDst;
+                            curDst = (curDst == shadow0) ? shadow1 : shadow0;
+                        }
+                    }
+
+                    finalShadow = curSrc;
+                }
+            }
+
+            // -------------------------------------------------
+            // Offset 
+            // -------------------------------------------------
+            double dxUS = dx;
+            double dyUS = dy;
+
+            switch (fRunState.primitiveUnits)
+            {
+            case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                dxUS *= fRunState.objectBBoxUS.w;
+                dyUS *= fRunState.objectBBoxUS.h;
+                break;
+            default:
+                break;
+            }
+
+            const WGMatrix3x3& m = fSpace.ctm;
+
+            const double dxPx = dxUS * m.m00 + dyUS * m.m10;
+            const double dyPx = dxUS * m.m01 + dyUS * m.m11;
+
+            // -------------------------------------------------
+            // Composite
+            // -------------------------------------------------
+            {
+                SVGB2DDriver bctx{};
+                bctx.attach(out, 1);
+                bctx.renew();
+
+                const double offX = std::floor(dxPx + 0.5);
+                const double offY = std::floor(dyPx + 0.5);
+
+                bctx.blendMode(BL_COMP_OP_SRC_COPY);
+                bctx.image(finalShadow, offX, offY);
+
+                bctx.blendMode(BL_COMP_OP_SRC_OVER);
+                bctx.image(in, 0, 0);
+
+                bctx.detach();
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+
+        // ------------------------------------------
+        // onFlood
+        // Type: generator
+        // -------------------------------------------
+
+        bool onFlood(const FilterIO& io, const FilterPrimitiveSubregion& subr,
+            const ColorSRGB& srgb) noexcept override
+        {
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface like = getImage(lastKey());
+            if (like.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(like);
+            if (out.empty())
+                return false;
+
+            Surface_ARGB32 outInfo = out.info();
+
+            if (!outInfo.data || outInfo.width <= 0 || outInfo.height <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            // create the pixel we will use to flood
+            const Pixel_ARGB32 px =
+                Pixel_ARGB32_premultiplied_from_ColorSRGB(srgb);
+
+            // If there is no specified subregion, we can fill the whole 
+            // surface directly. Otherwise, we will fill only the subregion, 
+            // which requires a bit more work to avoid disturbing pixels 
+            // outside the subregion.
+            if (!subr.isValid)
+            {
+                if (wg_surface_fill(outInfo, px) != WG_SUCCESS)
+                    return false;
+
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            // Clear the whole surface first, to ensure pixels 
+            // outside the subregion are fully transparent.
+            if (wg_surface_clear(outInfo) != WG_SUCCESS)
+                return false;
+
+            // get the specified subregion as a pixel rectangle
+            const WGRectI area = resolveSubregionPx(subr, out);
+
+            if (area.w > 0 && area.h > 0)
+            {
+                Surface_ARGB32 areaView = Surface_ARGB32_subview(outInfo, area);;
+                if (Surface_ARGB32_is_valid(areaView))
+                {
+                    if (wg_surface_fill(areaView, px) != WG_SUCCESS)
+                        return false;
+                }
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+        // -----------------------------------------
+        // onGaussianBlur()
+        // unary
+        // -----------------------------------------
+
+        bool onGaussianBlur(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            float sx,
+            float sy) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+            wg_surface_clear(out);
+
+            auto primLenToUser = [&](double v, double range) noexcept -> double
+                {
+                    switch (fRunState.primitiveUnits)
+                    {
+                    default:
+                    case SpaceUnitsKind::SVG_SPACE_USER:
+                        return v;
+
+                    case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                        return v * range;
+
+                    case SpaceUnitsKind::SVG_SPACE_STROKEWIDTH:
+                        return v;
+                    }
+                };
+
+            if (sx < 0.0f) sx = 0.0f;
+            if (sy < 0.0f) sy = 0.0f;
+
+            const double sxUS =
+                primLenToUser(double(sx), double(fRunState.objectBBoxUS.w));
+
+            const double syUS =
+                primLenToUser(double(sy), double(fRunState.objectBBoxUS.h));
+
+            const double sxPx = sxUS * std::abs(double(fSpace.sx));
+            const double syPx = syUS * std::abs(double(fSpace.sy));
+
+            const WGRectI writeArea = resolveSubregionPx(subr, in);
+
+
+
+            if (writeArea.w <= 0 || writeArea.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            auto copyWriteArea = [&](const Surface& src) noexcept -> bool
+                {
+                    Surface_ARGB32 dstInfo = out.info();
+                    Surface_ARGB32 srcInfo = src.info();
+
+                    Surface_ARGB32 dstView = Surface_ARGB32_subview(dstInfo, writeArea);;
+                    Surface_ARGB32 srcView = Surface_ARGB32_subview(srcInfo, writeArea);
+
+                    if (!Surface_ARGB32_is_valid(dstView))
+                        return false;
+
+                    if (!Surface_ARGB32_is_valid(srcView))
+                        return false;
+
+                    return wg_blit_copy_unchecked(dstView, srcView) == WG_SUCCESS;
+                };
+
+            const bool doX = sxPx > 0.0;
+            const bool doY = syPx > 0.0;
+
+            if (!doX && !doY)
+            {
+                if (!copyWriteArea(in))
+                    return false;
+
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            int boxX[3] = { 1, 1, 1 };
+            int boxY[3] = { 1, 1, 1 };
+
+            if (doX)
+                boxesForGauss(sxPx, 3, boxX);
+
+            if (doY)
+                boxesForGauss(syPx, 3, boxY);
+
+            int rx[3] = { 0, 0, 0 };
+            int ry[3] = { 0, 0, 0 };
+
+            if (doX)
+            {
+                rx[0] = (boxX[0] - 1) / 2;
+                rx[1] = (boxX[1] - 1) / 2;
+                rx[2] = (boxX[2] - 1) / 2;
+            }
+
+            if (doY)
+            {
+                ry[0] = (boxY[0] - 1) / 2;
+                ry[1] = (boxY[1] - 1) / 2;
+                ry[2] = (boxY[2] - 1) / 2;
+            }
+
+
+
+            const int padPxX = rx[0] + rx[1] + rx[2];
+            const int padPxY = ry[0] + ry[1] + ry[2];
+
+            const double padUserX = padPxX / fSpace.sx;
+            const double padUserY = padPxY / fSpace.sy;
+
+            const WGRectI sampleArea = resolveSubregionPx(subr, in, padUserX, padUserY);
+
+
+            if (sampleArea.w <= 0 || sampleArea.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            Surface tmp0 = Surface::createOwned(in.width(), in.height());
+            Surface tmp1 = Surface::createOwned(in.width(), in.height());
+
+
+            wg_surface_clear(tmp0);
+            wg_surface_clear(tmp1);
+
+            Surface curSrc = in;
+            Surface curDst = tmp0;
+
+            for (int pass = 0; pass < 3; ++pass)
+            {
+                if (doX && rx[pass] > 0)
+                {
+                    boxBlurH_PRGB32(curDst, curSrc, rx[pass], sampleArea);
+                    curSrc = curDst;
+                    curDst = (curDst == tmp0) ? tmp1 : tmp0;
+                }
+
+                if (doY && ry[pass] > 0)
+                {
+                    boxBlurV_PRGB32(curDst, curSrc, ry[pass], sampleArea);
+                    curSrc = curDst;
+                    curDst = (curDst == tmp0) ? tmp1 : tmp0;
+                }
+            }
+
+            const bool didAnyPass =
+                (doX && (rx[0] > 0 || rx[1] > 0 || rx[2] > 0)) ||
+                (doY && (ry[0] > 0 || ry[1] > 0 || ry[2] > 0));
+
+            if (!didAnyPass)
+            {
+                if (!copyWriteArea(in))
+                    return false;
+
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            if (!copyWriteArea(curSrc))
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+ 
+
+
+
+
+        // -----------------------------------------
+        // onImage()
+        // Type: generator
+        // -----------------------------------------
+        bool onImage(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            InternedKey imageKey,
+            AspectRatioAlignKind align,
+            AspectRatioMeetOrSliceKind mos) noexcept override
+        {
+            if (!fResolver)
+                return false;
+
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            const WGRectD dstRectUS = resolveSubregionUS(subr);
+            if (!(dstRectUS.w > 0.0) || !(dstRectUS.h > 0.0))
+                return false;
+
+            Surface out = fResolver->resolveFeImage(
+                imageKey,
+                fRunState,
+                dstRectUS,
+                align,
+                mos);
+
+            if (out.empty())
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+        /*
+        bool onImage(const FilterIO& io, 
+            const FilterPrimitiveSubregion& subr,
+            InternedKey imageKey,
+            AspectRatioAlignKind align, 
+            AspectRatioMeetOrSliceKind mos) noexcept override
+        {
+            if (!fResolver)
+                return false;
+
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            //WGRectI area = resolveSubregionPx(subr, *in);
+            const  WGRectD dstRectUS = resolveSubregionUS(subr);
+            if (!(dstRectUS.w > 0.0) || !(dstRectUS.h > 0.0))
+                return false;
+
+            auto out = fResolver->resolveFeImage(imageKey, fRunState, dstRectUS, align, mos);
+            if (out.empty())
+                return false;
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+        */
+
+
+        // ------------------------------------------
+        // onMerge
+        // ------------------------------------------
+
+        bool onMerge(const FilterIO& io, const FilterPrimitiveSubregion& subr, KeySpan inputs) noexcept override
+        {
+            if (!inputs.n)
+                return true;
+
+            Surface base{};
+            for (uint32_t i = 0; i < inputs.n; ++i)
+            {
+                InternedKey k = resolveInKey(inputs.p[i]);
+                Surface img = getImage(k);
+                if (!img.empty())
+                {
+                    base = img;
+                    break;
+                }
+            }
+
+            if (base.empty())
+                return false;
+
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(base);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            const WGRectI area = resolveSubregionPx(subr, base);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            Surface_ARGB32 outInfo = out.info();
+
+            Surface_ARGB32 outView = Surface_ARGB32_subview(outInfo, area);
+            if (!Surface_ARGB32_is_valid(outView))
+                return false;
+
+            for (uint32_t i = 0; i < inputs.n; ++i)
+            {
+                InternedKey k = resolveInKey(inputs.p[i]);
+                Surface img = getImage(k);
+                if (img.empty())
+                    continue;
+
+                Surface_ARGB32 imgInfo = img.info();
+
+                Surface_ARGB32 imgView = Surface_ARGB32_subview(imgInfo, area);
+                if (!Surface_ARGB32_is_valid(imgView))
+                    continue;
+
+                if (wg_blit_composite_unchecked(
+                    outView,
+                    imgView,
+                    WG_COMP_SRC_OVER) != WG_SUCCESS)
+                {
+                    return false;
+                }
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+
+        // -----------------------------------------
+        // onMorphology()
+        // Type: unary
+        // -----------------------------------------
+
+        bool onMorphology(const FilterIO& io, const FilterPrimitiveSubregion& subr,
+            FilterMorphologyOp op, float rx, float ry) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+
+
+            double rxUS = (double)rx;
+            double ryUS = (double)ry;
+
+            switch (fRunState.primitiveUnits)
+            {
+            default:
+            case SpaceUnitsKind::SVG_SPACE_USER:
+                break;
+            case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                rxUS *= fRunState.objectBBoxUS.w;
+                ryUS *= fRunState.objectBBoxUS.h;
+                break;
+            case SpaceUnitsKind::SVG_SPACE_STROKEWIDTH:
+                break;
+            }
+
+            int rpx = (int)std::floor(rxUS * fSpace.sx + 0.5);
+            int rpy = (int)std::floor(ryUS * fSpace.sy + 0.5);
+
+            if (rpx < 0) rpx = 0;
+            if (rpy < 0) rpy = 0;
+
+            WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                //out->clearAll();
+
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            const int W = (int)in.width();
+            const int H = (int)in.height();
+
+            auto tmp = createLikeSurfaceHandle(in);
+            if (tmp.empty())
+                return false;
+
+            wg_surface_clear(out);
+            wg_surface_clear(tmp);
+
+            const int x0 = area.x;
+            const int x1 = area.x + area.w - 1;
+            const int y0 = area.y;
+            const int y1 = area.y + area.h - 1;
+
+            const int tmpY0 = (y0 - rpy < 0) ? 0 : (y0 - rpy);
+            const int tmpY1 = (y1 + rpy >= H) ? (H - 1) : (y1 + rpy);
+
+            MorphDequeScratch rowScratch;
+            MorphDequeScratch colScratch;
+
+            if (!rowScratch.ensureCapacity((x1 - x0 + 1) + (rpx * 2)))
+                return false;
+
+            if (!colScratch.ensureCapacity((y1 - y0 + 1) + (rpy * 2)))
+                return false;
+
+            if (op == FILTER_MORPHOLOGY_ERODE)
+            {
+                for (int y = tmpY0; y <= tmpY1; ++y)
+                {
+                    uint32_t* drow = (uint32_t*)tmp.rowPointer((size_t)y);
+                    const uint32_t* srow = (const uint32_t*)in.rowPointer((size_t)y);
+
+                    if (!erode_row(drow, srow, x0, x1, W, rpx, rowScratch))
+                        return false;
+                }
+
+                if (!erode_col(out, tmp, x0, x1, y0, y1, H, rpy, colScratch))
+                    return false;
+            }
+            else
+            {
+                for (int y = tmpY0; y <= tmpY1; ++y)
+                {
+                    uint32_t* drow = (uint32_t*)tmp.rowPointer((size_t)y);
+                    const uint32_t* srow = (const uint32_t*)in.rowPointer((size_t)y);
+
+                    if (!dilate_row(drow, srow, x0, x1, W, rpx, rowScratch))
+                        return false;
+                }
+
+                if (!dilate_col(out, tmp, x0, x1, y0, y1, H, rpy, colScratch))
+                    return false;
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+
+            return true;
+        }
+
+
+        // -----------------------------------------
+        // onOffset
+        // unary
+        // -----------------------------------------
+
+        bool onOffset(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            float dx,
+            float dy) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            Surface out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            const WGRectI outBounds{ 0, 0, int(out.width()), int(out.height()) };
+            const WGRectI inBounds{ 0, 0, int(in.width()), int(in.height()) };
+
+            WGRectI area = resolveSubregionPx(subr, in);
+            area = rectI_intersection(area, outBounds);
+
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            double dxUS = double(dx);
+            double dyUS = double(dy);
+
+            switch (fRunState.primitiveUnits)
+            {
+            default:
+            case SpaceUnitsKind::SVG_SPACE_USER:
+                break;
+
+            case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                dxUS *= double(fRunState.objectBBoxUS.w);
+                dyUS *= double(fRunState.objectBBoxUS.h);
+                break;
+
+            case SpaceUnitsKind::SVG_SPACE_STROKEWIDTH:
+                break;
+            }
+
+            const WGMatrix3x3& m = fSpace.ctm;
+
+            const int offX = int(std::lround(dxUS * m.m00 + dyUS * m.m10));
+            const int offY = int(std::lround(dxUS * m.m01 + dyUS * m.m11));
+
+            // feOffset means:
+            //
+            //   dst(x + offX, y + offY) = src(x, y)
+            //
+            // Equivalently, for a destination pixel:
+            //
+            //   dst(x, y) = src(x - offX, y - offY)
+            //
+            // The primitive subregion is in destination/output coordinates.
+            WGRectI srcRect{
+                area.x - offX,
+                area.y - offY,
+                area.w,
+                area.h
+            };
+
+            srcRect = rectI_intersection(srcRect, inBounds);
+
+            if (srcRect.w > 0 && srcRect.h > 0)
+            {
+                WGRectI dstRect{
+                    srcRect.x + offX,
+                    srcRect.y + offY,
+                    srcRect.w,
+                    srcRect.h
+                };
+
+                dstRect = rectI_intersection(dstRect, area);
+
+                if (dstRect.w > 0 && dstRect.h > 0)
+                {
+                    srcRect = WGRectI{
+                        dstRect.x - offX,
+                        dstRect.y - offY,
+                        dstRect.w,
+                        dstRect.h
+                    };
+
+                    Surface_ARGB32 inInfo = in.info();
+                    Surface_ARGB32 outInfo = out.info();
+
+                    Surface_ARGB32 srcArea = Surface_ARGB32_subview(inInfo, srcRect);
+                    Surface_ARGB32 dstArea = Surface_ARGB32_subview(outInfo, dstRect);
+
+                    if (!Surface_ARGB32_is_valid(srcArea))
+                        return false;
+
+                    if (!Surface_ARGB32_is_valid(dstArea))
+                        return false;
+
+                    if (wg_blit_copy(dstArea, srcArea, 0, 0) != WG_SUCCESS)
+                        return false;
+                }
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+        // -----------------------------------------
+        // onSpecularLighting
+        // 
+        // ------------------------------------------
+        bool onSpecularLighting(const FilterIO& io, const FilterPrimitiveSubregion& subr,
+            const ColorSRGB& lightingColor,
+            float surfaceScale,
+            float specularConstant, float specularExponent,
+            float kernelUnitLengthX, float kernelUnitLengthY,
+            uint32_t lightType,
+            const LightPayload& light) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+            Surface_ARGB32 inInfo = in.info();
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            specularExponent = clamp(specularExponent, 1.0f, 128.0f);
+
+            float lcR, lcG, lcB;
+            resolveColorInterpolationRGB(lightingColor, io.colorInterp, lcR, lcG, lcB);
+
+            PixelToFilterUserMap map = makeLightingPixelMap(inInfo, fSpace.filterRectUS);
+            LightPayload localLight = localizeLightingPayload(light, lightType, fSpace.filterRectUS);
+
+            float dux, duy;
+            resolveLightingKernelStep(map, area, kernelUnitLengthX, kernelUnitLengthY, dux, duy);
+
+            const ColorCodecLUT& lut = color_codec_lut();
+
+            for (int y = area.y; y < area.y + area.h; ++y)
+            {
+                uint32_t* drow = (uint32_t*)out.rowPointer((size_t)y);
+
+                specularLighting_row_lut(
+                    drow,
+                    inInfo,
+                    y,
+                    area.x,
+                    area.x + area.w,
+                    map,
+                    localLight,
+                    lightType,
+                    lcR, lcG, lcB,
+                    surfaceScale,
+                    specularConstant,
+                    specularExponent,
+                    dux, duy,
+                    io.colorInterp,
+                    lut);
+
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+
+
+
+        // -----------------------------------------
+        // onTile
+        // Type: unary
+        // 
+        // This essentially acts as a 'pattern' routine.
+        // If the subr is smaller than the source graphic
+        // then it will repeat
+        // -----------------------------------------
+
+        bool onTile(const FilterIO& io, const FilterPrimitiveSubregion& subr) noexcept override
+        {
+            InternedKey inKey = resolveUnaryInputKey(io);
+            InternedKey outKey = resolveOutKeyStrict(io);
+
+            Surface in = getImage(inKey);
+            if (in.empty())
+                return false;
+
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            auto out = createLikeSurfaceHandle(in);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            const WGRectI area = resolveSubregionPx(subr, in);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            Surface outArea = out.getView(area);
+            if (outArea.empty())
+                return false;
+
+            const int tileW = (int)in.width();
+            const int tileH = (int)in.height();
+
+            // Compute phase so tiling is stable
+            int startX = area.x % tileW;
+            if (startX < 0) startX += tileW;
+
+            int startY = area.y % tileH;
+            if (startY < 0) startY += tileH;
+
+            // Fill using repeated blits
+            for (int y = -startY; y < area.h; y += tileH)
+            {
+                for (int x = -startX; x < area.w; x += tileW)
+                {
+                    wg_blit_copy(outArea, in, x, y);
+                }
+            }
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+        // -----------------------------------------
+        // onTurbulence
+        // -----------------------------------------
+
+        bool onTurbulence(
+            const FilterIO& io,
+            const FilterPrimitiveSubregion& subr,
+            FilterTurbulenceType typeKey,
+            float baseFreqX,
+            float baseFreqY,
+            uint32_t numOctaves,
+            float seed,
+            bool stitchTiles) noexcept override
+        {
+            InternedKey outKey = resolveOutKeyStrict(io);
+            if (!outKey)
+                outKey = filter::Filter_Last();
+
+            // try sizing on SourceGraphic first, then fallback to lastKey
+            // if both fail, quit since we have no reference for size
+            Surface like = getImage(filter::SourceGraphic());
+            if (like.empty())
+                like = getImage(lastKey());
+            if (like.empty())
+                return false;
+
+            auto out = createLikeSurfaceHandle(like);
+            if (out.empty())
+                return false;
+
+            wg_surface_clear(out);
+
+            WGRectI area = resolveSubregionPx(subr, out);
+            if (area.w <= 0 || area.h <= 0)
+            {
+                if (!putImage(outKey, out))
+                    return false;
+
+                setLastKey(outKey);
+                return true;
+            }
+
+            // --- Pixel mapping ---
+            PixelToFilterUserMap map;
+            map.surfaceW = int(out.width());
+            map.surfaceH = int(out.height());
+            //map.filterExtentUS = fSpace.filterExtentUS;
+            map.filterExtentUS = WGRectD{ 0,0, fSpace.filterRectUS.w,fSpace.filterRectUS.h };
+
+            map.uxPerPixel = (map.surfaceW > 0)
+                ? float(map.filterExtentUS.w / double(map.surfaceW))
+                : 1.0f;
+            map.uyPerPixel = (map.surfaceH > 0)
+                ? float(map.filterExtentUS.h / double(map.surfaceH))
+                : 1.0f;
+
+            // --- Noise params ---
+            TurbulenceNoiseParams params{};
+            params.baseFreqX = baseFreqX;
+            params.baseFreqY = baseFreqY;
+            params.seed = seed;
+            params.octaves = numOctaves;
+            params.amplitudeSum = turbulence_amplitude_sum(numOctaves);
+
+            TurbulenceState turb{};
+            buildTurbulenceState(turb, (int32_t)seed);
+
+            // --- User -> primitive mapping ---
+            auto userToPrimitive = [&](float ux, float uy, float& px, float& py) noexcept
+                {
+                    switch (fRunState.primitiveUnits)
+                    {
+                    default:
+                    case SpaceUnitsKind::SVG_SPACE_USER:
+                        px = ux;
+                        py = uy;
+                        break;
+
+                    case SpaceUnitsKind::SVG_SPACE_OBJECT:
+                    {
+                        const double absUx = double(ux) + fSpace.filterRectUS.x;
+                        const double absUy = double(uy) + fSpace.filterRectUS.y;
+
+                        const double bx = fRunState.objectBBoxUS.x;
+                        const double by = fRunState.objectBBoxUS.y;
+                        const double bw = fRunState.objectBBoxUS.w;
+                        const double bh = fRunState.objectBBoxUS.h;
+
+                        if (bw > 0.0 && bh > 0.0)
+                        {
+                            px = float((absUx - bx) / bw);
+                            py = float((absUy - by) / bh);
+                        }
+                        else
+                        {
+                            px = 0.0f;
+                            py = 0.0f;
+                        }
+                        break;
+                    }
+
+                    case SpaceUnitsKind::SVG_SPACE_STROKEWIDTH:
+                        px = ux;
+                        py = uy;
+                        break;
+                    }
+                };
+
+            // --- Stitch setup (derived from resolved area) ---
+            TurbulenceStitchInfo stitchInfo{};
+            const TurbulenceStitchInfo* stitchPtr = nullptr;
+
+            if (stitchTiles)
+            {
+                // Convert resolved pixel area back to user space
+                const WGRectD areaUS = resolveSubregionUS(subr);
+
+                if (areaUS.w > 0.0 && areaUS.h > 0.0)
+                {
+                    adjust_base_frequencies_for_stitch(
+                        (float)areaUS.w,
+                        (float)areaUS.h,
+                        params.baseFreqX,
+                        params.baseFreqY);
+
+                    stitchInfo = prepare_stitch_info(
+                        (float)areaUS.x,
+                        (float)areaUS.y,
+                        (float)areaUS.w,
+                        (float)areaUS.h,
+                        params.baseFreqX,
+                        params.baseFreqY);
+
+                    stitchPtr = &stitchInfo;
+                }
+            }
+
+            const bool fractalNoise = (typeKey == FILTER_TURBULENCE_FRACTAL_NOISE);
+
+            //minChannelValue = waavs::flt_max;
+            //maxChannelValue = waavs::flt_min;
+
+            // --- Main loop ---
+            for (int y = area.y; y < area.y + area.h; ++y)
+            {
+                uint32_t* drow = (uint32_t*)out.rowPointer((size_t)y);
+
+                for (int x = area.x; x < area.x + area.w; ++x)
+                {
+                    float ux, uy;
+                    pixelCenterToFilterUserStandalone(map, x, y, ux, uy);
+
+                    float tx, ty;
+                    userToPrimitive(ux, uy, tx, ty);
+
+                    float r, g, b, a;
+
+                    if (fractalNoise)
+                    {
+                        r = sampleFractalChannel(tx, ty, params, turb, 0, stitchTiles, stitchPtr);
+                        g = sampleFractalChannel(tx, ty, params, turb, 1, stitchTiles, stitchPtr);
+                        b = sampleFractalChannel(tx, ty, params, turb, 2, stitchTiles, stitchPtr);
+                        a = sampleFractalChannel(tx, ty, params, turb, 3, stitchTiles, stitchPtr);
+                    }
+                    else
+                    {
+                        r = sampleTurbulenceChannel(tx, ty, params, turb, 0, stitchTiles, stitchPtr);
+                        g = sampleTurbulenceChannel(tx, ty, params, turb, 1, stitchTiles, stitchPtr);
+                        b = sampleTurbulenceChannel(tx, ty, params, turb, 2, stitchTiles, stitchPtr);
+                        a = sampleTurbulenceChannel(tx, ty, params, turb, 3, stitchTiles, stitchPtr);
+                    }
+
+                    r = clamp01f(r);
+                    g = clamp01f(g);
+                    b = clamp01f(b);
+                    a = clamp01f(a);
+
+                    drow[x] = argb32_pack_straight_to_premul_u8(
+                        quantize0_255(a),
+                        quantize0_255(r),
+                        quantize0_255(g),
+                        quantize0_255(b));
+
+                    //drow[x] = argb32_pack_u8(
+                    //    quantize0_255(a),
+                    //    quantize0_255(r),
+                    //    quantize0_255(g),
+                    //    quantize0_255(b));
+                }
+            }
+
+            //printf("Fractal CHANNEL STATS - Octaves: %d  Amp: %3.2f  Min: %3.2f  Max: %3.2f\n",
+            //    params.octaves, params.amplitudeSum,
+            //    minChannelValue, maxChannelValue);
+
+            if (!putImage(outKey, out))
+                return false;
+
+            setLastKey(outKey);
+            return true;
+        }
+
+
+
+    };
+}

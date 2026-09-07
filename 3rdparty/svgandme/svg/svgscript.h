@@ -1,0 +1,51 @@
+#pragma once
+
+//
+// SVGScript
+// Handle the SVG script element
+//
+#include <map>
+#include <functional>
+#include <cstdint>
+
+
+#include "svgattributes.h"
+#include "svggraphicselement.h"
+
+
+
+namespace waavs {
+    struct SVGScriptElement : public SVGGraphicsElement
+    {
+        static void registerFactory()
+        {
+            registerContainerNode("script",
+                [](IAmGroot* groot, XmlPull& iter) {
+                    auto node = std::make_shared<SVGScriptElement>(groot);
+                    node->loadFromXmlPull(iter, groot);
+                    return node;
+                });
+            
+        }
+
+        ByteSpan fScript{};
+
+        SVGScriptElement(IAmGroot* groot) : SVGGraphicsElement(groot)
+        {
+            //setIsStructural(false);
+        }
+
+        // When content is not wrapped in CDATA
+        void loadContentNode(const XmlElement& elem, IAmGroot* groot) override
+        {
+            loadCDataNode(elem, groot);
+        }
+        
+        // When content is wrapped in CDATA
+        void loadCDataNode(const XmlElement& elem, IAmGroot* groot) override
+        {
+            fScript = elem.data();
+			//writeChunkToFile(fScript, "script.js");
+        }
+    };
+}

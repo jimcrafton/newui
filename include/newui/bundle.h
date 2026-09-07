@@ -77,8 +77,12 @@ namespace newui {
 
         // Loads relativePath (resolved via resourcePath()) as a BLImage.
         // BMP/JPEG/PNG/QOI all work out of the box - blend2d builds those
-        // codecs in unconditionally. Returns false, leaving outImage
-        // untouched, if the path doesn't resolve or isn't a loadable image.
+        // codecs in unconditionally. A ".svg" path is instead rasterized
+        // via renderSvgFile() (svgimage.h) at a fixed kDefaultSvgRasterSize
+        // x kDefaultSvgRasterSize - svgandme has no reliable way to ask an
+        // SVG for its own "natural" size (see renderSvgFile()'s own
+        // comment). Returns false, leaving outImage untouched, if the path
+        // doesn't resolve or isn't a loadable image.
         bool loadImage(const std::string& relativePath, BLImage& outImage) const;
 
         // Reads relativePath (resolved via resourcePath()) as text.

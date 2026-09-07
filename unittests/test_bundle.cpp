@@ -9,6 +9,7 @@
 #include "newui/rootview.h"
 #include "newui/rootviewproxy.h"
 #include "newui/subview.h"
+#include "newui/svgimage.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
 
@@ -82,6 +83,29 @@ TEST(Bundle, ResourcePathReturnsEmptyForMissingFile) {
 TEST(Bundle, LoadImageFailsForMissingFile) {
     BLImage image;
     EXPECT_FALSE(newui::Bundle::instance().loadImage("NoSuchImage.png", image));
+}
+
+TEST(Bundle, LoadImageRasterizesAnSvgResourceAtTheFixedDefaultSize) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\test.svg";
+    {
+        // Same tiny opaque-red-rect SVG as test_graphics.cpp's own
+        // WriteTestSVG() - only cares that ".svg" routes through
+        // renderSvgFile() at all, not real-world rendering fidelity.
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(bundle.loadImage("test.svg", image));
+    EXPECT_EQ(image.size().w, newui::kDefaultSvgRasterSize);
+    EXPECT_EQ(image.size().h, newui::kDefaultSvgRasterSize);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
 }
 
 TEST(Bundle, ResourcePathAndLoadTextFileFindAnOnDiskResource) {

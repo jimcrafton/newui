@@ -6,6 +6,7 @@
 #include "newui/reflectionio.h"
 #include "newui/rootview.h"
 #include "newui/rootviewproxy.h"
+#include "newui/svgimage.h"
 #include "newui/view.h"
 #include "newui/viewpath.h"
 #include "newui/viewstyle.h"
@@ -15,6 +16,7 @@
 #include <json5/json5_output.hpp>
 
 #include <any>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -535,6 +537,13 @@ namespace newui {
         if (path.empty()) {
             return false;
         }
+
+        const size_t extLen = std::strlen(".svg");
+        const bool isSvg = path.size() >= extLen && _stricmp(path.c_str() + (path.size() - extLen), ".svg") == 0;
+        if (isSvg) {
+            return renderSvgFile(path, kDefaultSvgRasterSize, kDefaultSvgRasterSize, outImage);
+        }
+
         return outImage.read_from_file(path.c_str()) == BL_SUCCESS;
     }
 

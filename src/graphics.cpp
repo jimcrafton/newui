@@ -1,8 +1,21 @@
 #include "newui/graphics.h"
+#include "newui/svgimage.h"
 
 #include <cmath>
 #include <cstring>
 #include <utility>
+
+namespace {
+
+bool hasExtension(const std::string& path, const char* ext) {
+    const size_t extLen = std::strlen(ext);
+    if (path.size() < extLen) {
+        return false;
+    }
+    return _stricmp(path.c_str() + (path.size() - extLen), ext) == 0;
+}
+
+}
 
 namespace newui::gfx {
 
@@ -46,12 +59,53 @@ namespace newui::gfx {
     }
 
     Image::Image(const std::string& path) {
+        if (hasExtension(path, ".svg")) {
+            // See this constructor's own header comment - kDefaultSvgRasterSize
+            // is a fixed stand-in for "natural size", not a real one.
+            *this = Image(path, kDefaultSvgRasterSize, kDefaultSvgRasterSize);
+            return;
+        }
+
         BLImage decoded;
         if (decoded.read_from_file(path.c_str()) != BL_SUCCESS) {
             return;
         }
         if (decoded.format() != BL_FORMAT_PRGB32 && decoded.convert(BL_FORMAT_PRGB32) != BL_SUCCESS) {
             return;
+        }
+
+        BLImageData data;
+        decoded.get_data(&data);
+        createDibBackedImage(data.size.w, data.size.h, data.pixel_data, data.stride);
+    }
+
+    Image::Image(const std::string& path, int width, int height) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
+        BLImage decoded;
+        if (hasExtension(path, ".svg")) {
+            if (!renderSvgFile(path, width, height, decoded)) {
+                return;
+            }
+        } else {
+            if (decoded.read_from_file(path.c_str()) != BL_SUCCESS) {
+                return;
+            }
+            if (decoded.format() != BL_FORMAT_PRGB32 && decoded.convert(BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                return;
+            }
+            if (decoded.size().w != width || decoded.size().h != height) {
+                BLImage scaled;
+                if (scaled.create(width, height, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                    return;
+                }
+                BLContext scaleCtx(scaled);
+                scaleCtx.blit_image(BLRectI(0, 0, width, height), decoded);
+                scaleCtx.end();
+                decoded = scaled;
+            }
         }
 
         BLImageData data;

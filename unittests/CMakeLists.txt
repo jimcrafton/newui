@@ -43,6 +43,7 @@ add_executable(newui_tests
     test_frameproxy.cpp
     test_splitter.cpp
     test_segmentedcontrol.cpp
+    test_svgimage.cpp
 )
 
 target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)

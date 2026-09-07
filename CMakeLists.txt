@@ -60,6 +60,20 @@ add_subdirectory(3rdparty/blend2d)
 # MIT, header-only) - used by the reflection-driven save/load format (see
 # include/newui/reflection.h/reflectionio.h).
 
+# svgandme - Dependency
+# =====================
+# Vendored under 3rdparty/ as a permanent part of the project (wiladams/
+# svgandme, commit 2bacca9c4a75de90481c28ac88d58d6c01d4f939, MIT,
+# header-only) - only the svg/ subdirectory (the reusable SVG parser +
+# Blend2D renderer, namespace waavs); the rest of upstream (app/, testy/,
+# ...) is Win32/GDI-specific example-app scaffolding we don't need. Pinned
+# to an exact commit rather than tracking upstream - it's active but
+# pre-1.0 (only tag is v0.1.0-alpha) and its own example projects have
+# already drifted out of sync with its headers once. Used by
+# include/newui/svgimage.h/src/svgimage.cpp only - kept out of
+# include/newui/graphics.h so its ~150 headers don't end up as a transitive
+# include of every graphics.h consumer.
+
 # reflectgen build integration - see cmake/ReflectGen.cmake's own header
 # comment for the full two-stage (configure-time discovery, build-time
 # generation) design. include()'d before add_library(newui ...) below
@@ -136,6 +150,7 @@ add_library(newui STATIC
     "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
     "include/newui/splitter.h" "src/splitter.cpp"
     "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
+    "include/newui/svgimage.h" "src/svgimage.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
@@ -154,6 +169,13 @@ target_include_directories(newui PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}/include
     3rdparty/json5/include
     3rdparty/wil/include
+)
+
+# PRIVATE, not PUBLIC like json5/wil above - svgandme is only ever included
+# from src/svgimage.cpp, never from a public newui/ header, so there's no
+# reason for it to leak into consumers' include paths.
+target_include_directories(newui PRIVATE
+    3rdparty/svgandme/svg
 )
 
 # Ole32/Uuid: COM (CoCreateInstance/CoInitializeEx and the CLSID_FileOpenDialog/
