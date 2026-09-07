@@ -604,6 +604,44 @@ TEST(ToolbarButton, OnCheckedChangedFiresOnlyOnActualChange) {
     delete button;
 }
 
+TEST(ToolbarButton, IconDefaultsToEmpty) {
+    ToolbarButton button;
+    EXPECT_TRUE(button.icon().empty());
+}
+
+TEST(ToolbarButton, SetIconChangesTheStoredValue) {
+    ToolbarButton button;
+    button.setIcon("Images/icons/toolbar/new.svg");
+    EXPECT_EQ(button.icon(), "Images/icons/toolbar/new.svg");
+}
+
+TEST(ToolbarButton, PaintWithAnIconAndTextDoesNotCrash) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 50, 24));
+    button->setText("New");
+    button->setIcon("Images/icons/toolbar/new.svg");  // resolves to nothing in this test binary - exercises the "icon failed to load" path, not a real blit
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    button->paint(ctx);
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, PaintWithOnlyAnIconAndNoTextDoesNotCrash) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 24, 24));
+    button->setIcon("Images/icons/toolbar/new.svg");
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    button->paint(ctx);
+
+    button->destroy();
+    delete button;
+}
+
 // ---------------------------------------------------------------------
 // ToolbarSeparator - orientation picks which axis carries the thin
 // dividing-line size, the other stays 0 (Stretch fills it from the

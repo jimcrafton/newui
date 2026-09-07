@@ -1749,6 +1749,14 @@ namespace newui {
         style().markDirty();
     }
 
+    void ToolbarButton::setIcon(const std::string& resourceName) {
+        if (icon_ == resourceName) {
+            return;
+        }
+        icon_ = resourceName;
+        style().markDirty();
+    }
+
     void ToolbarButton::setChecked(bool value) {
         if (checked_ == value) {
             return;
@@ -1794,13 +1802,10 @@ namespace newui {
     }
 
     void ToolbarButton::paint(BLContext& ctx) {
-        if (text_.empty() || textColor_.is_null()) {
+        bool hasIcon = !icon_.empty();
+        bool hasText = !text_.empty() && !textColor_.is_null();
+        if (!hasIcon && !hasText) {
             return;
-        }
-
-        BLFont* blFont = buttonStyle_->font.blFont();
-        if (blFont == nullptr || !blFont->is_valid()) {
-            throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
         }
 
         Rect clientBounds = getClientBounds();
@@ -1808,26 +1813,48 @@ namespace newui {
             return;
         }
 
-        BLGlyphBuffer glyphBuffer;
-        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
-        blFont->shape(glyphBuffer);
+        BLFont* blFont = nullptr;
+        double textWidth = 0.0;
+        double textHeight = 0.0;
+        if (hasText) {
+            blFont = buttonStyle_->font.blFont();
+            if (blFont == nullptr || !blFont->is_valid()) {
+                throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
+            }
 
-        BLTextMetrics textMetrics;
-        blFont->get_text_metrics(glyphBuffer, textMetrics);
+            BLGlyphBuffer glyphBuffer;
+            glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+            blFont->shape(glyphBuffer);
 
-        const BLFontMetrics& fontMetrics = blFont->metrics();
-        double textWidth = textMetrics.advance.x;
-        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+            BLTextMetrics textMetrics;
+            blFont->get_text_metrics(glyphBuffer, textMetrics);
 
-        double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+            const BLFontMetrics& fontMetrics = blFont->metrics();
+            textWidth = textMetrics.advance.x;
+            textHeight = fontMetrics.ascent + fontMetrics.descent;
+        }
 
-        ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
-        ctx.set_fill_style(textColor_);
-        ctx.set_fill_alpha(buttonStyle_->opacity);
-        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
-        ctx.restore();
+        // Icon + text painted as one centered block - assumes the icon
+        // paints successfully (a missing icon file leaves a small,
+        // accepted gap rather than re-centering after the fact).
+        double iconWidth = hasIcon ? (kIconSize + kIconGap) : 0.0;
+        double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
+        double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
+
+        if (hasIcon) {
+            x += Item::paintItemIcon(ctx, x, centerY, icon_, kIconSize, kIconGap);
+        }
+
+        if (hasText) {
+            double y = centerY - textHeight * 0.5 + blFont->metrics().ascent;
+
+            ctx.save();
+            ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
+            ctx.set_fill_style(textColor_);
+            ctx.set_fill_alpha(buttonStyle_->opacity);
+            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+            ctx.restore();
+        }
     }
 
     // -----------------------------------------------------------------

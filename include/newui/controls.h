@@ -1098,6 +1098,9 @@ namespace newui {
     // @reflect category=menutoolbar
     class ToolbarButton : public Control {
     public:
+        static constexpr float kIconSize = 16.0f;
+        static constexpr float kIconGap = 6.0f;
+
         ToolbarButton();
         virtual ~ToolbarButton() {}
 
@@ -1105,6 +1108,13 @@ namespace newui {
         void setText(const std::string& text);
 
         void setTextColor(BLRgba32 color);
+
+        // Resources/-relative path (Bundle::resourcePath()) - "" means no
+        // icon (text-only, unchanged behavior). Painted via Item::
+        // paintItemIcon() (items.h), same shared cache/blit every other
+        // icon-bearing control in this framework uses.
+        const std::string& icon() const { return icon_; }
+        void setIcon(const std::string& resourceName);
 
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
@@ -1128,6 +1138,7 @@ namespace newui {
 
         std::string text_;
         BLVar textColor_;
+        std::string icon_;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
