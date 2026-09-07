@@ -156,6 +156,7 @@ namespace newui {
         onMouseDown.add(this, &Button::handlePressStart);
         onMouseUp.add(this, &Button::handlePressEnd);
         onClick.add(this, &Button::handleClicked);
+        onStateChanged.add(this, &Button::handleStateChanged);
     }
 
     void Button::setText(const std::string& text) {
@@ -182,11 +183,18 @@ namespace newui {
 
     void Button::updatePressedVisual() {
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
-        if (buttonStyle_->pressed == wantPressed) {
+        bool wantEnabled = isEnabled();
+        if (buttonStyle_->pressed == wantPressed && buttonStyle_->enabled == wantEnabled) {
             return;
         }
         buttonStyle_->pressed = wantPressed;
+        buttonStyle_->enabled = wantEnabled;
         style().markDirty();
+    }
+
+    SyncReturn Button::handleStateChanged(Control& /*sender*/) {
+        updatePressedVisual();
+        return SyncReturn::Ignored;
     }
 
     SyncReturn Button::handlePressStart(View& /*sender*/, const Point& /*pt*/,
@@ -242,9 +250,17 @@ namespace newui {
         double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
         double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
+        // Same UIColorRole::DisabledText convention Label::handleStateChanged()
+        // already uses - the native BUTTON chrome (ThemedButtonStyle::paint())
+        // does visibly change for PBS_DISABLED (unlike a flat toolbar button),
+        // but the text drawn on top of it still needs to dim independently.
+        BLRgba32 effectiveTextColor = isEnabled()
+            ? BLRgba32(textColor_.as<BLRgba32>())
+            : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
         ctx.save();
         ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
-        ctx.set_fill_style(textColor_);
+        ctx.set_fill_style(effectiveTextColor);
         ctx.set_fill_alpha(buttonStyle_->opacity);
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
         ctx.restore();
@@ -1850,16 +1866,32 @@ namespace newui {
         double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
 
+        // A flat toolbar button shows no visible border/fill at rest either
+        // way (buttonStyle_->enabled only changes the native TS_DISABLED/
+        // TS_NORMAL background chrome, invisible here) - dimming this
+        // foreground content is the only real visual signal a disabled
+        // ToolbarButton has, same UIColorRole::DisabledText convention
+        // Label::handleStateChanged() already uses for its own text.
+        bool enabled = isEnabled();
+
         if (hasIcon) {
+            ctx.save();
+            if (!enabled) {
+                ctx.set_global_alpha(0.4);
+            }
             x += Item::paintItemIcon(ctx, x, centerY, icon_, kIconSize, kIconGap);
+            ctx.restore();
         }
 
         if (hasText) {
             double y = centerY - textHeight * 0.5 + blFont->metrics().ascent;
+            BLRgba32 effectiveTextColor = enabled
+                ? BLRgba32(textColor_.as<BLRgba32>())
+                : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
             ctx.save();
             ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
-            ctx.set_fill_style(textColor_);
+            ctx.set_fill_style(effectiveTextColor);
             ctx.set_fill_alpha(buttonStyle_->opacity);
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
             ctx.restore();

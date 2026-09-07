@@ -178,6 +178,7 @@ namespace newui {
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleClicked(Control& sender);
+        SyncReturn handleStateChanged(Control& sender);
 
         std::string text_;
         BLVar textColor_;

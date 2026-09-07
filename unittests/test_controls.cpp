@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
 // ScrollBar/ScrollView's pure logic (range/value/pageSize clamping,
 // region-driven click behavior) is fully headless-testable via direct
 // onMouseDown()/onMouseMove()/onMouseUp() invocation, same
@@ -535,6 +537,59 @@ TEST(ScrollView, VirtualizedChildIsPinnedToViewportSizeAndToldItsScrollOffsetDir
 }
 
 // ---------------------------------------------------------------------
+// Button - disabled-state visuals (same gap ToolbarButton had - see
+// feedback_paint_state_tests_dont_prove_visual_correctness memory)
+// ---------------------------------------------------------------------
+
+TEST(Button, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* button = new Button();
+    auto* style = dynamic_cast<ThemedButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    EXPECT_TRUE(style->enabled);
+
+    button->setEnabled(false);
+    EXPECT_FALSE(style->enabled);
+
+    button->setEnabled(true);
+    EXPECT_TRUE(style->enabled);
+
+    button->destroy();
+    delete button;
+}
+
+// Real pixel-level check, not just internal state - see ToolbarButton's
+// own identical test above for why a style-field-only assertion isn't
+// enough (the native BUTTON chrome here does visibly change for
+// PBS_DISABLED, but the text drawn on top of it needs its own dimming
+// too, and that's what this actually proves).
+TEST(Button, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
+    auto renderButton = [](bool enabled) {
+        auto* button = new Button();
+        button->setBounds(Rect(0, 0, 80, 24));
+        button->setText("Click Me");
+        button->setEnabled(enabled);
+
+        BLImage image(80, 24, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        button->paint(ctx);
+        ctx.end();
+
+        BLImageData data;
+        image.get_data(&data);
+        std::vector<uint8_t> pixels(
+            static_cast<const uint8_t*>(data.pixel_data),
+            static_cast<const uint8_t*>(data.pixel_data) + data.stride * 24);
+
+        button->destroy();
+        delete button;
+        return pixels;
+    };
+
+    EXPECT_NE(renderButton(true), renderButton(false));
+}
+
+// ---------------------------------------------------------------------
 // ToolbarButton - same momentary-vs-toggle click gesture as Button,
 // just checked via ThemedToolbarButtonStyle instead
 // ---------------------------------------------------------------------
@@ -622,6 +677,41 @@ TEST(ToolbarButton, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
 
     button->destroy();
     delete button;
+}
+
+// Real pixel-level check, not just internal state - style->enabled alone
+// (see SetEnabledSyncsTheThemedStylesOwnEnabledFlag above) doesn't prove
+// anything visually differs, since a flat toolbar button shows no visible
+// border/fill at rest either way; the text/icon dimming in paint() is what
+// actually has to differ. Same isPixelPainted-style verify-by-rendering
+// idiom test_rootviewproxy.cpp already established, extended to a full
+// buffer comparison since dimming shows up as a color difference across
+// many pixels, not a single painted/unpainted one.
+TEST(ToolbarButton, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
+    auto renderButton = [](bool enabled) {
+        auto* button = new ToolbarButton();
+        button->setBounds(Rect(0, 0, 50, 24));
+        button->setText("New");
+        button->setEnabled(enabled);
+
+        BLImage image(50, 24, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        button->paint(ctx);
+        ctx.end();
+
+        BLImageData data;
+        image.get_data(&data);
+        std::vector<uint8_t> pixels(
+            static_cast<const uint8_t*>(data.pixel_data),
+            static_cast<const uint8_t*>(data.pixel_data) + data.stride * 24);
+
+        button->destroy();
+        delete button;
+        return pixels;
+    };
+
+    EXPECT_NE(renderButton(true), renderButton(false));
 }
 
 TEST(ToolbarButton, IconDefaultsToEmpty) {
