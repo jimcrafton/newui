@@ -1,10 +1,12 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/svgimage.h>
 
 #include <blend2d/blend2d.h>
 
 #include <string>
+#include <unordered_map>
 
 namespace newui {
 
@@ -84,6 +86,31 @@ namespace newui {
         // comment). Returns false, leaving outImage untouched, if the path
         // doesn't resolve or isn't a loadable image.
         bool loadImage(const std::string& relativePath, BLImage& outImage) const;
+
+        // Same as loadImage() above, but rasterizes a ".svg" path at
+        // exactly width x height instead of the fixed kDefaultSvgRasterSize
+        // default - for a caller that knows the real pixel size it needs
+        // up front (a small toolbar/tree-row icon, e.g.) and wants a crisp
+        // render at that size rather than a blit-time downscale of a
+        // 32x32 default. A non-SVG path ignores width/height entirely
+        // (BLImage::read_from_file() has no resize step of its own) and
+        // behaves exactly like the two-argument overload.
+        bool loadImage(const std::string& relativePath, BLImage& outImage, int width, int height) const;
+
+        // loadImage(relativePath, outImage, width, height) above, but
+        // rasterized/decoded at most once per (relativePath, width,
+        // height) for this Bundle's lifetime - every later call with the
+        // same three arguments returns the same cached BLImage (a cheap
+        // BLImage copy, itself copy-on-write) instead of re-reading and
+        // re-parsing the file. Meant for exactly the case that motivated
+        // it: a small, fixed set of UI icons repeatedly painted (Item's
+        // own paintItemIcon() helper, items.cpp) - not a general-purpose
+        // image cache with any eviction policy, since that fixed-set
+        // assumption is what makes "never evict" acceptable here. Returns
+        // false (outImage untouched) under the same conditions
+        // loadImage() would, without polluting the cache with a failed
+        // lookup's default-constructed BLImage.
+        bool loadCachedImage(const std::string& relativePath, BLImage& outImage, int width = kDefaultSvgRasterSize, int height = kDefaultSvgRasterSize) const;
 
         // Reads relativePath (resolved via resourcePath()) as text.
         // Returns "" if the path doesn't resolve or can't be read - not
@@ -270,6 +297,14 @@ namespace newui {
         mutable std::string appName_;      // from Info.json only ("" if absent) - never overwritten by the fallback
         mutable std::string appVersion_;
         mutable std::string resolvedAppName_;  // scratch buffer for appName()'s live Application fallback
+
+        // loadCachedImage()'s own cache - keyed by "<relativePath>@<width>x<height>"
+        // rather than a struct key, since std::unordered_map has no
+        // built-in tuple/struct hashing and this table is small/short-
+        // lived enough (one Bundle singleton, a handful of distinct icon
+        // sizes) that the string concatenation cost is irrelevant next to
+        // the SVG parse it's avoiding.
+        mutable std::unordered_map<std::string, BLImage> imageCache_;
     };
 
 }

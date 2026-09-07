@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,9 @@
 
 namespace newui {
     class ItemController;
+    class ListController;
     class TreeController;
+    class TableController;
 
     // A lightweight, non-View "cell renderer" - owned and recycled by an
     // ItemController (controllers.h), borrowed by whatever SubView is
@@ -142,7 +145,12 @@ namespace newui {
         // at all.
         ListItem() = default;
 
-        virtual void paint(BLContext& ctx, const Rect& rect, std::size_t index, ItemController& controller);
+        // Takes ListController& specifically, not the generic
+        // ItemController& this used to take - needs ListController's own
+        // iconFor()/iconSize()/iconGap() (controllers.h) to paint an icon
+        // before text, same reasoning TreeItem::paint() already has for
+        // taking TreeController& instead of the generic base.
+        virtual void paint(BLContext& ctx, const Rect& rect, std::size_t index, ListController& controller);
     };
 
     // Geometry TreeItem::paint() (items.cpp) uses to lay out each row's
@@ -166,6 +174,26 @@ namespace newui {
     inline std::size_t treeDepthOf(const std::vector<std::size_t>& path) {
         return path.empty() ? 0 : path.size() - 1;
     }
+
+    // Paints a Bundle-resolved icon (resourceName, if it has a value) at
+    // (left, centerY), sized iconSize x iconSize, vertically centered on
+    // centerY - the shared "how to draw the thing a Controller's
+    // iconFor() pointed at" implementation ListItem/TreeItem/TableItem's
+    // own default paint() (below, items.cpp) call, and that any fully
+    // custom Item::paint() override (cpp_codetools' own ToolboxItem, e.g.)
+    // is equally free to call directly rather than hand-rolling its own
+    // Bundle::loadCachedImage() call. Loads via Bundle::instance().
+    // loadCachedImage() (bundle.h) - one rasterize per distinct
+    // (resourceName, iconSize) for the process's lifetime, not per call.
+    //
+    // Returns the horizontal space actually consumed - iconSize + gap if
+    // an icon was really painted, 0.0 if resourceName is nullopt/empty,
+    // iconSize <= 0, or the resource failed to load - so a caller can add
+    // it directly onto whatever "how far the row's leading edge has
+    // already been consumed" offset it was already tracking (the same
+    // idiom TreeItem::paint()'s own indent+glyph math already uses).
+    double paintItemIcon(BLContext& ctx, double left, double centerY,
+        const std::optional<std::string>& resourceName, float iconSize, float gap);
 
     // Item for a tree, addressed by path: the sequence of child indices
     // from the root down to this node (an empty path is the root itself).
@@ -201,6 +229,9 @@ namespace newui {
         // See ListItem::ListItem()'s own comment - same reflectgen reason.
         TableItem() = default;
 
-        virtual void paint(BLContext& ctx, const Rect& rect, std::size_t row, std::size_t col, ItemController& controller);
+        // Takes TableController& specifically - see ListItem::paint()'s
+        // own comment just above for why (same reasoning, needs
+        // TableController::iconFor(row, col)).
+        virtual void paint(BLContext& ctx, const Rect& rect, std::size_t row, std::size_t col, TableController& controller);
     };
 }

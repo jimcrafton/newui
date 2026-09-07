@@ -319,6 +319,22 @@ namespace newui {
         // no-op for nullptr.
         virtual void releaseItem(Item* item);
 
+        // The pixel size (both dimensions) an icon returned by iconFor()
+        // (declared per-shape on ListController/TreeController/
+        // TableController below, not here - see their own comments for
+        // why) should be rasterized/painted at, and the gap left between
+        // it and the text that follows. Shape-independent, so it lives
+        // here rather than being duplicated per subclass; a subclass
+        // overrides these instead of iconFor() alone if it wants a
+        // different icon size for its own rows. ListItem/TreeItem/
+        // TableItem's own default paint() (items.cpp) is the only thing
+        // that actually calls these - a fully custom Item::paint()
+        // override (ToolboxItem, e.g.) is free to ignore both and lay out
+        // however it likes, including calling paintItemIcon() itself with
+        // its own numbers.
+        virtual float iconSize() const { return 0.0f; }
+        virtual float iconGap() const { return 6.0f; }
+
     protected:
         // Reflection-based construction: looks up className via
         // reflection::classinfo() and constructs a fresh instance via its
@@ -363,6 +379,17 @@ namespace newui {
         // different Item class for particular indices (e.g. a header row
         // mixed in among ordinary data rows).
         virtual ListItem* createItem(std::size_t index);
+
+        // A Bundle-relative resource path (see Bundle::resourcePath()) to
+        // paint alongside index's own row, or std::nullopt for no icon -
+        // default. Deliberately controller-level, not Model-level: an
+        // icon is a presentation decision (which glyph represents this
+        // row), not data the row's own Model actually holds, matching
+        // Controller's existing "behavior/presentation policy, not
+        // content" role here (createItem() picks which Item class to use
+        // per the same reasoning). ListItem::paint()'s own default
+        // (items.cpp) is the only thing that calls this.
+        virtual std::optional<std::string> iconFor(std::size_t index) const { return std::nullopt; }
 
         // Narrows Controller's own model()/setModel(Model*) (a moment
         // above, in Controller) to ListModel* specifically - hides (not
@@ -499,6 +526,10 @@ namespace newui {
         // Default ignores path entirely - see ListController::createItem()'s
         // own comment.
         virtual TreeItem* createItem(const std::vector<std::size_t>& path);
+
+        // See ListController::iconFor()'s own comment - same reasoning,
+        // just keyed by path instead of a flat index.
+        virtual std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const { return std::nullopt; }
 
         // Narrows Controller's own model()/setModel(Model*) to TreeModel*
         // specifically - same dynamic_cast+throw pattern
@@ -674,6 +705,10 @@ namespace newui {
         // Default ignores row/col entirely - see ListController::createItem()'s
         // own comment.
         virtual TableItem* createItem(std::size_t row, std::size_t col);
+
+        // See ListController::iconFor()'s own comment - same reasoning,
+        // just keyed by (row, col) instead of a flat index.
+        virtual std::optional<std::string> iconFor(std::size_t row, std::size_t col) const { return std::nullopt; }
     };
 
 } // namespace newui

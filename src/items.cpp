@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "newui/bundle.h"
 #include "newui/controllers.h"
 #include "newui/fontmanager.h"
 #include "newui/uicolormanager.h"
@@ -95,6 +96,22 @@ namespace newui {
         }
     }
 
+    double paintItemIcon(BLContext& ctx, double left, double centerY,
+        const std::optional<std::string>& resourceName, float iconSize, float gap) {
+        if (!resourceName.has_value() || resourceName->empty() || iconSize <= 0.0f) {
+            return 0.0;
+        }
+
+        BLImage image;
+        int pixelSize = int(iconSize + 0.5f);
+        if (!Bundle::instance().loadCachedImage(*resourceName, image, pixelSize, pixelSize)) {
+            return 0.0;
+        }
+
+        ctx.blit_image(BLPoint(left, centerY - double(iconSize) * 0.5), image);
+        return double(iconSize) + double(gap);
+    }
+
     Item::Item() : style_(std::make_unique<ViewStyle>()) {
     }
 
@@ -134,11 +151,18 @@ namespace newui {
                               localClientBounds.size().width, localClientBounds.size().height);
     }
 
-    void ListItem::paint(BLContext& ctx, const Rect& rect, std::size_t index, ItemController& controller) {
+    void ListItem::paint(BLContext& ctx, const Rect& rect, std::size_t index, ListController& controller) {
         Item::paint(ctx, rect);
+
+        double centerY = clientBounds().top() + clientBounds().size().height * 0.5;
+        double textLeft = clientBounds().left() + paintItemIcon(ctx, clientBounds().left(), centerY,
+            controller.iconFor(index), controller.iconSize(), controller.iconGap());
+        Rect textRect(float(textLeft), clientBounds().top(),
+            clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
+
         Model* model = controller.model();
         std::any value = model != nullptr ? model->value(index) : std::any();
-        paintItemText(ctx, clientBounds(), valueToString(value), itemTextColor(*this));
+        paintItemText(ctx, textRect, valueToString(value), itemTextColor(*this));
     }
 
     void TreeItem::paint(BLContext& ctx, const Rect& rect, const std::vector<std::size_t>& path, TreeController& controller) {
@@ -155,7 +179,9 @@ namespace newui {
             paintExpandGlyph(ctx, glyphCenterX, glyphCenterY, kTreeGlyphWidth * 0.8, controller.isExpanded(path), itemTextColor(*this));
         }
 
-        double textLeft = clientBounds().left() + indent + kTreeGlyphWidth;
+        double contentLeft = clientBounds().left() + indent + kTreeGlyphWidth;
+        double textLeft = contentLeft + paintItemIcon(ctx, contentLeft, glyphCenterY,
+            controller.iconFor(path), controller.iconSize(), controller.iconGap());
         Rect textRect(float(textLeft), clientBounds().top(),
             clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
 
@@ -163,11 +189,18 @@ namespace newui {
         paintItemText(ctx, textRect, valueToString(value), itemTextColor(*this));
     }
 
-    void TableItem::paint(BLContext& ctx, const Rect& rect, std::size_t row, std::size_t col, ItemController& controller) {
+    void TableItem::paint(BLContext& ctx, const Rect& rect, std::size_t row, std::size_t col, TableController& controller) {
         Item::paint(ctx, rect);
+
+        double centerY = clientBounds().top() + clientBounds().size().height * 0.5;
+        double textLeft = clientBounds().left() + paintItemIcon(ctx, clientBounds().left(), centerY,
+            controller.iconFor(row, col), controller.iconSize(), controller.iconGap());
+        Rect textRect(float(textLeft), clientBounds().top(),
+            clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
+
         Model* model = controller.model();
         std::any value = model != nullptr ? model->value(std::make_pair(row, col)) : std::any();
-        paintItemText(ctx, clientBounds(), valueToString(value), itemTextColor(*this));
+        paintItemText(ctx, textRect, valueToString(value), itemTextColor(*this));
     }
 
 }

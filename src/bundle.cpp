@@ -533,6 +533,10 @@ namespace newui {
     }
 
     bool Bundle::loadImage(const std::string& relativePath, BLImage& outImage) const {
+        return loadImage(relativePath, outImage, kDefaultSvgRasterSize, kDefaultSvgRasterSize);
+    }
+
+    bool Bundle::loadImage(const std::string& relativePath, BLImage& outImage, int width, int height) const {
         std::string path = resourcePath(relativePath);
         if (path.empty()) {
             return false;
@@ -541,10 +545,29 @@ namespace newui {
         const size_t extLen = std::strlen(".svg");
         const bool isSvg = path.size() >= extLen && _stricmp(path.c_str() + (path.size() - extLen), ".svg") == 0;
         if (isSvg) {
-            return renderSvgFile(path, kDefaultSvgRasterSize, kDefaultSvgRasterSize, outImage);
+            return renderSvgFile(path, width, height, outImage);
         }
 
         return outImage.read_from_file(path.c_str()) == BL_SUCCESS;
+    }
+
+    bool Bundle::loadCachedImage(const std::string& relativePath, BLImage& outImage, int width, int height) const {
+        std::string key = relativePath + "@" + std::to_string(width) + "x" + std::to_string(height);
+
+        auto it = imageCache_.find(key);
+        if (it != imageCache_.end()) {
+            outImage = it->second;
+            return true;
+        }
+
+        BLImage image;
+        if (!loadImage(relativePath, image, width, height)) {
+            return false;
+        }
+
+        imageCache_.emplace(std::move(key), image);
+        outImage = std::move(image);
+        return true;
     }
 
     std::string Bundle::loadTextFile(const std::string& relativePath) const {
