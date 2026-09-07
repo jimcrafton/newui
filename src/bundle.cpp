@@ -57,10 +57,9 @@ namespace {
         return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
     }
 
-    // Absolute-path analogs of Bundle::loadTextFile()/writeTextFile() -
-    // read/write exactly the given path, with no resourcesDir()/bundleName
-    // resolution involved at all. Shared by the *FromFile()/*ToFile()
-    // family (loadFrameFromFile(), loadRootViewFromFile(), writeRootViewToFile()).
+    // Absolute-path analogs of loadTextFile()/writeTextFile() - no
+    // resourcesDir()/bundleName resolution. Shared by the *FromFile()/
+    // *ToFile() family below.
     bool readTextFileAtPath(const std::string& path, std::string& outText) {
         std::ifstream file(path, std::ios::binary);
         if (!file) {
@@ -664,9 +663,6 @@ namespace newui {
             return false;
         }
 
-        // Same reasoning as loadFrame() above - Frame::rootView() is a
-        // real registered property now, so this single read() call already
-        // reaches "rootView" on its own.
         reader.read(&frame);
         readAnimations(frame, reader);
         return true;

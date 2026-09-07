@@ -669,6 +669,189 @@ TEST_F(NewuiFileFixture, WriteRootViewPreservesOtherTopLevelKeysFromAnExistingFi
     EXPECT_EQ(reloadedFrame.rootView().childViews()[0]->name(), "newChild");
 }
 
+namespace {
+
+    // *FromFile()/*ToFile() resolve against an arbitrary absolute path, so
+    // this fixture uses a plain temp dir, not resourcesDir().
+    class NewuiAbsolutePathFixture : public ::testing::Test {
+    protected:
+        void SetUp() override {
+            char tempPathBuf[MAX_PATH]{};
+            ::GetTempPathA(MAX_PATH, tempPathBuf);
+            dir_ = std::string(tempPathBuf) + "NewuiAbsolutePathFixture";
+            ::CreateDirectoryA(dir_.c_str(), nullptr);
+        }
+
+        void TearDown() override {
+            for (const std::string& path : writtenPaths_) {
+                ::DeleteFileA(path.c_str());
+            }
+            ::RemoveDirectoryA(dir_.c_str());
+        }
+
+        // dir_ + "\" + fileName, tracked for TearDown() cleanup.
+        std::string pathFor(const std::string& fileName) {
+            std::string path = dir_ + "\\" + fileName;
+            writtenPaths_.push_back(path);
+            return path;
+        }
+
+        void writeFile(const std::string& fileName, const std::string& contents) {
+            std::ofstream file(pathFor(fileName), std::ios::binary);
+            file << contents;
+        }
+
+        std::string dir_;
+
+    private:
+        std::vector<std::string> writtenPaths_;
+    };
+
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadFrameFromFileAppliesTitleAndRebuildsRootViewChildren) {
+    writeFile("AbsFrame1.newui", R"({
+        type: "Frame",
+        title: "Loaded Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "child1" },
+            ],
+        },
+    })");
+
+    newui::Frame frame;
+    EXPECT_TRUE(newui::Bundle::instance().loadFrameFromFile(frame, pathFor("AbsFrame1.newui")));
+
+    EXPECT_EQ(frame.getTitle(), "Loaded Title");
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    EXPECT_EQ(frame.rootView().childViews()[0]->name(), "child1");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadFrameFromFileFailsForMissingFile) {
+    newui::Frame frame;
+    EXPECT_FALSE(newui::Bundle::instance().loadFrameFromFile(frame, pathFor("NoSuchFile.newui")));
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileWorksWithAnArbitraryPath) {
+    writeFile("AbsFrameless.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_TRUE(newui::Bundle::instance().loadRootViewFromFile(root, pathFor("AbsFrameless.newui")));
+
+    ASSERT_EQ(root.childViews().size(), 1u);
+    EXPECT_EQ(root.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileFailsWhenPathIsEmpty) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromFile(root, ""));
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileIntoARegisteredProxyTypeAlsoWorks) {
+    writeFile("AbsProxyLoad.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    EXPECT_TRUE(newui::Bundle::instance().loadRootViewFromFile(proxy, pathFor("AbsProxyLoad.newui")));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_EQ(proxy.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileWithDesignModePropagatesDesignTimeOntoFreshChildren) {
+    writeFile("AbsProxyDesignMode.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(proxy, pathFor("AbsProxyDesignMode.newui"), /*designMode=*/true));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_TRUE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileRoundTripsChildrenWithNoExistingFile) {
+    std::string path = pathFor("AbsWriteFresh.newui");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* child = new newui::SubView();
+    child->setName("writtenChild");
+    root.addChild(child);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(root, path));
+
+    newui::RootView reloaded(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(reloaded, path));
+    ASSERT_EQ(reloaded.childViews().size(), 1u);
+    EXPECT_EQ(reloaded.childViews()[0]->name(), "writtenChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileFailsWithEmptyPath) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().writeRootViewToFile(root, ""));
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFilePreservesOtherTopLevelKeysFromAnExistingFile) {
+    std::string path = pathFor("AbsWriteMerge.newui");
+    writeFile("AbsWriteMerge.newui", R"({
+        title: "Original Frame Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "oldChild" },
+            ],
+        },
+    })");
+
+    newui::RootView editedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* newChild = new newui::SubView();
+    newChild->setName("newChild");
+    editedRoot.addChild(newChild);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(editedRoot, path));
+
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    EXPECT_NE(ss.str().find("Original Frame Title"), std::string::npos);  // survived - never touched by writeRootViewToFile()
+
+    newui::RootView reloadedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(reloadedRoot, path));
+    ASSERT_EQ(reloadedRoot.childViews().size(), 1u);
+    EXPECT_EQ(reloadedRoot.childViews()[0]->name(), "newChild");  // reflects the new edit, not the old content
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileNeverTouchesBundleResourcesDir) {
+    std::string path = pathFor("AbsWriteNoResourcesDirTouch.newui");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(root, path));
+
+    std::string wouldBeBundlePath = newui::Bundle::instance().resourcesDir() + "\\AbsWriteNoResourcesDirTouch.newui.newui";
+    DWORD attrs = ::GetFileAttributesA(wouldBeBundlePath.c_str());
+    EXPECT_EQ(attrs, INVALID_FILE_ATTRIBUTES);
+}
+
 TEST_F(NewuiFileFixture, WriteDialogDelegatesToUnderlyingFrame) {
     trackFile("BundleWriteFrame2");
 
