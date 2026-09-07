@@ -604,6 +604,26 @@ TEST(ToolbarButton, OnCheckedChangedFiresOnlyOnActualChange) {
     delete button;
 }
 
+// Real bug: ThemedToolbarButtonStyle::enabled (a separate field from
+// Control::isEnabled(), used only to pick the native theme part state -
+// see its own stateId()) was never synced from setEnabled() at all, so a
+// disabled ToolbarButton's background never actually painted as disabled.
+TEST(ToolbarButton, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* button = new ToolbarButton();
+    auto* style = dynamic_cast<ThemedToolbarButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    EXPECT_TRUE(style->enabled);
+
+    button->setEnabled(false);
+    EXPECT_FALSE(style->enabled);
+
+    button->setEnabled(true);
+    EXPECT_TRUE(style->enabled);
+
+    button->destroy();
+    delete button;
+}
+
 TEST(ToolbarButton, IconDefaultsToEmpty) {
     ToolbarButton button;
     EXPECT_TRUE(button.icon().empty());

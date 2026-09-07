@@ -1734,6 +1734,7 @@ namespace newui {
         onMouseDown.add(this, &ToolbarButton::handlePressStart);
         onMouseUp.add(this, &ToolbarButton::handlePressEnd);
         onClick.add(this, &ToolbarButton::handleClicked);
+        onStateChanged.add(this, &ToolbarButton::handleStateChanged);
     }
 
     void ToolbarButton::setText(const std::string& text) {
@@ -1769,12 +1770,20 @@ namespace newui {
     void ToolbarButton::updatePressedVisual() {
         bool wantPressed = pressing_;
         bool wantChecked = isToggleButton_ && checked_;
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked) {
+        bool wantEnabled = isEnabled();
+        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked
+                && buttonStyle_->enabled == wantEnabled) {
             return;
         }
         buttonStyle_->pressed = wantPressed;
         buttonStyle_->checked = wantChecked;
+        buttonStyle_->enabled = wantEnabled;
         style().markDirty();
+    }
+
+    SyncReturn ToolbarButton::handleStateChanged(Control& /*sender*/) {
+        updatePressedVisual();
+        return SyncReturn::Ignored;
     }
 
     SyncReturn ToolbarButton::handlePressStart(View& /*sender*/, const Point& /*pt*/,
