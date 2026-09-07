@@ -37,7 +37,14 @@ TEST(RenderSvgFile, FailsForZeroOrNegativeSize) {
     ::DeleteFileA(path.c_str());
 }
 
-TEST(RenderSvgFile, FailsForAFileThatIsNotValidSvg) {
+TEST(RenderSvgFile, MalformedContentRendersAsAnEmptyTransparentImageRatherThanFailing) {
+    // svgandme's own SVGDocument::loadFromChunk() (svgdocument.h)
+    // unconditionally returns true regardless of what its XML parser
+    // actually made of the input - there's no real content validation, so
+    // garbage input doesn't fail parsing, it just produces an empty
+    // document that renders as fully transparent. Documenting that
+    // (verified) behavior here rather than asserting a failure that
+    // doesn't actually happen.
     const std::string path = "svgimage_test_notsvg.svg";
     {
         std::ofstream file(path, std::ios::binary);
@@ -45,7 +52,12 @@ TEST(RenderSvgFile, FailsForAFileThatIsNotValidSvg) {
     }
 
     BLImage image;
-    EXPECT_FALSE(newui::renderSvgFile(path, 16, 16, image));
+    ASSERT_TRUE(newui::renderSvgFile(path, 16, 16, image));
+
+    BLImageData data;
+    image.get_data(&data);
+    const uint32_t pixel = static_cast<const uint32_t*>(data.pixel_data)[0];
+    EXPECT_EQ(pixel, 0x00000000u);
 
     ::DeleteFileA(path.c_str());
 }
