@@ -99,9 +99,13 @@ namespace newui {
         // theme data actually exists.
         void refreshThemes();
 
+        virtual void preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags);
 
 
 		virtual bool initialize() override;
+
+        virtual void postCreate();
+
         virtual void destroy() override;
 
         virtual void addChild(SubView* child) override;

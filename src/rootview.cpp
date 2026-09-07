@@ -1338,6 +1338,12 @@ namespace newui {
 
 #define SIMPLE_VIEW	 WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPED
 
+	void RootView::preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags)
+	{
+
+	}
+
+
 	bool RootView::initialize()
 	{
 		bool result = true;
@@ -1352,6 +1358,9 @@ namespace newui {
 		if (name_.empty()) {
 			return false;
 		}
+
+
+		
 
 		WNDCLASSEXA wcex;
 		std::string className = "View" + name_;
@@ -1369,10 +1378,16 @@ namespace newui {
 		wcex.lpszClassName = className.c_str();
 		wcex.hIconSm = NULL;
 
+
+		size_t wndClassFlags = wcex.style;
+		size_t windowStyleFlags = SIMPLE_VIEW;
+		preCreateHints(wndClassFlags, windowStyleFlags);
+
+
 		RegisterClassExA(&wcex);
 
 		auto hwnd = ::CreateWindowExA( 0, className.c_str(), "",
-						SIMPLE_VIEW,
+						windowStyleFlags,
 						bounds_.left(),
 						bounds_.top(),
 						bounds_.size().width,
@@ -1398,13 +1413,18 @@ namespace newui {
 
 		resizeImageBuffer((int)bounds_.size().width, (int)bounds_.size().height);
 
+		postCreate();
+
 		::ShowWindow(viewHwnd_, SW_SHOW);
 		::SetFocus(viewHwnd_);
 
 		return true;
 	}
 
+	void RootView::postCreate()
+	{
 
+	}
 
 	void RootView::viewCreated()
 	{
