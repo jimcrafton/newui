@@ -108,6 +108,82 @@ TEST(Bundle, LoadImageRasterizesAnSvgResourceAtTheFixedDefaultSize) {
     ::RemoveDirectoryA(bundle.resourcesDir().c_str());
 }
 
+TEST(Bundle, LoadImageWithExplicitSizeRasterizesAnSvgAtThatSizeInstead) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\sizedTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(bundle.loadImage("sizedTest.svg", image, 15, 15));
+    EXPECT_EQ(image.size().w, 15);
+    EXPECT_EQ(image.size().h, 15);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageReturnsTheSameContentOnASecondCall) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\cachedTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage first;
+    ASSERT_TRUE(bundle.loadCachedImage("cachedTest.svg", first, 12, 12));
+    EXPECT_EQ(first.size().w, 12);
+
+    // Delete the file on disk - a genuinely fresh loadImage() call would
+    // now fail, so a second loadCachedImage() succeeding at all proves
+    // this came from the cache, not a re-read.
+    ::DeleteFileA(filePath.c_str());
+
+    BLImage second;
+    ASSERT_TRUE(bundle.loadCachedImage("cachedTest.svg", second, 12, 12));
+    EXPECT_EQ(second.size().w, 12);
+    EXPECT_EQ(second.size().h, 12);
+
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageWithADifferentSizeIsNotServedFromTheSmallerCacheEntry) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\multiSizeTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage small;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", small, 12, 12));
+    BLImage large;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", large, 24, 24));
+
+    EXPECT_EQ(small.size().w, 12);
+    EXPECT_EQ(large.size().w, 24);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageFailsForMissingFileWithoutCachingTheFailure) {
+    BLImage image;
+    EXPECT_FALSE(newui::Bundle::instance().loadCachedImage("NoSuchCachedImage.svg", image));
+}
+
 TEST(Bundle, ResourcePathAndLoadTextFileFindAnOnDiskResource) {
     const newui::Bundle& bundle = newui::Bundle::instance();
 
