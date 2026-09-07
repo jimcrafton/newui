@@ -96,7 +96,7 @@ namespace newui {
         }
     }
 
-    double paintItemIcon(BLContext& ctx, double left, double centerY,
+    double Item::paintItemIcon(BLContext& ctx, double left, double centerY,
         const std::optional<std::string>& resourceName, float iconSize, float gap) {
         if (!resourceName.has_value() || resourceName->empty() || iconSize <= 0.0f) {
             return 0.0;
@@ -155,7 +155,7 @@ namespace newui {
         Item::paint(ctx, rect);
 
         double centerY = clientBounds().top() + clientBounds().size().height * 0.5;
-        double textLeft = clientBounds().left() + paintItemIcon(ctx, clientBounds().left(), centerY,
+        double textLeft = clientBounds().left() + Item::paintItemIcon(ctx, clientBounds().left(), centerY,
             controller.iconFor(index), controller.iconSize(), controller.iconGap());
         Rect textRect(float(textLeft), clientBounds().top(),
             clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
@@ -180,7 +180,7 @@ namespace newui {
         }
 
         double contentLeft = clientBounds().left() + indent + kTreeGlyphWidth;
-        double textLeft = contentLeft + paintItemIcon(ctx, contentLeft, glyphCenterY,
+        double textLeft = contentLeft + Item::paintItemIcon(ctx, contentLeft, glyphCenterY,
             controller.iconFor(path), controller.iconSize(), controller.iconGap());
         Rect textRect(float(textLeft), clientBounds().top(),
             clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
@@ -193,7 +193,7 @@ namespace newui {
         Item::paint(ctx, rect);
 
         double centerY = clientBounds().top() + clientBounds().size().height * 0.5;
-        double textLeft = clientBounds().left() + paintItemIcon(ctx, clientBounds().left(), centerY,
+        double textLeft = clientBounds().left() + Item::paintItemIcon(ctx, clientBounds().left(), centerY,
             controller.iconFor(row, col), controller.iconSize(), controller.iconGap());
         Rect textRect(float(textLeft), clientBounds().top(),
             clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);

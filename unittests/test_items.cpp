@@ -407,15 +407,15 @@ protected:
 };
 
 TEST_F(PaintItemIconFixture, PaintItemIconReturnsZeroForNoResource) {
-    EXPECT_EQ(paintItemIcon(SharedContext(), 0.0, 0.0, std::nullopt, 12.0f, 6.0f), 0.0);
+    EXPECT_EQ(Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::nullopt, 12.0f, 6.0f), 0.0);
 }
 
 TEST_F(PaintItemIconFixture, PaintItemIconReturnsZeroForAResourceThatFailsToLoad) {
-    EXPECT_EQ(paintItemIcon(SharedContext(), 0.0, 0.0, std::string("NoSuchIcon.svg"), 12.0f, 6.0f), 0.0);
+    EXPECT_EQ(Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::string("NoSuchIcon.svg"), 12.0f, 6.0f), 0.0);
 }
 
 TEST_F(PaintItemIconFixture, PaintItemIconReturnsIconSizePlusGapForARealResource) {
-    double consumed = paintItemIcon(SharedContext(), 0.0, 0.0, std::string("paintItemIconTest.svg"), 12.0f, 6.0f);
+    double consumed = Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::string("paintItemIconTest.svg"), 12.0f, 6.0f);
     EXPECT_DOUBLE_EQ(consumed, 18.0);
 }
 

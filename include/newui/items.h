@@ -116,6 +116,31 @@ namespace newui {
         // which nothing else here stores independently).
         const Rect& clientBounds() const { return clientBounds_; }
 
+        // Paints a Bundle-resolved icon (resourceName, if it has a value)
+        // at (left, centerY), sized iconSize x iconSize, vertically
+        // centered on centerY - the shared "how to draw the thing a
+        // Controller's iconFor() pointed at" implementation ListItem/
+        // TreeItem/TableItem's own default paint() (items.cpp) call, and
+        // that any fully custom Item::paint() override (cpp_codetools'
+        // own ToolboxItem, e.g.) is equally free to call directly rather
+        // than hand-rolling its own Bundle::loadCachedImage() call. A
+        // static member (not a free function) since it needs no instance
+        // state, and not virtual - every Item-derived class shares the
+        // exact same "load, then blit" behavior, nothing here varies per
+        // subclass. Loads via Bundle::instance().loadCachedImage()
+        // (bundle.h) - one rasterize per distinct (resourceName,
+        // iconSize) for the process's lifetime, not per call.
+        //
+        // Returns the horizontal space actually consumed - iconSize + gap
+        // if an icon was really painted, 0.0 if resourceName is
+        // nullopt/empty, iconSize <= 0, or the resource failed to load -
+        // so a caller can add it directly onto whatever "how far the
+        // row's leading edge has already been consumed" offset it was
+        // already tracking (the same idiom TreeItem::paint()'s own
+        // indent+glyph math already uses).
+        static double paintItemIcon(BLContext& ctx, double left, double centerY,
+            const std::optional<std::string>& resourceName, float iconSize, float gap);
+
     private:
         std::unique_ptr<ViewStyle> style_;
         bool highlighted_ = false;
@@ -174,26 +199,6 @@ namespace newui {
     inline std::size_t treeDepthOf(const std::vector<std::size_t>& path) {
         return path.empty() ? 0 : path.size() - 1;
     }
-
-    // Paints a Bundle-resolved icon (resourceName, if it has a value) at
-    // (left, centerY), sized iconSize x iconSize, vertically centered on
-    // centerY - the shared "how to draw the thing a Controller's
-    // iconFor() pointed at" implementation ListItem/TreeItem/TableItem's
-    // own default paint() (below, items.cpp) call, and that any fully
-    // custom Item::paint() override (cpp_codetools' own ToolboxItem, e.g.)
-    // is equally free to call directly rather than hand-rolling its own
-    // Bundle::loadCachedImage() call. Loads via Bundle::instance().
-    // loadCachedImage() (bundle.h) - one rasterize per distinct
-    // (resourceName, iconSize) for the process's lifetime, not per call.
-    //
-    // Returns the horizontal space actually consumed - iconSize + gap if
-    // an icon was really painted, 0.0 if resourceName is nullopt/empty,
-    // iconSize <= 0, or the resource failed to load - so a caller can add
-    // it directly onto whatever "how far the row's leading edge has
-    // already been consumed" offset it was already tracking (the same
-    // idiom TreeItem::paint()'s own indent+glyph math already uses).
-    double paintItemIcon(BLContext& ctx, double left, double centerY,
-        const std::optional<std::string>& resourceName, float iconSize, float gap);
 
     // Item for a tree, addressed by path: the sequence of child indices
     // from the root down to this node (an empty path is the root itself).
