@@ -167,13 +167,13 @@ TEST(Bundle, LoadCachedImageWithADifferentSizeIsNotServedFromTheSmallerCacheEntr
                 "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
     }
 
-    BLImage small;
-    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", small, 12, 12));
-    BLImage large;
-    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", large, 24, 24));
+    BLImage smallImage;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", smallImage, 12, 12));
+    BLImage largeImage;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", largeImage, 24, 24));
 
-    EXPECT_EQ(small.size().w, 12);
-    EXPECT_EQ(large.size().w, 24);
+    EXPECT_EQ(smallImage.size().w, 12);
+    EXPECT_EQ(largeImage.size().w, 24);
 
     ::DeleteFileA(filePath.c_str());
     ::RemoveDirectoryA(bundle.resourcesDir().c_str());

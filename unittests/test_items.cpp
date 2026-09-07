@@ -488,3 +488,23 @@ TEST(TreeItem, PaintAtADeeperPathDoesNotCrash) {
     item->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), { 0u, 1u }, controller);
     controller.releaseItem(item);
 }
+
+namespace {
+class IconReturningTreeController : public TreeController {
+public:
+    std::optional<std::string> iconFor(const std::vector<std::size_t>& /*path*/) const override {
+        return std::string("paintItemIconTest.svg");
+    }
+    float iconSize() const override { return 12.0f; }
+};
+}  // namespace
+
+TEST_F(PaintItemIconFixture, TreeItemPaintWithAnIconReturningControllerDoesNotCrash) {
+    IconReturningTreeController controller;
+    TreeItem* item = controller.createItem({});
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), {}, controller);
+
+    controller.releaseItem(item);
+}
