@@ -12,6 +12,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -202,14 +203,37 @@ namespace newui {
 		// account for, same guarantee the original std::vector-backed
 		// buffer's comment already relied on.
 		const size_t stride = size_t(width) * 4;
-		imageBuffer_.create_from_data(width, height, BL_FORMAT_XRGB32, bits, intptr_t(stride));
+
+		// CreateDIBSection()'s returned bits are NOT guaranteed zeroed
+		// (same fact gfx::Image::createDibBackedImage()'s own comment
+		// notes, graphics.cpp) - harmless for the default opaque
+		// BL_FORMAT_XRGB32 case (dirtyRect_ below always covers the whole
+		// buffer on this first paint, and paintStyle()'s background fill
+		// is normally fully opaque anyway), but load-bearing for a
+		// BL_FORMAT_PRGB32 override (imageBufferFormat()) whose
+		// background is deliberately left transparent (e.g. PopupTool,
+		// popuptool.h) - without this, whatever pixels this DIB section
+		// happened to come back with would show through as opaque
+		// garbage instead of transparency wherever nothing paints.
+		std::memset(bits, 0, stride * size_t(height));
+
+		imageBuffer_.create_from_data(width, height, imageBufferFormat(), bits, intptr_t(stride));
 		dirtyRect_ = newui::Rect( 0,0, width, height);
 		notifyRedrawNeeded();
+	}
+
+	BLFormat RootView::imageBufferFormat() const {
+		return BL_FORMAT_XRGB32;
 	}
 
 	void RootView::markDirty() {
 		dirtyRect_ = snappedToPixels(this->getClientBounds());
 		scheduleRepaint();
+	}
+
+	void RootView::repaintNow() {
+		dirtyRect_ = snappedToPixels(this->getClientBounds());
+		notifyRedrawNeeded();
 	}
 
 
@@ -280,6 +304,10 @@ namespace newui {
 		onRedrawNeeded(*this);
 		repaint();
 
+		presentRepaintedBuffer();
+	}
+
+	void RootView::presentRepaintedBuffer() {
 		invalidate(&dirtyRect_);
 	}
 
@@ -944,19 +972,36 @@ namespace newui {
 			case WM_SIZE: {
 				// Only for a standalone RootView (no Frame) - Windows
 				// delivers this directly when something else (e.g. a VSIX
-				// host) resizes this RootView's own real HWND, and nothing
-				// external does that C++-side setBounds() call for it the
-				// way Frame::updateViewBounds() does in the Frame-owned
-				// case. Explicitly gated on parentFrame_ rather than relying
-				// on setBounds()'s own "bounds == bounds_" early-out to make
-				// a Frame-owned call here harmless - Frame is already the
-				// one true owner of this RootView's bounds in that case, and
+				// host, or this RootView's own setBounds() below via its
+				// ::SetWindowPos() call - WM_SIZE is dispatched synchronously,
+				// reentrantly, before that call even returns) resizes this
+				// RootView's own real HWND, and nothing external does that
+				// C++-side setBounds() call for it the way
+				// Frame::updateViewBounds() does in the Frame-owned case.
+				// Explicitly gated on parentFrame_ rather than relying on
+				// setBounds()'s own "bounds == bounds_" early-out to make a
+				// Frame-owned call here harmless - Frame is already the one
+				// true owner of this RootView's bounds in that case, and
 				// this stays a deliberate no-op (falls through to
 				// DefWindowProcA) rather than a second, merely-redundant
 				// path to the same result.
+				//
+				// bounds_.pos() here, not a hardcoded Point(0,0) - WM_SIZE's
+				// lParam only ever carries the new client size, never a
+				// position, so this has to reuse whatever position bounds_
+				// already holds rather than inventing one. That happens to
+				// already equal (0,0) for the one pre-existing standalone
+				// use case (a RootView hosted as a WS_CHILD inside a VSIX
+				// host's own window, always at that parent's origin), so
+				// this is a no-op change there - but a WS_POPUP standalone
+				// RootView (PopupTool, popuptool.h) has real *screen*
+				// coordinates in bounds_, and a hardcoded Point(0,0) here
+				// would silently snap it to the screen's top-left corner on
+				// every resize (via the reentrant path above) instead of
+				// leaving its position alone.
 				if (nullptr == parentFrame_) {
 					Size sz(LOWORD(lParam), HIWORD(lParam));
-					setBounds(Rect(Point(0, 0), sz));
+					setBounds(Rect(bounds_.pos(), sz));
 					result = true;
 				}
 			}
@@ -1338,7 +1383,7 @@ namespace newui {
 
 #define SIMPLE_VIEW	 WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPED
 
-	void RootView::preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags)
+	void RootView::preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags, size_t& windowExStyleFlags)
 	{
 
 	}
@@ -1381,12 +1426,13 @@ namespace newui {
 
 		size_t wndClassFlags = wcex.style;
 		size_t windowStyleFlags = SIMPLE_VIEW;
-		preCreateHints(wndClassFlags, windowStyleFlags);
-
+		size_t windowExStyleFlags = 0;
+		preCreateHints(wndClassFlags, windowStyleFlags, windowExStyleFlags);
+		wcex.style = static_cast<UINT>(wndClassFlags);
 
 		RegisterClassExA(&wcex);
 
-		auto hwnd = ::CreateWindowExA( 0, className.c_str(), "",
+		auto hwnd = ::CreateWindowExA( static_cast<DWORD>(windowExStyleFlags), className.c_str(), "",
 						windowStyleFlags,
 						bounds_.left(),
 						bounds_.top(),

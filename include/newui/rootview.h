@@ -99,12 +99,43 @@ namespace newui {
         // theme data actually exists.
         void refreshThemes();
 
-        virtual void preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags);
+        // wndClassFlags seeds WNDCLASSEXA::style, windowStyleFlags seeds
+        // CreateWindowExA's dwStyle, windowExStyleFlags seeds its
+        // dwExStyle (e.g. WS_EX_LAYERED | WS_EX_TOPMOST for a PopupTool -
+        // popuptool.h) - all three are passed in already set to
+        // RootView::initialize()'s own defaults (see rootview.cpp), so an
+        // override only needs to touch whichever of the three it actually
+        // wants to change.
+        virtual void preCreateHints(size_t& wndClassFlags, size_t& windowStyleFlags, size_t& windowExStyleFlags);
 
 
 		virtual bool initialize() override;
 
         virtual void postCreate();
+
+        // Pixel format resizeImageBuffer() (rootview.cpp) allocates
+        // getImageBuffer() at - BL_FORMAT_XRGB32 (opaque, alpha ignored)
+        // by default, matching every ordinary WM_PAINT-presented RootView
+        // (paintImageBufferToWindow()'s BitBlt() doesn't care about an
+        // alpha channel that isn't there). Override to BL_FORMAT_PRGB32
+        // for a RootView whose own SubView tree needs real per-pixel
+        // alpha in its painted output - e.g. PopupTool (popuptool.h),
+        // which composites getImageBuffer() over its own Underlay
+        // background rather than presenting it directly.
+        virtual BLFormat imageBufferFormat() const;
+
+        // Called at the very end of notifyRedrawNeeded(), once repaint()
+        // has actually finished writing this frame into getImageBuffer() -
+        // unlike onRedrawNeeded (fired *before* repaint(), for content
+        // that wants to draw into the buffer ahead of this RootView's own
+        // tree paint - see its own doc comment above), this is the right
+        // hook for something that needs the *final*, fully composited
+        // buffer. Base implementation calls invalidate(&dirtyRect_), same
+        // as always. PopupTool (popuptool.h) overrides this instead of
+        // subscribing onRedrawNeeded, precisely so its own present()
+        // reads getImageBuffer() after this RootView's own children have
+        // actually painted into it, not one frame stale.
+        virtual void presentRepaintedBuffer();
 
         virtual void destroy() override;
 
@@ -319,6 +350,23 @@ namespace newui {
         // real caller, feeding it the live cursor position via
         // GetCursorPos()/ScreenToClient().
         View* cursorTargetAt(const Point& pt);
+
+        // Repaints this RootView's entire tree into getImageBuffer() and
+        // calls presentRepaintedBuffer(), synchronously, right now -
+        // unlike markDirty() (whose actual repaint is deferred to the
+        // next RunLoop idle pass via scheduleRepaint()). Ordinary WM_PAINT-
+        // presented RootViews never need this - Windows itself eventually
+        // asks for a repaint (WM_PAINT) regardless of how markDirty()'s
+        // own deferral is timed. A PopupTool (popuptool.h) does need it:
+        // its own present() only composites/pushes whatever's *already*
+        // in getImageBuffer(), and nothing else ever asks this RootView
+        // to actually repaint that buffer - addChild() alone doesn't (see
+        // PopupTool::addChild()'s own override, which calls this after
+        // the base call) - so without a synchronous repaint somewhere, a
+        // child added after the fact wouldn't show up until some
+        // unrelated event (a mouse hover, say) happened to call
+        // markDirty() on its own.
+        void repaintNow();
 
 
         newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);

@@ -160,3 +160,20 @@ add_executable(dragdrop1
 )
 
 target_link_libraries(dragdrop1 PRIVATE newui)
+
+add_executable(popuptool1
+    popuptool1.cpp
+)
+
+target_link_libraries(popuptool1 PRIVATE newui)
+
+# popup-card.svg (examples/, a single rounded <rect>) is this popup's own
+# shape source for the "SVG Popup" button, via Underlay::loadImageFile()
+# (underlay.h) - same Resources/-relative post-build copy as svgimage1/
+# imagefill1's own assets.
+add_custom_command(TARGET popuptool1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:popuptool1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/popup-card.svg"
+        "$<TARGET_FILE_DIR:popuptool1>/Resources/popup-card.svg"
+)

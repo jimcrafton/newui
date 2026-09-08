@@ -422,6 +422,72 @@ namespace newui::shapes {
         path.add_round_rect(BLRoundRect(double(x()), double(y()), double(width()), double(height()), double(radiusX_), double(radiusY_)));
     }
 
+    Rect CalloutRoundRect::localBounds() const {
+        float left = x();
+        float top = y();
+        float right = x() + width();
+        float bottom = y() + height();
+        switch (tailSide_) {
+            case TailSide::Top:    top -= tailHeight_; break;
+            case TailSide::Bottom: bottom += tailHeight_; break;
+            case TailSide::Left:   left -= tailHeight_; break;
+            case TailSide::Right:  right += tailHeight_; break;
+        }
+        return Rect(left, top, right - left, bottom - top);
+    }
+
+    void CalloutRoundRect::buildPath(BLPath& path) const {
+        double x0 = double(x());
+        double y0 = double(y());
+        double x1 = double(x() + width());
+        double y1 = double(y() + height());
+        double rad = double(radius_);
+        double half = double(tailWidth_) * 0.5;
+        double tip = double(tailHeight_);
+        double pos = (tailSide_ == TailSide::Top || tailSide_ == TailSide::Bottom)
+            ? x0 + double(tailPosition_) * (x1 - x0)
+            : y0 + double(tailPosition_) * (y1 - y0);
+
+        // Top edge: x0+rad -> x1-rad, at y0.
+        path.move_to(x0 + rad, y0);
+        if (tailSide_ == TailSide::Top) {
+            path.line_to(pos - half, y0);
+            path.line_to(pos, y0 - tip);
+            path.line_to(pos + half, y0);
+        }
+        path.line_to(x1 - rad, y0);
+        path.arc_quadrant_to(BLPoint(x1, y0), BLPoint(x1, y0 + rad));
+
+        // Right edge: y0+rad -> y1-rad, at x1.
+        if (tailSide_ == TailSide::Right) {
+            path.line_to(x1, pos - half);
+            path.line_to(x1 + tip, pos);
+            path.line_to(x1, pos + half);
+        }
+        path.line_to(x1, y1 - rad);
+        path.arc_quadrant_to(BLPoint(x1, y1), BLPoint(x1 - rad, y1));
+
+        // Bottom edge: x1-rad -> x0+rad, at y1 (right-to-left).
+        if (tailSide_ == TailSide::Bottom) {
+            path.line_to(pos + half, y1);
+            path.line_to(pos, y1 + tip);
+            path.line_to(pos - half, y1);
+        }
+        path.line_to(x0 + rad, y1);
+        path.arc_quadrant_to(BLPoint(x0, y1), BLPoint(x0, y1 - rad));
+
+        // Left edge: y1-rad -> y0+rad, at x0 (bottom-to-top).
+        if (tailSide_ == TailSide::Left) {
+            path.line_to(x0, pos + half);
+            path.line_to(x0 - tip, pos);
+            path.line_to(x0, pos - half);
+        }
+        path.line_to(x0, y0 + rad);
+        path.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + rad, y0));
+
+        path.close();
+    }
+
     void buildPartiallyRoundedRectPath(BLPath& path, const Rect& r, float radius, bool roundTop, bool roundBottom) {
         double x0 = double(r.left());
         double y0 = double(r.top());
