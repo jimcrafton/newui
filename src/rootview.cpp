@@ -283,13 +283,28 @@ namespace newui {
 		if (repaintScheduled_) {
 			return;
 		}
-		repaintScheduled_ = true;
 
 		// Captured by value - keeps the flag (and therefore the safety
 		// check below) alive independently of *this*, which this queued
 		// task may outlive - see aliveFlag_'s own doc comment (rootview.h).
 		std::shared_ptr<bool> alive = aliveFlag_;
+
+		// repaintScheduled_ only actually flips true once a postIdle() task
+		// is genuinely queued to reset it - real, confirmed bug otherwise:
+		// a caller that triggers markDirty() before RunLoop::run() has
+		// started on this thread (e.g. building a Splitter/ScrollView/
+		// TreeView tree via addChild() before app.run(), which cascades
+		// into ScrollView::handleSizeChanged() -> markDirty() while
+		// RunLoop::current() still reports "not started") used to set this
+		// flag regardless, permanently - with no postIdle task ever queued
+		// to flip it back, every later scheduleRepaint() call for the rest
+		// of the process's life hit the early-return above and did
+		// nothing, silently dropping every future repaint request (the
+		// window would then only ever repaint via a real OS resize, which
+		// reaches notifyRedrawNeeded() through resizeImageBuffer() instead,
+		// bypassing this flag entirely).
 		if (RunLoop::current()) {
+			repaintScheduled_ = true;
 			RunLoop::current().postIdle([this, alive]() {
 				if (*alive) {
 					repaintScheduled_ = false;
