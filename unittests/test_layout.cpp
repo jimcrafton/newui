@@ -851,6 +851,80 @@ TEST(GridLayout, ColumnAndRowSpacingOffsetTracks) {
 }
 
 // ---------------------------------------------------------------------
+// GridLayout::trackGeometry() - the same per-axis pixel offsets/sizes
+// arrange() computes and immediately consumes, exposed for a design-time
+// caller (a grid-line cue, or resolving which cell a point falls in)
+// without duplicating arrange()'s own track-sizing math.
+// ---------------------------------------------------------------------
+
+TEST(GridLayoutTrackGeometry, MatchesTheSameSizesArrangeWouldProduce) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 120, 50));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedColumn(20.0f);
+    grid->addStarColumn(1.0f);
+    grid->addStarColumn(3.0f);
+    grid->addFixedRow(50.0f);
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    ASSERT_EQ(geometry.columns.offsets.size(), 3u);
+    ASSERT_EQ(geometry.columns.sizes.size(), 3u);
+    // leftover = 120 - 20 = 100, split 1:3 -> 25 and 75 - same as
+    // GridLayout.StarColumnsSplitLeftoverProportionalToWeight above.
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[0], 0.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[0], 20.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[1], 20.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[1], 25.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[2], 45.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[2], 75.0f);
+
+    ASSERT_EQ(geometry.rows.offsets.size(), 1u);
+    EXPECT_FLOAT_EQ(geometry.rows.offsets[0], 0.0f);
+    EXPECT_FLOAT_EQ(geometry.rows.sizes[0], 50.0f);
+
+    delete container;
+}
+
+TEST(GridLayoutTrackGeometry, IncludesSpacingInOffsets) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 55, 27));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedColumn(20.0f);
+    grid->addFixedColumn(30.0f);
+    grid->setColumnSpacing(5.0f);
+    grid->addFixedRow(20.0f);
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[1], 25.0f);  // 20 (column 0) + 5 (columnSpacing)
+
+    delete container;
+}
+
+TEST(GridLayoutTrackGeometry, EmptyTracksReturnEmptyGeometry) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 100));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    EXPECT_TRUE(geometry.columns.offsets.empty());
+    EXPECT_TRUE(geometry.rows.offsets.empty());
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------
 // View/SubView integration
 // ---------------------------------------------------------------------
 

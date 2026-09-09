@@ -454,13 +454,13 @@ namespace newui {
         }
     }
 
-    void GridLayout::arrange(View& container) {
+    GridLayout::GridGeometry GridLayout::trackGeometry(const View& container) const {
+        GridGeometry geometry;
         if (rows_.empty() || columns_.empty()) {
-            return;  // nothing to place into
+            return geometry;  // nothing to place into
         }
 
-        const Rect clientBounds = container.getClientBounds();
-        const Size containerSize = clientBounds.size();
+        const Size containerSize = container.getClientBounds().size();
 
         // Auto tracks first: walk visible children once per axis, taking
         // the max desiredSize() among non-spanning children landing in
@@ -490,10 +490,24 @@ namespace newui {
             }
         }
 
-        const std::vector<float> columnSizes = resolveGridTrackSizes(columns_, autoColumnSizes, containerSize.width, columnSpacing_);
-        const std::vector<float> rowSizes = resolveGridTrackSizes(rows_, autoRowSizes, containerSize.height, rowSpacing_);
-        const std::vector<float> columnOffsets = gridTrackOffsets(columnSizes, columnSpacing_);
-        const std::vector<float> rowOffsets = gridTrackOffsets(rowSizes, rowSpacing_);
+        geometry.columns.sizes = resolveGridTrackSizes(columns_, autoColumnSizes, containerSize.width, columnSpacing_);
+        geometry.rows.sizes = resolveGridTrackSizes(rows_, autoRowSizes, containerSize.height, rowSpacing_);
+        geometry.columns.offsets = gridTrackOffsets(geometry.columns.sizes, columnSpacing_);
+        geometry.rows.offsets = gridTrackOffsets(geometry.rows.sizes, rowSpacing_);
+        return geometry;
+    }
+
+    void GridLayout::arrange(View& container) {
+        if (rows_.empty() || columns_.empty()) {
+            return;  // nothing to place into
+        }
+
+        const Rect clientBounds = container.getClientBounds();
+        const GridGeometry geometry = trackGeometry(container);
+        const std::vector<float>& columnSizes = geometry.columns.sizes;
+        const std::vector<float>& rowSizes = geometry.rows.sizes;
+        const std::vector<float>& columnOffsets = geometry.columns.offsets;
+        const std::vector<float>& rowOffsets = geometry.rows.offsets;
 
         for (SubView* child : container.childViews()) {
             if (!child->isVisible()) {

@@ -439,6 +439,23 @@ namespace newui {
     // consecutive tracks on each axis, same idea as FlexLayout::spacing().
     class GridLayout : public Layout {
     public:
+        // One axis's resolved per-track pixel offset/size, computed live against a
+        // container's current bounds and children - see trackGeometry().
+        // offsets[i]/sizes[i] describe rows()[i] or columns()[i] (whichever axis this
+        // came from), relative to the container's getClientBounds() origin - the same
+        // values arrange() itself computes and immediately consumes, exposed here so a
+        // caller (e.g. a design-time grid-line cue, or a drag resolving which cell a
+        // point falls in) doesn't have to duplicate arrange()'s own track-sizing math.
+        struct GridTrackGeometry {
+            std::vector<float> offsets;
+            std::vector<float> sizes;
+        };
+
+        struct GridGeometry {
+            GridTrackGeometry columns;
+            GridTrackGeometry rows;
+        };
+
         // Explicit, not relying on the implicit compiler-generated one -
         // see AnchorLayout's own comment above for why.
         GridLayout() = default;
@@ -501,6 +518,9 @@ namespace newui {
 
         void arrange(View& container) override;
 
+        // Resolves both axes' current pixel geometry - the same computation
+        // arrange() runs, without actually positioning any children.
+        GridGeometry trackGeometry(const View& container) const;
 
     private:
         std::vector<GridTrack> rows_;

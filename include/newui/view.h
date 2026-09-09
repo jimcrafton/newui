@@ -109,6 +109,14 @@ namespace newui {
         virtual void addChild(SubView* child);
         virtual void removeChild(SubView* child);
 
+        // Moves an already-attached child to a new index within childViews(), without
+        // detaching/reattaching it - needed for a reorder gesture (e.g. dragging a
+        // FlexLayout sibling past another) to change order alone, not identity/focus/
+        // selection the way a removeChild()+addChild() pair would. newIndex is clamped
+        // to the valid range after the move; a no-op if child isn't a direct child of
+        // this View. Calls updateLayout() same as addChild()/removeChild().
+        virtual void reorderChild(SubView* child, std::size_t newIndex);
+
         // Read-only view of this View's direct children, in the order
         // addChild() attached them - what a Layout arranges (see
         // Layout::arrange()).

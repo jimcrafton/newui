@@ -898,6 +898,7 @@ namespace newui {
 
         void addChild(SubView* child) override;
         void removeChild(SubView* child) override;
+        void reorderChild(SubView* child, std::size_t newIndex) override;
 
         // Not an override of View::contentSize() above (that one's
         // non-virtual, deliberately - see its own doc comment) - just the

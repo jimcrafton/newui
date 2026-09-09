@@ -454,6 +454,108 @@ TEST(HitTestChildren, PointOverParentButOutsideNestedChildReturnsParent) {
 }
 
 // ---------------------------------------------------------------------------
+// reorderChild() - moves a child within childViews() without detaching it.
+// ---------------------------------------------------------------------------
+
+TEST(ReorderChild, MovesChildToALaterIndex) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    auto* c = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+    container->addChild(c);
+
+    container->reorderChild(a, 2);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], c);
+    EXPECT_EQ(container->childViews()[2], a);
+
+    delete container;
+}
+
+TEST(ReorderChild, MovesChildToAnEarlierIndex) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    auto* c = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+    container->addChild(c);
+
+    container->reorderChild(c, 0);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], c);
+    EXPECT_EQ(container->childViews()[1], a);
+    EXPECT_EQ(container->childViews()[2], b);
+
+    delete container;
+}
+
+TEST(ReorderChild, IndexPastTheEndClampsToTheLastPosition) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+
+    container->reorderChild(a, 100);
+
+    ASSERT_EQ(container->childViews().size(), 2u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], a);
+
+    delete container;
+}
+
+TEST(ReorderChild, IsANoOpForAViewThatIsNotADirectChild) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* stranger = new newui::SubView();
+    container->addChild(a);
+
+    container->reorderChild(stranger, 0);
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], a);
+
+    delete stranger;
+    delete container;
+}
+
+TEST(ReorderChild, TriggersARelayoutOfTheNewOrder) {
+    // FlexLayout arranges purely by childViews() order - reordering then
+    // relying on the automatic updateLayout() call (same as addChild()/
+    // removeChild()) should be enough to re-pack a and b's positions
+    // without an explicit updateLayout() call from the test.
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 10));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+
+    auto* a = new newui::SubView();
+    a->setDesiredSize(newui::Size(20.0f, 10.0f));
+    a->setVisible(true);
+    auto* b = new newui::SubView();
+    b->setDesiredSize(newui::Size(30.0f, 10.0f));
+    b->setVisible(true);
+    container->addChild(a);
+    container->addChild(b);
+
+    ASSERT_FLOAT_EQ(a->bounds().left(), 0.0f);
+    ASSERT_FLOAT_EQ(b->bounds().left(), 20.0f);
+
+    container->reorderChild(b, 0);
+
+    EXPECT_FLOAT_EQ(b->bounds().left(), 0.0f);
+    EXPECT_FLOAT_EQ(a->bounds().left(), 30.0f);
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------------
 // destroy() - regression coverage for a real crash: View::destroy() used
 // to iterate childViews_ with a live range-based for loop while each
 // child->destroy() removed itself from that same vector

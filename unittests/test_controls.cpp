@@ -433,6 +433,35 @@ TEST(ScrollView, AddChildDoesNotBecomeADirectChildOfScrollViewItself) {
     delete view;
 }
 
+TEST(ScrollView, ReorderChildRedirectsIntoTheViewportLikeAddChildDoes) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* a = new SubView();
+    a->setVisible(true);
+    auto* b = new SubView();
+    b->setVisible(true);
+    view->addChild(a);
+    view->addChild(b);
+
+    // Real content lives in viewport_, not view's own childViews() - see
+    // AddChildDoesNotBecomeADirectChildOfScrollViewItself above - so a
+    // naive base-class reorderChild() searching view's own childViews()
+    // would silently no-op. Confirmed correct by checking the parent's
+    // (viewport_'s) own child order changed.
+    View* viewport = a->parent();
+    ASSERT_EQ(viewport->childViews()[0], a);
+    ASSERT_EQ(viewport->childViews()[1], b);
+
+    view->reorderChild(b, 0);
+
+    EXPECT_EQ(viewport->childViews()[0], b);
+    EXPECT_EQ(viewport->childViews()[1], a);
+
+    view->destroy();
+    delete view;
+}
+
 TEST(ScrollView, AutoDerivesContentSizeFromSoleChildsContentSizeWithoutAManualCall) {
     auto* view = new ScrollView();
     view->setBounds(Rect(0, 0, 200, 200));

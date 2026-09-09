@@ -1480,6 +1480,16 @@ namespace newui {
         updateLayout();
     }
 
+    void ScrollView::reorderChild(SubView* child, std::size_t newIndex) {
+        // Same identity guard as removeChild() above - viewport_/vBar_/hBar_ live in
+        // *this* ScrollView's own childViews_, not viewport_'s.
+        if (child == viewport_ || child == vBar_ || child == hBar_) {
+            SubView::reorderChild(child, newIndex);
+            return;
+        }
+        viewport_->reorderChild(child, newIndex);
+    }
+
     void ScrollView::setContentSize(const Size& size) {
         // Unconditional, even on the early-return below - a caller that
         // explicitly calls this at all wants manual control from now on,

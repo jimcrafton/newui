@@ -57,6 +57,19 @@ namespace newui {
 		updateLayout();
 	}
 
+	void View::reorderChild(SubView* child, std::size_t newIndex) {
+		auto it = std::find(childViews_.begin(), childViews_.end(), child);
+		if (it == childViews_.end()) {
+			return;
+		}
+		childViews_.erase(it);
+		if (newIndex > childViews_.size()) {
+			newIndex = childViews_.size();
+		}
+		childViews_.insert(childViews_.begin() + newIndex, child);
+		updateLayout();
+	}
+
 	void View::setLayout(std::unique_ptr<Layout> layout) {
 		layout_ = std::move(layout);
 		updateLayout();
