@@ -70,6 +70,32 @@ namespace newui {
 		updateLayout();
 	}
 
+	bool View::setParent(View* newParent) {
+		if (newParent == parent_) {
+			return true;
+		}
+
+		RootView* rootView = dynamic_cast<RootView*>(this);
+		if (rootView != nullptr) {
+			return false;  // a RootView can never be anyone's child
+		}
+		SubView* self = dynamic_cast<SubView*>(this);
+
+		for (View* ancestor = newParent; ancestor != nullptr; ancestor = ancestor->parent()) {
+			if (ancestor == this) {
+				return false;  // would create a cycle
+			}
+		}
+
+		if (View* oldParent = parent_) {
+			oldParent->removeChild(self);
+		}
+		if (newParent != nullptr) {
+			newParent->addChild(self);
+		}
+		return true;
+	}
+
 	void View::setLayout(std::unique_ptr<Layout> layout) {
 		layout_ = std::move(layout);
 		updateLayout();

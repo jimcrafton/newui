@@ -30,8 +30,12 @@ void SubView::setVisible(bool visible) {
 }
 
 void SubView::addChild(SubView* child) {
-    child->setParent(this);
-	View::addChild(child);	
+    // Raw parent_ bookkeeping via internal_setParent() (view.h) - not the real, safe
+    // View::setParent(), which calls addChild()/removeChild() itself (to support an
+    // already-attached child moving between containers); routing this through it would
+    // recurse forever.
+    child->internal_setParent(this);
+	View::addChild(child);
 	// propagateRootView(), not setRootView(): child may already have its
 	// own subtree (built before being attached here), and every
 	// descendant in it needs to pick up this rootView() too, not just
@@ -54,7 +58,7 @@ void SubView::removeChild(SubView* child) {
     }
 
     View::removeChild(child);
-    child->setParent(nullptr);
+    child->internal_setParent(nullptr);  // see addChild()'s own comment on why not setParent()
     child->propagateRootView(nullptr);
 }
 

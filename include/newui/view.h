@@ -31,6 +31,15 @@ namespace newui {
     // View::destroy().
     class View : public Component {
     public:
+        // Both write parent_ directly (a plain protected-field assignment, not routed through
+        // setParent() - see that method's own comment for why) in their own addChild()/
+        // removeChild() overrides - RootView/SubView are sibling classes, so without this,
+        // C++'s protected-access rule ("only through an object of the accessing class's own
+        // type or further derived") blocks RootView from touching a field it only inherits
+        // via the common View base when reached through a SubView* (a real, compiler-caught
+        // error, not a style choice).
+        friend class RootView;
+        friend class SubView;
 
         View();
 
@@ -536,9 +545,18 @@ namespace newui {
             return parent_;
         }
 
-        void setParent(View* newParent) {
-            parent_ = newParent;
-        }
+        // Safely moves this View to become newParent's child, detaching it from its current
+        // parent() first if one exists - addChild()/removeChild()'s own bookkeeping still sets
+        // parent_ directly (a plain protected-field write at their two call sites, not routed
+        // through this) so calling this never recurses back into itself. newParent == nullptr
+        // detaches this View entirely, leaving it parentless - a legitimate way to remove it
+        // from the tree without deleting it. Refuses (returns false, no-op) if this View is a
+        // RootView (never anyone's child) or if newParent is this View itself or one of its
+        // own descendants (would corrupt the tree into a cycle). Always appends at newParent's
+        // own addChild()-determined position (the end), never taking an index itself - a
+        // plain single-View* parameter fits a normal reflection Property setter shape; call
+        // reorderChild() separately afterward if a specific position is actually needed.
+        bool setParent(View* newParent);
 
         // Sets rootView() on this View and recurses into every descendant
         // already in childViews_ - so attaching/detaching a SubView (sub)
@@ -576,6 +594,16 @@ namespace newui {
         View* parent_ = nullptr;
 
         RootView* rootView_ = nullptr;
+
+        // The one place parent_ is ever written outside of setParent() itself -
+        // SubView::addChild()/removeChild() and RootView::addChild()/removeChild() (their own
+        // real tree-mutation entry points) call this directly as their own bookkeeping, via
+        // the friend declarations above (needed since RootView/SubView are siblings - see
+        // those). Never routed through setParent(), which calls addChild()/removeChild()
+        // itself - that would recurse.
+        void internal_setParent(View* newParent) {
+            parent_ = newParent;
+        }
     };
 
 }

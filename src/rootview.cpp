@@ -508,16 +508,18 @@ namespace newui {
 		// descendant in it needs to pick up this RootView too, not just
 		// child itself.
 		child->propagateRootView(rootView());
-		child->setParent(this);
+		// Raw parent_ bookkeeping via internal_setParent() (view.h) - see
+		// SubView::addChild()'s own comment (subview.cpp) for why not setParent().
+		child->internal_setParent(this);
 		View::addChild(child);
-		
+
 	}
 
 	void RootView::removeChild(SubView* child) {
 		notifySubViewRemoved(child);
 		View::removeChild(child);
 		child->setParentView(nullptr);
-		child->setParent(nullptr);
+		child->internal_setParent(nullptr);  // see addChild()'s own comment on why not setParent()
 		child->propagateRootView(nullptr);
 	}
 

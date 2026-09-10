@@ -556,6 +556,97 @@ TEST(ReorderChild, TriggersARelayoutOfTheNewOrder) {
 }
 
 // ---------------------------------------------------------------------------
+// setParent() - the real, safe, coordinated reparent (removeChild() from the old
+// parent + addChild() onto the new one) - see its own doc comment (view.h) for why
+// this is a separate method from addChild()/removeChild()'s own raw parent_
+// bookkeeping (internal_setParent(), also in view.h) rather than routed through it.
+// ---------------------------------------------------------------------------
+
+TEST(SetParent, MovesAnAlreadyAttachedChildToADifferentContainer) {
+    auto* containerA = new newui::SubView();
+    auto* containerB = new newui::SubView();
+    auto* child = new newui::SubView();
+    containerA->addChild(child);
+
+    EXPECT_TRUE(child->setParent(containerB));
+
+    EXPECT_EQ(child->parent(), containerB);
+    EXPECT_TRUE(containerA->childViews().empty());
+    ASSERT_EQ(containerB->childViews().size(), 1u);
+    EXPECT_EQ(containerB->childViews()[0], child);
+
+    delete containerA;
+    delete containerB;
+}
+
+TEST(SetParent, AttachesAFreshNeverAttachedChild) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    ASSERT_EQ(child->parent(), nullptr);
+
+    EXPECT_TRUE(child->setParent(container));
+
+    EXPECT_EQ(child->parent(), container);
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], child);
+
+    delete container;
+}
+
+TEST(SetParent, NullptrDetachesTheChildEntirely) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    container->addChild(child);
+
+    EXPECT_TRUE(child->setParent(nullptr));
+
+    EXPECT_EQ(child->parent(), nullptr);
+    EXPECT_TRUE(container->childViews().empty());
+
+    delete container;
+    delete child;
+}
+
+TEST(SetParent, IsANoOpWhenNewParentIsAlreadyTheCurrentParent) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    container->addChild(child);
+
+    EXPECT_TRUE(child->setParent(container));
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], child);
+
+    delete container;
+}
+
+TEST(SetParent, RefusesToCreateACycle) {
+    // containerB is already containerA's own child - moving containerA to become
+    // containerB's child (containerA->setParent(containerB)) would make containerA
+    // its own indirect descendant.
+    auto* containerA = new newui::SubView();
+    auto* containerB = new newui::SubView();
+    containerA->addChild(containerB);
+
+    EXPECT_FALSE(containerA->setParent(containerB));
+
+    EXPECT_EQ(containerA->parent(), nullptr);
+    ASSERT_EQ(containerA->childViews().size(), 1u);
+    EXPECT_EQ(containerA->childViews()[0], containerB);
+
+    delete containerA;
+}
+
+TEST(SetParent, RefusesOnARootView) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 100, 100), "root");
+    auto* container = new newui::SubView();
+
+    EXPECT_FALSE(root.setParent(container));
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------------
 // destroy() - regression coverage for a real crash: View::destroy() used
 // to iterate childViews_ with a live range-based for loop while each
 // child->destroy() removed itself from that same vector
@@ -614,7 +705,7 @@ TEST(ViewDestroy, DestroysDirectRootViewChildrenWithoutCorruptingIteration) {
     // case, e.g. root.addChild(sidebar) in examples/layout1.cpp) never had
     // parent_ set at all, so SubView::destroy()'s self-removal
     // (parent_->removeChild(this)) silently never fired for it.
-    // RootView::addChild() now calls setParent() too - without that,
+    // RootView::addChild() now calls internal_setParent() too - without that,
     // View::destroy()'s front()-popping loop would never see childViews_
     // shrink and would re-process (and double-delete) the same already-
     // destroyed pointer.
