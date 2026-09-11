@@ -466,7 +466,7 @@ namespace newui {
         // e.g. a control mid-validation with an invalid value can
         // refuse to give up focus until that's resolved.
         virtual bool canResignFocus() const { return true; }
-        virtual bool canBecomeFocused() const { return true; }
+        virtual bool canBecomeFocused() const { return !isDesignTime(); }
 
         // Answers whether this View itself (not its children) can
         // currently carry out cmd - default false, so a View that

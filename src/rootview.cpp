@@ -480,17 +480,17 @@ namespace newui {
 				paintRect = &r;
 			}
 
-			::InvalidateRect(viewHwnd_, paintRect, FALSE);
+::InvalidateRect(viewHwnd_, paintRect, FALSE);
 		}
 
 		dirtyRect_.clear();
 	}
 
 	void RootView::invalidate() {
-		invalidate(nullptr);		
+		invalidate(nullptr);
 	}
 
-	void RootView::setVisible(bool visible) 
+	void RootView::setVisible(bool visible)
 	{
 		if (visible == visible_) {
 			return;
@@ -571,17 +571,21 @@ namespace newui {
 
 		if (hoveredSubView_ != nullptr) {
 			SubView* left = hoveredSubView_;
-			left->onMouseLeft(*left, rootPt - accumulatedOffset(left), 0, 0);
-			left->setHighlighted(false);
-			left->style().markDirty();
+			if (!left->isDesignTime()) {
+				left->onMouseLeft(*left, rootPt - accumulatedOffset(left), 0, 0);
+				left->setHighlighted(false);
+				left->style().markDirty();
+			}
 		}
 
 		hoveredSubView_ = target;
 
 		if (hoveredSubView_ != nullptr) {
-			hoveredSubView_->onMouseEntered(*hoveredSubView_, rootPt - accumulatedOffset(hoveredSubView_), 0, 0);
-			hoveredSubView_->setHighlighted(true);
-			hoveredSubView_->style().markDirty();
+			if (!hoveredSubView_->isDesignTime()) {
+				hoveredSubView_->onMouseEntered(*hoveredSubView_, rootPt - accumulatedOffset(hoveredSubView_), 0, 0);
+				hoveredSubView_->setHighlighted(true);
+				hoveredSubView_->style().markDirty();
+			}
 		}
 	}
 
@@ -595,17 +599,7 @@ namespace newui {
 		}
 
 		if (target != nullptr) {
-			// A design-time SubView (e.g. content loaded into a Designer's
-			// RootViewProxy) is never a valid real-interaction target -
-			// vetoed here, not just at mouseDown()'s own already-gated call
-			// site, so every other caller (mouseDblClick(), Tab-focus-
-			// cycling in controls.cpp, ...) gets the same guarantee for
-			// free. keyEvent() only ever dispatches to focusedSubView_, so
-			// this is also what keeps keyboard input out of a design-time
-			// subtree.
-			if (target->isDesignTime()) {
-				return;
-			}
+			
 			if (!target->canBecomeFocused()) {
 				return;
 			}
@@ -633,7 +627,7 @@ namespace newui {
 		// leaf's own answer (defaulted false unless a subclass overrides
 		// it) via ordinary non-virtual base dispatch instead.
 		for (View* v = focusedSubView_; v != nullptr && v != this; v = v->parent()) {
-			if (v->canPerformCommand(cmd)) {
+			if (v->canPerformCommand(cmd) && !v->isDesignTime()) {
 				return true;
 			}
 		}
@@ -730,7 +724,9 @@ namespace newui {
 		setFocusedSubView(target);
 
 		if (target != nullptr) {
-			target->onMouseDown(*target, localPt, btnMask, keyMask);
+			if (!target->isDesignTime()) {
+				target->onMouseDown(*target, localPt, btnMask, keyMask);
+			}
 		}
 
 		// Arms a potential outgoing drag - only for a left-button press on
@@ -770,7 +766,9 @@ namespace newui {
 
 
 			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
-			dispatchTarget->onMouseMove(*dispatchTarget, localPt, btnMask, keyMask);
+			if (!dispatchTarget->isDesignTime()) {
+				dispatchTarget->onMouseMove(*dispatchTarget, localPt, btnMask, keyMask);
+			}
 		}
 		else {
 			::SetCursor(this->cursor().handle());
@@ -785,56 +783,59 @@ namespace newui {
 		// since it's a plain settable pointer application code could in
 		// principle clear mid-gesture.
 		if (activeDragView_ != nullptr) {
-			DropSource* dragSource = activeDragView_->dragSource();
-			if (dragSource == nullptr || (btnMask & mbmLeftButton) == 0) {
-				activeDragView_ = nullptr;
-			} else {
-				Point currentLocalPt = pt - accumulatedOffset(activeDragView_);
-				Point delta = currentLocalPt - activeDragLocalPt_;
-				const float thresholdSquared = 16.0f;  // ~4px - distinguishes a drag from a click
-				if ((delta.x * delta.x + delta.y * delta.y) >= thresholdSquared) {
-					SubView* dragView = activeDragView_;
+
+			if (!activeDragView_->isDesignTime()) {
+				DropSource* dragSource = activeDragView_->dragSource();
+				if (dragSource == nullptr || (btnMask & mbmLeftButton) == 0) {
 					activeDragView_ = nullptr;
+				}
+				else {
+					Point currentLocalPt = pt - accumulatedOffset(activeDragView_);
+					Point delta = currentLocalPt - activeDragLocalPt_;
+					const float thresholdSquared = 16.0f;  // ~4px - distinguishes a drag from a click
+					if ((delta.x * delta.x + delta.y * delta.y) >= thresholdSquared) {
+						SubView* dragView = activeDragView_;
+						activeDragView_ = nullptr;
 
-					// Files take priority over text, matching DropTarget's
-					// own CF_HDROP-before-CF_UNICODETEXT convention
-					// (dragndrop.h) - only one kind of drag can actually
-					// start per gesture.
-					std::vector<VirtualFile> files;
-					std::wstring text;
-					bool providingFiles = dragSource->onProvideFiles.syncCallFirst(*dragSource, files).handled();
-					bool providingText = !providingFiles
-						&& dragSource->onProvideText.syncCallFirst(*dragSource, text).handled();
+						// Files take priority over text, matching DropTarget's
+						// own CF_HDROP-before-CF_UNICODETEXT convention
+						// (dragndrop.h) - only one kind of drag can actually
+						// start per gesture.
+						std::vector<VirtualFile> files;
+						std::wstring text;
+						bool providingFiles = dragSource->onProvideFiles.syncCallFirst(*dragSource, files).handled();
+						bool providingText = !providingFiles
+							&& dragSource->onProvideText.syncCallFirst(*dragSource, text).handled();
 
-					if (providingFiles || providingText) {
-						// DoDragDrop() (inside StartDragOperation()/
-						// StartVirtualFileDrag()) does its own mouse
-						// tracking/capture internally - release this
-						// RootView's own Win32 capture first rather than
-						// leaving two independent capture holders active at
-						// once (capturedSubView_ itself is left as-is;
-						// DoDragDrop() consumes the terminating button-up
-						// directly, so it never sees a matching mouseUp() -
-						// a known, harmless rough edge until this class
-						// learns to let go of its own bookkeeping around a
-						// drag more deliberately).
-						::ReleaseCapture();
-						Point windowPt = accumulatedOffset(dragView) + currentLocalPt;
-						POINT ptClient{ static_cast<LONG>(windowPt.x), static_cast<LONG>(windowPt.y) };
+						if (providingFiles || providingText) {
+							// DoDragDrop() (inside StartDragOperation()/
+							// StartVirtualFileDrag()) does its own mouse
+							// tracking/capture internally - release this
+							// RootView's own Win32 capture first rather than
+							// leaving two independent capture holders active at
+							// once (capturedSubView_ itself is left as-is;
+							// DoDragDrop() consumes the terminating button-up
+							// directly, so it never sees a matching mouseUp() -
+							// a known, harmless rough edge until this class
+							// learns to let go of its own bookkeeping around a
+							// drag more deliberately).
+							::ReleaseCapture();
+							Point windowPt = accumulatedOffset(dragView) + currentLocalPt;
+							POINT ptClient{ static_cast<LONG>(windowPt.x), static_cast<LONG>(windowPt.y) };
 
-						DWORD rawEffect = DROPEFFECT_NONE;
-						if (providingFiles) {
-							StartVirtualFileDrag(windowHandle(), std::move(files), ptClient, DROPEFFECT_COPY, &rawEffect);
-						} else {
-							StartDragOperation(windowHandle(), text, ptClient, DROPEFFECT_COPY, &rawEffect);
+							DWORD rawEffect = DROPEFFECT_NONE;
+							if (providingFiles) {
+								StartVirtualFileDrag(windowHandle(), std::move(files), ptClient, DROPEFFECT_COPY, &rawEffect);
+							}
+							else {
+								StartDragOperation(windowHandle(), text, ptClient, DROPEFFECT_COPY, &rawEffect);
+							}
+							dragSource->onDragComplete(*dragSource, toDropEffect(rawEffect));
 						}
-						dragSource->onDragComplete(*dragSource, toDropEffect(rawEffect));
 					}
 				}
 			}
 		}
-
-
 	}
 
 	void RootView::mouseWheel(const Point& pt, float mouseDelta, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
@@ -861,9 +862,12 @@ namespace newui {
 			if (sv == nullptr) {
 				break;
 			}
-			if (sv->onMouseWheel.syncCallFirst(*sv, localPt, mouseDelta).handled()) {
-				return;
+			if (!sv->isDesignTime()) {
+				if (sv->onMouseWheel.syncCallFirst(*sv, localPt, mouseDelta).handled()) {
+					return;
+				}
 			}
+			
 			View* parent = sv->parent();
 			if (parent != nullptr) {
 				localPt = localPt + sv->bounds().pos() - parent->origin();
@@ -901,7 +905,9 @@ namespace newui {
 		activeDragView_ = nullptr;
 
 		if (target != nullptr) {
-			target->onMouseUp(*target, localPt, btnMask, keyMask);
+			if (!target->isDesignTime()) {
+				target->onMouseUp(*target, localPt, btnMask, keyMask);
+			}
 		}
 	}
 
@@ -920,7 +926,9 @@ namespace newui {
 		setFocusedSubView(target);
 
 		if (target != nullptr) {
-			target->onMouseDblClick(*target, localPt, btnMask, keyMask);
+			if (!target->isDesignTime()) {
+				target->onMouseDblClick(*target, localPt, btnMask, keyMask);
+			}
 		}
 	}
 
