@@ -760,10 +760,15 @@ namespace newui {
 
 		SubView* dispatchTarget = capturedSubView_ != nullptr ? capturedSubView_ : hoverTarget;
 		if (dispatchTarget != nullptr) {
+			
+			::SetCursor(dispatchTarget->cursor().handle());
+
 			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
 			dispatchTarget->onMouseMove(*dispatchTarget, localPt, btnMask, keyMask);
 		}
-
+		else {
+			::SetCursor(this->cursor().handle());
+		}
 		// Outgoing-drag gesture detection - only while a drag is actually
 		// armed (mouseDown() above set this on a View with a DropSource
 		// listener) and the left button is still held. Re-fetches
@@ -805,7 +810,6 @@ namespace newui {
 						// learns to let go of its own bookkeeping around a
 						// drag more deliberately).
 						::ReleaseCapture();
-
 						Point windowPt = accumulatedOffset(dragView) + currentLocalPt;
 						POINT ptClient{ static_cast<LONG>(windowPt.x), static_cast<LONG>(windowPt.y) };
 
@@ -820,6 +824,8 @@ namespace newui {
 				}
 			}
 		}
+
+
 	}
 
 	void RootView::mouseWheel(const Point& pt, float mouseDelta, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
@@ -1187,7 +1193,7 @@ namespace newui {
 				result = true;
 			}
 			break;
-
+			/*
 			case WM_SETCURSOR: {
 				// LOWORD(lParam) is the hit-test code from the preceding
 				// WM_NCHITTEST - only override the cursor for the client
@@ -1217,6 +1223,7 @@ namespace newui {
 				result = true;
 			}
 			break;
+			*/
 
 			case WM_MOUSELEAVE: {
 				POINT pt = { 0,0 };
