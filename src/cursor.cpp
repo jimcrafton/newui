@@ -199,7 +199,15 @@ namespace newui {
     }
 
     HCURSOR Cursor::handle() const {
-        return resolveCursor(kind_, handle_);
+        // Custom already has its real handle sitting in handle_ - nothing to resolve/cache.
+        // Otherwise, resolve once and cache into handle_ itself (see its own comment, cursor.h) -
+        // a kind change (setCursorKind()/setPath()/setImage()) already clears handle_ via
+        // releaseOwnedHandle(), so a stale cached shape can never survive past whatever change
+        // would invalidate it.
+        if (kind_ != CursorKind::Custom && handle_ == nullptr) {
+            handle_ = resolveCursor(kind_, nullptr);
+        }
+        return handle_;
     }
 
     void Cursor::releaseOwnedHandle() {

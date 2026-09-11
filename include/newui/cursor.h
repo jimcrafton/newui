@@ -144,6 +144,12 @@ namespace newui {
         // to real memory - real, reproduced access violation the moment
         // this got reachable via View::cursor() (view.h) registering as a
         // Property.
+        // For a system kind(), resolved once and cached into handle_ (see its own comment) -
+        // ::LoadCursor() for a given IDC_* constant always returns the same process-wide shared
+        // handle anyway (Windows owns and caches it internally, hence no DestroyCursor() for
+        // these), so this is purely a "skip the redundant call" optimization, not a correctness
+        // fix - handle() is called on every WM_SETCURSOR (RootView::handleMessage()), i.e.
+        // potentially many times a second during a drag.
         //@reflect ignore=true
         HCURSOR handle() const;
 
@@ -185,7 +191,18 @@ namespace newui {
 
         CursorKind kind_ = CursorKind::Arrow;
         std::string path_;
-        HCURSOR handle_ = nullptr;
+
+        // Doubles as the Custom-owned handle (see ownsHandle()) AND, for a system kind_, a
+        // lazily-resolved cache of that shape's HCURSOR - handle() populates it via
+        // resolveCursor() on first read after a kind change, returning it directly on every
+        // later read instead of re-resolving (::LoadCursor()) every time. Safe to reuse the same
+        // member for both roles: releaseOwnedHandle() already clears it unconditionally on every
+        // setCursorKind()/setPath()/setImage() call (the only three places kind_ can change), so
+        // a stale system-kind cache can never survive past the change that would invalidate it -
+        // and ownsHandle() already gates the actual ::DestroyCursor() by kind_ == Custom, so a
+        // cached system handle (never owned) is never mistakenly freed. mutable since handle()
+        // is const but needs to populate this cache on a cache-miss read.
+        mutable HCURSOR handle_ = nullptr;
     };
 
 }

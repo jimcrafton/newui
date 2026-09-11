@@ -1203,6 +1203,16 @@ namespace newui {
 				::ScreenToClient(viewHwnd_, &pt);
 
 				View* target = cursorTargetAt(Point(static_cast<float>(pt.x), static_cast<float>(pt.y)));
+				{
+					// TEMPORARY diagnostic - remove once the cursor-during-drag investigation is
+					// done. Confirms whether WM_SETCURSOR actually fires during a captured drag,
+					// and what cursorTargetAt() resolves to.
+					char buf[256];
+					::wsprintfA(buf, "[cursor] WM_SETCURSOR target=%s kind=%d captured=%p\n",
+						target->name().c_str(), static_cast<int>(target->cursorKind()),
+						static_cast<void*>(capturedSubView_));
+					::OutputDebugStringA(buf);
+				}
 				::SetCursor(target->resolvedCursor());
 				outLRESULT = TRUE;
 				result = true;
