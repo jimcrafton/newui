@@ -759,11 +759,6 @@ namespace newui {
 		if (dispatchTarget != nullptr) {
 			
 			::SetCursor(dispatchTarget->cursor().handle());
-			printf("[cursor] WM_SETCURSOR target=%s kind=%d captured=%p\n",
-				dispatchTarget->name().c_str(), static_cast<int>(dispatchTarget->cursorKind()),
-				static_cast<void*>(dispatchTarget));
-
-
 
 			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
 			if (!dispatchTarget->isDesignTime()) {
@@ -772,9 +767,6 @@ namespace newui {
 		}
 		else {
 			::SetCursor(this->cursor().handle());
-			printf("[cursor] RootView WM_SETCURSOR target=%s kind=%d captured=%p\n",
-				name().c_str(), static_cast<int>(cursorKind()),
-				static_cast<void*>(this));
 		}
 		// Outgoing-drag gesture detection - only while a drag is actually
 		// armed (mouseDown() above set this on a View with a DropSource
@@ -1054,7 +1046,6 @@ namespace newui {
 				if (!GetUpdateRect(viewHwnd_, NULL, FALSE)) {
 					outLRESULT = 0;
 					result = true;
-					printf("GetUpdateRect failed\n");
 					return result;
 				}
 
