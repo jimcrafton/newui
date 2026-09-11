@@ -469,15 +469,21 @@ TEST(RootViewKeyEvents, KeyEventIsNotRoutedToASubViewWhenNothingIsFocused) {
 
 // ---------------------------------------------------------------------------
 // A design-time SubView (isDesignTime(), e.g. content loaded into a
-// Designer's RootViewProxy) is never a valid real-interaction target -
-// resolveInteractiveHit() (mouseDown/mouseMove/mouseUp/mouseDblClick/
-// mouseWheel) and setFocusedSubView() (keyEvent() only ever dispatches to
-// focusedSubView_) both gate on it, so it never hovers, captures, clicks, or
-// takes keyboard focus. hitTestChildren() itself stays ungated - a
-// Designer's own selection code needs the real hit target either way.
+// Designer's RootViewProxy) never receives a real mouse/keyboard event and
+// never takes keyboard focus - every dispatch site (onMouseDown/onMouseMove/
+// onMouseUp/onMouseDblClick/onMouseWheel/onMouseEntered/onMouseLeft) gates on
+// isDesignTime() individually before calling the target's own delegate, and
+// setFocusedSubView() is refused via canBecomeFocused()'s own
+// `!isDesignTime()` default (view.h). resolveInteractiveHit() itself, and
+// hitTestChildren() underneath it, deliberately stay ungated though -
+// capturedSubView_/hoveredSubView_ still track a design-time child like any
+// other, since mouseMove()'s own ::SetCursor() call and cursorTargetAt() both
+// need the real hit target to resolve a design-time child's own cursor while
+// hovering/dragging it inside a Designer - it just never gets the event
+// itself.
 // ---------------------------------------------------------------------------
 
-TEST(RootViewDesignTimeGating, MouseDownIgnoresADesignTimeChildEntirely) {
+TEST(RootViewDesignTimeGating, MouseDownDoesNotDispatchToADesignTimeChildButStillCapturesIt) {
     ResetMouseEvents();
     auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 
@@ -491,14 +497,14 @@ TEST(RootViewDesignTimeGating, MouseDownIgnoresADesignTimeChildEntirely) {
     root->mouseDown(newui::Point(20, 20), 1, 0);
 
     EXPECT_EQ(g_downEvent.count, 0);
-    EXPECT_EQ(root->capturedSubView(), nullptr);
+    EXPECT_EQ(root->capturedSubView(), child);
     EXPECT_EQ(root->focusedSubView(), nullptr);
 
     root->destroy();
     delete root;
 }
 
-TEST(RootViewDesignTimeGating, MouseMoveNeverHoversADesignTimeChild) {
+TEST(RootViewDesignTimeGating, MouseMoveDoesNotDispatchToADesignTimeChildButStillTracksItAsHovered) {
     ResetMouseEvents();
     auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 
@@ -512,7 +518,7 @@ TEST(RootViewDesignTimeGating, MouseMoveNeverHoversADesignTimeChild) {
     root->mouseMove(newui::Point(20, 20), 0, 0);
 
     EXPECT_EQ(g_moveEvent.count, 0);
-    EXPECT_EQ(root->hoveredSubView(), nullptr);
+    EXPECT_EQ(root->hoveredSubView(), child);
 
     root->destroy();
     delete root;
@@ -537,7 +543,7 @@ TEST(RootViewDesignTimeGating, MouseUpWithoutCaptureIgnoresADesignTimeChild) {
     delete root;
 }
 
-TEST(RootViewDesignTimeGating, MouseDblClickIgnoresADesignTimeChildEntirely) {
+TEST(RootViewDesignTimeGating, MouseDblClickDoesNotDispatchToADesignTimeChildButStillCapturesIt) {
     ResetMouseEvents();
     auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 
@@ -549,7 +555,7 @@ TEST(RootViewDesignTimeGating, MouseDblClickIgnoresADesignTimeChildEntirely) {
 
     root->mouseDblClick(newui::Point(20, 20), 1, 0);
 
-    EXPECT_EQ(root->capturedSubView(), nullptr);
+    EXPECT_EQ(root->capturedSubView(), child);
     EXPECT_EQ(root->focusedSubView(), nullptr);
 
     root->destroy();

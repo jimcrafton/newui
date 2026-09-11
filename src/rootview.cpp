@@ -1201,37 +1201,6 @@ namespace newui {
 				result = true;
 			}
 			break;
-			/*
-			case WM_SETCURSOR: {
-				// LOWORD(lParam) is the hit-test code from the preceding
-				// WM_NCHITTEST - only override the cursor for the client
-				// area (HTCLIENT); anything else (resize borders, etc.)
-				// should keep getting Windows' own default handling.
-				if (LOWORD(lParam) != HTCLIENT) {
-					result = false;
-					break;
-				}
-
-				POINT pt;
-				::GetCursorPos(&pt);
-				::ScreenToClient(viewHwnd_, &pt);
-
-				View* target = cursorTargetAt(Point(static_cast<float>(pt.x), static_cast<float>(pt.y)));
-				{
-					// TEMPORARY diagnostic - remove once the cursor-during-drag investigation is
-					// done. Confirms whether WM_SETCURSOR actually fires during a captured drag,
-					// and what cursorTargetAt() resolves to.
-					
-					printf("[cursor] WM_SETCURSOR target=%s kind=%d captured=%p\n",
-						target->name().c_str(), static_cast<int>(target->cursorKind()),
-						static_cast<void*>(capturedSubView_));
-				}
-				::SetCursor(target->resolvedCursor());
-				outLRESULT = TRUE;
-				result = true;
-			}
-			break;
-			*/
 
 			case WM_MOUSELEAVE: {
 				POINT pt = { 0,0 };
