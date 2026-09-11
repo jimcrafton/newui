@@ -716,7 +716,8 @@ namespace newui {
 	// hoveredSubView()/capturedSubView()/focusedSubView() in rootview.h).
 	SubView* RootView::resolveInteractiveHit(const Point& pt, Point& outLocalPt) const {
 		SubView* hit = hitTestChildren(pt, outLocalPt);
-		return (hit != nullptr && !hit->isDesignTime()) ? hit : nullptr;
+		//return (hit != nullptr && !hit->isDesignTime()) ? hit : nullptr;
+		return hit;//(hit != nullptr) ? hit : nullptr;
 	}
 
 	void RootView::mouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask)
