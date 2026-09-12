@@ -3239,7 +3239,19 @@ namespace newui {
 
             popupListView_ = new ListView();
             popupListView_->setVisible(true);
-            popupListView_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+
+            // Wrapped in a real ScrollView (not added to popup_->rootView() directly) so a popup
+            // taller than kMaxPopupHeight's worth of rows below gets a real vertical scrollbar and
+            // responds to the mouse wheel - real, live-reported gap (FontPropertyEditor's "name"
+            // dropdown, cpp_codetools, is the first DropDownList content long enough to overflow
+            // kMaxPopupHeight at all). ListView already answers onQueryContentSize (its own
+            // constructor) - same "virtualized content child" shape ScrollView::updateLayout()
+            // already handles for TextControl/TreeView - so it needs no LayoutParams of its own
+            // once it's popupScroll_'s content child; only popupScroll_ itself does, below.
+            popupScroll_ = new ScrollView();
+            popupScroll_->setVisible(true);
+            popupScroll_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+            popupScroll_->addChild(popupListView_);
 
             // A real Layout (not manual bounds-poking) is load-bearing
             // here, not just tidy - see the long comment on why in this
@@ -3247,7 +3259,7 @@ namespace newui {
             // already calls updateLayout() synchronously as part of
             // handling the real WM_SIZE that show()'s own ShowWindow()
             // triggers - giving popup_->rootView() a FlexLayout means
-            // popupListView_ gets arranged to fill it automatically, in
+            // popupScroll_ gets arranged to fill it automatically, in
             // that same synchronous call, with no separately-timed
             // setBounds() call of our own that could race show()'s
             // immediate forced repaint.
@@ -3255,7 +3267,7 @@ namespace newui {
             popupLayout->setSpacing(0.0f);
             popupLayout->setPadding(0.0f);
             popup_->rootView().setLayout(std::move(popupLayout));
-            popup_->rootView().addChild(popupListView_);
+            popup_->rootView().addChild(popupScroll_);
 
             // Without an explicit background, whatever's behind an
             // unpainted RootView shows through as a solid black rect
@@ -3324,6 +3336,7 @@ namespace newui {
             popup_->setBounds(popupBounds);
             if (!popup_->initialize(frame->frameHandle())) {
                 popup_.reset();
+                popupScroll_ = nullptr;
                 popupListView_ = nullptr;
                 return;
             }

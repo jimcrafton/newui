@@ -2300,7 +2300,15 @@ namespace newui {
 
         std::unique_ptr<ListController> controller_;
         std::unique_ptr<PopupFrame> popup_;
-        ListView* popupListView_ = nullptr;  // owned by popup_->rootView()'s normal addChild(), not by this class directly
+        // popupListView_ is wrapped in popupScroll_ (a real ScrollView, not the plain FlexLayout
+        // arrangement this used before) so a popup taller than kMaxPopupHeight's worth of rows
+        // (openPopup(), controls.cpp) gets a real vertical scrollbar and responds to the mouse
+        // wheel - ListView already answers onQueryContentSize (its own constructor), so it needs
+        // no LayoutParams of its own once it's ScrollView's content child; only popupScroll_ does
+        // (to fill popup_->rootView()'s own vertical FlexLayout). Both owned by popup_->rootView()'s
+        // normal addChild() chain, not by this class directly.
+        ScrollView* popupScroll_ = nullptr;
+        ListView* popupListView_ = nullptr;
         std::optional<std::size_t> selectedIndex_;
 
         // Guards openPopup()'s own restore of the popup ListView's
