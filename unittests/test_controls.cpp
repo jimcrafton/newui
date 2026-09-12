@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <vector>
 
 // ScrollBar/ScrollView's pure logic (range/value/pageSize clamping,
@@ -616,6 +617,49 @@ TEST(Button, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
     };
 
     EXPECT_NE(renderButton(true), renderButton(false));
+}
+
+// Real, live-reported crash: ViewStyle::font()/setFont() (now a real, Properties-panel-editable
+// property, not just a plain field - see FontPropertyEditor, cpp_codetools) lets a user pick any
+// font name and independently tick "bold" - a combination Font::blFont() has no guarantee will
+// resolve. The exact combination reported live: "Trebuchet MS Bold" is itself a real, separately
+// installed face name (not "Trebuchet MS" + a synthesized bold variant), so picking it as the
+// font *name* and also ticking "bold" makes blFont() look up "Trebuchet MS Bold Bold", which
+// doesn't exist. Button::paint() used to treat "didn't resolve" as a "shouldn't happen" invariant
+// and threw, crashing the whole app the moment this now-reachable combination came up - it must
+// degrade gracefully (skip drawing the text) instead, same as LabelStyle::paint() already does
+// for its own now-editable font.
+TEST(Button, PaintWithAnUnresolvedFontDoesNotThrowAndSkipsDrawingText) {
+    // Skips (rather than failing) if this machine has no such face installed at all - the point
+    // is the "name alone resolves, but name+bold together doesn't" combination, not this exact
+    // family.
+    const std::vector<SystemFontInfo>& fonts = FontManager::listFonts();
+    bool hasTrebuchetBold = std::any_of(fonts.begin(), fonts.end(),
+        [](const SystemFontInfo& info) { return info.name == "Trebuchet MS Bold"; });
+    if (!hasTrebuchetBold) {
+        GTEST_SKIP() << "this machine has no 'Trebuchet MS Bold' font face installed";
+    }
+
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+    button->setText("Click Me");
+
+    auto* style = dynamic_cast<ThemedButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    Font font = style->font();
+    font.setName("Trebuchet MS Bold");
+    font.setBold(true);
+    style->setFont(font);
+    ASSERT_EQ(font.blFont(), nullptr) << "test assumption: 'Trebuchet MS Bold Bold' must not resolve";
+
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
 }
 
 // ---------------------------------------------------------------------

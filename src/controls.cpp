@@ -226,9 +226,15 @@ namespace newui {
             return;
         }
 
+        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
+        // cpp_codetools, which already rejects an edit that wouldn't resolve - see its own
+        // fontResolves() comment) - but a font set some other way (loading a saved document on a
+        // machine missing that face, say) can still fail to resolve here. A real, live-reported
+        // crash when this used to throw: skipping the text draw is the graceful degradation; the
+        // rest of this Button (its native chrome) still paints normally either way.
         BLFont* blFont = buttonStyle_->font().blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
-            throw std::runtime_error("Button::paint: font not resolved to a valid BLFont");
+            return;
         }
 
         Rect clientBounds = getClientBounds();
@@ -1868,10 +1874,15 @@ namespace newui {
         double textHeight = 0.0;
         if (hasText) {
             blFont = buttonStyle_->font().blFont();
-            if (blFont == nullptr || !blFont->is_valid()) {
-                throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
-            }
-
+        }
+        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
+        // cpp_codetools) - see Button::paint()'s own comment on why an unresolved font must
+        // degrade gracefully (skip drawing the text) instead of throwing/crashing here too.
+        if (hasText && (blFont == nullptr || !blFont->is_valid())) {
+            hasText = false;
+            blFont = nullptr;
+        }
+        if (hasText) {
             BLGlyphBuffer glyphBuffer;
             glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
             blFont->shape(glyphBuffer);
