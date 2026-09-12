@@ -416,13 +416,26 @@ namespace newui {
         updateTextColor();
     }
 
+    namespace {
+        // linkColor_/hoveredLinkColor_/textColor_ (Label's own private members, above) are still
+        // plain BLVar, each always actually holding a solid RGBA32 color (never a gradient/image -
+        // set only via Label::setTextColor()/setLinkColor()/setHoveredLinkColor(BLRgba32)) -
+        // LabelStyle::textColor itself is a plain Color now (see its own comment, viewstyle.h), so
+        // this extracts the solid color back out for the assignment.
+        Color colorFromSolidBLVar(const BLVar& var) {
+            BLRgba32 rgba;
+            var.to_rgba32(&rgba);
+            return Color(rgba);
+        }
+    }
+
     void Label::updateTextColor() {
         if (!isEnabled()) {
-            labelStyle_->textColor = UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+            labelStyle_->textColor = UIColorManager::colorFor(UIColorRole::DisabledText);
         } else if (hotLink_) {
-            labelStyle_->textColor = hovering_ ? hoveredLinkColor_ : linkColor_;
+            labelStyle_->textColor = colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_);
         } else {
-            labelStyle_->textColor = textColor_;
+            labelStyle_->textColor = colorFromSolidBLVar(textColor_);
         }
         style().markDirty();
     }

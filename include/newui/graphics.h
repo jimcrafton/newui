@@ -392,6 +392,17 @@ namespace newui::gfx {
         const std::string& imagePath() const { return imagePath_; }
         void setImagePath(const std::string& path) { imagePath_ = path; imageCacheValid_ = false; }
 
+        // Sets resolvedImage()'s own cache directly from an already-decoded BLImage, bypassing
+        // read_from_file() entirely - for a caller that already has real pixels in memory with no
+        // file on disk to reflect a path to at all (e.g. ViewStyle::setBackgroundImage(const
+        // BLImage&), a programmatically-generated background - see its own comment for why it
+        // can't just take a path like the string overload does). imagePath() itself is cleared -
+        // there's no real path behind this fill any more, so leaving a stale one would be
+        // misleading were this ever serialized/rebuilt from it - same "kind_ left untouched,
+        // caller sets it separately" convention setImagePath()/setColor()/setGradient() already
+        // follow (see this class's own kind_ comment for why).
+        void setImage(const BLImage& image) { imageCache_ = image; imageCacheValid_ = true; imagePath_.clear(); }
+
         float opacity() const { return opacity_; }
         void setOpacity(float opacity) { opacity_ = opacity; }
 

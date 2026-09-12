@@ -115,6 +115,14 @@ namespace newui {
             a = rgba.a;
         }
 
+        // Implicit, unlike the packed-integer constructors above - BLRgba32 is already a distinct,
+        // unambiguous type (not a bare integer that could mean anything), so a direct
+        // `Color c = someBLRgba32;`/`someField = someBLRgba32;` (someField already a Color) reads
+        // naturally and matches how freely BLRgba32 itself gets constructed/passed around
+        // elsewhere in this codebase (e.g. every existing "= BLRgba32(r, g, b)" style-field
+        // assignment, viewstyle.h/.cpp and their own tests, predating Color even existing there).
+        Color(const BLRgba32& rgba32) noexcept : Color(rgba32.value) {}
+
         // 64-bit packed color: 0xAAAARRRRGGGGBBBB when hasAlpha (matching
         // blend2d's BLRgba64 packing - alpha in the top 16 bits), or the
         // low 48 bits as 0x0000RRRRGGGGBBBB (top 16 bits ignored, alpha
@@ -676,7 +684,21 @@ namespace newui {
             return toBLRgba().to_rgba32();
         }
 
-        
+        // The sentinel isNull() checks for - the all-zero {0,0,0,0} default for a style field
+        // that's meant to be off until explicitly given a real color (an edge bevel, a checkmark,
+        // label text, ...), the same role a null BLVar played for these before they were plain,
+        // reflectable Color fields (BLVar itself can't be - reflection.h, writes silently drop
+        // it). Named rather than a bare {0.0f, 0.0f, 0.0f, 0.0f} literal at each field's own
+        // declaration, so the intent ("this field starts unset") reads directly at the call site.
+        static constexpr Color null() noexcept { return Color(0.0f, 0.0f, 0.0f, 0.0f); }
+
+        // True only for the exact null() sentinel above. A deliberately-set fully-transparent
+        // color with real r/g/b (e.g. a fade-out mid-animation) still paints nothing either way
+        // (alpha alone governs that), but isn't treated as "unset" here - only the untouched
+        // default is.
+        bool isNull() const noexcept { return r == 0.0f && g == 0.0f && b == 0.0f && a == 0.0f; }
+
+
         operator BLRgba() const noexcept {
             return toBLRgba();
         }        

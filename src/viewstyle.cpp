@@ -280,6 +280,50 @@ namespace newui {
 		}
 	}
 
+	namespace {
+		// One-time conversion from a raw blend2d BLGradient (what setBackgroundGradient()'s own
+		// public API still takes, for existing callers) into backgroundFill_'s own reflectable
+		// gfx::Gradient representation (graphics.h) - the reverse of Gradient::toBLGradient()
+		// (graphics.cpp), which this mirrors field-for-field. Radial's own r1 (second radius) is
+		// never preserved - gfx::Gradient's own model has no field for it, matching
+		// toBLGradient()'s reverse direction, which always passes 0.0 for it too - not a new
+		// limitation introduced here.
+		gfx::Gradient toGfxGradient(const BLGradient& src) {
+			gfx::Gradient g;
+			switch (src.type()) {
+				case BL_GRADIENT_TYPE_RADIAL: {
+					g.setKind(gfx::GradientKind::Radial);
+					const BLRadialGradientValues& v = src.radial();
+					g.setRadialCenter(Point(float(v.x0), float(v.y0)));
+					g.setRadialFocalOffset(Point(float(v.x1 - v.x0), float(v.y1 - v.y0)));
+					g.setRadialRadius(float(v.r0));
+					break;
+				}
+				case BL_GRADIENT_TYPE_CONIC: {
+					g.setKind(gfx::GradientKind::Conic);
+					const BLConicGradientValues& v = src.conic();
+					g.setConicCenter(Point(float(v.x0), float(v.y0)));
+					g.setConicAngle(float(v.angle));
+					g.setConicRepeat(float(v.repeat));
+					break;
+				}
+				case BL_GRADIENT_TYPE_LINEAR:
+				default: {
+					g.setKind(gfx::GradientKind::Linear);
+					const BLLinearGradientValues& v = src.linear();
+					g.setLinearStart(Point(float(v.x0), float(v.y0)));
+					g.setLinearEnd(Point(float(v.x1), float(v.y1)));
+					break;
+				}
+			}
+			g.setExtendMode(gfx::toExtendMode(src.extend_mode()));
+			for (const BLGradientStop& stop : src.stops_view()) {
+				g.stops().push_back(gfx::GradientStop(float(stop.offset), Color(stop.rgba.value)));
+			}
+			return g;
+		}
+	}
+
 	bool ViewStyle::setBackgroundImage(const std::string& path) {
 		BLImage image;
 		if (image.read_from_file(path.c_str()) != BL_SUCCESS) {
@@ -291,32 +335,33 @@ namespace newui {
 	}
 
 	void ViewStyle::setBackgroundImage(const BLImage& image) {
-		backgroundFill_ = BLPattern(image);
+		backgroundFill_.setImage(image);
+		backgroundFill_.setKind(gfx::PaintKind::Image);
 		bkgFillStyle = FillStyle::FillImage;
 	}
 
 	void ViewStyle::setBackgroundGradient(const BLGradient& gradient)
 	{
-		backgroundFill_ = gradient;
+		backgroundFill_.setGradient(toGfxGradient(gradient));
+		backgroundFill_.setKind(gfx::PaintKind::Gradient);
 		bkgFillStyle = FillStyle::FillGradient;
 	}
 
 	void ViewStyle::setBackgroundColor(const Color& color)
 	{
-		backgroundFill_ = color.toBLRgba32();
+		backgroundFill_.setColor(color);
+		backgroundFill_.setKind(gfx::PaintKind::Color);
 		bkgFillStyle = FillStyle::FillColor;
 	}
 
 	void ViewStyle::setBackgroundColor(const BLRgba32& color)
 	{
-		backgroundFill_ = color;
-		bkgFillStyle = FillStyle::FillColor;
+		setBackgroundColor(Color(color));
 	}
 
 	void ViewStyle::setHilightColor(const Color& color)
 	{
-		highlightFill = color.toBLRgba32();;
-		hilightFillStyle = FillStyle::FillColor;		
+		highlightFill = color;
 	}
 
 	Rect ViewStyle::computeClientBounds(const Size& size) const
@@ -333,18 +378,29 @@ namespace newui {
 			return;
 		}
 
-		bool useHighlight = highlighted && !highlightFill.is_null();
-		const BLVar& background = useHighlight ? highlightFill : backgroundFill_;
-		FillStyle fillStyle = useHighlight ? hilightFillStyle : bkgFillStyle;
+		// highlightFill is solid-color-only (Color, not backgroundFill_'s gfx::Fill) - it never had
+		// a real gradient/image setter or its own FillStyle branching to begin with, just a raw
+		// value read directly, so a plain, unconditional solid fill here is exactly what every
+		// existing caller (only ever setHilightColor()) already produced.
+		bool useHighlight = highlighted && !highlightFill.isNull();
 
 		ctx.save();
 		ctx.set_comp_op( toBLCompOp(compositingOp));
 
+		if (useHighlight) {
+			ctx.set_fill_style(highlightFill.toBLRgba32());
+			ctx.set_fill_alpha(opacity);
 
+			if (rectRadius != 0.0) {
+				ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+			}
+			else {
+				ctx.fill_rect(BLRect(0, 0, size.width, size.height));
+			}
+		}
+		else if (BLVar background = backgroundFill_.toBLVar(Rect(0.0f, 0.0f, size.width, size.height)); !background.is_null()) {
 
-		if (!background.is_null()) {
-
-			switch (fillStyle) {
+			switch (bkgFillStyle) {
 				case FillStyle::FillColor: {
 					ctx.set_fill_style(background);
 					ctx.set_fill_alpha(opacity);
@@ -465,9 +521,9 @@ namespace newui {
 			}
 		}
 
-		if (borderWidth > 0.0f && !borderFill.is_null()) {
+		if (borderWidth > 0.0f && !borderFill.isNull()) {
 			double inset = borderWidth * 0.5;
-			ctx.set_stroke_style(borderFill);
+			ctx.set_stroke_style(borderFill.toBLRgba32());
 			ctx.set_stroke_alpha(opacity);
 			ctx.set_stroke_width(borderWidth);
 
@@ -485,15 +541,16 @@ namespace newui {
 	}
 
 	void ImageFillStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
-		bool useHighlight = highlighted && !highlightFill.is_null();
-		FillStyle fillStyle = useHighlight ? hilightFillStyle : bkgFillStyle;
-		const BLVar& background = useHighlight ? highlightFill : backgroundFill();
+		// highlightFill is solid-color-only now (Color, not backgroundFill()'s gfx::Fill) - it can
+		// never be FillImage, so a checkerboard backdrop is only ever possibly needed for the
+		// *background* fill, regardless of highlighted. Same guards ViewStyle::paint() itself
+		// applies before touching background - mirrored here since this runs *before* delegating
+		// to it, to decide whether there's even an image fill worth backing with a checkerboard in
+		// the first place.
+		bool useHighlight = highlighted && !highlightFill.isNull();
+		BLVar background = backgroundFill().toBLVar(Rect(0.0f, 0.0f, size.width, size.height));
 
-		// Same guards ViewStyle::paint() itself applies before touching
-		// background - mirrored here since this runs *before* delegating
-		// to it, to decide whether there's even an image fill worth
-		// backing with a checkerboard in the first place.
-		if (size.width > 0.0f && size.height > 0.0f && fillStyle == FillStyle::FillImage &&
+		if (!useHighlight && size.width > 0.0f && size.height > 0.0f && bkgFillStyle == FillStyle::FillImage &&
 				!background.is_null() && background.is_pattern()) {
 			BLImage img = background.as<BLPattern>().get_image();
 

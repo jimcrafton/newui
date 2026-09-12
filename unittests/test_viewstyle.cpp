@@ -393,7 +393,7 @@ TEST(ViewStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
 
 TEST(ViewStyle, SetBackgroundImageFromBLImageSetsAPatternFill) {
     newui::ViewStyle style;
-    EXPECT_TRUE(style.backgroundFill().is_null());
+    EXPECT_EQ(style.backgroundFill().kind(), newui::gfx::PaintKind::None);
 
     BLImage image(4, 4, BL_FORMAT_PRGB32);
     {
@@ -405,8 +405,10 @@ TEST(ViewStyle, SetBackgroundImageFromBLImageSetsAPatternFill) {
 
     style.setBackgroundImage(image);
 
-    EXPECT_FALSE(style.backgroundFill().is_null());
-    EXPECT_TRUE(style.backgroundFill().is_pattern());
+    EXPECT_EQ(style.backgroundFill().kind(), newui::gfx::PaintKind::Image);
+    BLVar resolved = style.backgroundFill().toBLVar(newui::Rect(0.0f, 0.0f, 4.0f, 4.0f));
+    EXPECT_FALSE(resolved.is_null());
+    EXPECT_TRUE(resolved.is_pattern());
 }
 
 TEST(ViewStyle, SetBackgroundImageSurvivesTheSourceImageGoingOutOfScope) {
@@ -444,7 +446,8 @@ TEST(ViewStyle, SetBackgroundImageFromPathLoadsARealFile) {
     newui::ViewStyle style;
     EXPECT_TRUE(style.setBackgroundImage(path));
 
-    EXPECT_TRUE(style.backgroundFill().is_pattern());
+    EXPECT_EQ(style.backgroundFill().kind(), newui::gfx::PaintKind::Image);
+    EXPECT_TRUE(style.backgroundFill().toBLVar(newui::Rect(0.0f, 0.0f, 4.0f, 4.0f)).is_pattern());
 
     ::DeleteFileA(path.c_str());
 }
@@ -455,10 +458,8 @@ TEST(ViewStyle, SetBackgroundImageFromPathFailsForAMissingFileAndLeavesFillUncha
 
     EXPECT_FALSE(style.setBackgroundImage("NoSuchBackgroundImage.png"));
 
-    ASSERT_TRUE(style.backgroundFill().is_rgba32());
-    BLRgba32 rgba;
-    style.backgroundFill().to_rgba32(&rgba);
-    EXPECT_EQ(rgba.value, BLRgba32(1, 2, 3).value);
+    ASSERT_EQ(style.backgroundFill().kind(), newui::gfx::PaintKind::Color);
+    EXPECT_EQ(style.backgroundFill().color().toBLRgba32().value, BLRgba32(1, 2, 3).value);
 }
 
 TEST(ButtonStyle, ComputeClientBoundsDeflatesByEdgeWidth) {

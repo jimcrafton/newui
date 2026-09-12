@@ -4,6 +4,7 @@
 #include <newui/font.h>
 #include <newui/geometry.h>
 #include <newui/color.h>
+#include <newui/graphics.h>
 
 // <newui/newui.h> already transitively includes <windows.h> with
 // NOMINMAX defined first - see the feedback_no_std_minmax memory if this
@@ -149,11 +150,17 @@ namespace newui {
     CompositingFlag toCompositingFlag(BLCompOp f);
 
     // Common appearance drawn by View::paintStyle() before a view's own
-    // paint() runs. backgroundFill/borderFill/highlightFill are BLVar, so
-    // each can independently hold a solid color (BLRgba32/BLRgba64), a
-    // gradient (BLGradient), or an image (BLPattern wrapping a BLImage
-    // loaded via BLImage::read_from_file()/read_from_data()) - a null
-    // BLVar (the default) means "don't draw that part".
+    // paint() runs. backgroundFill/borderFill/highlightFill are gfx::Fill
+    // (graphics.h), so each can independently hold a solid color, a
+    // gradient, or an image - a default-constructed Fill (kind() ==
+    // gfx::PaintKind::None) means "don't draw that part", resolved to
+    // whatever set_fill_style()/set_stroke_style() actually accepts via
+    // Fill::toBLVar() at paint time. Was raw BLVar until this class's own
+    // "properties panel" story (cpp_codetools) needed these reflectable -
+    // BLVar itself can't be (reflection.h - writes silently drop it,
+    // property.h's IsPodLike check fails it for animation too), same
+    // reasoning ShapeStyle's own fill()/stroke() (shapes.h) already
+    // migrated to Fill/Stroke for.
     //
     // Polymorphic so a View can be handed a ButtonStyle/CheckBoxStyle/
     // custom subclass via View::setStyle() to draw widget-specific chrome
@@ -162,7 +169,7 @@ namespace newui {
     // border, then add whatever's specific to that widget kind.
     class ViewStyle {
     protected:
-        BLVar backgroundFill_;
+        gfx::Fill backgroundFill_;
     public:
         // Explicit, not relying on the implicit compiler-generated one -
         // reflectgen's constructor collection only ever sees a
@@ -177,13 +184,17 @@ namespace newui {
         virtual ~ViewStyle() = default;
 
         
-        const BLVar& backgroundFill() const { return backgroundFill_;  }
+        const gfx::Fill& backgroundFill() const { return backgroundFill_;  }
 
-        BLVar borderFill;
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why. Solid-color only (no gradient/image capability,
+        // unlike backgroundFill_ above) - neither ever had a real setter or paint()-time branching
+        // for anything else, just a raw value read directly, so there's nothing to preserve by
+        // keeping them as gfx::Fill too.
+        Color borderFill = Color::null();
         float borderWidth = 0.0f;
-        BLVar highlightFill;
+        Color highlightFill = Color::null();
         FillStyle bkgFillStyle = FillStyle::FillColor;
-        FillStyle hilightFillStyle = FillStyle::FillColor;
         StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
 
         // How an image fill is drawn - see ImageFillMode's own comment.
@@ -221,15 +232,16 @@ namespace newui {
 
         // Sets backgroundFill to path's image (PNG/BMP/JPEG/QOI - decoded
         // via BLImage::read_from_file(), same codecs Bundle::loadImage()
-        // uses), wrapped in a BLPattern - backgroundFill already supports
-        // this (it's a BLVar, which can hold a solid color, a gradient,
-        // or a BLPattern/image - see the class comment above), this is
-        // just the convenient way to load one from disk. The BLPattern
-        // takes its own independent, refcounted handle to the decoded
-        // image (ordinary BLImage COW semantics), so the local BLImage
-        // this reads into along the way doesn't need to outlive the
-        // call. Returns false (backgroundFill left unchanged) if the
-        // file can't be read/decoded.
+        // uses) - backgroundFill's own setImagePath() (gfx::Fill,
+        // graphics.h) does the actual lazy load/cache; this is just the
+        // convenient "load one from disk and mark this fill as an image"
+        // one-call wrapper (setImagePath() + setKind(Image)), matching
+        // setBackgroundColor()/setBackgroundGradient()'s own shape below.
+        // Returns false (backgroundFill left unchanged) if the file can't
+        // be read/decoded - checked eagerly here (unlike setImagePath()
+        // itself, which only ever discovers a bad path lazily, the next
+        // toBLVar() call) since a caller of *this* method is specifically
+        // asking "did this succeed", not just "remember this path".
         //
         // Deliberately takes a path/BLImage, not a newui::Image
         // (graphics.h) - Image::blImage() wraps a Win32 DIB section's
@@ -242,11 +254,22 @@ namespace newui {
         // there's no such hazard.
         bool setBackgroundImage(const std::string& path);
 
-        // Sets backgroundFill directly from an already-decoded BLImage,
-        // wrapped in a BLPattern - see the path-based overload above for
-        // why this takes a plain BLImage rather than a newui::Image.
+        // Sets backgroundFill directly from an already-decoded BLImage -
+        // gfx::Fill::setImage() (graphics.h) bypasses its own path-based
+        // lazy load for exactly this "already have real pixels in memory,
+        // no file to reflect a path to" case; see the path-based overload
+        // above for why this takes a plain BLImage rather than a
+        // newui::Image.
         void setBackgroundImage(const BLImage& image);
 
+        // Converts the given raw blend2d BLGradient into backgroundFill's
+        // own reflectable gfx::Gradient representation (viewstyle.cpp) -
+        // BLGradient itself isn't reflectable (same reason BLVar wasn't),
+        // so this is a real, lossy-only-in-the-ways-gfx::Gradient itself
+        // already is (a radial gradient's second radius, r1, is never
+        // preserved - gfx::Gradient's own model has no field for it,
+        // matching Gradient::toBLGradient()'s own reverse direction) one-
+        // time conversion, not a live reference to gradient.
         void setBackgroundGradient(const BLGradient& gradient);
 
         void setBackgroundColor(const Color& color);
@@ -331,14 +354,16 @@ namespace newui {
 
         Edge3DStyle edgeStyle = Edge3DStyle::Raised;
         float edgeWidth = 2.0f;
-        BLVar edgeHighlightColor;
-        BLVar edgeShadowColor;
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        Color edgeHighlightColor = Color::null();
+        Color edgeShadowColor = Color::null();
 
         // Etched/Bump are two nested bevels, so they occupy 2x edgeWidth
         // inward from the outer edge; Raised/Sunken are just the one.
         Rect computeClientBounds(const Size& size) const override {
             Rect bounds = ViewStyle::computeClientBounds(size);
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.is_null() && edgeShadowColor.is_null())) {
+            if (edgeWidth <= 0.0f || (edgeHighlightColor.isNull() && edgeShadowColor.isNull())) {
                 return bounds;
             }
             bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
@@ -348,13 +373,13 @@ namespace newui {
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.is_null() && edgeShadowColor.is_null())) {
+            if (edgeWidth <= 0.0f || (edgeHighlightColor.isNull() && edgeShadowColor.isNull())) {
                 return;
             }
 
             ctx.save();
             ctx.set_comp_op(toBLCompOp(compositingOp));
-            paintEdge3D(ctx, size, edgeStyle, edgeHighlightColor, edgeShadowColor, edgeWidth);
+            paintEdge3D(ctx, size, edgeStyle, BLVar(edgeHighlightColor.toBLRgba32()), BLVar(edgeShadowColor.toBLRgba32()), edgeWidth);
             ctx.restore();
         }
 
@@ -389,7 +414,9 @@ namespace newui {
     class LabelStyle : public ViewStyle {
     public:
         std::string text;
-        BLVar textColor;
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        Color textColor = Color::null();
 
         LabelStyle() {
 			font = FontManager::getSystemFont(SystemUIFont::Message);
@@ -398,7 +425,7 @@ namespace newui {
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (text.empty() || textColor.is_null()) {
+            if (text.empty() || textColor.isNull()) {
                 return;
             }
 
@@ -427,7 +454,7 @@ namespace newui {
 
             ctx.save();
             ctx.set_comp_op(toBLCompOp(compositingOp));
-            ctx.set_fill_style(textColor);
+            ctx.set_fill_style(textColor.toBLRgba32());
             ctx.set_fill_alpha(opacity);
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
 
@@ -463,10 +490,12 @@ namespace newui {
         float boxSize = 13.0f;
         Edge3DStyle boxEdgeStyle = Edge3DStyle::Sunken;
         float boxEdgeWidth = 2.0f;
-        BLVar boxFill;
-        BLVar boxEdgeHighlightColor;
-        BLVar boxEdgeShadowColor;
-        BLVar checkColor;
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        Color boxFill = Color::null();
+        Color boxEdgeHighlightColor = Color::null();
+        Color boxEdgeShadowColor = Color::null();
+        Color checkColor = Color::null();
         float checkWidth = 2.0f;
 
         // Gap left between the box and clientBounds, e.g. for a label
@@ -498,17 +527,17 @@ namespace newui {
             ctx.set_comp_op(toBLCompOp(compositingOp));
             ctx.translate(0.0, boxTop);
 
-            if (!boxFill.is_null()) {
-                ctx.set_fill_style(boxFill);
+            if (!boxFill.isNull()) {
+                ctx.set_fill_style(boxFill.toBLRgba32());
                 ctx.fill_rect(BLRect(0, 0, boxSize, boxSize));
             }
 
             if (boxEdgeWidth > 0.0f) {
-                paintEdge3D(ctx, boxViewSize, boxEdgeStyle, boxEdgeHighlightColor, boxEdgeShadowColor, boxEdgeWidth);
+                paintEdge3D(ctx, boxViewSize, boxEdgeStyle, BLVar(boxEdgeHighlightColor.toBLRgba32()), BLVar(boxEdgeShadowColor.toBLRgba32()), boxEdgeWidth);
             }
 
-            if (checked && !checkColor.is_null()) {
-                ctx.set_stroke_style(checkColor);
+            if (checked && !checkColor.isNull()) {
+                ctx.set_stroke_style(checkColor.toBLRgba32());
                 ctx.set_stroke_width(checkWidth);
                 float inset = boxSize * 0.2f;
                 ctx.stroke_line(inset, boxSize * 0.5f, boxSize * 0.45f, boxSize - inset);
