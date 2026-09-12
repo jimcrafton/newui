@@ -913,7 +913,7 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
     panel.setLayout(std::move(flex));
 
     auto label = std::make_unique<newui::LabelStyle>();
-    label->text = "Hello from style()";
+    label->setText("Hello from style()");
     panel.setStyle(std::move(label));
 
     ASSERT_TRUE(newui::Bundle::instance().writeView(panel, "BundleWriteLayoutStyle"));
@@ -929,7 +929,7 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
 
     auto* reloadedStyle = dynamic_cast<newui::LabelStyle*>(&reloaded->style());
     ASSERT_NE(reloadedStyle, nullptr);
-    EXPECT_EQ(reloadedStyle->text, "Hello from style()");
+    EXPECT_EQ(reloadedStyle->text(), "Hello from style()");
 
     reloaded->destroy();
     delete reloaded;
