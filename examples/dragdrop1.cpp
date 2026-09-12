@@ -188,8 +188,8 @@ int main() {
     dragSource->setVisible(true);
     dragSource->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     dragSource->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-    dragSource->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    dragSource->style().borderWidth = 1.0f;
+    dragSource->style().setBorderFill(newui::Color::fromName("dimgray"));
+    dragSource->style().setBorderWidth(1.0f);
     root.addChild(dragSource);
 
     auto* dragFileSourceHint = new newui::Label();

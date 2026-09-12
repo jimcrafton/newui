@@ -251,8 +251,8 @@ TEST(ViewStyle, MarkDirtyDoesNotCrashWithNoLiveRootView) {
 TEST(ViewStyle, BorderDeflatesClientBoundsByBorderWidth) {
     newui::ViewStyle style;
     style.setBackgroundColor( BLRgba32(255, 0, 0));
-    style.borderFill = BLRgba32(0, 0, 255);
-    style.borderWidth = 2.0f;
+    style.setBorderFill(BLRgba32(0, 0, 255));
+    style.setBorderWidth(2.0f);
 
     newui::Rect clientBounds;
     style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -265,10 +265,10 @@ TEST(ViewStyle, BorderDeflatesClientBoundsByBorderWidth) {
 
 TEST(ButtonStyle, RaisedEdgeDeflatesClientBoundsByEdgeWidth) {
     newui::ButtonStyle btn;
-    btn.edgeStyle = newui::Edge3DStyle::Raised;
-    btn.edgeWidth = 2.0f;
-    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
-    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+    btn.setEdgeStyle(newui::Edge3DStyle::Raised);
+    btn.setEdgeWidth(2.0f);
+    btn.setEdgeHighlightColor(BLRgba32(255, 255, 255));
+    btn.setEdgeShadowColor(BLRgba32(64, 64, 64));
 
     newui::Rect clientBounds;
     btn.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -281,10 +281,10 @@ TEST(ButtonStyle, RaisedEdgeDeflatesClientBoundsByEdgeWidth) {
 // 2*edgeWidth inward from the outer edge - unlike Raised/Sunken's one.
 TEST(ButtonStyle, EtchedEdgeDeflatesClientBoundsByTwiceEdgeWidth) {
     newui::ButtonStyle btn;
-    btn.edgeStyle = newui::Edge3DStyle::Etched;
-    btn.edgeWidth = 2.0f;
-    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
-    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+    btn.setEdgeStyle(newui::Edge3DStyle::Etched);
+    btn.setEdgeWidth(2.0f);
+    btn.setEdgeHighlightColor(BLRgba32(255, 255, 255));
+    btn.setEdgeShadowColor(BLRgba32(64, 64, 64));
 
     newui::Rect clientBounds;
     btn.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -295,12 +295,12 @@ TEST(ButtonStyle, EtchedEdgeDeflatesClientBoundsByTwiceEdgeWidth) {
 
 TEST(ButtonStyle, BorderAndEdgeDeflationsAreAdditive) {
     newui::ButtonStyle btn;
-    btn.borderFill = BLRgba32(0, 0, 0);
-    btn.borderWidth = 1.0f;
-    btn.edgeStyle = newui::Edge3DStyle::Raised;
-    btn.edgeWidth = 2.0f;
-    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
-    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+    btn.setBorderFill(BLRgba32(0, 0, 0));
+    btn.setBorderWidth(1.0f);
+    btn.setEdgeStyle(newui::Edge3DStyle::Raised);
+    btn.setEdgeWidth(2.0f);
+    btn.setEdgeHighlightColor(BLRgba32(255, 255, 255));
+    btn.setEdgeShadowColor(BLRgba32(64, 64, 64));
 
     newui::Rect clientBounds;
     btn.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -310,7 +310,7 @@ TEST(ButtonStyle, BorderAndEdgeDeflationsAreAdditive) {
 
 TEST(ButtonStyle, ZeroEdgeWidthLeavesBaseClientBoundsUnchanged) {
     newui::ButtonStyle btn;
-    btn.edgeWidth = 0.0f;
+    btn.setEdgeWidth(0.0f);
 
     newui::Rect clientBounds;
     btn.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -321,10 +321,10 @@ TEST(ButtonStyle, ZeroEdgeWidthLeavesBaseClientBoundsUnchanged) {
 
 TEST(CheckBoxStyle, BoxAndSpacingDeflateOnlyTheLeftSide) {
     newui::CheckBoxStyle cb;
-    cb.boxSize = 13.0f;
-    cb.boxLabelSpacing = 4.0f;
-    cb.boxFill = BLRgba32(255, 255, 255);
-    cb.checkColor = BLRgba32(0, 0, 0);
+    cb.setBoxSize(13.0f);
+    cb.setBoxLabelSpacing(4.0f);
+    cb.setBoxFill(BLRgba32(255, 255, 255));
+    cb.setCheckColor(BLRgba32(0, 0, 0));
 
     newui::Rect clientBounds;
     cb.paint(SharedContext(), newui::Size(100, 20), false, clientBounds);
@@ -337,15 +337,15 @@ TEST(CheckBoxStyle, BoxAndSpacingDeflateOnlyTheLeftSide) {
 
 TEST(CheckBoxStyle, CheckedStatePaintsWithoutAlteringClientBounds) {
     newui::CheckBoxStyle cb;
-    cb.boxSize = 13.0f;
-    cb.checkColor = BLRgba32(0, 0, 0);
+    cb.setBoxSize(13.0f);
+    cb.setCheckColor(BLRgba32(0, 0, 0));
 
     newui::Rect uncheckedBounds;
-    cb.checked = false;
+    cb.setChecked(false);
     cb.paint(SharedContext(), newui::Size(100, 20), false, uncheckedBounds);
 
     newui::Rect checkedBounds;
-    cb.checked = true;
+    cb.setChecked(true);
     cb.paint(SharedContext(), newui::Size(100, 20), false, checkedBounds);
 
     EXPECT_FLOAT_EQ(uncheckedBounds.left(), checkedBounds.left());
@@ -368,7 +368,7 @@ TEST(ViewStyle, ComputeClientBoundsMatchesNoBorderCase) {
 
 TEST(ViewStyle, ComputeClientBoundsDeflatesByBorderWidth) {
     newui::ViewStyle style;
-    style.borderWidth = 2.0f;
+    style.setBorderWidth(2.0f);
 
     newui::Rect clientBounds = style.computeClientBounds(newui::Size(64, 64));
 
@@ -380,8 +380,8 @@ TEST(ViewStyle, ComputeClientBoundsDeflatesByBorderWidth) {
 
 TEST(ViewStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
     newui::ViewStyle style;
-    style.borderFill = BLRgba32(0, 0, 255);
-    style.borderWidth = 3.0f;
+    style.setBorderFill(BLRgba32(0, 0, 255));
+    style.setBorderWidth(3.0f);
 
     newui::Rect computed = style.computeClientBounds(newui::Size(64, 64));
 
@@ -464,10 +464,10 @@ TEST(ViewStyle, SetBackgroundImageFromPathFailsForAMissingFileAndLeavesFillUncha
 
 TEST(ButtonStyle, ComputeClientBoundsDeflatesByEdgeWidth) {
     newui::ButtonStyle btn;
-    btn.edgeStyle = newui::Edge3DStyle::Raised;
-    btn.edgeWidth = 2.0f;
-    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
-    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+    btn.setEdgeStyle(newui::Edge3DStyle::Raised);
+    btn.setEdgeWidth(2.0f);
+    btn.setEdgeHighlightColor(BLRgba32(255, 255, 255));
+    btn.setEdgeShadowColor(BLRgba32(64, 64, 64));
 
     newui::Rect clientBounds = btn.computeClientBounds(newui::Size(64, 64));
 
@@ -477,10 +477,10 @@ TEST(ButtonStyle, ComputeClientBoundsDeflatesByEdgeWidth) {
 
 TEST(ButtonStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
     newui::ButtonStyle btn;
-    btn.edgeStyle = newui::Edge3DStyle::Etched;
-    btn.edgeWidth = 2.0f;
-    btn.edgeHighlightColor = BLRgba32(255, 255, 255);
-    btn.edgeShadowColor = BLRgba32(64, 64, 64);
+    btn.setEdgeStyle(newui::Edge3DStyle::Etched);
+    btn.setEdgeWidth(2.0f);
+    btn.setEdgeHighlightColor(BLRgba32(255, 255, 255));
+    btn.setEdgeShadowColor(BLRgba32(64, 64, 64));
 
     newui::Rect computed = btn.computeClientBounds(newui::Size(64, 64));
 
@@ -492,8 +492,8 @@ TEST(ButtonStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
 
 TEST(CheckBoxStyle, ComputeClientBoundsDeflatesOnlyTheLeftSide) {
     newui::CheckBoxStyle cb;
-    cb.boxSize = 13.0f;
-    cb.boxLabelSpacing = 4.0f;
+    cb.setBoxSize(13.0f);
+    cb.setBoxLabelSpacing(4.0f);
 
     newui::Rect clientBounds = cb.computeClientBounds(newui::Size(100, 20));
 
@@ -504,10 +504,10 @@ TEST(CheckBoxStyle, ComputeClientBoundsDeflatesOnlyTheLeftSide) {
 
 TEST(CheckBoxStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
     newui::CheckBoxStyle cb;
-    cb.boxSize = 13.0f;
-    cb.boxLabelSpacing = 4.0f;
-    cb.boxFill = BLRgba32(255, 255, 255);
-    cb.checkColor = BLRgba32(0, 0, 0);
+    cb.setBoxSize(13.0f);
+    cb.setBoxLabelSpacing(4.0f);
+    cb.setBoxFill(BLRgba32(255, 255, 255));
+    cb.setCheckColor(BLRgba32(0, 0, 0));
 
     newui::Rect computed = cb.computeClientBounds(newui::Size(100, 20));
 
@@ -523,7 +523,7 @@ TEST(CheckBoxStyle, ComputeClientBoundsAgreesWithPaintsOutParameter) {
 
 TEST(LabelStyle, EmptyTextDoesNotCrashAndLeavesClientBoundsAtFullSize) {
     newui::LabelStyle style;
-    style.textColor = BLRgba32(0, 0, 0);
+    style.setTextColor(BLRgba32(0, 0, 0));
 
     newui::Rect clientBounds;
     style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -534,7 +534,7 @@ TEST(LabelStyle, EmptyTextDoesNotCrashAndLeavesClientBoundsAtFullSize) {
 
 TEST(LabelStyle, NullTextColorDoesNotCrash) {
     newui::LabelStyle style;
-    style.text = "Hello";
+    style.setText("Hello");
 
     newui::Rect clientBounds;
     style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -544,9 +544,9 @@ TEST(LabelStyle, NullTextColorDoesNotCrash) {
 
 TEST(LabelStyle, UnresolvedFontDoesNotCrash) {
     newui::LabelStyle style;
-    style.text = "Hello";
-    style.textColor = BLRgba32(0, 0, 0);
-    // style.font is default-constructed (empty name), so blFont() -> nullptr.
+    style.setText("Hello");
+    style.setTextColor(BLRgba32(0, 0, 0));
+    // style.font() is default-constructed (empty name), so blFont() -> nullptr.
 
     newui::Rect clientBounds;
     style.paint(SharedContext(), newui::Size(64, 64), false, clientBounds);
@@ -571,10 +571,12 @@ TEST(LabelStyle, TextIsCenteredWithinClientBounds) {
     BLContext ctx(image);
 
     newui::LabelStyle style;
-    style.text = "Test";
-    style.textColor = BLRgba32(0, 0, 0, 255);
-    style.font.setName(fonts[0].name);
-    style.font.setSize(24.0f);
+    style.setText("Test");
+    style.setTextColor(BLRgba32(0, 0, 0, 255));
+    newui::Font font = style.font();
+    font.setName(fonts[0].name);
+    font.setSize(24.0f);
+    style.setFont(font);
 
     newui::Rect clientBounds;
     style.paint(ctx, newui::Size(float(width), float(height)), false, clientBounds);
