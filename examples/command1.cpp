@@ -68,7 +68,7 @@ public:
           pasteAction_(newui::commands::paste, "Paste") {
         auto style = std::make_unique<newui::LabelStyle>();
         labelStyle_ = style.get();
-        labelStyle_->textColor = newui::UIColorManager::colorFor(newui::UIColorRole::WindowText).toBLRgba32();
+        labelStyle_->setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowText));
         setStyle(std::move(style));
         setVisible(true);
         setDesiredSize(newui::Size(0.0f, 60.0f));
@@ -114,7 +114,7 @@ public:
 
     void setText(std::string text) {
         text_ = std::move(text);
-        labelStyle_->text = label_ + ": " + (text_.empty() ? "(empty)" : text_);
+        labelStyle_->setText(label_ + ": " + (text_.empty() ? "(empty)" : text_));
         style().markDirty();
     }
 
@@ -269,8 +269,8 @@ int main() {
     auto* instructions = new newui::SubView();
     instructions->setVisible(true);
     auto instructionsStyle = std::make_unique<newui::LabelStyle>();
-    instructionsStyle->text = "Click a note below, then Edit > Copy/Paste (or Ctrl+C/Ctrl+V). Lock a note to veto focus leaving it.";
-    instructionsStyle->textColor = newui::UIColorManager::colorFor(newui::UIColorRole::WindowText).toBLRgba32();
+    instructionsStyle->setText("Click a note below, then Edit > Copy/Paste (or Ctrl+C/Ctrl+V). Lock a note to veto focus leaving it.");
+    instructionsStyle->setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowText));
     instructionsStyle->setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
     instructions->setStyle(std::move(instructionsStyle));
     instructions->setDesiredSize(newui::Size(0.0f, 20.0f));

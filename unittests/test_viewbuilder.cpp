@@ -83,10 +83,10 @@ TEST(ViewBuilder, TemplatedLayoutConfiguresRealLayoutBeforeAttaching) {
 
 TEST(ViewBuilder, TemplatedStyleConfiguresRealStyleBeforeAttaching) {
     auto* view = newui::ViewBuilder<newui::SubView>()
-        .style<newui::ViewStyle>([](newui::ViewStyle& s) { s.borderWidth = 3.0f; })
+        .style<newui::ViewStyle>([](newui::ViewStyle& s) { s.setBorderWidth(3.0f); })
         .build();
 
-    EXPECT_FLOAT_EQ(view->style().borderWidth, 3.0f);
+    EXPECT_FLOAT_EQ(view->style().borderWidth(), 3.0f);
 
     delete view;
 }

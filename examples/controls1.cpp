@@ -48,7 +48,7 @@ newui::SubView* MakeLabel(const std::string& text) {
     auto* label = new newui::SubView();
     label->setVisible(true);
     auto style = std::make_unique<newui::LabelStyle>();
-    style->text = text;
+    style->setText(text);
     // UIColorManager::colorFor(), not a hardcoded literal - matches
     // root's own backgroundFill below (see main()), which follows the
     // same reasoning: this toolkit's native controls (Progress/Button)
@@ -58,7 +58,7 @@ newui::SubView* MakeLabel(const std::string& text) {
     // UIColorManager::colorFor() or they drift out of sync with it -
     // concretely, hardcoded black text landing on an unexpectedly
     // dark-inverted native control face.
-    style->textColor = newui::UIColorManager::colorFor(newui::UIColorRole::WindowText).toBLRgba32();
+    style->setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowText));
     // Without an opaque fill of its own, this label's glyphs would get
     // alpha-blended directly onto whatever was already there on every
     // repaint (root's own background fill is scoped to dirtyRect_, but

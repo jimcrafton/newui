@@ -390,8 +390,8 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
     panel->setName(name);
     panel->setVisible(true);
     panel->style().setBackgroundColor( newui::Color::fromName(backgroundColorName) );
-    panel->style().borderFill = newui::Color::fromName(borderColorName).toBLRgba32();
-    panel->style().borderWidth = borderWidth;
+    panel->style().setBorderFill(newui::Color::fromName(borderColorName).toBLRgba32());
+    panel->style().setBorderWidth(borderWidth);
     return panel;
 }
 

@@ -81,8 +81,8 @@ int main() {
 
     labelStyle->setBackgroundColor(newui::Color::fromSystemColor(newui::SystemColor::ButtonHighlight));
 
-	labelStyle->text = "Hello, World!";
-    labelStyle->textColor = newui::Color::fromName("black").toBLRgba32();
+	labelStyle->setText("Hello, World!");
+    labelStyle->setTextColor(newui::Color::fromName("black"));
 
     // Grab the raw address before ownership moves into v below - the
     // AnimatedLabelStyle itself lives on the heap and doesn't move; only

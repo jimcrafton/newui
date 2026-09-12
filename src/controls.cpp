@@ -134,7 +134,7 @@ namespace newui {
 
         auto buttonStyle = std::make_unique<ThemedButtonStyle>();
         buttonStyle_ = buttonStyle.get();
-        buttonStyle_->font = FontManager::getSystemFont(SystemUIFont::Message);
+        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         // UIColorManager::colorFor(), not Color::fromSystemColor() - the
@@ -226,7 +226,7 @@ namespace newui {
             return;
         }
 
-        BLFont* blFont = buttonStyle_->font.blFont();
+        BLFont* blFont = buttonStyle_->font().blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
             throw std::runtime_error("Button::paint: font not resolved to a valid BLFont");
         }
@@ -259,9 +259,9 @@ namespace newui {
             : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
         ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
+        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
         ctx.set_fill_style(effectiveTextColor);
-        ctx.set_fill_alpha(buttonStyle_->opacity);
+        ctx.set_fill_alpha(buttonStyle_->opacity());
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
         ctx.restore();
     }
@@ -383,7 +383,7 @@ namespace newui {
             return;
         }
         text_ = text;
-        labelStyle_->text = text;
+        labelStyle_->setText(text);
         style().markDirty();
     }
 
@@ -392,7 +392,9 @@ namespace newui {
             return;
         }
         hotLink_ = value;
-        labelStyle_->font.setUnderlined(hotLink_);
+        Font labelFont = labelStyle_->font();
+        labelFont.setUnderlined(hotLink_);
+        labelStyle_->setFont(labelFont);
         // Only while enabled - matches updateTextColor()'s own "disabled
         // never invites a hyperlink click" rule, so a disabled hot-link
         // Label doesn't show a hand cursor for a click that won't do
@@ -431,11 +433,11 @@ namespace newui {
 
     void Label::updateTextColor() {
         if (!isEnabled()) {
-            labelStyle_->textColor = UIColorManager::colorFor(UIColorRole::DisabledText);
+            labelStyle_->setTextColor(UIColorManager::colorFor(UIColorRole::DisabledText));
         } else if (hotLink_) {
-            labelStyle_->textColor = colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_);
+            labelStyle_->setTextColor(colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_));
         } else {
-            labelStyle_->textColor = colorFromSolidBLVar(textColor_);
+            labelStyle_->setTextColor(colorFromSolidBLVar(textColor_));
         }
         style().markDirty();
     }
@@ -1699,8 +1701,8 @@ namespace newui {
         // Tile default - see this class's own comment (controls.h) for
         // why a dedicated image control's default should differ from the
         // base ViewStyle default every other image-filled View shares.
-        imageStyle->imageFillMode = ImageFillMode::Align;
-        imageStyle->imageAlignment = ImageAlignment::Center;
+        imageStyle->setImageFillMode(ImageFillMode::Align);
+        imageStyle->setImageAlignment(ImageAlignment::Center);
         setStyle(std::move(imageStyle));
 
         onImagePathChanged.add(this, &Image::updateImage);
@@ -1716,13 +1718,13 @@ namespace newui {
 
     void Image::setImageFillMode(ImageFillMode mode)
     {
-        style().imageFillMode = mode;
+        style().setImageFillMode(mode);
         style().markDirty();
     }
 
     void Image::setImageAlignment(ImageAlignment align)
     {
-        style().imageAlignment = align;
+        style().setImageAlignment(align);
         style().markDirty();
     }
 
@@ -1765,7 +1767,7 @@ namespace newui {
 
         auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
         buttonStyle_ = buttonStyle.get();
-        buttonStyle_->font = FontManager::getSystemFont(SystemUIFont::Message);
+        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
@@ -1865,7 +1867,7 @@ namespace newui {
         double textWidth = 0.0;
         double textHeight = 0.0;
         if (hasText) {
-            blFont = buttonStyle_->font.blFont();
+            blFont = buttonStyle_->font().blFont();
             if (blFont == nullptr || !blFont->is_valid()) {
                 throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
             }
@@ -1913,9 +1915,9 @@ namespace newui {
                 : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
             ctx.save();
-            ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
+            ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
             ctx.set_fill_style(effectiveTextColor);
-            ctx.set_fill_alpha(buttonStyle_->opacity);
+            ctx.set_fill_alpha(buttonStyle_->opacity());
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
             ctx.restore();
         }

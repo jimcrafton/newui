@@ -231,26 +231,26 @@ SubView* demoWriter()
     app.setFrame(frame);
 
     RootView& root = frame->rootView();
-    root.style().borderWidth = 2.0f;
-    root.style().opacity = 1.0f;
+    root.style().setBorderWidth(2.0f);
+    root.style().setOpacity(1.0f);
 
     SubView* panel = new SubView();
     panel->setName("panel");
     panel->setBounds(Rect(10.0f, 10.0f, 300.0f, 200.0f));
-    panel->style().borderWidth = 1.0f;
-    panel->style().opacity = 0.9f;
+    panel->style().setBorderWidth(1.0f);
+    panel->style().setOpacity(0.9f);
     root.addChild(panel);
 
     SubView* child1 = new SubView();
     child1->setName("child1");
     child1->setBounds(Rect(0.0f, 0.0f, 100.0f, 40.0f));
-    child1->style().borderWidth = 0.5f;
+    child1->style().setBorderWidth(0.5f);
     panel->addChild(child1);
 
     SubView* child2 = new SubView();
     child2->setName("child2");
     child2->setBounds(Rect(0.0f, 50.0f, 100.0f, 40.0f));
-    child2->style().borderWidth = 0.75f;
+    child2->style().setBorderWidth(0.75f);
     panel->addChild(child2);
 
     SubView* sibling = new SubView();
@@ -460,8 +460,8 @@ void demoRoundTrip(SubView* panel) {
 
     check("name matches", freshPanel.name() == panel->name());
     check("bounds matches", freshPanel.bounds() == panel->bounds());
-    check("style.borderWidth matches", freshPanel.style().borderWidth == panel->style().borderWidth);
-    check("style.opacity matches", freshPanel.style().opacity == panel->style().opacity);
+    check("style.borderWidth matches", freshPanel.style().borderWidth() == panel->style().borderWidth());
+    check("style.opacity matches", freshPanel.style().opacity() == panel->style().opacity());
     check("child count matches", freshPanel.childViews().size() == panel->childViews().size());
     check("grandchild names match",
         freshPanel.childViews().size() == 2 &&

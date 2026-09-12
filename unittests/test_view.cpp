@@ -58,7 +58,7 @@ TEST(ViewGetClientBounds, ReflectsStyleImmediatelyAfterSetStyle) {
     view->setBounds(newui::Rect(0, 0, 100, 50));
 
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 5.0f;
+    style->setBorderWidth(5.0f);
     view->setStyle(std::move(style));
 
     const newui::Rect clientBounds = view->getClientBounds();
@@ -71,7 +71,7 @@ TEST(ViewGetClientBounds, ReflectsStyleImmediatelyAfterSetStyle) {
 TEST(ViewGetClientBounds, ReflectsBoundsChangeWithoutAPriorPaint) {
     auto* view = new newui::SubView();
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 2.0f;
+    style->setBorderWidth(2.0f);
     view->setStyle(std::move(style));
 
     view->setBounds(newui::Rect(0, 0, 64, 64));

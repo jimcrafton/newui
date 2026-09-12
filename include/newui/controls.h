@@ -1073,10 +1073,10 @@ namespace newui {
         // ViewStyle's own base default of Tile - a control meant to show
         // one picture/icon should show it once, centered, not repeated,
         // unless asked otherwise.
-        ImageFillMode imageFillMode() const { return style().imageFillMode; }
+        ImageFillMode imageFillMode() const { return style().imageFillMode(); }
         void setImageFillMode(ImageFillMode mode);
 
-        ImageAlignment imageAlignment() const { return style().imageAlignment; }
+        ImageAlignment imageAlignment() const { return style().imageAlignment(); }
         void setImageAlignment(ImageAlignment align);
 
 

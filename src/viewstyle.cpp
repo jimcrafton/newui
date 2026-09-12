@@ -358,14 +358,14 @@ namespace newui {
 
 	void ViewStyle::setHilightColor(const Color& color)
 	{
-		highlightFill = color;
+		highlightFill_ = color;
 	}
 
 	Rect ViewStyle::computeClientBounds(const Size& size) const
 	{
 		Rect result(0.0f, 0.0f, size.width, size.height);
 
-		return result.deflate(borderWidth);
+		return result.deflate(borderWidth_);
 	}
 	void ViewStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const
 	{
@@ -379,31 +379,37 @@ namespace newui {
 		// a real gradient/image setter or its own FillStyle branching to begin with, just a raw
 		// value read directly, so a plain, unconditional solid fill here is exactly what every
 		// existing caller (only ever setHilightColor()) already produced.
-		bool useHighlight = highlighted && !highlightFill.isNull();
+		bool useHighlight = highlighted && !highlightFill_.isNull();
 
 		ctx.save();
-		ctx.set_comp_op( toBLCompOp(compositingOp));
+		ctx.set_comp_op( toBLCompOp(compositingOp_));
 
 		if (useHighlight) {
-			ctx.set_fill_style(highlightFill.toBLRgba32());
-			ctx.set_fill_alpha(opacity);
+			ctx.set_fill_style(highlightFill_.toBLRgba32());
+			ctx.set_fill_alpha(opacity_);
 
-			if (rectRadius != 0.0) {
-				ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+			if (rectRadius_ != 0.0) {
+				ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius_));
 			}
 			else {
 				ctx.fill_rect(BLRect(0, 0, size.width, size.height));
 			}
 		}
 		else if (BLVar background = backgroundFill_.toBLVar(Rect(0.0f, 0.0f, size.width, size.height)); !background.is_null()) {
+			// backgroundFill_'s own opacity() (gfx::Fill, graphics.h - already used correctly by
+			// the Shapes system, shapes.cpp) combines multiplicatively with this style's own
+			// opacity - a real, live-caught bug otherwise: backgroundFill_.opacity() was a real,
+			// editable Properties-panel field that had no effect on anything at all, since every
+			// set_fill_alpha() call here only ever read the outer, pre-existing ViewStyle::opacity.
+			float backgroundAlpha = opacity_ * backgroundFill_.opacity();
 
 			switch (backgroundFill_.kind()) {
 				case gfx::PaintKind::Color: {
 					ctx.set_fill_style(background);
-					ctx.set_fill_alpha(opacity);
+					ctx.set_fill_alpha(backgroundAlpha);
 
-					if (rectRadius != 0.0) {
-						ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+					if (rectRadius_ != 0.0) {
+						ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius_));
 					}
 					else {
 						ctx.fill_rect(BLRect(0, 0, size.width, size.height));
@@ -418,10 +424,10 @@ namespace newui {
 					// reinterpreting it as one.
 					if (!background.is_pattern()) {
 						ctx.set_fill_style(background);
-						ctx.set_fill_alpha(opacity);
+						ctx.set_fill_alpha(backgroundAlpha);
 
-						if (rectRadius != 0.0) {
-							ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+						if (rectRadius_ != 0.0) {
+							ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius_));
 						}
 						else {
 							ctx.fill_rect(BLRect(0, 0, size.width, size.height));
@@ -433,13 +439,13 @@ namespace newui {
 					BLImage img = pattern.get_image();
 					BLSizeI imgSize = img.size();
 
-					ctx.set_fill_alpha(opacity);
+					ctx.set_fill_alpha(backgroundAlpha);
 
 					if (imgSize.w <= 0 || imgSize.h <= 0) {
 						break;  // nothing decoded - no natural size to tile/stretch/align against
 					}
 
-					switch (imageFillMode) {
+					switch (imageFillMode_) {
 						case ImageFillMode::Stretch: {
 							// Scaled to exactly cover the fill rect (ignores
 							// the image's own aspect ratio) - PAD rather
@@ -453,8 +459,8 @@ namespace newui {
 								double(size.height) / double(imgSize.h)));
 							ctx.set_fill_style(pattern);
 
-							if (rectRadius != 0.0) {
-								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+							if (rectRadius_ != 0.0) {
+								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius_));
 							}
 							else {
 								ctx.fill_rect(BLRect(0, 0, size.width, size.height));
@@ -471,7 +477,7 @@ namespace newui {
 							// across the rest of the fill rect the way
 							// BL_EXTEND_MODE_PAD would if the fill shape
 							// were the full rect instead.
-							BLPoint offset = alignedImageOffset(imageAlignment, imgSize, size);
+							BLPoint offset = alignedImageOffset(imageAlignment_, imgSize, size);
 							pattern.set_extend_mode(BL_EXTEND_MODE_PAD);
 							pattern.set_transform(BLMatrix2D::make_translation(offset));
 							ctx.set_fill_style(pattern);
@@ -495,8 +501,8 @@ namespace newui {
 							pattern.reset_transform();
 							ctx.set_fill_style(pattern);
 
-							if (rectRadius != 0.0) {
-								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius));
+							if (rectRadius_ != 0.0) {
+								ctx.fill_round_rect(BLRoundRect(0, 0, size.width, size.height, rectRadius_));
 							}
 							else {
 								ctx.fill_rect(BLRect(0, 0, size.width, size.height));
@@ -509,7 +515,7 @@ namespace newui {
 
 				case gfx::PaintKind::Gradient: {
 					ctx.set_fill_style(background);
-					ctx.set_fill_alpha(opacity);
+					ctx.set_fill_alpha(backgroundAlpha);
 					ctx.fill_rect(BLRect(0, 0, size.width, size.height));
 				}
 				break;
@@ -520,14 +526,14 @@ namespace newui {
 			}
 		}
 
-		if (borderWidth > 0.0f && !borderFill.isNull()) {
-			double inset = borderWidth * 0.5;
-			ctx.set_stroke_style(borderFill.toBLRgba32());
-			ctx.set_stroke_alpha(opacity);
-			ctx.set_stroke_width(borderWidth);
+		if (borderWidth_ > 0.0f && !borderFill_.isNull()) {
+			double inset = borderWidth_ * 0.5;
+			ctx.set_stroke_style(borderFill_.toBLRgba32());
+			ctx.set_stroke_alpha(opacity_);
+			ctx.set_stroke_width(borderWidth_);
 
-			if (rectRadius != 0.0) {
-				ctx.stroke_round_rect(BLRoundRect(inset, inset, size.width - inset, size.height - inset, rectRadius));
+			if (rectRadius_ != 0.0) {
+				ctx.stroke_round_rect(BLRoundRect(inset, inset, size.width - inset, size.height - inset, rectRadius_));
 			}
 			else {
 				ctx.stroke_box(inset, inset, size.width - inset, size.height - inset);
@@ -546,7 +552,7 @@ namespace newui {
 		// applies before touching background - mirrored here since this runs *before* delegating
 		// to it, to decide whether there's even an image fill worth backing with a checkerboard in
 		// the first place.
-		bool useHighlight = highlighted && !highlightFill.isNull();
+		bool useHighlight = highlighted && !highlightFill().isNull();
 		BLVar background = backgroundFill().toBLVar(Rect(0.0f, 0.0f, size.width, size.height));
 
 		if (!useHighlight && size.width > 0.0f && size.height > 0.0f && backgroundFill().kind() == gfx::PaintKind::Image &&
@@ -558,9 +564,9 @@ namespace newui {
 			// channel" signal - blend2d's PNG decoder already resolved
 			// that question once, at load time.
 			if (img.format() == BL_FORMAT_PRGB32) {
-				double cs = double(checkerSize > 0.0f ? checkerSize : 8.0f);
-				BLRgba32 colorA = checkerColorA.toBLRgba32();
-				BLRgba32 colorB = checkerColorB.toBLRgba32();
+				double cs = double(checkerSize() > 0.0f ? checkerSize() : 8.0f);
+				BLRgba32 colorA = checkerColorA().toBLRgba32();
+				BLRgba32 colorB = checkerColorB().toBLRgba32();
 
 				ctx.save();
 				// Always plain SRC_OVER, fully opaque, regardless of this
@@ -757,7 +763,7 @@ namespace newui {
 				themedImage.create_from_data(width, height, BL_FORMAT_PRGB32, bits, intptr_t(rowWidthPixels) * 4);
 
 				ctx.save();
-				ctx.set_comp_op(toBLCompOp(compositingOp));
+				ctx.set_comp_op(toBLCompOp(compositingOp()));
 				ctx.blit_image(BLPoint(0, 0), themedImage);
 				ctx.restore();
 			}
@@ -777,9 +783,9 @@ namespace newui {
 
 		Color tickColor = UIColorManager::colorFor(UIColorRole::ControlBorder);
 		ctx.save();
-		ctx.set_comp_op(toBLCompOp(compositingOp));
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
 		ctx.set_fill_style(tickColor.toBLRgba32());
-		ctx.set_fill_alpha(opacity);
+		ctx.set_fill_alpha(opacity());
 
 		// tickCount+1 marks (both ends included), evenly spaced across the
 		// strip's own full extent - a close approximation of the real
@@ -837,12 +843,12 @@ namespace newui {
 		Color accent = UIColorManager::colorFor(UIColorRole::HighlightBackground);
 
 		ctx.save();
-		ctx.set_comp_op(toBLCompOp(compositingOp));
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
 		ctx.set_fill_style(accent.toBLRgba32());
 		// Pressed reads as a stronger fill than a plain hover - same
 		// "pressed is more emphatic than hot" precedence stateId() already
 		// encodes for the native part this replaces.
-		ctx.set_fill_alpha(opacity * (pressed ? 0.55f : 0.30f));
+		ctx.set_fill_alpha(opacity() * (pressed ? 0.55f : 0.30f));
 		ctx.fill_round_rect(double(r.left()), double(r.top()),
 			double(r.size().width), double(r.size().height), double(highlightCornerRadius));
 		ctx.restore();

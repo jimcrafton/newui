@@ -202,8 +202,8 @@ int main() {
     dragFileSource->setVisible(true);
     dragFileSource->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     dragFileSource->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-    dragFileSource->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    dragFileSource->style().borderWidth = 1.0f;
+    dragFileSource->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+    dragFileSource->style().setBorderWidth(1.0f);
     root.addChild(dragFileSource);
 
     auto* dropTargetHint = new newui::Label();
@@ -219,8 +219,8 @@ int main() {
     dropTargetBox->setVisible(true);
     dropTargetBox->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     dropTargetBox->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-    dropTargetBox->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    dropTargetBox->style().borderWidth = 1.0f;
+    dropTargetBox->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+    dropTargetBox->style().setBorderWidth(1.0f);
     root.addChild(dropTargetBox);
 
     auto makeRow = [&root](float height) {
@@ -262,8 +262,8 @@ int main() {
     droppedImageSwatch->setDesiredSize(newui::Size(48.0f, 48.0f));
     droppedImageSwatch->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
     droppedImageSwatch->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-    droppedImageSwatch->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    droppedImageSwatch->style().borderWidth = 1.0f;
+    droppedImageSwatch->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+    droppedImageSwatch->style().setBorderWidth(1.0f);
     droppedImageRow->addChild(droppedImageSwatch);
 
     // Makes dragSource a real outgoing-drag origin - RootView's own mouse

@@ -65,9 +65,9 @@ namespace {
         swatch->setDesiredSize(newui::Size(0.0f, 150.0f));
         swatch->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
         swatch->style().setBackgroundImage(image);
-        swatch->style().imageFillMode = newui::ImageFillMode::Stretch;
-        swatch->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-        swatch->style().borderWidth = 1.0f;
+        swatch->style().setImageFillMode(newui::ImageFillMode::Stretch);
+        swatch->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+        swatch->style().setBorderWidth(1.0f);
         cell->addChild(swatch);
 
         auto* label = new newui::Label();
@@ -93,8 +93,8 @@ namespace {
         image->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
         image->setImageFillMode(newui::ImageFillMode::Align);
         image->setImageAlignment(newui::ImageAlignment::Center);
-        image->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-        image->style().borderWidth = 1.0f;
+        image->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+        image->style().setBorderWidth(1.0f);
         image->setImagePath(imagePath);
         cell->addChild(image);
 

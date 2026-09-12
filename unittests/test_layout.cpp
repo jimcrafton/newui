@@ -153,7 +153,7 @@ TEST(AnchorLayout, ArrangesWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* child = NewChild(container, newui::Rect());
@@ -177,7 +177,7 @@ TEST(AnchorLayout, OpposingAnchorsStretchWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* child = NewChild(container, newui::Rect());
@@ -350,7 +350,7 @@ TEST(FlexLayout, ArrangesWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 100, 300));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* childA = NewChild(container, newui::Rect(0, 0, 40, 20));
@@ -615,7 +615,7 @@ TEST(CardLayout, ActiveChildFillsStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* childA = NewChild(container, newui::Rect(0, 0, 10, 10));

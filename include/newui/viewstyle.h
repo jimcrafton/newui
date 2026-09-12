@@ -191,35 +191,51 @@ namespace newui {
         const gfx::Fill& backgroundFill() const { return backgroundFill_;  }
         gfx::Fill& backgroundFill() { return backgroundFill_;  }
 
-        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
-        // Color::isNull()'s own comment for why. Solid-color only (no gradient/image capability,
-        // unlike backgroundFill_ above) - neither ever had a real setter or paint()-time branching
-        // for anything else, just a raw value read directly, so there's nothing to preserve by
-        // keeping them as gfx::Fill too.
-        Color borderFill = Color::null();
-        float borderWidth = 0.0f;
-        Color highlightFill = Color::null();
-        StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
+        // Getter/setter pairs, not plain public fields, for every one of these - reflectgen only
+        // ever registers a plain public field as a Class::Field (see reflection.h's own Field/
+        // Property distinction), and cpp_codetools's PropertiesModel (the Designer's own Properties
+        // panel) only ever walks Class::allProperties(), never Class::allFields() - a real,
+        // previously-invisible gap: every one of these was completely absent from the Properties
+        // panel despite being real, meaningful, design-time-editable state. Getter/setter pairs
+        // register as real Properties instead, matching backgroundFill's own const/non-const-pair
+        // treatment above (though these are simpler - plain by-value getter+setter, no addressable-
+        // reference concerns, since none of them need in-place nested editing the way a Fill does).
+        const Color& borderFill() const { return borderFill_; }
+        void setBorderFill(const Color& color) { borderFill_ = color; }
+
+        float borderWidth() const { return borderWidth_; }
+        void setBorderWidth(float width) { borderWidth_ = width; }
+
+        const Color& highlightFill() const { return highlightFill_; }
+        void setHighlightFill(const Color& color) { highlightFill_ = color; }
+
+        StrokeStyle strokeStyle() const { return strokeStyle_; }
+        void setStrokeStyle(StrokeStyle style) { strokeStyle_ = style; }
 
         // How an image fill is drawn - see ImageFillMode's own comment. Only ever meaningful for
         // backgroundFill (gfx::PaintKind::Image) - highlightFill is solid-color-only, see its own
         // comment above.
-        ImageFillMode imageFillMode = ImageFillMode::Tile;
+        ImageFillMode imageFillMode() const { return imageFillMode_; }
+        void setImageFillMode(ImageFillMode mode) { imageFillMode_ = mode; }
 
         // Anchor ImageFillMode::Align positions an unscaled image fill
         // at - ignored by Tile/Stretch.
-        ImageAlignment imageAlignment = ImageAlignment::Center;
+        ImageAlignment imageAlignment() const { return imageAlignment_; }
+        void setImageAlignment(ImageAlignment alignment) { imageAlignment_ = alignment; }
 
-        float rectRadius = 0.0;
+        float rectRadius() const { return rectRadius_; }
+        void setRectRadius(float radius) { rectRadius_ = radius; }
 
         // Multiplies the alpha of whatever's set above (works uniformly for
         // colors, gradients and images) - separate from any alpha already
         // baked into a color/image itself.
-        float opacity = 1.0f;
+        float opacity() const { return opacity_; }
+        void setOpacity(float value) { opacity_ = value; }
 
         // How background/border blend with whatever's already in the
         // buffer; see BLCompOp. Defaults to normal alpha-blended painting.
-        CompositingFlag compositingOp = CompSrcOver;
+        CompositingFlag compositingOp() const { return compositingOp_; }
+        void setCompositingOp(CompositingFlag op) { compositingOp_ = op; }
 
         // Font available for this style's own text-drawing needs - e.g. a
         // LabelStyle subclass that draws text in its paint() override. See
@@ -228,9 +244,8 @@ namespace newui {
         // base ViewStyle::paint() doesn't draw text itself (this toolkit
         // has no automatic text layout/drawing yet), so this is just
         // storage for whoever paints text for this view.
-        Font font;
-
-
+        const Font& font() const { return font_; }
+        void setFont(const Font& value) { font_ = value; }
 
         // Sets backgroundFill to path's image (PNG/BMP/JPEG/QOI - decoded
         // via BLImage::read_from_file(), same codecs Bundle::loadImage()
@@ -339,6 +354,17 @@ namespace newui {
         void markDirty();
 
     private:
+        Color borderFill_ = Color::null();
+        float borderWidth_ = 0.0f;
+        Color highlightFill_ = Color::null();
+        StrokeStyle strokeStyle_ = StrokeStyle::StrokeColor;
+        ImageFillMode imageFillMode_ = ImageFillMode::Tile;
+        ImageAlignment imageAlignment_ = ImageAlignment::Center;
+        float rectRadius_ = 0.0f;
+        float opacity_ = 1.0f;
+        CompositingFlag compositingOp_ = CompSrcOver;
+        Font font_;
+
         View* view_ = nullptr;
     };
 
@@ -354,37 +380,49 @@ namespace newui {
         // see ViewStyle's own comment above for why.
         ButtonStyle() = default;
 
-        Edge3DStyle edgeStyle = Edge3DStyle::Raised;
-        float edgeWidth = 2.0f;
+        Edge3DStyle edgeStyle() const { return edgeStyle_; }
+        void setEdgeStyle(Edge3DStyle style) { edgeStyle_ = style; }
+
+        float edgeWidth() const { return edgeWidth_; }
+        void setEdgeWidth(float width) { edgeWidth_ = width; }
+
         // Off (Color::null()) by default, not Color's own usual opaque-black default - see
         // Color::isNull()'s own comment for why.
-        Color edgeHighlightColor = Color::null();
-        Color edgeShadowColor = Color::null();
+        const Color& edgeHighlightColor() const { return edgeHighlightColor_; }
+        void setEdgeHighlightColor(const Color& color) { edgeHighlightColor_ = color; }
+
+        const Color& edgeShadowColor() const { return edgeShadowColor_; }
+        void setEdgeShadowColor(const Color& color) { edgeShadowColor_ = color; }
 
         // Etched/Bump are two nested bevels, so they occupy 2x edgeWidth
         // inward from the outer edge; Raised/Sunken are just the one.
         Rect computeClientBounds(const Size& size) const override {
             Rect bounds = ViewStyle::computeClientBounds(size);
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.isNull() && edgeShadowColor.isNull())) {
+            if (edgeWidth_ <= 0.0f || (edgeHighlightColor_.isNull() && edgeShadowColor_.isNull())) {
                 return bounds;
             }
-            bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
-            return bounds.deflate(doubled ? edgeWidth * 2.0f : edgeWidth);
+            bool doubled = (edgeStyle_ == Edge3DStyle::Etched || edgeStyle_ == Edge3DStyle::Bump);
+            return bounds.deflate(doubled ? edgeWidth_ * 2.0f : edgeWidth_);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.isNull() && edgeShadowColor.isNull())) {
+            if (edgeWidth_ <= 0.0f || (edgeHighlightColor_.isNull() && edgeShadowColor_.isNull())) {
                 return;
             }
 
             ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
-            paintEdge3D(ctx, size, edgeStyle, BLVar(edgeHighlightColor.toBLRgba32()), BLVar(edgeShadowColor.toBLRgba32()), edgeWidth);
+            ctx.set_comp_op(toBLCompOp(compositingOp()));
+            paintEdge3D(ctx, size, edgeStyle_, BLVar(edgeHighlightColor_.toBLRgba32()), BLVar(edgeShadowColor_.toBLRgba32()), edgeWidth_);
             ctx.restore();
         }
 
+    private:
+        Edge3DStyle edgeStyle_ = Edge3DStyle::Raised;
+        float edgeWidth_ = 2.0f;
+        Color edgeHighlightColor_ = Color::null();
+        Color edgeShadowColor_ = Color::null();
     };
 
     // ViewStyle plus a single line of text (background/border only besides
@@ -415,23 +453,26 @@ namespace newui {
     // track/fill chrome already is.
     class LabelStyle : public ViewStyle {
     public:
-        std::string text;
+        const std::string& text() const { return text_; }
+        void setText(const std::string& value) { text_ = value; }
+
         // Off (Color::null()) by default, not Color's own usual opaque-black default - see
         // Color::isNull()'s own comment for why.
-        Color textColor = Color::null();
+        const Color& textColor() const { return textColor_; }
+        void setTextColor(const Color& color) { textColor_ = color; }
 
         LabelStyle() {
-			font = FontManager::getSystemFont(SystemUIFont::Message);
+			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (text.empty() || textColor.isNull()) {
+            if (text_.empty() || textColor_.isNull()) {
                 return;
             }
 
-            BLFont* blFont = font.blFont();
+            BLFont* blFont = font().blFont();
             if (blFont == nullptr || !blFont->is_valid()) {
 				throw std::runtime_error("LabelStyle::paint: font not resolved to a valid BLFont");
             }
@@ -441,7 +482,7 @@ namespace newui {
             }
 
             BLGlyphBuffer glyphBuffer;
-            glyphBuffer.set_utf8_text(text.c_str(), text.size());
+            glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
             blFont->shape(glyphBuffer);
 
             BLTextMetrics textMetrics;
@@ -455,12 +496,12 @@ namespace newui {
             double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
             ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
-            ctx.set_fill_style(textColor.toBLRgba32());
-            ctx.set_fill_alpha(opacity);
-            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
+            ctx.set_comp_op(toBLCompOp(compositingOp()));
+            ctx.set_fill_style(textColor_.toBLRgba32());
+            ctx.set_fill_alpha(opacity());
+            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
 
-            if (font.underlined()) {
+            if (font().underlined()) {
                 // Same fill_style/alpha already set above for the text
                 // itself - the underline is meant to look like part of
                 // the same stroke of "color", not a separate element.
@@ -477,6 +518,9 @@ namespace newui {
             ctx.restore();
         }
 
+    private:
+        std::string text_;
+        Color textColor_ = Color::null();
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),
@@ -488,67 +532,96 @@ namespace newui {
         // see ViewStyle's own comment above for why.
         CheckBoxStyle() = default;
 
-        bool checked = false;
-        float boxSize = 13.0f;
-        Edge3DStyle boxEdgeStyle = Edge3DStyle::Sunken;
-        float boxEdgeWidth = 2.0f;
+        bool isChecked() const { return checked_; }
+        void setChecked(bool value) { checked_ = value; }
+
+        float boxSize() const { return boxSize_; }
+        void setBoxSize(float size) { boxSize_ = size; }
+
+        Edge3DStyle boxEdgeStyle() const { return boxEdgeStyle_; }
+        void setBoxEdgeStyle(Edge3DStyle style) { boxEdgeStyle_ = style; }
+
+        float boxEdgeWidth() const { return boxEdgeWidth_; }
+        void setBoxEdgeWidth(float width) { boxEdgeWidth_ = width; }
+
         // Off (Color::null()) by default, not Color's own usual opaque-black default - see
         // Color::isNull()'s own comment for why.
-        Color boxFill = Color::null();
-        Color boxEdgeHighlightColor = Color::null();
-        Color boxEdgeShadowColor = Color::null();
-        Color checkColor = Color::null();
-        float checkWidth = 2.0f;
+        const Color& boxFill() const { return boxFill_; }
+        void setBoxFill(const Color& color) { boxFill_ = color; }
+
+        const Color& boxEdgeHighlightColor() const { return boxEdgeHighlightColor_; }
+        void setBoxEdgeHighlightColor(const Color& color) { boxEdgeHighlightColor_ = color; }
+
+        const Color& boxEdgeShadowColor() const { return boxEdgeShadowColor_; }
+        void setBoxEdgeShadowColor(const Color& color) { boxEdgeShadowColor_ = color; }
+
+        const Color& checkColor() const { return checkColor_; }
+        void setCheckColor(const Color& color) { checkColor_ = color; }
+
+        float checkWidth() const { return checkWidth_; }
+        void setCheckWidth(float width) { checkWidth_ = width; }
 
         // Gap left between the box and clientBounds, e.g. for a label
         // drawn by the client to the right of the box.
-        float boxLabelSpacing = 4.0f;
+        float boxLabelSpacing() const { return boxLabelSpacing_; }
+        void setBoxLabelSpacing(float spacing) { boxLabelSpacing_ = spacing; }
 
         // The box occupies the left boxSize + boxLabelSpacing of whatever
         // the border already left clientBounds with; a label drawn by the
         // client goes to the right of that.
         Rect computeClientBounds(const Size& size) const override {
             Rect bounds = ViewStyle::computeClientBounds(size);
-            if (boxSize <= 0.0f) {
+            if (boxSize_ <= 0.0f) {
                 return bounds;
             }
-            return bounds.deflate(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
+            return bounds.deflate(boxSize_ + boxLabelSpacing_, 0.0f, 0.0f, 0.0f);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (boxSize <= 0.0f) {
+            if (boxSize_ <= 0.0f) {
                 return;
             }
 
-            float boxTop = (size.height - boxSize) * 0.5f;
-            Size boxViewSize(boxSize, boxSize);
+            float boxTop = (size.height - boxSize_) * 0.5f;
+            Size boxViewSize(boxSize_, boxSize_);
 
             ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
+            ctx.set_comp_op(toBLCompOp(compositingOp()));
             ctx.translate(0.0, boxTop);
 
-            if (!boxFill.isNull()) {
-                ctx.set_fill_style(boxFill.toBLRgba32());
-                ctx.fill_rect(BLRect(0, 0, boxSize, boxSize));
+            if (!boxFill_.isNull()) {
+                ctx.set_fill_style(boxFill_.toBLRgba32());
+                ctx.fill_rect(BLRect(0, 0, boxSize_, boxSize_));
             }
 
-            if (boxEdgeWidth > 0.0f) {
-                paintEdge3D(ctx, boxViewSize, boxEdgeStyle, BLVar(boxEdgeHighlightColor.toBLRgba32()), BLVar(boxEdgeShadowColor.toBLRgba32()), boxEdgeWidth);
+            if (boxEdgeWidth_ > 0.0f) {
+                paintEdge3D(ctx, boxViewSize, boxEdgeStyle_, BLVar(boxEdgeHighlightColor_.toBLRgba32()), BLVar(boxEdgeShadowColor_.toBLRgba32()), boxEdgeWidth_);
             }
 
-            if (checked && !checkColor.isNull()) {
-                ctx.set_stroke_style(checkColor.toBLRgba32());
-                ctx.set_stroke_width(checkWidth);
-                float inset = boxSize * 0.2f;
-                ctx.stroke_line(inset, boxSize * 0.5f, boxSize * 0.45f, boxSize - inset);
-                ctx.stroke_line(boxSize * 0.45f, boxSize - inset, boxSize - inset, inset);
+            if (checked_ && !checkColor_.isNull()) {
+                ctx.set_stroke_style(checkColor_.toBLRgba32());
+                ctx.set_stroke_width(checkWidth_);
+                float inset = boxSize_ * 0.2f;
+                ctx.stroke_line(inset, boxSize_ * 0.5f, boxSize_ * 0.45f, boxSize_ - inset);
+                ctx.stroke_line(boxSize_ * 0.45f, boxSize_ - inset, boxSize_ - inset, inset);
             }
 
             ctx.restore();
         }
 
+    private:
+        bool checked_ = false;
+        float boxSize_ = 13.0f;
+        Edge3DStyle boxEdgeStyle_ = Edge3DStyle::Sunken;
+        float boxEdgeWidth_ = 2.0f;
+        Color boxFill_ = Color::null();
+        Color boxEdgeHighlightColor_ = Color::null();
+        Color boxEdgeShadowColor_ = Color::null();
+        Color checkColor_ = Color::null();
+        float checkWidth_ = 2.0f;
+        float boxLabelSpacing_ = 4.0f;
     };
 
     // ViewStyle plus a checkerboard backdrop drawn behind an image fill
@@ -576,16 +649,25 @@ namespace newui {
 
         // Checkerboard square size, in device pixels - the same rough
         // ballpark image editors use.
-        float checkerSize = 8.0f;
+        float checkerSize() const { return checkerSize_; }
+        void setCheckerSize(float size) { checkerSize_ = size; }
 
         // Photoshop/GIMP-style light-gray/white pair by default - always
         // drawn fully opaque, regardless of this style's own opacity (see
         // paint()'s own comment): fading the image should reveal more of
         // the checkerboard, not fade the checkerboard itself away too.
-        Color checkerColorA = Color(0xd0d0d0u, false);
-        Color checkerColorB = Color(0xffffffu, false);
+        const Color& checkerColorA() const { return checkerColorA_; }
+        void setCheckerColorA(const Color& color) { checkerColorA_ = color; }
+
+        const Color& checkerColorB() const { return checkerColorB_; }
+        void setCheckerColorB(const Color& color) { checkerColorB_ = color; }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+
+    private:
+        float checkerSize_ = 8.0f;
+        Color checkerColorA_ = Color(0xd0d0d0u, false);
+        Color checkerColorB_ = Color(0xffffffu, false);
     };
 
     // Base for a second family of styles alongside ViewStyle/ButtonStyle/
