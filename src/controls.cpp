@@ -1466,6 +1466,13 @@ namespace newui {
 
     void ScrollView::addChild(SubView* child) {
         viewport_->addChild(child);
+        // See handleContentChildContentSizeChanged()'s own doc comment (controls.h) for why this
+        // is needed at all, not just addChild()'s own updateLayout() call below - a real,
+        // live-reported bug otherwise: expanding a TreeView row (or any other in-place content
+        // change - more text typed, a different font, ...) grows the child's own contentSize()
+        // without this ScrollView ever finding out, so its bars stay stale until some unrelated
+        // event (a resize) happens to call updateLayout() again.
+        child->onContentSizeChanged.add(this, &ScrollView::handleContentChildContentSizeChanged);
         // Picks up child's own contentSize() immediately (see
         // updateLayout()'s own comment) rather than leaving contentSize_
         // at whatever it was (typically the default Size(), showing no
@@ -1531,6 +1538,11 @@ namespace newui {
 
     SyncReturn ScrollView::handleQueryContentSize(View& /*sender*/, Size& outSize) {
         outSize = contentSize_;
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleContentChildContentSizeChanged(View& /*sender*/) {
+        updateLayout();
         return SyncReturn::Handled;
     }
 

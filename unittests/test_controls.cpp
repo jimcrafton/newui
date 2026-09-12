@@ -566,6 +566,40 @@ TEST(ScrollView, VirtualizedChildIsPinnedToViewportSizeAndToldItsScrollOffsetDir
     delete view;
 }
 
+// Real, live-reported bug: expanding a TreeView row (or any other in-place content growth -
+// more text typed, a different font, ...) grows the content child's own contentSize() answer,
+// but nothing told this ScrollView so until some unrelated event (a resize) happened to call
+// updateLayout() again - handleContentChildContentSizeChanged() (controls.h) was declared and
+// documented but never actually implemented or subscribed in addChild(), so onContentSizeChanged
+// firing on a content child was a complete no-op as far as the ScrollView hosting it was
+// concerned.
+TEST(ScrollView, ContentChildAnnouncingAGrownContentSizeUpdatesBarsWithoutAnExternalTrigger) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* content = new SubView();
+    content->setVisible(true);
+    Size reportedSize(100.0f, 100.0f);
+    content->onQueryContentSize.add([&reportedSize](View&, Size& outSize) -> SyncReturn {
+        outSize = reportedSize;
+        return SyncReturn::Handled;
+    });
+    view->addChild(content);
+
+    ASSERT_FALSE(view->vBar()->isVisible()) << "100x100 content fits a 200x200 viewport";
+
+    // content itself now answers a taller size and announces it via onContentSizeChanged -
+    // this ScrollView is never resized, and setContentSize()/addChild() are never called again.
+    reportedSize = Size(100.0f, 800.0f);
+    content->onContentSizeChanged(*content);
+
+    EXPECT_EQ(view->contentSize(), Size(100.0f, 800.0f));
+    EXPECT_TRUE(view->vBar()->isVisible());
+
+    view->destroy();
+    delete view;
+}
+
 // ---------------------------------------------------------------------
 // Button - disabled-state visuals (same gap ToolbarButton had - see
 // feedback_paint_state_tests_dont_prove_visual_correctness memory)
