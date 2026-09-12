@@ -61,6 +61,7 @@ namespace newui {
     // Right, or Top + Bottom) means the child stretches to fill that
     // axis instead of just being positioned along it - see
     // AnchorLayout::arrange().
+    // @reflect flags
     enum class Anchor : std::uint8_t {
         None    = 0,
         Left    = 1 << 0,

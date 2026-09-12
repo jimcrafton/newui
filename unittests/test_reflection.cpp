@@ -697,3 +697,21 @@ TEST(Reflection, EnumLookupByFullyQualifiedName) {
     EXPECT_EQ(byBareName, orientationEnum);
     EXPECT_EQ(byQualifiedName, orientationEnum);
 }
+
+// Anchor is explicitly named in EnumBuilder<T>::flags()'s own comment as a real enum that needs
+// the explicit "@reflect flags" opt-in (layout.h) - Enum::isFlags()/decompose()'s own generic
+// contract is already covered by test_enumserialization.cpp's hand-built flags enum; this is a
+// narrow regression guard specifically for Anchor's own annotation, so it can't silently regress
+// back to unset (real property editor code, PropertiesGrid's own FlagsEnumPropertyEditor, depends
+// on this being true to render a real checkbox list instead of falling back to a raw number).
+TEST(Reflection, AnchorEnumIsRegisteredAsFlags) {
+    const Enum* anchorEnum = ReflectionRegistry::getEnum(typeid(newui::Anchor));
+    ASSERT_NE(anchorEnum, nullptr);
+    EXPECT_TRUE(anchorEnum->isFlags());
+
+    std::uint64_t leftTop = anchorEnum->toUInt64(std::any(newui::Anchor::Left | newui::Anchor::Top));
+    std::vector<std::string> names = anchorEnum->decompose(leftTop);
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_NE(std::find(names.begin(), names.end(), "Left"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "Top"), names.end());
+}
