@@ -651,6 +651,38 @@ TEST(Reflection, GeneratedDataLinksViewStyleThemedButtonStyleChain) {
     EXPECT_EQ(themedButtonStyleClass->parentClass(), themedViewStyleClass);
 }
 
+// ViewStyle::backgroundFill() is a getter-only, no-setter accessor - property()'s own addressable
+// check (reflection.h: is_lvalue_reference_v && !is_const_v && setter==nullptr) requires a
+// *non-const* lvalue reference, so this only works because ViewStyle has both a const and a
+// non-const backgroundFill() overload (same pair-shape as View::style()). A real bug caught live:
+// this was const-only for a while during the BLVar -> gfx::Fill migration, which made
+// isAddressable() false and PropertiesModel::classifyProperty() (cpp_codetools) fall through to
+// Kind::PropertyUnsupported even though gfx::Fill itself is a real, reflectable Class - nothing in
+// this suite (which only ever checked gfx::Fill's own reflection data, or ViewStyle's class
+// hierarchy, never backgroundFill's own addressability specifically) caught it. This test exists
+// so that regression can never be silent again.
+TEST(Reflection, ViewStyleBackgroundFillIsAddressableAndResolvesToFillsRealClass) {
+    const Class* viewStyleClass = classinfo(typeid(newui::ViewStyle));
+    ASSERT_NE(viewStyleClass, nullptr);
+
+    std::vector<const Property*> props;
+    viewStyleClass->allProperties(props);
+    const Property* backgroundFillProp = nullptr;
+    for (const Property* p : props) {
+        if (p->name() == "backgroundFill") {
+            backgroundFillProp = p;
+            break;
+        }
+    }
+    ASSERT_NE(backgroundFillProp, nullptr);
+    EXPECT_TRUE(backgroundFillProp->isAddressable());
+
+    newui::ViewStyle style;
+    const Class* fillClass = backgroundFillProp->getClass(&style);
+    ASSERT_NE(fillClass, nullptr);
+    EXPECT_EQ(fillClass, classinfo(typeid(newui::gfx::Fill)));
+}
+
 // classinfo(typeid(newui::Rect)) above is the type-erased-but-still-
 // compile-time-typed lookup; classinfo(const std::string&) (reflection.h)
 // is the fully-stringly-typed one - a "newui::Rect" name string, with no

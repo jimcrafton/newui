@@ -71,13 +71,6 @@ namespace newui {
     }
 
 
-    enum FillStyle{
-        FillNone = 0,
-        FillColor,
-        FillImage,
-        FillGradient
-    };
-
     enum StrokeStyle {
         StrokeNone = 0,
         StrokeColor,
@@ -85,8 +78,8 @@ namespace newui {
         StrokeGradient
     };
 
-    // How an image fill (FillStyle::FillImage, on either backgroundFill
-    // or highlightFill) maps its BLImage onto the shape being filled -
+    // How an image fill (gfx::PaintKind::Image, on backgroundFill) maps its BLImage onto the
+    // shape being filled -
     // Tile repeats the image at its own natural size (the only behavior
     // ViewStyle::paint() had before this enum existed); Stretch scales it
     // to exactly cover the fill rect, ignoring the image's own aspect
@@ -184,7 +177,19 @@ namespace newui {
         virtual ~ViewStyle() = default;
 
         
+        // Both const and non-const, same pair-shape as View::style() (view.h) - the *real* reason
+        // this pairing matters here, not just symmetry: reflection.h's own property() addressability
+        // rule explicitly requires a non-const lvalue reference with no setter to treat a getter as
+        // addressable (see ClassBuilder::property()'s own `constexpr bool addressable` check) - a
+        // const-only accessor would make PropertiesModel::classifyProperty() fall through to
+        // Kind::PropertyUnsupported even though gfx::Fill itself is a real, reflectable Class (a
+        // real bug caught live: this was true throughout this whole migration until here). Safe to
+        // expose mutably despite the "only ever set via setBackgroundColor/Gradient/Image()"
+        // framing elsewhere in this class - see bkgFillStyle's own removal, below, which was the
+        // real reason a raw mutable reference used to be unsafe (a Properties-panel edit through
+        // this reference would have silently desynced it from backgroundFill_.kind() otherwise).
         const gfx::Fill& backgroundFill() const { return backgroundFill_;  }
+        gfx::Fill& backgroundFill() { return backgroundFill_;  }
 
         // Off (Color::null()) by default, not Color's own usual opaque-black default - see
         // Color::isNull()'s own comment for why. Solid-color only (no gradient/image capability,
@@ -194,14 +199,11 @@ namespace newui {
         Color borderFill = Color::null();
         float borderWidth = 0.0f;
         Color highlightFill = Color::null();
-        FillStyle bkgFillStyle = FillStyle::FillColor;
         StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
 
-        // How an image fill is drawn - see ImageFillMode's own comment.
-        // Shared by backgroundFill/highlightFill (only one of which is
-        // ever actually painted per paint() call, per useHighlight
-        // there), same as opacity/compositingOp already being shared
-        // across both rather than duplicated per-fill.
+        // How an image fill is drawn - see ImageFillMode's own comment. Only ever meaningful for
+        // backgroundFill (gfx::PaintKind::Image) - highlightFill is solid-color-only, see its own
+        // comment above.
         ImageFillMode imageFillMode = ImageFillMode::Tile;
 
         // Anchor ImageFillMode::Align positions an unscaled image fill
@@ -564,11 +566,10 @@ namespace newui {
     // this codebase currently opts into it, so no other image fill
     // anywhere else grows an unexpected checkerboard.
     //
-    // Only ever draws anything when bkgFillStyle (or hilightFillStyle,
-    // while highlighted) is FillStyle::FillImage and that fill's BLImage
-    // actually has an alpha channel - every other fill kind (solid color,
-    // gradient, no fill at all, or an opaque XRGB32 image) falls straight
-    // through to the base paint() unchanged, drawing nothing extra.
+    // Only ever draws anything when not highlighted (highlightFill is solid-color-only, never
+    // Image) and backgroundFill().kind() is gfx::PaintKind::Image with an actual alpha channel -
+    // every other fill kind (solid color, gradient, no fill at all, or an opaque XRGB32 image)
+    // falls straight through to the base paint() unchanged, drawing nothing extra.
     class ImageFillStyle : public ViewStyle {
     public:
         ImageFillStyle() = default;

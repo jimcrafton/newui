@@ -337,21 +337,18 @@ namespace newui {
 	void ViewStyle::setBackgroundImage(const BLImage& image) {
 		backgroundFill_.setImage(image);
 		backgroundFill_.setKind(gfx::PaintKind::Image);
-		bkgFillStyle = FillStyle::FillImage;
 	}
 
 	void ViewStyle::setBackgroundGradient(const BLGradient& gradient)
 	{
 		backgroundFill_.setGradient(toGfxGradient(gradient));
 		backgroundFill_.setKind(gfx::PaintKind::Gradient);
-		bkgFillStyle = FillStyle::FillGradient;
 	}
 
 	void ViewStyle::setBackgroundColor(const Color& color)
 	{
 		backgroundFill_.setColor(color);
 		backgroundFill_.setKind(gfx::PaintKind::Color);
-		bkgFillStyle = FillStyle::FillColor;
 	}
 
 	void ViewStyle::setBackgroundColor(const BLRgba32& color)
@@ -400,8 +397,8 @@ namespace newui {
 		}
 		else if (BLVar background = backgroundFill_.toBLVar(Rect(0.0f, 0.0f, size.width, size.height)); !background.is_null()) {
 
-			switch (bkgFillStyle) {
-				case FillStyle::FillColor: {
+			switch (backgroundFill_.kind()) {
+				case gfx::PaintKind::Color: {
 					ctx.set_fill_style(background);
 					ctx.set_fill_alpha(opacity);
 
@@ -415,11 +412,9 @@ namespace newui {
 				}
 				break;
 
-				case FillStyle::FillImage: {
-					// background may not actually hold a BLPattern (e.g.
-					// bkgFillStyle set to FillImage by hand without ever
-					// going through setBackgroundImage()) - fall back to
-					// drawing whatever's really there rather than
+				case gfx::PaintKind::Image: {
+					// background may not actually hold a BLPattern (e.g. resolvedImage() failed to
+					// load) - fall back to drawing whatever's really there rather than
 					// reinterpreting it as one.
 					if (!background.is_pattern()) {
 						ctx.set_fill_style(background);
@@ -512,12 +507,16 @@ namespace newui {
 				}
 				break;
 
-				case FillStyle::FillGradient: {
+				case gfx::PaintKind::Gradient: {
 					ctx.set_fill_style(background);
 					ctx.set_fill_alpha(opacity);
 					ctx.fill_rect(BLRect(0, 0, size.width, size.height));
 				}
 				break;
+
+				case gfx::PaintKind::None:
+				default:
+					break;
 			}
 		}
 
@@ -550,7 +549,7 @@ namespace newui {
 		bool useHighlight = highlighted && !highlightFill.isNull();
 		BLVar background = backgroundFill().toBLVar(Rect(0.0f, 0.0f, size.width, size.height));
 
-		if (!useHighlight && size.width > 0.0f && size.height > 0.0f && bkgFillStyle == FillStyle::FillImage &&
+		if (!useHighlight && size.width > 0.0f && size.height > 0.0f && backgroundFill().kind() == gfx::PaintKind::Image &&
 				!background.is_null() && background.is_pattern()) {
 			BLImage img = background.as<BLPattern>().get_image();
 
