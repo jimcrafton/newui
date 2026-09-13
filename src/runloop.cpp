@@ -357,6 +357,11 @@ namespace newui {
             ::EnableWindow(ownerHandle, FALSE);
         }
 
+        
+        ShowWindow(modalHandle, SW_SHOWNORMAL);
+        UpdateWindow(modalHandle);
+        SetFocus(modalHandle);
+
         bool quitSeen = false;
         MSG msg;
         while (!isDone()) {
