@@ -354,7 +354,18 @@ namespace newui {
         onModalStart(*this);
 
         if (ownerHandle != nullptr) {
-            ::EnableWindow(ownerHandle, FALSE);
+
+            
+            if (::GetCapture() != NULL)
+            {
+                ::ReleaseCapture();
+            }
+
+            //find root windows for app
+            HWND hwndTrueRoot = GetAncestor(ownerHandle, GA_ROOT);
+            if (hwndTrueRoot != ::GetDesktopWindow()) {
+                ::EnableWindow(hwndTrueRoot, FALSE);
+            }
         }
 
         
