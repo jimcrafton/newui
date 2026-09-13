@@ -78,11 +78,19 @@ namespace newui {
     // it) or modally (showModal() blocks the caller and disables owner
     // until closed).
     //
-    // Composes a Frame rather than subclassing it - Frame's window
-    // creation/message handling (WndProc, handleMessage) isn't virtual,
-    // so there's no seam to add modal-loop/owner-disable behavior via
-    // inheritance; Dialog builds that on top of Frame's already-public
-    // onClosed delegate and setTitle()/setBounds()/rootView() instead.
+    // Subclasses Frame directly (handleMessage() below overrides it) - an
+    // earlier version composed a plain Frame member instead, on the belief
+    // that Frame's message handling wasn't virtual and so offered no seam
+    // for a derived class; that was wrong (handleMessage() already is
+    // virtual, and PopupFrame - popupframe.h/.cpp - already overrides it
+    // for exactly this same reason: a WM_DESTROY that must not
+    // ::PostQuitMessage(0) the way Frame::handleMessage()'s own case does,
+    // which is only correct for the application's real top-level window.
+    // Every Frame anywhere in this codebase before Dialog *was* that one
+    // window, so this went untested until a real Dialog was actually
+    // shown+closed while the app kept running - closing it was quitting
+    // the whole application. See handleMessage()'s own override for the
+    // fix, same shape as PopupFrame's.
     //
     // Single-show: once closed, its native window is torn down for good
     // (Frame itself has no way to recreate a destroyed window) - build a
@@ -93,10 +101,10 @@ namespace newui {
     // initialize().
     // ------------------------------------------------------------------
 
-    class Dialog {
+    class Dialog : public Frame {
     public:
         Dialog();
-        ~Dialog();
+        ~Dialog() override;
 
         Dialog(const Dialog&) = delete;
         Dialog& operator=(const Dialog&) = delete;
@@ -136,50 +144,21 @@ namespace newui {
         // Dialog replacement for the old SHBrowseForFolder.
         static bool ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath);
 
-        void setTitle(const std::string& title) {
-            frame_.setTitle(title);
-        }
+        // setTitle()/getTitle()/setBounds()/getBounds()/setName()/getName()/rootView() (both
+        // overloads) are all inherited from Frame unchanged - no need to re-declare/forward them
+        // now that Dialog is a Frame rather than composing one.
 
-        std::string getTitle() const {
-            return frame_.getTitle();
-        }
-
-        void setBounds(const Rect& bounds) {
-            frame_.setBounds(bounds);
-        }
-
-        const Rect& getBounds() const {
-            return frame_.getBounds();
-        }
-
-        // See Frame::getName() - identifies this Dialog's own saved-layout
-        // file for Bundle::loadDialog() (bundle.h), which just forwards to
-        // Bundle::loadFrame(frame()).
-        void setName(const std::string& name) {
-            frame_.setName(name);
-        }
-
-        std::string getName() const {
-            return frame_.getName();
-        }
-
-        RootView& rootView() {
-            return frame_.rootView();
-        }
-
-        const RootView& rootView() const {
-            return frame_.rootView();
-        }
-
-        // The Frame this Dialog composes - exposed so Bundle::loadDialog()
-        // (bundle.h) can delegate straight to Bundle::loadFrame() rather
-        // than duplicating that logic here.
+        // Dialog *is* the Frame Bundle::loadDialog()/writeDialog() (bundle.h) need - kept only so
+        // those two call sites (loadFrame(dialog.frame())/writeFrame(dialog.frame())) don't need
+        // touching; a plain Frame& to *this.
         Frame& frame() {
-            return frame_;
+            return *this;
         }
 
+        // Same name as before (Frame's own equivalent is frameHandle()) - kept as the name this
+        // class's own callers/tests already use.
         HWND dialogHandle() const {
-            return frame_.frameHandle();
+            return frameHandle();
         }
 
         typedef Delegate<Dialog> ClosedDelegate;
@@ -226,12 +205,17 @@ namespace newui {
             return closed_;
         }
 
+    protected:
+        // Overrides Frame::handleMessage()'s own WM_DESTROY case to skip its unconditional
+        // ::PostQuitMessage(0) - see this class's own comment above for why. Forwards every other
+        // message unchanged.
+        bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
+
     private:
         bool ensureInitialized();
 
         SyncReturn handleFrameClosed(Frame& frame);
 
-        Frame frame_;
         DialogResult result_ = DialogResult::None;
         bool closed_ = false;
     };

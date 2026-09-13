@@ -298,22 +298,25 @@ bool Dialog::ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, s
 }
 
 Dialog::Dialog() {
-    frame_.onClosed.add(this, &Dialog::handleFrameClosed);
+    // Frame::onClosed explicitly (not onClosed - Dialog::onClosed above shadows Frame's own
+    // member of that name, same type-erased-by-name shadowing any derived class gets when it
+    // declares a member with the same name as one already in its base; here that's deliberate,
+    // since Dialog::onClosed's own richer DialogResult-flavored meaning is what external callers
+    // should get from a plain dialog.onClosed).
+    Frame::onClosed.add(this, &Dialog::handleFrameClosed);
 }
 
 Dialog::~Dialog() {
-    // Frame::~Frame() throws if a live window still exists with its
-    // rootView_ not yet torn down (see frame.cpp) - close()/the user
-    // closing the window normally already does this via WM_CLOSE ->
-    // WM_DESTROY, but if this Dialog is destroyed while still open
-    // (show()'d and never closed), force the window down synchronously
-    // here first so frame_'s own destructor - which runs right after this
-    // one finishes, as a member - never sees a live rootView_ next to a
-    // live frameHandle_. A Dialog that was never shown at all needs no
-    // such help: frameHandle_ is still null, and Frame::~Frame() itself
-    // already knows a never-created window has nothing to tear down.
-    if (frame_.frameHandle() != nullptr) {
-        ::DestroyWindow(frame_.frameHandle());
+    // Frame::~Frame() throws if a live window still exists with its rootView_ not yet torn down
+    // (see frame.cpp) - close()/the user closing the window normally already does this via
+    // WM_CLOSE -> WM_DESTROY, but if this Dialog is destroyed while still open (show()'d and
+    // never closed), force the window down synchronously here first so Frame::~Frame() - which
+    // runs right after this destructor's own body finishes, same as it always did as a base class
+    // now instead of a member - never sees a live rootView_ next to a live frameHandle_. A Dialog
+    // that was never shown at all needs no such help: frameHandle_ is still null, and
+    // Frame::~Frame() itself already knows a never-created window has nothing to tear down.
+    if (frameHandle() != nullptr) {
+        ::DestroyWindow(frameHandle());
     }
 }
 
@@ -321,10 +324,24 @@ bool Dialog::ensureInitialized() {
     if (closed_) {
         return false;  // single-show - see class comment in dialogs.h
     }
-    if (frame_.frameHandle() != nullptr) {
+    if (frameHandle() != nullptr) {
         return true;
     }
-    return frame_.initialize();
+    return initialize();
+}
+
+bool Dialog::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {
+    if (message == WM_DESTROY) {
+        // Deliberately no ::PostQuitMessage(0) - see this class's own comment (dialogs.h) for why:
+        // that's the one behavior that would be actively wrong to inherit unchanged from
+        // Frame::handleMessage()'s own WM_DESTROY case, since destroying a Dialog must never quit
+        // the whole application's message loop. Same fix shape PopupFrame::handleMessage() already
+        // established for exactly this problem (a dropdown popup's own Frame).
+        destroy();
+        outLRESULT = 0;
+        return true;
+    }
+    return Frame::handleMessage(message, wParam, lParam, outLRESULT);
 }
 
 SyncReturn Dialog::handleFrameClosed(Frame&) {
@@ -371,7 +388,7 @@ DialogResult Dialog::showModal(HWND hwnd, RunLoop* runLoop) {
 
 
     bool completedNormally = loopToUse->runModal(
-        frame_.frameHandle(), hwnd, [this]() { return closed_; });
+        frameHandle(), hwnd, [this]() { return closed_; });
 
     if (!completedNormally) {
         // runModal() gave up because WM_QUIT reached this thread (the app
@@ -393,14 +410,14 @@ void Dialog::close(DialogResult result) {
         return;  // first close() (or the user closing the window) already won
     }
     result_ = result;
-    if (frame_.frameHandle() != nullptr) {
+    if (frameHandle() != nullptr) {
         // Async on purpose - lets this run from inside a handler that's
         // itself on the frame's message-dispatch call stack (e.g. a
         // button's onClicked) without reentering DestroyWindow from
         // there. Funnels through the exact same WM_CLOSE path a native X
         // click takes, so handleFrameClosed() above is the single place
         // that actually finalizes things.
-        ::PostMessage(frame_.frameHandle(), WM_CLOSE, 0, 0);
+        ::PostMessage(frameHandle(), WM_CLOSE, 0, 0);
     } else {
         closed_ = true;
         onClosed(*this);
