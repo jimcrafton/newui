@@ -649,7 +649,7 @@ namespace newui {
     }
 
     bool Bundle::loadDialog(Dialog& dialog) const {
-        return loadFrame(dialog.frame());
+        return loadFrame(dialog);
     }
 
     bool Bundle::loadFrameFromFile(Frame& frame, const std::string& absolutePath) const {
@@ -791,7 +791,7 @@ namespace newui {
     }
 
     bool Bundle::writeDialog(Dialog& dialog) const {
-        return writeFrame(dialog.frame());
+        return writeFrame(dialog);
     }
 
     namespace {

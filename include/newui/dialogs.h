@@ -119,7 +119,7 @@ namespace newui {
         // at all.
         // ------------------------------------------------------------------
 
-        static DialogResult ShowMessageBox(HWND owner, const std::string& text, const std::string& title,
+        static DialogResult showMessageBox(HWND owner, const std::string& text, const std::string& title,
                                             MessageBoxButtons buttons = MessageBoxButtons::Ok,
                                             MessageBoxIcon icon = MessageBoxIcon::None);
 
@@ -136,24 +136,16 @@ namespace newui {
         // (no owner window).
         // ------------------------------------------------------------------
 
-        static bool ShowOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
-        static bool ShowOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths);
-        static bool ShowSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths);
+        static bool showSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
 
         // FOS_PICKFOLDERS on an IFileOpenDialog - the modern Common Item
         // Dialog replacement for the old SHBrowseForFolder.
-        static bool ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath);
 
-        // setTitle()/getTitle()/setBounds()/getBounds()/setName()/getName()/rootView() (both
-        // overloads) are all inherited from Frame unchanged - no need to re-declare/forward them
-        // now that Dialog is a Frame rather than composing one.
+        virtual bool initialize();
 
-        // Dialog *is* the Frame Bundle::loadDialog()/writeDialog() (bundle.h) need - kept only so
-        // those two call sites (loadFrame(dialog.frame())/writeFrame(dialog.frame())) don't need
-        // touching; a plain Frame& to *this.
-        Frame& frame() {
-            return *this;
-        }
 
         // Same name as before (Frame's own equivalent is frameHandle()) - kept as the name this
         // class's own callers/tests already use.

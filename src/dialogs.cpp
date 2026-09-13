@@ -148,7 +148,7 @@ namespace {
 
 }  // namespace
 
-DialogResult Dialog::ShowMessageBox(HWND owner, const std::string& text, const std::string& title,
+DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const std::string& title,
                                      MessageBoxButtons buttons, MessageBoxIcon icon) {
     UINT flags = 0;
     switch (buttons) {
@@ -181,7 +181,7 @@ DialogResult Dialog::ShowMessageBox(HWND owner, const std::string& text, const s
     }
 }
 
-bool Dialog::ShowOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -202,7 +202,7 @@ bool Dialog::ShowOpenFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::ShowOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
+bool Dialog::showOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -247,7 +247,7 @@ bool Dialog::ShowOpenFileMulti(HWND owner, const FileDialogOptions& options, std
     return result;
 }
 
-bool Dialog::ShowSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -268,7 +268,7 @@ bool Dialog::ShowSaveFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -318,6 +318,59 @@ Dialog::~Dialog() {
     if (frameHandle() != nullptr) {
         ::DestroyWindow(frameHandle());
     }
+}
+
+bool Dialog::initialize()
+{
+    bool result = true;
+    WNDCLASSEXA wcex;
+    std::string className = "Dialog";
+    wcex.cbSize = sizeof(wcex);
+
+    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
+    wcex.cbClsExtra = 0;
+    wcex.cbWndExtra = 0;
+    wcex.hInstance = Application::instance().instanceHandle();
+    wcex.hIcon = NULL;
+    wcex.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
+    wcex.hbrBackground = NULL;//(HBRUSH)(COLOR_WINDOW+1);
+    wcex.lpszMenuName = NULL;
+    wcex.lpszClassName = className.c_str();
+    wcex.hIconSm = NULL;
+
+    RegisterClassExA(&wcex);
+
+
+    DWORD dialogStyle = WS_POPUPWINDOW | WS_CAPTION | WS_CLIPSIBLINGS | DS_MODALFRAME;
+    DWORD dwExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CONTROLPARENT;
+
+    auto hwnd = ::CreateWindowExA(
+        dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
+        bounds_.left(), bounds_.top(), bounds_.size().width, bounds_.size().height,
+        Application::instance().dummyWindowHandle(),
+        NULL,
+        Application::instance().instanceHandle(),
+        this
+    );
+
+
+    if (!hwnd) {
+        result = false;
+        return result;
+    }
+
+    //frameHandle_ was set in WndProc during WM_NCCREATE, so we can check it here
+    //should be the same as hwnd returned from CreateWindowExA
+    if (hwnd != this->frameHandle_) {
+        result = false;
+        return result;
+    }
+
+    //::ShowWindow(frameHandle_, SW_SHOW);
+    //::RedrawWindow(frameHandle_, NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
+
+    return result;
 }
 
 bool Dialog::ensureInitialized() {

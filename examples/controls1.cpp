@@ -31,6 +31,7 @@
 #include "newui/uicolormanager.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
+#include "newui/dialogs.h"
 
 #include <chrono>
 #include <cstdio>
@@ -38,6 +39,9 @@
 #include <iostream>
 #include <memory>
 #include <string>
+
+#include <newui/viewbuilder.h>
+
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
     printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
@@ -162,12 +166,23 @@ int main() {
     auto* toolbar = new newui::Toolbar();
     root.addChild(toolbar);
 
+
+    
+
+
+
+
     auto* newButton = new newui::ToolbarButton();
     newButton->setText("New");
     newButton->setDesiredSize(newui::Size(50.0f, 24.0f));
     newButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
-        [](newui::Control&) -> newui::SyncReturn {
+        [&frame](newui::Control&) -> newui::SyncReturn {
             printf("Toolbar: New clicked\n");
+
+            newui::Dialog dlg;
+			dlg.setBounds(newui::Rect(0, 0, 400, 300));
+            dlg.showModal(frame.frameHandle());
+
             return newui::SyncReturn::Handled;
         }));
     toolbar->addChild(newButton);

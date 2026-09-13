@@ -423,6 +423,7 @@ namespace newui {
         if (ownerHandle != nullptr) {
             ::EnableWindow(ownerHandle, TRUE);
             ::SetForegroundWindow(ownerHandle);
+            ::SetFocus(ownerHandle);
         }
 
         onModalEnd(*this);
