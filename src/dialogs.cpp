@@ -352,7 +352,7 @@ DialogResult Dialog::showModal(Frame* owner) {
 
 DialogResult Dialog::showModal(View* view)
 {
-    showModal(view->rootView()->windowHandle());
+    return showModal(view->rootView()->windowHandle());
 }
 
 
