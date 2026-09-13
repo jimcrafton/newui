@@ -210,6 +210,7 @@ namespace newui {
 
         DialogResult result_ = DialogResult::None;
         bool closed_ = false;
+		HWND modalOwner_ = nullptr;  // only valid during showModal() - the owner window disabled for the duration
     };
 
 }

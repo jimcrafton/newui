@@ -348,9 +348,9 @@ bool Dialog::initialize()
     auto hwnd = ::CreateWindowExA(
         dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
         bounds_.left(), bounds_.top(), bounds_.size().width, bounds_.size().height,
-        Application::instance().dummyWindowHandle(),
+        modalOwner_,
         NULL,
-        Application::instance().instanceHandle(),
+         ::GetModuleHandleA(nullptr),
         this
     );
 
@@ -427,6 +427,9 @@ DialogResult Dialog::showModal(View* view)
 
 
 DialogResult Dialog::showModal(HWND hwnd, RunLoop* runLoop) {
+
+	modalOwner_ = hwnd;
+
     if (!ensureInitialized()) {
         return DialogResult::Cancel;
     }
