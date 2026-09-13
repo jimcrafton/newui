@@ -2,6 +2,7 @@
 
 #include "newui/application.h"
 #include "newui/runloop.h"
+#include "newui/utils.h"
 
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -9,33 +10,6 @@
 namespace newui {
 
 namespace {
-
-    std::wstring Utf8ToWide(const std::string& text) {
-        if (text.empty()) {
-            return std::wstring();
-        }
-        int required = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
-        if (required <= 0) {
-            return std::wstring();
-        }
-        std::wstring result(static_cast<size_t>(required), L'\0');
-        ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required);
-        return result;
-    }
-
-    std::string WideToUtf8(const wchar_t* text) {
-        if (text == nullptr || *text == L'\0') {
-            return std::string();
-        }
-        int len = static_cast<int>(wcslen(text));
-        int required = ::WideCharToMultiByte(CP_UTF8, 0, text, len, nullptr, 0, nullptr, nullptr);
-        if (required <= 0) {
-            return std::string();
-        }
-        std::string result(static_cast<size_t>(required), '\0');
-        ::WideCharToMultiByte(CP_UTF8, 0, text, len, result.data(), required, nullptr, nullptr);
-        return result;
-    }
 
     // Initializes COM (STA) for the current thread if it isn't already,
     // and releases it again on destruction - only if this instance is the
@@ -84,8 +58,8 @@ namespace {
         storage.clear();
         storage.reserve(filters.size() * 2);
         for (const auto& filter : filters) {
-            storage.push_back(Utf8ToWide(filter.name));
-            storage.push_back(Utf8ToWide(filter.pattern));
+            storage.push_back(utf8ToWide(filter.name));
+            storage.push_back(utf8ToWide(filter.pattern));
         }
 
         std::vector<COMDLG_FILTERSPEC> specs;
@@ -104,17 +78,17 @@ namespace {
                              std::vector<std::wstring>& filterStorage,
                              std::vector<COMDLG_FILTERSPEC>& filterSpecs) {
         if (!options.title.empty()) {
-            dialog->SetTitle(Utf8ToWide(options.title).c_str());
+            dialog->SetTitle(utf8ToWide(options.title).c_str());
         }
         if (!options.defaultFileName.empty()) {
-            dialog->SetFileName(Utf8ToWide(options.defaultFileName).c_str());
+            dialog->SetFileName(utf8ToWide(options.defaultFileName).c_str());
         }
         if (!options.defaultExtension.empty()) {
-            dialog->SetDefaultExtension(Utf8ToWide(options.defaultExtension).c_str());
+            dialog->SetDefaultExtension(utf8ToWide(options.defaultExtension).c_str());
         }
         if (!options.initialDirectory.empty()) {
             IShellItem* folder = nullptr;
-            std::wstring wideDir = Utf8ToWide(options.initialDirectory);
+            std::wstring wideDir = utf8ToWide(options.initialDirectory);
             if (SUCCEEDED(::SHCreateItemFromParsingName(wideDir.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
                 dialog->SetFolder(folder);
                 folder->Release();
@@ -131,7 +105,7 @@ namespace {
         if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) || path == nullptr) {
             return false;
         }
-        outPath = WideToUtf8(path);
+        outPath = wideToUtf8(path);
         ::CoTaskMemFree(path);
         return true;
     }

@@ -21,6 +21,13 @@ namespace newui {
 	std::string demangleTypeName(const std::type_info& info);
 	std::string extractNamespace(const std::type_info& info);
 
+	// UTF-8 <-> UTF-16 conversion via MultiByteToWideChar()/WideCharToMultiByte()
+	// - the shared home for what used to be separate private copies of this
+	// exact conversion in dialogs.cpp and text.cpp; reflection.cpp's
+	// std::wstring property support (TextField::text()) is a third consumer.
+	std::wstring utf8ToWide(const std::string& text);
+	std::string wideToUtf8(const std::wstring& text);
+
 
 	struct KeyboardEventInfo {
 		int scanCode = 0;

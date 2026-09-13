@@ -6,6 +6,34 @@
 
 
 namespace newui {
+	std::wstring utf8ToWide(const std::string& text)
+	{
+		if (text.empty()) {
+			return std::wstring();
+		}
+		int required = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+		if (required <= 0) {
+			return std::wstring();
+		}
+		std::wstring result(static_cast<std::size_t>(required), L'\0');
+		::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required);
+		return result;
+	}
+
+	std::string wideToUtf8(const std::wstring& text)
+	{
+		if (text.empty()) {
+			return std::string();
+		}
+		int required = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+		if (required <= 0) {
+			return std::string();
+		}
+		std::string result(static_cast<std::size_t>(required), '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required, nullptr, nullptr);
+		return result;
+	}
+
 	std::string extractNamespace(const std::type_info& info)
 	{
 		std::string result = "";

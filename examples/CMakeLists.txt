@@ -185,6 +185,25 @@ add_custom_command(TARGET loaddialog1 POST_BUILD
         "$<TARGET_FILE_DIR:loaddialog1>/Resources/confirmdialog.newui"
 )
 
+add_executable(loadcoloreditor1
+    loadcoloreditor1.cpp
+)
+
+target_link_libraries(loadcoloreditor1 PRIVATE newui)
+
+# coloreditordialog.newui (examples/, generated from an HTML/CSS mockup via
+# the newui-view-json5 skill's HTML-mockup-conversion process - see
+# .claude/skills/newui-view-json5/references/html-mockup-conversion.md) is
+# this example's whole UI source of truth, loaded via Bundle::loadFrame() at
+# runtime - same Resources/-relative post-build copy as loaddialog1's own
+# asset above.
+add_custom_command(TARGET loadcoloreditor1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:loadcoloreditor1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/coloreditordialog.newui"
+        "$<TARGET_FILE_DIR:loadcoloreditor1>/Resources/coloreditordialog.newui"
+)
+
 # popup-card.svg (examples/, a single rounded <rect>) is this popup's own
 # shape source for the "SVG Popup" button, via Underlay::loadImageFile()
 # (underlay.h) - same Resources/-relative post-build copy as svgimage1/

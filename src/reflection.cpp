@@ -1,4 +1,5 @@
 #include "newui/reflection.h"
+#include "newui/utils.h"
 
 #include <algorithm>
 #include <set>
@@ -327,6 +328,16 @@ namespace newui::reflection {
                 reader->readString(valName, str);
                 val = str;
             }
+            else if (valType == typeid(std::wstring)) {
+                // e.g. TextField::text() - the reader's own readString()/
+                // writeString() are UTF-8-only, so a wide-string property
+                // round-trips through newui::utf8ToWide()/wideToUtf8()
+                // (utils.h) at this one boundary rather than needing its
+                // own reader/writer primitives.
+                std::string str;
+                reader->readString(valName, str);
+                val = utf8ToWide(str);
+            }
             else if (valType == typeid(bool)) {
                 bool b;
                 reader->readBool(valName, b);
@@ -431,6 +442,9 @@ namespace newui::reflection {
         }
         if (valType == typeid(std::string)) {
             writer->writeString(valName, std::any_cast<std::string>(val));
+        }
+        else if (valType == typeid(std::wstring)) {
+            writer->writeString(valName, wideToUtf8(std::any_cast<std::wstring>(val)));
         }
         else if (valType == typeid(bool)) {
             writer->writeBool(valName, std::any_cast<bool>(val));

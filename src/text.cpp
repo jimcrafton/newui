@@ -1,6 +1,7 @@
 #include "newui/text.h"
 
 #include "newui/uicolormanager.h"
+#include "newui/utils.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -36,23 +37,6 @@ namespace newui::text {
         _COM_SMARTPTR_TYPEDEF(IWICBitmap, __uuidof(IWICBitmap));
         _COM_SMARTPTR_TYPEDEF(IWICBitmapLock, __uuidof(IWICBitmapLock));
 
-        // Same MultiByteToWideChar()-based conversion dialogs.cpp's own
-        // (file-local) Utf8ToWide() already uses - IDWriteFactory::
-        // CreateTextFormat() needs a wide font name, Font::name() is a
-        // plain (UTF-8) std::string.
-        std::wstring Utf8ToWide(const std::string& text) {
-            if (text.empty()) {
-                return std::wstring();
-            }
-            int required = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
-            if (required <= 0) {
-                return std::wstring();
-            }
-            std::wstring result(static_cast<size_t>(required), L'\0');
-            ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required);
-            return result;
-        }
-
         // Shared by TextRenderer::Impl and TextLayoutEngine::Impl - both
         // need "given a Font, get/cache a matching IDWriteTextFormat",
         // resolved lazily and re-resolved only when the font actually
@@ -78,7 +62,7 @@ namespace newui::text {
 
                 DWRITE_FONT_WEIGHT weight = font.bold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL;
                 DWRITE_FONT_STYLE style = font.italic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
-                std::wstring fontName = Utf8ToWide(font.name());
+                std::wstring fontName = utf8ToWide(font.name());
                 if (fontName.empty()) {
                     fontName = L"Segoe UI";
                 }
