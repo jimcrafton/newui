@@ -160,6 +160,19 @@ namespace {
                 return nullptr;
             }
         }
+        else {
+            std::string svgext = ".svg";
+            std::string pathLower = path;
+			std::transform(pathLower.begin(), pathLower.end(), pathLower.begin(), ::tolower);
+
+			if (pathLower.size() >= svgext.size() && pathLower.find(svgext) != std::string::npos) {
+				// Handle SVG-specific logic if needed
+
+				if (!newui::renderSvgFile(path, maxSize, maxSize, image)) {
+					return nullptr;
+				}
+			}
+        }
 
         return createCursorFromImage(image, hotspotX, hotspotY, maxSize);
     }

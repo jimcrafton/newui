@@ -206,6 +206,8 @@ namespace newui {
         // immediately, without showing anything, if the native window
         // couldn't be created or this Dialog was already closed.
         DialogResult showModal(Frame* owner = nullptr);
+        DialogResult showModal(View* view);
+        DialogResult showModal(HWND hwnd, RunLoop* runLoop=nullptr);
 
         // Closes the dialog, recording result - the first close() call
         // (whether this explicit call, or the user closing the window

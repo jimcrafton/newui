@@ -344,19 +344,35 @@ bool Dialog::show() {
 }
 
 DialogResult Dialog::showModal(Frame* owner) {
+    HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
+    
+	return showModal(ownerHandle);
+}
+
+
+DialogResult Dialog::showModal(View* view)
+{
+    showModal(view->rootView()->windowHandle());
+}
+
+
+DialogResult Dialog::showModal(HWND hwnd, RunLoop* runLoop) {
     if (!ensureInitialized()) {
         return DialogResult::Cancel;
     }
 
-    HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
 
-    
-    if (!RunLoop::current()) {
+    RunLoop* loopToUse = runLoop ? runLoop : &RunLoop::current();
+
+
+    if (!*loopToUse) {
         throw std::runtime_error("newui::Dialog::showModal: no RunLoop is running on this thread");
     }
 
-    bool completedNormally = RunLoop::current().runModal(
-        frame_.frameHandle(), ownerHandle, [this]() { return closed_; });
+
+    bool completedNormally = loopToUse->runModal(
+        frame_.frameHandle(), hwnd, [this]() { return closed_; });
+
     if (!completedNormally) {
         // runModal() gave up because WM_QUIT reached this thread (the app
         // itself is shutting down), not because closed_ actually became
