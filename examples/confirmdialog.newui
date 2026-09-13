@@ -1,0 +1,207 @@
+{
+  meta: {
+    author: "",
+    date: "2026-09-13",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "Frame",
+  title: "Confirm Delete",
+  name: "confirmdialog",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 40, y: 40 },
+    size: { type: "Size", width: 360, height: 170 }
+  },
+  rootView: {
+    type: "RootView",
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 360, height: 170 }
+    },
+    visible: true,
+    name: "rootview",
+    layout: {
+      type: "FlexLayout",
+      orientation: "Vertical",
+      mainAxisAlignment: "Start",
+      crossAxisAlignment: "Stretch",
+      spacing: 16,
+      padding: 16,
+      wrap: false,
+      lineSpacing: 0,
+      alignContent: "Start"
+    },
+    style: {
+      type: "ViewStyle",
+      borderWidth: 0,
+      strokeStyle: "StrokeColor",
+      rectRadius: 0,
+      opacity: 1,
+      compositingOp: "CompSrcOver",
+      font: { type: "Font", name: "", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+    },
+    highlighted: false,
+    clientBounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 360, height: 170 }
+    },
+    desiredSize: { type: "Size", width: 360, height: 170 },
+    desiredSizeOverride: true,
+    origin: { type: "Point", x: 0, y: 0 },
+    cursor: { type: "Cursor", kind: "Arrow", path: "", null: true },
+    childViews: [
+      {
+        type: "Label",
+        text: "Are you sure you want to delete this file? This action cannot be undone.",
+        hotLink: false,
+        enabled: true,
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 16, y: 16 },
+          size: { type: "Size", width: 328, height: 60 }
+        },
+        visible: true,
+        name: "questionLabel",
+        style: {
+          type: "LabelStyle",
+          text: "Are you sure you want to delete this file? This action cannot be undone.",
+          wordWrap: true,
+          borderWidth: 0,
+          strokeStyle: "StrokeColor",
+          rectRadius: 0,
+          opacity: 1,
+          compositingOp: "CompSrcOver",
+          font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+        },
+        highlighted: false,
+        clientBounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 0, y: 0 },
+          size: { type: "Size", width: 328, height: 60 }
+        },
+        desiredSize: { type: "Size", width: 300, height: 40 },
+        desiredSizeOverride: true,
+        origin: { type: "Point", x: 0, y: 0 },
+        cursor: { type: "Cursor", kind: "Arrow", path: "", null: true },
+        childViews: []
+      },
+      {
+        type: "SubView",
+        bounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 16, y: 92 },
+          size: { type: "Size", width: 328, height: 32 }
+        },
+        visible: true,
+        name: "buttonRow",
+        layout: {
+          type: "FlexLayout",
+          orientation: "Horizontal",
+          mainAxisAlignment: "End",
+          crossAxisAlignment: "Stretch",
+          spacing: 12,
+          padding: 0,
+          wrap: false,
+          lineSpacing: 0,
+          alignContent: "Start"
+        },
+        style: {
+          type: "ViewStyle",
+          borderWidth: 0,
+          strokeStyle: "StrokeColor",
+          rectRadius: 0,
+          opacity: 1,
+          compositingOp: "CompSrcOver",
+          font: { type: "Font", name: "", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+        },
+        highlighted: false,
+        clientBounds: {
+          type: "Rect",
+          pos: { type: "Point", x: 0, y: 0 },
+          size: { type: "Size", width: 328, height: 32 }
+        },
+        desiredSize: { type: "Size", width: 192, height: 32 },
+        desiredSizeOverride: true,
+        origin: { type: "Point", x: 0, y: 0 },
+        cursor: { type: "Cursor", kind: "Arrow", path: "", null: true },
+        childViews: [
+          {
+            type: "Button",
+            text: "OK",
+            toggleButton: false,
+            checked: false,
+            enabled: true,
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 136, y: 2 },
+              size: { type: "Size", width: 90, height: 28 }
+            },
+            visible: true,
+            name: "okButton",
+            style: {
+              type: "ThemedButtonStyle",
+              pressed: false,
+              enabled: true,
+              borderWidth: 0,
+              strokeStyle: "StrokeColor",
+              rectRadius: 0,
+              opacity: 1,
+              compositingOp: "CompSrcOver",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            highlighted: false,
+            clientBounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 3, y: 3 },
+              size: { type: "Size", width: 84, height: 22 }
+            },
+            desiredSize: { type: "Size", width: 90, height: 28 },
+            desiredSizeOverride: true,
+            origin: { type: "Point", x: 0, y: 0 },
+            cursor: { type: "Cursor", kind: "Arrow", path: "", null: true },
+            childViews: []
+          },
+          {
+            type: "Button",
+            text: "Cancel",
+            toggleButton: false,
+            checked: false,
+            enabled: true,
+            bounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 238, y: 2 },
+              size: { type: "Size", width: 90, height: 28 }
+            },
+            visible: true,
+            name: "cancelButton",
+            style: {
+              type: "ThemedButtonStyle",
+              pressed: false,
+              enabled: true,
+              borderWidth: 0,
+              strokeStyle: "StrokeColor",
+              rectRadius: 0,
+              opacity: 1,
+              compositingOp: "CompSrcOver",
+              font: { type: "Font", name: "Segoe UI", size: 12, bold: false, italic: false, strikeThrough: false, underlined: false }
+            },
+            highlighted: false,
+            clientBounds: {
+              type: "Rect",
+              pos: { type: "Point", x: 3, y: 3 },
+              size: { type: "Size", width: 84, height: 22 }
+            },
+            desiredSize: { type: "Size", width: 90, height: 28 },
+            desiredSizeOverride: true,
+            origin: { type: "Point", x: 0, y: 0 },
+            cursor: { type: "Cursor", kind: "Arrow", path: "", null: true },
+            childViews: []
+          }
+        ]
+      }
+    ]
+  }
+}
