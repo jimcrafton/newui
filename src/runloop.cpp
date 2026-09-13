@@ -364,8 +364,32 @@ namespace newui {
 
         bool quitSeen = false;
         MSG msg;
+        bool isIdle = true;
         while (!isDone()) {
+            // Real, live-diagnosed bug: this loop used to go straight to a blocking GetMessage()
+            // with no way for a postIdle() task to ever run - and every real repaint funnels
+            // through exactly that (View::redraw()/RootView::markDirty() -> scheduleRepaint() ->
+            // RunLoop::current().postIdle(...), see rootview.cpp) - so a click that correctly
+            // updated a control's own state (confirmed live: SegmentedControl::selectedIndex_
+            // really did change) never got drawn, since the modal dialog's own message loop was
+            // the one running at the time and never gave that deferred task a turn. GetMessage()
+            // itself has no "queue's empty" signal to hook into (unlike PeekMessage) - this same
+            // "poll with PeekMessage, run idle work while the queue is empty" shape RunLoop::run()
+            // already uses (above) is what actually creates that opportunity.
+            while (isIdle && !::PeekMessage(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+                idleProcessing();
+                if (!hasIdleTasks()) {
+                    isIdle = false;
+                } else {
+                    // Same reasoning as run()'s own identical wait above - without this, an
+                    // idle-but-not-done modal loop (e.g. AnimationManager still registered) would
+                    // spin re-checking PeekMessage as fast as the CPU allows.
+                    ::MsgWaitForMultipleObjects(0, nullptr, FALSE, 1, QS_ALLINPUT);
+                }
+            }
+
             BOOL got = ::GetMessage(&msg, nullptr, 0, 0);
+            isIdle = true;  // a real message just arrived - give idle work another turn next pass
             if (got == 0 || got == -1) {
                 // WM_QUIT reached this thread (or GetMessage itself
                 // failed) - stop waiting rather than swallow it; re-post
