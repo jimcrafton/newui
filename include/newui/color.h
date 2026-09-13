@@ -579,19 +579,42 @@ namespace newui {
         // "#00ff33"). Alpha defaults to fully opaque for the 3/6-digit
         // forms that don't specify one. If str isn't valid hex, falls
         // back to fromName() (so e.g. "red" and "cornflowerblue" work
-        // here too).
+        // here too), then to a UIColorRole name (e.g. "WindowBackground",
+        // "ControlText" - see fromUIColorRoleName()'s own comment) - so a
+        // color specified anywhere as a plain string (a saved ViewStyle/
+        // Fill property in particular) can name a live, theme-tracking
+        // role instead of a fixed value, with zero extra plumbing beyond
+        // this one shared parse path.
         //
         // Returns false and leaves outColor untouched if str is neither
-        // valid hex nor a recognized color name; true otherwise. Pairs
-        // with toString().
+        // valid hex, a recognized color name, nor a UIColorRole name;
+        // true otherwise. Pairs with toString() (hex/name output only -
+        // a role match here is resolved to a plain value, not preserved
+        // as a role on the way back out).
         //
         // https://www.w3.org/TR/css-color-4/#hex-notation
         static bool fromString(const std::string& str, Color& outColor) noexcept {
             if (fromHex(str, outColor)) {
                 return true;
             }
-            return fromName(str, outColor);
+            if (fromName(str, outColor)) {
+                return true;
+            }
+            return fromUIColorRoleName(str, outColor);
         }
+
+        // The UIColorRole half of fromString() above - out-of-line (color.cpp),
+        // not inline like every other Color parser here, specifically to
+        // avoid a circular #include: UIColorManager (uicolormanager.h)
+        // already includes color.h for Color itself, so color.h can't
+        // also #include uicolormanager.h to call UIColorManager::colorFor()
+        // inline. Matches str case-insensitively against a UIColorRole
+        // enum name ("WindowBackground", "ControlText", "LinkText", ...)
+        // and resolves it live via UIColorManager::colorFor() - not a
+        // frozen snapshot, so re-parsing the same string later (e.g. after
+        // an OS light/dark mode change) picks up the new value. Returns
+        // false (outColor untouched) if str doesn't match any role name.
+        static bool fromUIColorRoleName(const std::string& str, Color& outColor) noexcept;
 
         // Packs r/g/b/a into out per the given channel list: each channel
         // is independently quantized (clamped, then rounded) to its own

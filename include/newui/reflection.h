@@ -124,6 +124,27 @@ namespace newui::reflection {
         // field that base ViewStyle doesn't have).
         virtual bool hasValue(const std::string& propertyName) const { return true; }
 
+        // Populates instancePtr from whatever this reader's own source data
+        // has for the *current* object scope (whatever beginObject() the
+        // caller already called most recently opened) - construct-or-reuse,
+        // then apply only whatever properties/fields the source actually
+        // has (Class::property()/field(), both walk parentClass()), not
+        // every registered member. instancePtr is in/out: null on entry
+        // means "construct a fresh instance of clazz" (instanceOnHeap is
+        // then set true, and instancePtr comes back holding the new
+        // instance, or stays null if clazz has no usable constructor);
+        // non-null on entry means "read into this existing instance"
+        // (instancePtr is returned unchanged - same identity, just
+        // mutated). clazz is assumed already resolved/validated by the
+        // caller (see Class::isOrDerivesFrom()) - this doesn't re-check it.
+        //
+        // This reader decides how to walk its own source format - Class/
+        // Property/Field stay passive lookup/storage targets it queries,
+        // not drivers. Recursion into a nested Class-typed property comes
+        // back through here too (via the same reader), so the whole object
+        // graph is read the same way top to bottom.
+        virtual void readInto(const Class* clazz, void*& instancePtr, bool& instanceOnHeap) = 0;
+
         // The resolved runtime Class (via its "type" tag) of whichever
         // collection element the *current* array position holds - unlike
         // beginObject(""), which also consumes/advances that position (it
@@ -540,9 +561,13 @@ namespace newui::reflection {
 
         void read(void* instancePtr, ClassReader* reader) const override {
             if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
-                std::any existing(static_cast<ValueT*>(address(instancePtr)));
-                bool onHeap = false;
-                nestedClazz->read(reader, name(), existing, onHeap);
+                void* nestedPtr = address(instancePtr);
+                const Class* resolvedClazz = reader->beginObject(name());
+                if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                    bool onHeap = false;
+                    reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                }
+                reader->endObject(name(), resolvedClazz);
                 return;
             }
             std::any val;
@@ -1129,89 +1154,62 @@ namespace newui::reflection {
                 // through here instead of silently doing nothing just
                 // because ValueT as a whole can't be copied.
                 if (shouldCreateOnHeap()) {
-                    // hasValue() first - see its own doc comment
-                    // (ClassReader, reflection.h) for the real, reproduced
-                    // bug this guards against: without it, a property
-                    // that's simply *absent* from the source (an older
-                    // document predating this property becoming
-                    // reflected, or one written by hand) but whose ValueT
-                    // happens to be default-constructible would still get
-                    // unconditionally reconstructed from scratch below and
-                    // overwrite whatever real, already-live value this
-                    // property currently holds - never reads into
-                    // existing storage the way isAddressable()'s branch
-                    // does, so there is no "safe" version of that for a
-                    // PtrGetter/PtrSetter property; skipping entirely,
-                    // leaving the existing value untouched, is the only
-                    // correct response to "nothing here to read".
-                    if (!reader->hasValue(name())) {
-                        return;
-                    }
-                    // If there's already a live value here - ptrGetter_
-                    // makes shouldCreateOnHeap() mode addressable too, so
-                    // address() finds it (e.g. a Slider's thumb_ already
-                    // has its own real ThemedTrackbarThumbStyle from
-                    // Slider's own constructor, before any reading ever
-                    // starts) - peek the saved data's resolved runtime
-                    // type first (a throwaway beginObject()/endObject()
-                    // pair; side-effect-free and safe to repeat for a
-                    // *keyed* - not array-positional - lookup) and compare
-                    // it against the existing value's own real type:
-                    //   - same type: read the saved data straight INTO
-                    //     the existing object instead of constructing a
-                    //     new one - the existing object's *identity*
-                    //     never changes, so anything else non-owningly
-                    //     pointing at it (e.g. Slider::thumbStyle_) stays
-                    //     valid. Real, reproduced bug without this:
-                    //     reconstructing thumb_'s style via a fresh
-                    //     new/delete cycle left thumbStyle_ dangling,
-                    //     crashing the next time Slider touched it.
-                    //   - different type, or no live value yet: fall
-                    //     through to the ordinary construct-fresh-and-
-                    //     set() path below - a genuine type change has to
-                    //     replace the object; nothing else can safely
-                    //     have been relying on the old one's identity
-                    //     anyway.
-                    if (void* existingPtr = address(instancePtr); existingPtr != nullptr) {
-                        const Class* resolvedClazz = reader->beginObject(name());
-                        reader->endObject(name(), resolvedClazz);
-                        if (resolvedClazz != nullptr &&
-                                resolvedClazz == classinfo(typeid(*static_cast<ValueT*>(existingPtr)))) {
-                            std::any existing(static_cast<ValueT*>(existingPtr));
-                            bool onHeap = false;
-                            nestedClazz->read(reader, name(), existing, onHeap);
-                            return;
+                    // Peek the saved data's resolved type first (unusable -
+                    // null, or not a genuine ValueT subclass - just means
+                    // this property can't be processed here; whatever
+                    // existing value there is stays untouched) and compare
+                    // it against any already-live value's own real type
+                    // before deciding whether to hand readInto() the
+                    // existing pointer (reuse in place) or null (construct
+                    // fresh):
+                    //   - same type: existingPtr passed as-is - readInto()
+                    //     reads the saved data straight INTO the existing
+                    //     object, whose *identity* never changes, so
+                    //     anything else non-owningly pointing at it (e.g.
+                    //     Slider::thumbStyle_) stays valid. Real, reproduced
+                    //     bug without this: reconstructing thumb_'s style
+                    //     via a fresh new/delete cycle left thumbStyle_
+                    //     dangling, crashing the next time Slider touched it.
+                    //   - different type, or no live value yet: null passed
+                    //     instead - readInto() constructs fresh; a genuine
+                    //     type change has to replace the object, nothing
+                    //     else can safely have been relying on the old
+                    //     one's identity anyway.
+                    const Class* resolvedClazz = reader->beginObject(name());
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        void* existingPtr = address(instancePtr);
+                        bool sameType = existingPtr != nullptr &&
+                            resolvedClazz == classinfo(typeid(*static_cast<ValueT*>(existingPtr)));
+                        void* nestedPtr = sameType ? existingPtr : nullptr;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                        // Only a freshly-constructed instance needs set() -
+                        // reusing existingPtr in place already mutated the
+                        // live object directly, nothing to reassign.
+                        if (!sameType && nestedPtr != nullptr) {
+                            set(instancePtr, std::any(static_cast<ValueT*>(nestedPtr)));
                         }
                     }
-                    // raw (a type-erased void*), not
-                    // std::any_cast<ValueT*>(fresh) - fresh may hold a
-                    // more-derived pointer than ValueT (nestedClazz->
-                    // read() can resolve a "type" tag naming a real
-                    // subclass, see TypedClass<T>::read()'s own
-                    // comment), and any_cast needs an exact type
-                    // match. static_cast<ValueT*>(raw) is well-defined
-                    // here for the same single-non-virtual-inheritance
-                    // reason TypedPropertyCollection::readFreshElement()'s
-                    // own pointer branch already relies on.
-                    std::any fresh;
-                    bool onHeap = false;
-                    void* raw = nullptr;
-                    nestedClazz->read(reader, name(), fresh, onHeap, &raw);
-                    if (raw != nullptr) {
-                        set(instancePtr, std::any(static_cast<ValueT*>(raw)));
-                    }
+                    reader->endObject(name(), resolvedClazz);
                 } else if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
-                        std::any existing(static_cast<ValueT*>(nestedPtr));
-                        bool onHeap = false;
-                        nestedClazz->read(reader, name(), existing, onHeap);
+                        const Class* resolvedClazz = reader->beginObject(name());
+                        if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                            bool onHeap = false;
+                            reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                        }
+                        reader->endObject(name(), resolvedClazz);
                     }
                 } else if constexpr (kCopyable && std::is_default_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
-                    ValueT temp{};
-                    std::any boxedTemp(&temp);
-                    bool onHeap = false;
-                    nestedClazz->read(reader, name(), boxedTemp, onHeap);
-                    set(instancePtr, std::any(temp));
+                    const Class* resolvedClazz = reader->beginObject(name());
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        ValueT temp{};
+                        void* tempPtr = &temp;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, tempPtr, onHeap);
+                        set(instancePtr, std::any(temp));
+                    }
+                    reader->endObject(name(), resolvedClazz);
                 }
                 return;
             }
@@ -1692,13 +1690,17 @@ namespace newui::reflection {
                         // then delete" convention - see View::destroy()'s
                         // own childViews_ loop) before falling through to
                         // construct a proper replacement.
-                        const Class* resolvedClazz = reader->peekElementType();
+                        const Class* peekedClazz = reader->peekElementType();
                         const Class* existingClazz = classinfo(typeid(*existing));
-                        if (resolvedClazz == nullptr || resolvedClazz == existingClazz) {
+                        if (peekedClazz == nullptr || peekedClazz == existingClazz) {
                             if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                                std::any existingBoxed(existing);
-                                bool onHeap = false;
-                                nestedClazz->read(reader, "", existingBoxed, onHeap);
+                                const Class* resolvedClazz = reader->beginObject("");
+                                if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                                    void* existingPtr = existing;
+                                    bool onHeap = false;
+                                    reader->readInto(resolvedClazz, existingPtr, onHeap);
+                                }
+                                reader->endObject("", resolvedClazz);
                             }
                             reader->endElement(idx, std::any());
                             return;
@@ -1739,12 +1741,11 @@ namespace newui::reflection {
                 // or an existing one being fully replaced, never partially
                 // updated. Resolves the nested Class by the element's
                 // *static* declared pointee type (e.g. Shape) - that's
-                // only a starting point, though: nestedClazz->read() below
-                // (TypedClass<T>::read(), reflection.h) itself consults
-                // the source data's own "type" tag (via beginObject()'s
-                // return) and, when it names a genuine subclass, hands
-                // back an instance of *that* concrete type instead - see
-                // its own comment for the full mechanism. raw is a type-
+                // only a starting point, though: beginObject("") below
+                // consults the source data's own "type" tag, and (via
+                // isOrDerivesFrom()) readInto() ends up constructing an
+                // instance of *that* concrete type instead, when it names a
+                // genuine subclass. raw is a type-
                 // erased void*, not std::any_cast<PointeeT*>(fresh) - the
                 // any_cast would throw whenever polymorphic dispatch
                 // actually fired (fresh then holds e.g. Circle*, not
@@ -1759,10 +1760,13 @@ namespace newui::reflection {
                 // above already relies on for the write side).
                 using PointeeT = std::remove_pointer_t<ElementT>;
                 if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                    std::any fresh;
-                    bool onHeap = false;
+                    const Class* resolvedClazz = reader->beginObject("");
                     void* raw = nullptr;
-                    nestedClazz->read(reader, "", fresh, onHeap, &raw);
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, raw, onHeap);
+                    }
+                    reader->endObject("", resolvedClazz);
                     if (raw != nullptr) {
                         return std::any(static_cast<PointeeT*>(raw));
                     }
@@ -1771,9 +1775,13 @@ namespace newui::reflection {
             } else if (const Class* nestedClazz = classinfo(elementType()); nestedClazz != nullptr) {
                 if constexpr (std::is_default_constructible_v<ElementT> && std::is_copy_constructible_v<ElementT>) {
                     ElementT value{};
-                    std::any boxedTemp(&value);
-                    bool onHeap = false;
-                    nestedClazz->read(reader, "", boxedTemp, onHeap);
+                    const Class* resolvedClazz = reader->beginObject("");
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        void* valuePtr = &value;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, valuePtr, onHeap);
+                    }
+                    reader->endObject("", resolvedClazz);
                     return std::any(value);
                 }
                 return std::any();
@@ -2387,6 +2395,21 @@ namespace newui::reflection {
         // has nothing to point at).
         const Class* parentClass() const { return parentClass_; }
 
+        // True if this class *is* base, or genuinely derives from it
+        // (walking parentClass()). Used to check a resolved-from-data class
+        // (a "type" tag) against a statically-expected one before
+        // constructing anything - a stray/wrong tag naming some unrelated
+        // registered class returns false here, same as one that doesn't
+        // resolve to any registered class at all; neither is usable.
+        bool isOrDerivesFrom(const Class* base) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                if (c == base) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         std::type_index type() const { return type_; }
         const std::string& name() const { return name_; }
         const std::string& namespaceName() const { return namespaceName_; }
@@ -2586,20 +2609,11 @@ namespace newui::reflection {
         // to name itself; taking the string directly removes both.
         virtual void write(void* instancePtr, ClassWriter* writer, const std::string& name) const = 0;
 
-        // outRawInstance, when non-null, receives the same raw pointer
-        // outInstance ends up holding (as a type-erased void* rather than
-        // the std::any's own concretely-typed T*) - the only way a caller
-        // that doesn't know T can get a usable pointer back at all, since
-        // std::any_cast requires an exact type match and a generic caller
-        // has no T to cast to. Needed by ObjectReader::readObjects()
-        // (reflectionio.h): its pass 1 creates/reads every named object
-        // through this same Class::read() regardless of its concrete type,
-        // then pass 2 needs a real pointer for each to hand to Method::
-        // invoke()/Delegate::connectListener() while resolving delegate
-        // connections - both of which already take void*, not std::any.
-        // Defaulted so every existing call site is unaffected.
-        virtual void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
-                            bool& instanceOnHeap, void** outRawInstance = nullptr) const = 0;
+        // No read() counterpart to write() above any more - reading is
+        // driven entirely by the reader now (see ClassReader::readObject()'s
+        // own comment), not by Class. Class stays a passive lookup/factory
+        // surface for the read path: property()/field() (both walk
+        // parentClass()) and createInstance().
 
         // Invokes a registered "setDesignTime" Method on instancePtr, if
         // this class (or any of its parentClass() ancestors) has one - a
@@ -2621,13 +2635,12 @@ namespace newui::reflection {
         // from, only on whichever real Class the caller already resolved.
         // Used by ObjectReader's design-mode read path to propagate
         // isDesignTime() onto every freshly-constructed instance - see
-        // TypedClass<T>::read()'s own call site.
+        // TypedClass<T>::read()'s own call site. No explicit parentClass()
+        // walk needed here any more - method() itself now walks the chain
+        // (reflection.cpp).
         void trySetDesignTime(void* instancePtr, bool value) const {
-            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
-                if (const Method* m = c->method("setDesignTime"); m != nullptr) {
-                    m->invoke(instancePtr, { std::any(value) });
-                    return;
-                }
+            if (const Method* m = method("setDesignTime"); m != nullptr) {
+                m->invoke(instancePtr, { std::any(value) });
             }
         }
     private:
@@ -2837,146 +2850,16 @@ namespace newui::reflection {
             writer->exitInstance(this, instancePtr);
         }
 
-        // outInstance already holding a value means the caller (a
-        // TypedProperty<SourceT,T>::read() addressable/stack-local branch,
-        // above) has somewhere real to write into already - a live
-        // sub-object's address(), or a throwaway stack local's - so this
-        // never allocates in that case, and instanceOnHeap is left exactly
-        // as the caller set it (this call didn't allocate anything, so it
-        // has nothing new to report). An empty outInstance only happens
-        // from the shouldCreateOnHeap() branch (or a future generic
-        // Reader's true top-level read(), which has no property/address
-        // context at all) - always heap, and (see below) not always this
-        // class's own registered constructor. createInstance() returning
-        // nothing (no matching constructor registered - e.g. Rect, which
-        // is never meant to be built this way in the first place, see
-        // TypedProperty::read()'s isAddressable()/stack-local branches)
-        // leaves instancePtr null rather than crashing on
-        // std::any_cast<T*> against an empty std::any.
-        //
-        // Polymorphic dispatch: beginObject() below already resolves and
-        // returns the *concrete* Class the data's own "type" tag names
-        // (ObjectReader::beginObject(), reflectionio.h) - only used here
-        // when actually constructing fresh (an already-live outInstance is
-        // already the correct, specific type its owner allocated it as -
-        // nothing to swap) and when that resolved class is a genuine
-        // registered subclass of T (walked via parentClass() below - a
-        // stray/bogus "type" tag naming some unrelated class is ignored,
-        // falling back to this class's own T, same as if beginObject() had
-        // resolved nothing at all). Without this, e.g. a Shape-typed
-        // collection element whose data says "type": "Circle" would always
-        // try to construct exactly Shape (abstract - createInstance()
-        // fails outright) and would only ever read Shape's own properties
-        // even if it could - Circle's centerX/centerY/radius would never
-        // be reached. clazz->createInstance(&raw)/allProperties()/
-        // allFields() (not this->...) is what actually reaches the
-        // concrete type's own constructor and full property/field set;
-        // see Constructor::invoke(args, outRaw)'s own comment for why a
-        // raw void* (not std::any_cast<T*>) is what crosses this
-        // particular boundary - clazz might not be T here.
-        void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
-                    bool& instanceOnHeap, void** outRawInstance = nullptr) const override {
-            // Mirrors write()'s own beginObject()/endObject() bracketing
-            // above - was missing entirely before this pass, which meant a
-            // reader had no hook to descend into the propertyName-keyed
-            // sub-object at all before reading its properties (see
-            // ClassReader::beginObject()'s own doc comment for what a real
-            // implementation is expected to do with propertyName).
-            const Class* clazz = reader->beginObject(propertyName);
-
-            // NOTE: deliberately no design-mode Class::proxy() substitution
-            // here, unlike the ordinary subclass-of-T resolution just below.
-            // Every caller that reaches the fresh-construct branch below
-            // (readFreshElement()/readNew<BaseT>(), reflectionio.h) captures
-            // the constructed object as a raw void* and then
-            // static_cast<DeclaredT*>(raw)'s it back to the *statically*
-            // declared type - safe for genuine polymorphism (Circle:Shape,
-            // real single non-virtual inheritance, same layout at offset 0)
-            // but real undefined behavior for a proxy substitution, since a
-            // proxy class (FrameProxy) is deliberately NOT a real subclass
-            // of what it proxies (Frame) - unrelated layouts entirely.
-            // Proxy substitution only belongs at a call site that never
-            // does that static_cast-back-to-declared-type step - no such
-            // safe call site exists yet (readNested<InstanceT>(), the one
-            // DesignerEditor actually needs, already reads directly into an
-            // explicitly-chosen InstanceT like RootViewProxy and never
-            // reaches this branch at all - see its own comment above).
-            bool useResolvedClazz = false;
-            if (clazz != nullptr && clazz != static_cast<const Class*>(this) && !outInstance.has_value()) {
-                for (const Class* c = clazz; c != nullptr; c = c->parentClass()) {
-                    if (c == static_cast<const Class*>(this)) {
-                        useResolvedClazz = true;
-                        break;
-                    }
-                }
-            }
-            if (!useResolvedClazz) {
-                clazz = this;
-            }
-
-            void* instancePtr = nullptr;
-
-            if (outInstance.has_value()) {
-                instancePtr = std::any_cast<T*>(outInstance);
-            } else {
-                void* raw = nullptr;
-                outInstance = clazz->createInstance(&raw);
-                if (raw == nullptr) {
-                    if (outRawInstance) {
-                        *outRawInstance = nullptr;
-                    }
-                    reader->endObject(propertyName, this);
-                    return;
-                }
-                instancePtr = raw;
-                instanceOnHeap = true;
-
-                // Propagate design mode onto every freshly-constructed
-                // instance (proxy-substituted or not) - see Class::
-                // trySetDesignTime()'s own comment for why this goes
-                // through clazz (the resolved, possibly-more-derived
-                // class), not this class's own T.
-                if (reader->isDesignMode()) {
-                    clazz->trySetDesignTime(instancePtr, true);
-                }
-            }
-
-            // See ClassReader::enterInstance()'s own comment - skips
-            // reading properties/fields into instancePtr when it's already
-            // being read somewhere up the current read() call chain,
-            // instead of recursing back into it and never returning;
-            // beginObject() already ran above, so endObject() still has to
-            // run below regardless of which branch this takes.
-            if (reader->enterInstance(clazz, instancePtr)) {
-                std::vector<const Property*> ordered;
-                clazz->allProperties(ordered);
-
-                for (const Property* property : ordered) {
-                    property->read(instancePtr, reader);
-                }
-
-                // Fields - the read-side mirror of write()'s own fields loop
-                // above. Public-only there because a private field was never
-                // written in the first place (matching scope, not required by
-                // anything on this side specifically) - there's simply no
-                // data under a private field's name to read back regardless,
-                // so this doesn't re-check scope() itself.
-                std::vector<const Field*> orderedFields;
-                clazz->allFields(orderedFields);
-
-                for (const Field* field : orderedFields) {
-                    field->read(instancePtr, reader);
-                }
-
-                reader->exitInstance(clazz, instancePtr);
-            }
-
-            if (outRawInstance) {
-                *outRawInstance = instancePtr;
-            }
-
-            reader->endObject(propertyName, clazz);
-        }
+        // No read() here any more - see Class::write()'s own comment just
+        // above the removed declaration. ClassReader::readObject()
+        // (reflection.h) now does what this used to: resolve a possibly-
+        // more-derived subclass from the source data's own "type" tag
+        // (walking parentClass(), same check this used to do inline),
+        // construct fresh via Class::createInstance() or reuse an existing
+        // instance, and walk only whatever properties/fields the source
+        // actually has (Class::property()/field(), both base-chain aware)
+        // - driven by the concrete reader (ObjectReader, reflectionio.h),
+        // not by this class.
     };
 
     // Fluent assembly for a Class - both hand-written registration and,

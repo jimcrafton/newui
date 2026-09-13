@@ -389,6 +389,50 @@ namespace newui::reflection {
             return obj.is_valid() && obj.find(propertyName) != obj.end();
         }
 
+        // See ClassReader::readInto()'s own comment. Walks the *current*
+        // object scope (whatever beginObject() the caller already called
+        // most recently opened) - construct-or-reuse instancePtr, then
+        // apply only whatever properties/fields that scope's own JSON5
+        // keys actually name (Class::property()/field(), both walk
+        // parentClass()). An unresolvable key (a typo, scratch data, or a
+        // newer build's property this one doesn't know) is silently
+        // skipped, not an error - "type"/"meta"/"delegates" are skipped
+        // outright, never real Property/Field names.
+        void readInto(const Class* clazz, void*& instancePtr, bool& instanceOnHeap) override {
+            if (instancePtr == nullptr) {
+                void* raw = nullptr;
+                clazz->createInstance(&raw);
+                if (raw == nullptr) {
+                    return;
+                }
+                instancePtr = raw;
+                instanceOnHeap = true;
+                if (designMode_) {
+                    clazz->trySetDesignTime(instancePtr, true);
+                }
+            }
+
+            if (enterInstance(clazz, instancePtr)) {
+                json5::object_view obj(stack.back());
+                if (obj.is_valid()) {
+                    for (auto [key, node] : obj) {
+                        std::string name(key);
+                        if (name == "type" || name == "meta" || name == "delegates") {
+                            continue;
+                        }
+                        if (const Property* property = clazz->property(name); property != nullptr) {
+                            property->read(instancePtr, this);
+                        } else if (const Field* field = clazz->field(name); field != nullptr) {
+                            field->read(instancePtr, this);
+                        }
+                        // else: unknown key - forward/backward compatible,
+                        // silently skipped.
+                    }
+                }
+                exitInstance(clazz, instancePtr);
+            }
+        }
+
         void endObject(const std::string&, const Class*) override {
             stack.pop_back();
             cursorStack.pop_back();
@@ -459,9 +503,15 @@ namespace newui::reflection {
             stack.push_back(doc);
             cursorStack.push_back(0);
 
-            std::any instVal(inst);
+            // No beginObject() call here - stack is already positioned at
+            // the root (just pushed above), and reading into an existing
+            // *inst never does polymorphic type-swapping (only a fresh
+            // construction does - see readNew()), so there's no "type" tag
+            // to resolve either. clazz (inst's own static type) is what
+            // readInto() uses to look up properties/fields either way.
+            void* instancePtr = inst;
             bool onHeap = false;
-            clazz->read(this, "", instVal, onHeap);
+            readInto(clazz, instancePtr, onHeap);
 
             // "meta" is a sibling of the real payload at the document root
             // (see ObjectWriter::beginObject()'s own comment), not a
@@ -497,14 +547,23 @@ namespace newui::reflection {
             stack.push_back(doc);
             cursorStack.push_back(0);
 
-            std::any instVal;  // empty - clazz->read() below fresh-constructs into it
-            bool onHeap = true;  // this call path always constructs fresh - see comment above
-            void* raw = nullptr;
-            clazz->read(this, "", instVal, onHeap, &raw);
+            // Unlike read()/readNested() (an existing instance, no type
+            // question), this always constructs fresh, so the root's own
+            // "type" tag genuinely has to be resolved and validated against
+            // BaseT before anything is built - beginObject("") reuses its
+            // existing classinfo() lookup for that rather than duplicating
+            // json5 access here.
+            const Class* resolved = beginObject("");
+            void* instancePtr = nullptr;
+            if (resolved != nullptr && resolved->isOrDerivesFrom(clazz)) {
+                bool onHeap = true;
+                readInto(resolved, instancePtr, onHeap);
+            }
+            endObject("", resolved);
 
             readMetaFromDoc();
 
-            return static_cast<BaseT*>(raw);
+            return static_cast<BaseT*>(instancePtr);
         }
 
         // Reads the propertyName-keyed nested object at the document's own
@@ -526,9 +585,16 @@ namespace newui::reflection {
             stack.push_back(doc);
             cursorStack.push_back(0);
 
-            std::any instVal(inst);
+            // Existing *inst, so no type resolution needed (same as
+            // read()'s own reasoning) - but propertyName is a real, keyed
+            // sub-object here (e.g. "rootView"), so beginObject() is
+            // genuinely needed to navigate there, unlike read()'s true-root
+            // case.
+            beginObject(propertyName);
+            void* instancePtr = inst;
             bool onHeap = false;
-            clazz->read(this, propertyName, instVal, onHeap);
+            readInto(clazz, instancePtr, onHeap);
+            endObject(propertyName, clazz);
 
             readMetaFromDoc();
         }
@@ -617,10 +683,28 @@ namespace newui::reflection {
                     continue;
                 }
 
-                std::any instVal;
-                bool onHeap = false;
+                // createInstance() (not readInto()) is what actually gives
+                // this a properly-typed std::any here - readInto() only
+                // ever works in terms of void*, but a caller enumerating
+                // heterogeneous named objects with no compile-time type of
+                // its own genuinely needs one (see NamedObject::instance's
+                // own real callers - examples/reflection2.cpp,
+                // test_delegateserialization.cpp - both std::any_cast it
+                // back to their own concrete type). Once constructed, raw
+                // is handed to readInto() as an *existing* instance so it
+                // only populates properties, never reconstructs.
                 void* raw = nullptr;
-                clazz->read(this, name, instVal, onHeap, &raw);
+                std::any instVal = clazz->createInstance(&raw);
+                if (raw != nullptr) {
+                    if (isDesignMode()) {
+                        clazz->trySetDesignTime(raw, true);
+                    }
+                    beginObject(name);
+                    void* instancePtr = raw;
+                    bool onHeap = true;
+                    readInto(clazz, instancePtr, onHeap);
+                    endObject(name, clazz);
+                }
 
                 indexByName[name] = objects.size();
                 objects.push_back(NamedObject{ name, clazz, std::move(instVal), raw });

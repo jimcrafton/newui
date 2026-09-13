@@ -13,9 +13,61 @@
 
 #include <array>
 #include <cassert>
+#include <vector>
 
 namespace {
-	
+
+	// Greedy word-wrap for LabelStyle::paint()'s wordWrap() case - breaks
+	// text into as many lines as needed so each line's *shaped* width
+	// (BLFont::shape()+get_text_metrics(), the same measurement paint()
+	// itself uses to draw, not a monospace character-count guess) fits
+	// within maxWidth, breaking only at a space - never mid-word, so a
+	// single word wider than maxWidth on its own is left to overflow that
+	// one line rather than being hyphenated/cut. Always returns at least
+	// one line (the whole text, unbroken) if text has no spaces at all or
+	// is empty.
+	std::vector<std::string> wrapLabelText(const std::string& text, BLFont& font, double maxWidth) {
+		std::vector<std::string> lines;
+		std::string currentLine;
+		std::string word;
+
+		auto shapedWidth = [&font](const std::string& s) -> double {
+			BLGlyphBuffer glyphBuffer;
+			glyphBuffer.set_utf8_text(s.c_str(), s.size());
+			font.shape(glyphBuffer);
+			BLTextMetrics metrics;
+			font.get_text_metrics(glyphBuffer, metrics);
+			return metrics.advance.x;
+		};
+
+		for (std::size_t i = 0; i <= text.size(); ++i) {
+			bool atBreak = (i == text.size() || text[i] == ' ');
+			if (!atBreak) {
+				word += text[i];
+				continue;
+			}
+			if (word.empty()) {
+				continue;
+			}
+
+			std::string candidate = currentLine.empty() ? word : currentLine + " " + word;
+			if (currentLine.empty() || shapedWidth(candidate) <= maxWidth) {
+				currentLine = candidate;
+			} else {
+				lines.push_back(currentLine);
+				currentLine = word;
+			}
+			word.clear();
+		}
+
+		if (!currentLine.empty()) {
+			lines.push_back(currentLine);
+		}
+		if (lines.empty()) {
+			lines.push_back(text);
+		}
+		return lines;
+	}
 
 	// Approximates a dark-mode look for a theme part uxtheme has no real
 	// dark visual for at all (see RootView::refreshThemes()'s doc comment)
@@ -540,6 +592,81 @@ namespace newui {
 			}
 
 			
+		}
+
+		ctx.restore();
+	}
+
+	void LabelStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		ViewStyle::paint(ctx, size, highlighted, clientBounds);
+
+		if (text().empty() || textColor().isNull()) {
+			return;
+		}
+
+		BLFont* blFont = font().blFont();
+		if (blFont == nullptr || !blFont->is_valid()) {
+			throw std::runtime_error("LabelStyle::paint: font not resolved to a valid BLFont");
+		}
+
+		if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
+			return;
+		}
+
+		const BLFontMetrics& fontMetrics = blFont->metrics();
+		double lineHeight = fontMetrics.ascent + fontMetrics.descent;
+
+		std::vector<std::string> lines = wordWrap()
+			? wrapLabelText(text(), *blFont, clientBounds.size().width)
+			: std::vector<std::string>{ text() };
+
+		double totalTextHeight = lineHeight * static_cast<double>(lines.size());
+		double y = clientBounds.top() + (clientBounds.size().height - totalTextHeight) * 0.5 + fontMetrics.ascent;
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_style(textColor().toBLRgba32());
+		ctx.set_fill_alpha(opacity());
+
+		// Tracks the last drawn line's own position/width for the
+		// underline below - with wordWrap() off, lines has exactly one
+		// element, so this ends up identical to the original single-line
+		// behavior; with wrapping on, only the last line gets underlined
+		// (a multi-line underline under every wrapped line would need its
+		// own visual design decision this doesn't attempt to guess).
+		double lastLineX = clientBounds.left();
+		double lastLineWidth = 0.0;
+		double lastLineY = y;
+
+		for (const std::string& line : lines) {
+			BLGlyphBuffer glyphBuffer;
+			glyphBuffer.set_utf8_text(line.c_str(), line.size());
+			blFont->shape(glyphBuffer);
+
+			BLTextMetrics textMetrics;
+			blFont->get_text_metrics(glyphBuffer, textMetrics);
+			double textWidth = textMetrics.advance.x;
+			double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
+
+			ctx.fill_utf8_text(BLPoint(x, y), *blFont, line.c_str(), line.size());
+
+			lastLineX = x;
+			lastLineWidth = textWidth;
+			lastLineY = y;
+			y += lineHeight;
+		}
+
+		if (font().underlined()) {
+			// Same fill_style/alpha already set above for the text
+			// itself - the underline is meant to look like part of the
+			// same stroke of "color", not a separate element. Positioned/
+			// sized from the font's own underline_position/
+			// underline_thickness (BLFontMetrics) so it tracks whatever
+			// font is actually in use rather than a guessed fixed offset.
+			double thickness = fontMetrics.underline_thickness > 0.0f
+				? double(fontMetrics.underline_thickness) : 1.0;
+			double underlineY = lastLineY + fontMetrics.underline_position;
+			ctx.fill_rect(BLRect(lastLineX, underlineY, lastLineWidth, thickness));
 		}
 
 		ctx.restore();

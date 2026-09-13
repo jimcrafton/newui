@@ -461,66 +461,25 @@ namespace newui {
         const Color& textColor() const { return textColor_; }
         void setTextColor(const Color& color) { textColor_ = color; }
 
+        // Off by default - the original, single-line-centered behavior
+        // every existing Label still gets unchanged. When on, paint()
+        // (viewstyle.cpp) greedily breaks text() across as many lines as
+        // needed to fit clientBounds' own width (breaking only at a
+        // space, never mid-word), vertically centering the whole block
+        // instead of just one line.
+        bool wordWrap() const { return wordWrap_; }
+        void setWordWrap(bool value) { wordWrap_ = value; }
+
         LabelStyle() {
 			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
 
-        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
-            ViewStyle::paint(ctx, size, highlighted, clientBounds);
-
-            if (text_.empty() || textColor_.isNull()) {
-                return;
-            }
-
-            BLFont* blFont = font().blFont();
-            if (blFont == nullptr || !blFont->is_valid()) {
-				throw std::runtime_error("LabelStyle::paint: font not resolved to a valid BLFont");
-            }
-
-            if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
-                return;
-            }
-
-            BLGlyphBuffer glyphBuffer;
-            glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
-            blFont->shape(glyphBuffer);
-
-            BLTextMetrics textMetrics;
-            blFont->get_text_metrics(glyphBuffer, textMetrics);
-
-            const BLFontMetrics& fontMetrics = blFont->metrics();
-            double textWidth = textMetrics.advance.x;
-            double textHeight = fontMetrics.ascent + fontMetrics.descent;
-
-            double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-            double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
-
-            ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp()));
-            ctx.set_fill_style(textColor_.toBLRgba32());
-            ctx.set_fill_alpha(opacity());
-            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
-
-            if (font().underlined()) {
-                // Same fill_style/alpha already set above for the text
-                // itself - the underline is meant to look like part of
-                // the same stroke of "color", not a separate element.
-                // Positioned/sized from the font's own underline_position/
-                // underline_thickness (BLFontMetrics) so it tracks
-                // whatever font is actually in use rather than a guessed
-                // fixed offset.
-                double thickness = fontMetrics.underline_thickness > 0.0f
-                    ? double(fontMetrics.underline_thickness) : 1.0;
-                double underlineY = y + fontMetrics.underline_position;
-                ctx.fill_rect(BLRect(x, underlineY, textWidth, thickness));
-            }
-
-            ctx.restore();
-        }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
     private:
         std::string text_;
         Color textColor_ = Color::null();
+        bool wordWrap_ = false;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),

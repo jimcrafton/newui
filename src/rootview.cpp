@@ -7,6 +7,7 @@
 #include "newui/subview.h"
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
+#include "newui/uicolormanager.h"
 #include "newui/viewstyle.h"
 #include "newui/reflection.h"
 
@@ -78,6 +79,7 @@ namespace newui {
 		// on itself, not just propagated down to children (see
 		// addChild()).
 		setRootView(this);
+		initDefaultBackground();
 	}
 
 	RootView::RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
@@ -87,6 +89,26 @@ namespace newui {
 
 		// Same reasoning as the Frame-owned constructor above.
 		setRootView(this);
+		initDefaultBackground();
+	}
+
+	// Unlike a mid-tree SubView (which should stay transparent by default
+	// and let its parent's own painting show through - ViewStyle::
+	// backgroundFill()'s own PaintKind::None default, unchanged), a
+	// RootView always *is* the whole real window's own background - give
+	// it a real one by default, rather than leaving every RootView's
+	// window content area rendering as solid black (unpainted) until some
+	// caller sets this explicitly. UIColorManager::colorFor() is called
+	// once here (a live query, not a value baked into this class), same
+	// as any other caller of it - if the OS theme later changes, this
+	// initial value goes stale the same way overlay1.cpp's own one-time
+	// setBackgroundColor() call would; re-tracking that live is a
+	// separate concern (Frame::handleMessage()'s WM_THEMECHANGED handling
+	// refreshes ThemedViewStyle's native theme handles, not plain
+	// ViewStyle fills - see its own comment).
+	void RootView::initDefaultBackground() {
+		style().backgroundFill().setKind(gfx::PaintKind::Color);
+		style().backgroundFill().setColor(UIColorManager::colorFor(UIColorRole::WindowBackground));
 	}
 
 	RootView::~RootView() {

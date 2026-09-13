@@ -90,8 +90,8 @@ void registerRectReflection() {
 void registerViewStyleReflection() {
     ClassBuilder<ViewStyle> builder;
     builder.clazz()
-        .property("borderWidth", Scope::Public, &ViewStyle::borderWidth)
-        .property("opacity", Scope::Public, &ViewStyle::opacity)
+        .property("borderWidth", Scope::Public, &ViewStyle::borderWidth, &ViewStyle::setBorderWidth)
+        .property("opacity", Scope::Public, &ViewStyle::opacity, &ViewStyle::setOpacity)
         .constructor<>();
     ReflectionRegistry::registerClass(builder);
 }

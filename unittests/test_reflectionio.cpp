@@ -531,9 +531,13 @@ TEST(ReflectionIO, TrySetDesignTimeWalksParentClassToFindTheMethod) {
     const Class* derivedClazz = classinfo(typeid(DesignAwareDerived));
     ASSERT_NE(derivedClazz, nullptr);
 
-    // Confirms the premise: the derived class's own method() lookup alone
-    // (no parentClass() walk) would find nothing.
-    ASSERT_EQ(derivedClazz->method("setDesignTime"), nullptr);
+    // Class::method() itself now walks parentClass() (reflection.cpp), so
+    // a method declared only on the base resolves through the derived
+    // class too - confirming that here isn't just incidental, it's the
+    // same lookup trySetDesignTime() below now relies on directly (no
+    // separate parentClass() walk of its own any more - see its own
+    // comment).
+    ASSERT_NE(derivedClazz->method("setDesignTime"), nullptr);
 
     derivedClazz->trySetDesignTime(&instance, true);
     EXPECT_TRUE(instance.designTime);

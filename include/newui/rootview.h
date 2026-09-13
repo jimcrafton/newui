@@ -372,6 +372,10 @@ namespace newui {
         newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);
 
     private:
+        // See its own definition comment (rootview.cpp) - called once
+        // from each constructor.
+        void initDefaultBackground();
+
 	    Frame* parentFrame_ = nullptr;
 		HWND viewHwnd_ = nullptr;
 

@@ -167,6 +167,24 @@ add_executable(popuptool1
 
 target_link_libraries(popuptool1 PRIVATE newui)
 
+add_executable(loaddialog1
+    loaddialog1.cpp
+)
+
+target_link_libraries(loaddialog1 PRIVATE newui)
+
+# confirmdialog.newui (examples/, hand-written - see
+# .claude/skills/newui-view-json5/SKILL.md) is this example's whole UI
+# source of truth, loaded via Bundle::loadFrame() at runtime - same
+# Resources/-relative post-build copy as popuptool1/svgimage1/imagefill1's
+# own assets above.
+add_custom_command(TARGET loaddialog1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:loaddialog1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/confirmdialog.newui"
+        "$<TARGET_FILE_DIR:loaddialog1>/Resources/confirmdialog.newui"
+)
+
 # popup-card.svg (examples/, a single rounded <rect>) is this popup's own
 # shape source for the "SVG Popup" button, via Underlay::loadImageFile()
 # (underlay.h) - same Resources/-relative post-build copy as svgimage1/
