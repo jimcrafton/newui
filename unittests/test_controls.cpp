@@ -1705,6 +1705,147 @@ TEST(ListView, SetKeyboardHighlightedIndexClampsAndIsIndependentOfHover) {
     delete listView;
 }
 
+// ---------------------------------------------------------------------
+// ListView - keyboard navigation (handleKeyDown(), controls.cpp). Mirrors
+// the plain/Ctrl/Shift click conventions above but driven by Up/Down/Home/
+// End instead of a clicked row - see handleKeyDown()'s own doc comment
+// (controls.h) for the full plain/Shift/Ctrl+Arrow/Ctrl+Space contract.
+// ---------------------------------------------------------------------
+
+namespace {
+
+void PressKey(ListView* listView, std::uint32_t VKeyCode, std::uint32_t keyMask) {
+    listView->onKeyDown(*listView, keyMask, 0, 1, VKeyCode);
+}
+
+}  // namespace
+
+TEST(ListView, PlainArrowMovesAndReplacesSelection) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 2u }));
+
+    PressKey(listView, vkUpArrow, 0);
+    PressKey(listView, vkUpArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 0u }))
+        << "Up Arrow at row 0 must clamp, not wrap or go negative";
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, DownArrowClampsAtTheLastRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c" };
+    listView->setModel(&model);
+
+    listView->setSelectedIndex(2u);
+    PressKey(listView, vkDownArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 2u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, HomeAndEndJumpToTheFirstAndLastRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->setSelectedIndex(2u);
+    PressKey(listView, vkEnd, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 4u }));
+
+    PressKey(listView, vkHome, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 0u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ShiftArrowExtendsFromTheAnchorAndKeepsExtending) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    ClickRow(listView, 1, 0);  // sets selectionAnchor_ to row 1, like a plain click
+
+    PressKey(listView, vkDownArrow, kmShift);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u }));
+
+    // A second Shift+Down must extend further from row 2, not reset back
+    // to ranging from the anchor to row 2 again.
+    PressKey(listView, vkDownArrow, kmShift);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, kmCtrl);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u }))
+        << "Ctrl+Arrow must not touch real selection";
+    ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*listView->keyboardHighlightedIndex(), 2u);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    StubRowModel model;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(&model);
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, kmCtrl);  // highlight -> row 2, selection still just {1}
+    PressKey(listView, vkSpaceBar, kmCtrl);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u }));
+
+    // Toggling again clears it back off.
+    PressKey(listView, vkSpaceBar, kmCtrl);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ArrowKeysAreANoOpWithNoRows) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+
+    PressKey(listView, vkDownArrow, 0);  // must not crash with itemCount() == 0
+
+    EXPECT_FALSE(listView->selectedIndex().has_value());
+
+    listView->destroy();
+    delete listView;
+}
+
 TEST(ListView, PaintDoesNotCrashAndReusesASinglePooledItemAcrossRowsAndCalls) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
@@ -1891,6 +2032,155 @@ TEST(TreeView, ShiftClickSelectsARangeAcrossExpandedRows) {
     ClickTreeRow(treeView, 2, 50.0f, kmShift);   // range to visible row 2 ({0,1})
 
     EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u }, { 0u, 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+// ---------------------------------------------------------------------
+// TreeView - keyboard navigation (handleKeyDown(), controls.cpp). Up/Down/
+// Home/End/Shift/Ctrl mirror ListView's own contract over visible row
+// index; Left/Right add the tree-specific collapse-or-go-to-parent /
+// expand-or-go-to-first-child pair - see handleKeyDown()'s own doc comment
+// (controls.h). StubTreeRowModel (above): 2 root children, the first
+// ({0}) has 2 of its own ({0,0}/{0,1}), the second ({1}) is a leaf.
+// ---------------------------------------------------------------------
+
+namespace {
+
+void PressTreeKey(TreeView* treeView, std::uint32_t VKeyCode, std::uint32_t keyMask) {
+    treeView->onKeyDown(*treeView, keyMask, 0, 1, VKeyCode);
+}
+
+}  // namespace
+
+TEST(TreeView, PlainArrowMovesAndReplacesSelectionAcrossVisibleRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);  // collapsed: visible {0}, {1}
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, 0);
+
+    ASSERT_TRUE(treeView->selectedPath().has_value());
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 1u }));
+
+    PressTreeKey(treeView, vkDownArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 1u })) << "Down at the last visible row must clamp";
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RightArrowExpandsFirstThenMovesToTheFirstChildOnASecondPress) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+
+    PressTreeKey(treeView, vkRightArrow, 0);
+    EXPECT_TRUE(treeView->controller().isExpanded({ 0u }));
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "the first Right Arrow only expands - it doesn't also move";
+
+    PressTreeKey(treeView, vkRightArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u, 0u }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, LeftArrowCollapsesFirstThenMovesToTheParentOnASecondPress) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);
+
+    // A leaf (path {0,0} has no children of its own) - Left goes straight
+    // to the parent, no collapse step to do first.
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u, 0u });
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }));
+
+    // Now sitting on {0}, which IS expanded (has children) - first Left
+    // collapses it rather than immediately jumping to its own parent.
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_FALSE(treeView->controller().isExpanded({ 0u }));
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "the first Left Arrow only collapses - it doesn't also move";
+
+    // {0} is a top-level path (size 1) - no parent to move to.
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ShiftArrowExtendsSelectionAcrossVisibleRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+    treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
+
+    ClickTreeRow(treeView, 0, 50.0f, 0);  // anchor at visible row 0 ({0})
+
+    PressTreeKey(treeView, vkDownArrow, kmShift);
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u } }));
+
+    PressTreeKey(treeView, vkDownArrow, kmShift);
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u }, { 0u, 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);  // collapsed: visible {0}, {1}
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, kmCtrl);
+
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "Ctrl+Arrow must not touch real selection";
+    ASSERT_TRUE(treeView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*treeView->keyboardHighlightedIndex(), 1u);
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    StubTreeRowModel model;
+    treeView->setModel(&model);
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, kmCtrl);  // highlight -> {1}, selection still just {0}
+    PressTreeKey(treeView, vkSpaceBar, kmCtrl);
+
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ArrowKeysAreANoOpWithNoRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+
+    PressTreeKey(treeView, vkDownArrow, 0);  // must not crash with visibleCount() == 0
+
+    EXPECT_FALSE(treeView->selectedPath().has_value());
 
     treeView->destroy();
     delete treeView;

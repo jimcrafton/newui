@@ -2585,6 +2585,7 @@ namespace newui {
         onMouseDown.add(this, &ListView::handleMouseDown);
         onMouseMove.add(this, &ListView::handleMouseMove);
         onMouseLeft.add(this, &ListView::handleMouseLeft);
+        onKeyDown.add(this, &ListView::handleKeyDown);
         onQueryContentSize.add(this, &ListView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
         onGotFocus.add(this, &ListView::handleGotFocus);
@@ -2852,6 +2853,94 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    std::size_t ListView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchor_.has_value()) {
+            return *selectionAnchor_;
+        }
+        if (auto sel = selectedIndex(); sel.has_value()) {
+            return *sel;
+        }
+        return 0;
+    }
+
+    // Intra-control behavior (which row is selected inside this already-
+    // focused ListView), local to this class - same "handled where the
+    // control's own state lives" convention TextController's own vkUpArrow/
+    // vkLeftArrow/etc. handling and DropDownList::handleKeyDown() already
+    // follow, not something UIInputManager (uiinputmanager.h) routes.
+    // UIInputManager owns *inter*-control policy instead (which View gets
+    // focus at all, Tab/Shift+Tab between them) - it would only come back
+    // into play here for a boundary spatial-jump to a different sibling
+    // View, which nothing in this codebase does anywhere yet (deliberately
+    // out of scope - see uiinputmanager.h's own class comment).
+    SyncReturn ListView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->itemCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // The other half of Ctrl+Arrow's "move a preview highlight
+            // without touching real selection" contract - toggles
+            // whatever's currently highlighted into/out of the real
+            // selection. A plain (non-Ctrl) Space is left alone - Control
+            // itself already treats a completed Space press like a click
+            // via its own onClick tracking, which this shouldn't fight.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(*keyboardHighlightedIndex_);
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (ctrl && !shift) {
+            // Move only - see handleKeyDown()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchor_.has_value()) {
+                selectionAnchor_ = currentKeyboardLead();
+            }
+            selectRange(*selectionAnchor_, next);
+            // Tracks the moving edge so a repeated Shift+Arrow keeps
+            // extending from here, not resetting to the anchor every time -
+            // see currentKeyboardLead()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedIndex(next);
+            selectionAnchor_ = next;
+            setKeyboardHighlightedIndex(std::nullopt);
+        }
+        return SyncReturn::Handled;
+    }
+
     SyncReturn ListView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         if (!hoveredIndex_.has_value()) {
             return SyncReturn::Ignored;
@@ -2893,11 +2982,23 @@ namespace newui {
         onMouseDown.add(this, &TreeView::handleMouseDown);
         onMouseMove.add(this, &TreeView::handleMouseMove);
         onMouseLeft.add(this, &TreeView::handleMouseLeft);
+        onKeyDown.add(this, &TreeView::handleKeyDown);
         onQueryContentSize.add(this, &TreeView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
         onGotFocus.add(this, &TreeView::handleGotFocus);
         onLostFocus.add(this, &TreeView::handleLostFocus);
         controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+    }
+
+    void TreeView::setKeyboardHighlightedIndex(std::optional<std::size_t> index) {
+        if (index.has_value() && *index >= controller_->visibleCount()) {
+            index.reset();
+        }
+        if (index == keyboardHighlightedIndex_) {
+            return;
+        }
+        keyboardHighlightedIndex_ = index;
+        style().markDirty();
     }
 
     SyncReturn TreeView::handleGotFocus(View& /*sender*/) {
@@ -3046,7 +3147,8 @@ namespace newui {
             item->style().setView(this);
             item->setSelected(isSelected(path));
             item->setEnabled(isEnabled());
-            item->setHighlighted(hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i);
+            bool isKeyboardHighlighted = keyboardHighlightedIndex_.has_value() && *keyboardHighlightedIndex_ == i;
+            item->setHighlighted((hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i) || isKeyboardHighlighted);
 
             float height = controller_->itemHeight(i);
             if (height <= 0.0f) {
@@ -3070,6 +3172,11 @@ namespace newui {
                     controller_->itemHeight(*primaryIndex));
                 onRequestScrollIntoView(*this, selectedRect);
             }
+        }
+        if (keyboardHighlightedIndex_.has_value()) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
         }
     }
 
@@ -3150,6 +3257,128 @@ namespace newui {
         }
         hoveredVisibleIndex_ = newHoveredIndex;
         style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    std::size_t TreeView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchorPath_.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*selectionAnchorPath_); idx.has_value()) {
+                return *idx;
+            }
+        }
+        if (auto sel = selectedPath(); sel.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*sel); idx.has_value()) {
+                return *idx;
+            }
+        }
+        return 0;
+    }
+
+    // Same "intra-control, not UIInputManager" reasoning as ListView::
+    // handleKeyDown()'s own doc comment (controls.h).
+    SyncReturn TreeView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->visibleCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // See ListView::handleKeyDown()'s own Ctrl+Space handling
+            // (controls.cpp) - same contract, path-keyed.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(controller_->pathAt(*keyboardHighlightedIndex_));
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkLeftArrow || VKeyCode == vkRightArrow) {
+            std::vector<std::size_t> path = controller_->pathAt(currentKeyboardLead());
+            TreeModel* treeModel = controller_->model();
+            bool hasChildren = treeModel != nullptr && treeModel->hasChildren(path);
+            bool expanded = hasChildren && controller_->isExpanded(path);
+
+            if (VKeyCode == vkLeftArrow) {
+                if (expanded) {
+                    controller_->setExpanded(path, false);
+                    return SyncReturn::Handled;
+                }
+                // Already collapsed (or a leaf) - move to the parent path,
+                // if there is one. An empty path (path.size() == 1, a
+                // top-level node) has no parent - nothing left to do.
+                if (path.size() <= 1) {
+                    return SyncReturn::Ignored;
+                }
+                path.pop_back();
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+                return SyncReturn::Ignored;
+            }
+
+            // vkRightArrow
+            if (hasChildren && !expanded) {
+                controller_->setExpanded(path, true);
+                return SyncReturn::Handled;
+            }
+            if (expanded) {
+                path.push_back(0);
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        std::vector<std::size_t> nextPath = controller_->pathAt(next);
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (ctrl && !shift) {
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchorPath_.has_value()) {
+                selectionAnchorPath_ = controller_->pathAt(currentKeyboardLead());
+            }
+            selectRange(*selectionAnchorPath_, nextPath);
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedPath(nextPath);
+            selectionAnchorPath_ = nextPath;
+            setKeyboardHighlightedIndex(std::nullopt);
+        }
         return SyncReturn::Handled;
     }
 

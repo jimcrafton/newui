@@ -2031,6 +2031,28 @@ namespace newui {
         // !hoverHighlightEnabled(), so nothing to undo when it's turned
         // back on mid-hover.
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down/Home/End move/extend/preview selection the same way
+        // handleMouseDown()'s own Shift/Ctrl handling does, just relative
+        // to whichever row is "current" (keyboardHighlightedIndex_ if a
+        // Ctrl-Arrow preview is in progress, else selectionAnchor_, else
+        // selectedIndex(), else row 0) instead of a clicked row:
+        //  - plain: replaces selectedIndices_ with just the new row
+        //    (setSelectedIndex()) and moves selectionAnchor_ to it - same
+        //    as a plain click.
+        //  - Shift: extends from selectionAnchor_ to the new row
+        //    (selectRange()) - same as Shift+click; repeated presses keep
+        //    extending from the new row (tracked via
+        //    keyboardHighlightedIndex_), not resetting to the anchor.
+        //  - Ctrl: moves keyboardHighlightedIndex_ only - real selection
+        //    is untouched until Ctrl+Space toggles it (see below) - same
+        //    "move a preview highlight, not the real selection" contract
+        //    DropDownList::moveKeyboardHighlight() already established for
+        //    its own popup ListView, just driven by this ListView's own
+        //    real keyboard focus instead of a synthetic one.
+        // Ctrl+Space toggles selection at keyboardHighlightedIndex_ (a
+        // no-op if nothing's currently highlighted) - the other half of
+        // classic Win32 listbox keyboard multi-select.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         // Clears hoveredIndex_ - the cursor has left this control
         // entirely, so no row is hovered regardless of where it last was.
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -2064,6 +2086,14 @@ namespace newui {
         // actually change, otherwise marks dirty and fires
         // onSelectionChanged.
         void replaceSelection(std::set<std::size_t> newSelection);
+
+        // The row Up/Down/Home/End in handleKeyDown() treats as "here
+        // right now" before applying a move - keyboardHighlightedIndex_ if
+        // a Ctrl-Arrow preview is already in progress, else
+        // selectionAnchor_, else selectedIndex(), else row 0 (never
+        // itemCount(), by construction - handleKeyDown() already returns
+        // early when itemCount() == 0).
+        std::size_t currentKeyboardLead() const;
 
         std::unique_ptr<ListController> controller_;
         float scrollOffsetY_ = 0.0f;
@@ -2133,6 +2163,17 @@ namespace newui {
         bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
         void setHoverHighlightEnabled(bool value);
 
+        // A second, independent highlight driven by Ctrl+Arrow (see
+        // handleKeyDown(), controls.cpp) - same "moved but not yet
+        // selected" contract as ListView::keyboardHighlightedIndex(), a
+        // visible-row index (controller_->pathAt()'s own index space, not
+        // a tree path) for the same reason paint() already needs one to
+        // look up itemOffset()/itemHeight(). Clamped to a valid index (or
+        // cleared if visibleCount() is 0) - never left pointing past the
+        // end.
+        std::optional<std::size_t> keyboardHighlightedIndex() const { return keyboardHighlightedIndex_; }
+        void setKeyboardHighlightedIndex(std::optional<std::size_t> index);
+
         float rowHeight() const { return controller_->defaultItemHeight(); }
         void setRowHeight(float height);
 
@@ -2201,6 +2242,18 @@ namespace newui {
         SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down move/extend/preview selection the same way ListView::
+        // handleKeyDown() does (see its own doc comment, controls.h) -
+        // plain replaces, Shift extends from selectionAnchorPath_, Ctrl
+        // moves keyboardHighlightedIndex_ only (Ctrl+Space toggles it into
+        // the real selection) - all keyed by visible row index, converted
+        // to/from a tree path via controller_->pathAt()/visibleIndexOf().
+        // Left/Right add the classic tree-specific pair on top: collapse
+        // (if expanded) or go to the parent path (if not); expand (if
+        // collapsed and has children) or go to the first child path (if
+        // already expanded) - see TreeController::isExpanded()/
+        // hasChildren().
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         SyncReturn handleQueryContentSize(View& sender, Size& outSize);
         SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
         SyncReturn handleDataChanged(TreeController& sender);
@@ -2213,12 +2266,25 @@ namespace newui {
 
         void replaceSelection(std::set<std::vector<std::size_t>> newSelection);
 
+        // The visible row handleKeyDown()'s Up/Down treats as "here right
+        // now" before applying a move - same shape as ListView::
+        // currentKeyboardLead(), just resolving selectionAnchorPath_/
+        // selectedPath() to a visible index via controller_->
+        // visibleIndexOf() first (a path can't be compared/offset
+        // directly the way a flat index can). Falls back to row 0 if
+        // nothing resolves to a currently-visible row (e.g. the anchor
+        // path got collapsed away) - never visibleCount(), by
+        // construction (handleKeyDown() already returns early when
+        // visibleCount() == 0).
+        std::size_t currentKeyboardLead() const;
+
         std::unique_ptr<TreeController> controller_;
         float scrollOffsetY_ = 0.0f;
         std::set<std::vector<std::size_t>> selectedPaths_;
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
+        std::optional<std::size_t> keyboardHighlightedIndex_;
 
         // Captured from style() at construction (TreeView::TreeView()) -
         // see handleGotFocus()/handleLostFocus() above.
