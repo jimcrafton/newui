@@ -329,7 +329,6 @@ namespace newui {
 		if (style_) {
 			style_->computePrePaintBounds(outDirtyBounds);
 		}
-		printf("View::computePrePaintBounds() called for %s, outDirtyBounds: %f, %f, %f, %f\n", name_.c_str(), r.left(), r.top(), r.right(), r.bottom());
 	}
 
 	void View::redraw()

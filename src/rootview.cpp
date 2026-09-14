@@ -364,15 +364,13 @@ namespace newui {
 		// pattern/image fills do. This scoping is what keeps a small
 		// hover-driven repaint from wiping (and needing to redraw) the
 		// *entire* window's background on every call.
-		if (!dirtyRect_.empty()) {
-			printf("Repainting dirty rectangle: %f, %f, %f, %f\n", dirtyRect_.left(), dirtyRect_.top(), dirtyRect_.right(), dirtyRect_.bottom());
+		if (!dirtyRect_.empty()) {			
 			ctx.save();
 			ctx.clip_to_rect(dirtyRect_);
 			paintStyle(ctx);
 			paint(ctx);
 			ctx.restore();
 		} else {
-			printf("Repainting full rectangle: %f, %f, %f, %f\n", bounds_.left(), bounds_.top(), bounds_.right(), bounds_.bottom());
 			paintStyle(ctx);
 			paint(ctx);
 		}
