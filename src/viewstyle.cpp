@@ -632,6 +632,7 @@ namespace newui {
 		dropShadow.style().dropShadow().setEnabled(true);
 		dropShadow.style().dropShadow().setOffset(newui::Point(1.0f * elevation_, 1.0f * elevation_));
 		dropShadow.style().dropShadow().setSoftness(2.0f * elevation_);
+		dropShadow.style().dropShadow().setAmount(1.0f * (1.0f / elevation_));
 		dropShadow.render(ctx);
 	}
 
