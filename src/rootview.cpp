@@ -703,7 +703,40 @@ namespace newui {
 			capturedSubView_ = nullptr;
 		}
 		if (focusedSubView_ != nullptr && isWithinSubtree(focusedSubView_, removedSubtreeRoot)) {
-			focusedSubView_ = nullptr;
+			// Recover to the nearest still-alive ancestor that can hold
+			// focus, rather than just dropping it to nullptr - walk up
+			// from removedSubtreeRoot's own parent (still intact at this
+			// point; only removedSubtreeRoot's own subtree is going away,
+			// same as hoveredSubView_/capturedSubView_ above). Stops
+			// naturally at `this` (a RootView is never itself a focus
+			// target - see moveFocus()'s own candidate gathering,
+			// uiinputmanager.cpp) or wherever the SubView chain runs out.
+			//
+			// Deliberately bypasses setFocusedSubView()'s
+			// canResignFocus() veto and never fires onLostFocus() on the
+			// doomed view - it's being destroyed regardless of what it
+			// wants, same as hoveredSubView_/capturedSubView_ being
+			// silently cleared just above with no onMouseLeft/etc. fired
+			// either. onGotFocus() *is* fired on the recovered target
+			// though (unlike the silent hover/capture clears, which have
+			// no "recovered to" concept at all) - real controls
+			// (ThemedEditStyle-based ones especially, see this class's
+			// own "visual focus indication" follow-up) rely on that hook
+			// actually firing to show real focus feedback, not just
+			// isFocused() flipping.
+			SubView* recovered = nullptr;
+			for (View* v = removedSubtreeRoot->parent(); v != nullptr && v != this; v = v->parent()) {
+				SubView* candidate = dynamic_cast<SubView*>(v);
+				if (candidate != nullptr && candidate->canBecomeFocused()) {
+					recovered = candidate;
+					break;
+				}
+			}
+			focusedSubView_ = recovered;
+			if (focusedSubView_ != nullptr) {
+				focusedSubView_->onGotFocus(*focusedSubView_);
+				focusedSubView_->style().markDirty();
+			}
 		}
 	}
 

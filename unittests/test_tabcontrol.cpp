@@ -1,4 +1,5 @@
 #include "newui/tabcontrol.h"
+#include "newui/keyboard_constants.h"
 
 #include <gtest/gtest.h>
 
@@ -205,4 +206,99 @@ TEST(TabControl, LeftRightAlignmentButtonsUseTheRightThemeAlignment) {
 
     leftTabs->destroy();
     delete leftTabs;
+}
+
+// ---------------------------------------------------------------------
+// Arrow-key tab switching - the whole strip is one Tab stop (see
+// TabControl's own constructor comment, tabcontrol.cpp); once it has
+// focus, arrow keys (not the individual buttons) switch which tab is
+// selected. Driven directly via onKeyDown(), same "no real HWND/message
+// pump needed" pattern SimulatedClickOnTabButtonSelectsIt above uses for
+// onMouseDown().
+// ---------------------------------------------------------------------
+
+TEST(TabControl, RightArrowAdvancesToTheNextTabOnATopAlignedStrip) {
+    auto* tabs = new newui::TabControl(newui::ThemedTabItemStyle::TabAlignment::Top);
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+    tabs->addTab("Third", MakePage("page3"));
+    ASSERT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkRightArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+    EXPECT_TRUE(tabs->page(1)->isVisible());
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, LeftArrowRetreatsAndWrapsToTheLastTab) {
+    auto* tabs = new newui::TabControl(newui::ThemedTabItemStyle::TabAlignment::Top);
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+    tabs->addTab("Third", MakePage("page3"));
+    ASSERT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkLeftArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 2u) << "Left from the first tab must wrap to the last";
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RightArrowWrapsFromTheLastTabBackToTheFirst) {
+    auto* tabs = new newui::TabControl(newui::ThemedTabItemStyle::TabAlignment::Top);
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+    tabs->selectTab(1);
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkRightArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, UpDownArrowsAreIgnoredOnAHorizontalStrip) {
+    auto* tabs = new newui::TabControl(newui::ThemedTabItemStyle::TabAlignment::Top);
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkDownArrow);
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkUpArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, DownArrowAdvancesOnALeftAlignedVerticalStrip) {
+    auto* tabs = new newui::TabControl(newui::ThemedTabItemStyle::TabAlignment::Left);
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkDownArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+
+    // The horizontal-strip keys must do nothing on a vertical strip -
+    // this isn't just "Right also happens to work", it's the wrong axis
+    // entirely.
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkRightArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkUpArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, ArrowKeyOnAnEmptyTabControlIsIgnoredNotACrash) {
+    auto* tabs = new newui::TabControl();
+
+    tabs->onKeyDown(*tabs, 0, 0, 1, newui::vkRightArrow);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    tabs->destroy();
+    delete tabs;
 }

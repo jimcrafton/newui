@@ -1472,6 +1472,142 @@ TEST(RootViewSubViewRemoval, RemovingNestedGrandchildClearsHoverCaptureFocus) {
     delete root;
 }
 
+// ---------------------------------------------------------------------------
+// Focus-recovery-on-destroy: RootView::notifySubViewRemoved() no longer just
+// drops focusedSubView_ to nullptr when the removed subtree carries it away -
+// it walks up from the removed subtree's own (still-alive) parent to the
+// nearest ancestor that canBecomeFocused(), same "auto-refocus a fallback"
+// idea the docx floated as a follow-up to FocusScope/FocusGuide (see
+// [[uiinputmanager-task]]). hoveredSubView_/capturedSubView_ still just clear
+// silently - only focus recovers, since only focus has a meaningful "give it
+// to something else instead" fallback.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewFocusRecovery, RemovingTheFocusedChildRecoversToAFocusableAncestor) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 0, 100, 100));
+    panel->setVisible(true);
+    panel->setAcceptsFocus(true);
+    root->addChild(panel);
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->setAcceptsFocus(true);
+    panel->addChild(child);
+
+    root->setFocusedSubView(child);
+    ASSERT_EQ(root->focusedSubView(), child);
+
+    int panelGotFocusCount = 0;
+    panel->onGotFocus.add([&panelGotFocusCount](newui::View&) { ++panelGotFocusCount; return newui::SyncReturn::Handled; });
+
+    panel->removeChild(child);
+
+    EXPECT_EQ(root->focusedSubView(), panel) << "focus should recover to the nearest surviving focusable ancestor";
+    EXPECT_EQ(panelGotFocusCount, 1) << "the recovered-to ancestor must actually get onGotFocus, not just the raw pointer";
+
+    delete child;
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusRecovery, SkipsNonFocusableAncestorsToFindOneFurtherUp) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* focusableGrandparent = new newui::SubView();
+    focusableGrandparent->setBounds(newui::Rect(0, 0, 150, 150));
+    focusableGrandparent->setVisible(true);
+    focusableGrandparent->setAcceptsFocus(true);
+    root->addChild(focusableGrandparent);
+
+    // Plain, non-focusable intermediate container - recovery must walk
+    // straight past it, not stop here (and not treat it as "no ancestor
+    // found" either).
+    auto* plainContainer = new newui::SubView();
+    plainContainer->setBounds(newui::Rect(0, 0, 100, 100));
+    plainContainer->setVisible(true);
+    focusableGrandparent->addChild(plainContainer);
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->setAcceptsFocus(true);
+    plainContainer->addChild(child);
+
+    root->setFocusedSubView(child);
+    ASSERT_EQ(root->focusedSubView(), child);
+
+    plainContainer->removeChild(child);
+
+    EXPECT_EQ(root->focusedSubView(), focusableGrandparent);
+
+    delete child;
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusRecovery, ClearsToNullptrWhenNoAncestorCanBecomeFocused) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* plainContainer = new newui::SubView();
+    plainContainer->setBounds(newui::Rect(0, 0, 100, 100));
+    plainContainer->setVisible(true);
+    root->addChild(plainContainer);
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->setAcceptsFocus(true);
+    plainContainer->addChild(child);
+
+    root->setFocusedSubView(child);
+    ASSERT_EQ(root->focusedSubView(), child);
+
+    plainContainer->removeChild(child);
+
+    EXPECT_EQ(root->focusedSubView(), nullptr);
+
+    delete child;
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusRecovery, RemovingTheFocusedViewIgnoresItsOwnCanResignFocusVeto) {
+    // A doomed view refusing to resign focus (e.g. an unsaved-edit guard,
+    // see command1.cpp's own example) must never block recovery/clearing -
+    // it's being destroyed regardless of what it wants. Using
+    // setFocusedSubView() for recovery instead of a direct field write
+    // would silently leave focusedSubView_ pointing at freed memory the
+    // instant the caller deletes it.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 0, 100, 100));
+    panel->setVisible(true);
+    panel->setAcceptsFocus(true);
+    root->addChild(panel);
+
+    auto* child = new VetoableSubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->allowResign = false;
+    panel->addChild(child);
+
+    root->setFocusedSubView(child);
+    ASSERT_EQ(root->focusedSubView(), child);
+
+    panel->removeChild(child);
+
+    EXPECT_EQ(root->focusedSubView(), panel);
+
+    delete child;
+    root->destroy();
+    delete root;
+}
+
 TEST(RootViewDefaultNaming, FirstButtonAttachedGetsNameButton1) {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 
