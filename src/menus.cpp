@@ -408,6 +408,7 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
 MenuBar::MenuBar() {
     setName("MenuBar");
     setVisible(true);
+    setAcceptsFocus(true);
     setStyle(std::make_unique<ThemedMenuBarBackgroundStyle>());
     setLayout(std::make_unique<FlexLayout>(Orientation::Horizontal));
     setDesiredSize(Size(0.0f, 32.0f));  // caller can override via setDesiredSize() afterward

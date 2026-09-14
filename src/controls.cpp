@@ -1430,6 +1430,7 @@ namespace newui {
 
     ScrollView::ScrollView() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         viewport_ = new SubView();
         viewport_->setVisible(true);
@@ -1785,6 +1786,7 @@ namespace newui {
 
     ToolbarButton::ToolbarButton() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
         buttonStyle_ = buttonStyle.get();

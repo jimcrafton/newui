@@ -337,6 +337,12 @@ TEST(MenuBar, ConstructedVisibleWithThemedBackgroundStyleAndHorizontalLayout) {
     delete bar;
 }
 
+TEST(MenuBar, AcceptsFocusByDefault) {
+    auto* bar = new newui::MenuBar();
+    EXPECT_TRUE(bar->acceptsFocus());
+    delete bar;
+}
+
 TEST(MenuBar, SetMenuItemsBuildsOneThemedButtonPerTopLevelItem) {
     std::vector<std::unique_ptr<newui::MenuItem>> items;
     items.push_back(std::make_unique<newui::MenuItem>("File"));

@@ -380,6 +380,16 @@ TEST(ScrollView, BarsHiddenWhenContentFitsViewport) {
     delete view;
 }
 
+TEST(ScrollView, AcceptsFocusByDefault) {
+    // Lets keyboard users Tab into a scrollable region that hosts no
+    // focusable content of its own (e.g. read-only text) and page/arrow
+    // through it - see UIInputManager::moveFocus() (uiinputmanager.h).
+    auto* view = new ScrollView();
+    EXPECT_TRUE(view->acceptsFocus());
+    view->destroy();
+    delete view;
+}
+
 TEST(ScrollView, BarsShownAndRangedWhenContentExceedsViewport) {
     auto* view = new ScrollView();
     view->setBounds(Rect(0, 0, 200, 200));
@@ -824,6 +834,11 @@ TEST(ToolbarButton, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
 TEST(ToolbarButton, IconDefaultsToEmpty) {
     ToolbarButton button;
     EXPECT_TRUE(button.icon().empty());
+}
+
+TEST(ToolbarButton, AcceptsFocusByDefault) {
+    ToolbarButton button;
+    EXPECT_TRUE(button.acceptsFocus());
 }
 
 TEST(ToolbarButton, SetIconChangesTheStoredValue) {
