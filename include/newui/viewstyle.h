@@ -326,6 +326,33 @@ namespace newui {
         // this and don't need to touch clientBounds again themselves.
         virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const;
 
+        // Draws the keyboard-focus indicator - called by View::paintStyle()
+        // (view.h) right after paint() above, but only when the owning
+        // View is the RootView's current focusedSubView() (View::
+        // isFocused()); ctx/clientBounds are exactly what that same paint()
+        // call already produced, so most overrides never need to touch
+        // this at all. Deliberately a separate call, not folded into
+        // paint()'s own highlighted-keyed signature - unlike highlighted
+        // (a real uxtheme part/state, PBS_HOT etc.), "focused" has no
+        // theme-part equivalent for most controls (real Windows draws
+        // keyboard focus as a dotted rect layered *over* a control's own
+        // chrome, not as a different theme state of it), so threading it
+        // through every ThemedViewStyle subclass's stateId() would be both
+        // a much larger change and the wrong shape for what it's modeling.
+        //
+        // Base implementation: a dashed rect inset from clientBounds in
+        // UIColorRole::HighlightBackground (uicolormanager.h - the user's
+        // accent color, same role selection highlights already use).
+        // Hand-drawn via Blend2D dash support, not GDI's DrawFocusRect() -
+        // this toolkit's whole buffer is an offscreen DIB blitted via
+        // BitBlt (see RootView::paintImageBufferToWindow()), not a live
+        // HDC an XOR-pattern trick could round-trip against.
+        //
+        // Override to suppress or customize where the default would look
+        // wrong - e.g. a themed Edit control's own caret already signals
+        // focus, so ThemedEditStyle overrides this to do nothing.
+        virtual void paintFocusRing(BLContext& ctx, const Size& size, const Rect& clientBounds) const;
+
         // Non-owning upward back-reference to the owning View (View owns
         // *this via its own std::unique_ptr<ViewStyle> style_) - reachable
         // downward already via that View's own "style" property, so
@@ -1078,6 +1105,15 @@ namespace newui {
         bool readOnly = false;
         bool enabled = true;
 
+        // Suppresses ViewStyle's default dashed focus ring (viewstyle.cpp) -
+        // stateId() above already draws the real native ETS_FOCUSED border
+        // once focused is true, matching how a real Windows Edit control
+        // signals keyboard focus (a highlighted border, not a ring drawn
+        // over top of it). See TextController::handleGotFocus()/
+        // handleLostFocus() (controls.cpp) - and ListView/TreeView/
+        // DropDownList's own handleGotFocus()/handleLostFocus() - for what
+        // actually keeps focused in sync with real keyboard focus.
+        void paintFocusRing(BLContext&, const Size&, const Rect&) const override {}
 
     protected:
         int partId() const override { return EP_EDITTEXT; }

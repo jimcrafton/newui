@@ -319,6 +319,65 @@ TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
 }
 
 // ---------------------------------------------------------------------------
+// isFocused() - computed live from rootView()->focusedSubView() (view.cpp),
+// not a stored flag. Used by paintStyle() to decide whether to draw
+// ViewStyle::paintFocusRing() - see RootViewFocusPolicy in test_rootview.cpp
+// for the fuller Tab/click-driven focus routing this reads from.
+// ---------------------------------------------------------------------------
+
+TEST(ViewIsFocused, FalseWithNoRootView) {
+    auto* view = new newui::SubView();
+
+    EXPECT_FALSE(view->isFocused());
+
+    delete view;
+}
+
+TEST(ViewIsFocused, FalseWhenAttachedButNothingIsFocused) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* view = new newui::SubView();
+    view->setBounds(newui::Rect(0, 0, 50, 50));
+    view->setVisible(true);
+    root->addChild(view);
+
+    EXPECT_FALSE(view->isFocused());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsFocused, TrueOnlyForTheRootViewsCurrentFocusedSubView) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    first->setAcceptsFocus(true);
+    root->addChild(first);
+
+    auto* second = new newui::SubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    second->setAcceptsFocus(true);
+    root->addChild(second);
+
+    root->setFocusedSubView(first);
+    EXPECT_TRUE(first->isFocused());
+    EXPECT_FALSE(second->isFocused());
+
+    root->setFocusedSubView(second);
+    EXPECT_FALSE(first->isFocused());
+    EXPECT_TRUE(second->isFocused());
+
+    root->setFocusedSubView(nullptr);
+    EXPECT_FALSE(first->isFocused());
+    EXPECT_FALSE(second->isFocused());
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
 // hitTestChildren() - pure geometry, no RootView/live window involved.
 // RootView::mouseDown()/mouseMove()/etc. (rootview.cpp) are what actually
 // call this to route real input to the right SubView - covered separately

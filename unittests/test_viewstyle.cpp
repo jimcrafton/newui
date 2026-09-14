@@ -1056,6 +1056,40 @@ TEST(ThemedEditStyle, StateIdPrecedence) {
 }
 
 // ---------------------------------------------------------------------------
+// paintFocusRing() - View::paintStyle() (view.cpp) calls this after paint()
+// itself, but only when the owning View isFocused(); these cases only cover
+// "doesn't crash / doesn't draw" since (same as every paint() test above)
+// nothing here inspects actual pixels.
+// ---------------------------------------------------------------------------
+
+TEST(ViewStyleFocusRing, DefaultDrawsWithoutCrashing) {
+    newui::ViewStyle style;
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    style.paintFocusRing(SharedContext(), newui::Size(64, 64), clientBounds);
+}
+
+TEST(ViewStyleFocusRing, DefaultToleratesAZeroSizeClientBounds) {
+    newui::ViewStyle style;
+
+    newui::Rect clientBounds;  // width/height both 0
+    style.paintFocusRing(SharedContext(), newui::Size(0, 0), clientBounds);
+}
+
+TEST(ThemedEditStyle, PaintFocusRingIsSuppressed) {
+    // ThemedEditStyle's own stateId() already draws the real native
+    // ETS_FOCUSED border once focused is true (see StateIdPrecedence
+    // above) - the generic dashed ring would be redundant/non-native on
+    // top of it, so this override is a deliberate no-op. Nothing to
+    // assert beyond "doesn't crash" - same as every other paint() case in
+    // this file.
+    newui::ThemedEditStyle style;
+
+    newui::Rect clientBounds(0, 0, 120, 24);
+    style.paintFocusRing(SharedContext(), newui::Size(120, 24), clientBounds);
+}
+
+// ---------------------------------------------------------------------------
 // Batch 2: ThemedListItemStyle / ThemedHeaderItemStyle /
 // ThemedHeaderSortArrowStyle / ThemedTreeItemStyle / ThemedTreeGlyphStyle /
 // ThemedTabItemStyle / ThemedTabPaneStyle / ThemedTrackbarTrackStyle /

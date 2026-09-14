@@ -607,6 +607,37 @@ namespace newui {
 		ctx.restore();
 	}
 
+	void ViewStyle::paintFocusRing(BLContext& ctx, const Size& /*size*/, const Rect& clientBounds) const
+	{
+		// kInset keeps the ring inside clientBounds' own edge rather than
+		// sitting exactly on it - a plain style has no border chrome of
+		// its own to naturally separate the two, so without this the ring
+		// would visually merge with clientBounds' own boundary.
+		constexpr float kInset = 1.5f;
+		Rect ring = clientBounds.deflate(kInset);
+		if (ring.size().width <= 0.0f || ring.size().height <= 0.0f) {
+			return;
+		}
+
+		ctx.save();
+		ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+
+		// A short dash/gap pair, not a solid stroke - the classic
+		// DrawFocusRect() look every native Win32 dialog uses, hand-drawn
+		// here since this toolkit's buffer is an offscreen DIB blitted via
+		// BitBlt (RootView::paintImageBufferToWindow()), not a live HDC an
+		// XOR-pattern trick could round-trip against.
+		BLArray<double> dashArray;
+		dashArray.append(2.0, 2.0);
+		ctx.set_stroke_dash_array(dashArray);
+		ctx.set_stroke_dash_offset(0.0);
+
+		ctx.stroke_box(ring.left(), ring.top(), ring.right(), ring.bottom());
+		ctx.restore();
+	}
+
 	void LabelStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
 		ViewStyle::paint(ctx, size, highlighted, clientBounds);
 

@@ -2036,11 +2036,22 @@ namespace newui {
     }
 
     SyncReturn TextController::handleGotFocus() {
-        
+
         if (RunLoop::current()) {
             caret_.start(RunLoop::current());
         }
-        
+
+        // TextField/TextControl both use ThemedEditStyle (see their own
+        // constructors) - its stateId() only draws the real native
+        // ETS_FOCUSED border when this is true, so this is what actually
+        // keeps that in sync with real keyboard focus (nothing else did -
+        // the field existed, matched a real theme state, and was never
+        // set anywhere, confirmed via ThemedEditStyle's own
+        // StateIdPrecedence test only ever driving it by hand).
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = true;
+        }
+
         // start()/setPosition() below deliberately don't fire
         // onVisibilityChanged themselves (see Caret's own doc comment -
         // "the caller already knows the outcome at the call site") - this
@@ -2055,6 +2066,9 @@ namespace newui {
 
     SyncReturn TextController::handleLostFocus() {
         caret_.stop();
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = false;
+        }
         owner_.style().markDirty();
         return SyncReturn::Handled;
     }
@@ -2561,14 +2575,35 @@ namespace newui {
     ListView::ListView() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
         setAcceptsFocus(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &ListView::handleMouseDown);
         onMouseMove.add(this, &ListView::handleMouseMove);
         onMouseLeft.add(this, &ListView::handleMouseLeft);
         onQueryContentSize.add(this, &ListView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
+        onGotFocus.add(this, &ListView::handleGotFocus);
+        onLostFocus.add(this, &ListView::handleLostFocus);
         controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+    }
+
+    SyncReturn ListView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     void ListView::setHoverHighlightEnabled(bool value) {
@@ -2848,14 +2883,35 @@ namespace newui {
     TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
         setVisible(true);
         setAcceptsFocus(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &TreeView::handleMouseDown);
         onMouseMove.add(this, &TreeView::handleMouseMove);
         onMouseLeft.add(this, &TreeView::handleMouseLeft);
         onQueryContentSize.add(this, &TreeView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
+        onGotFocus.add(this, &TreeView::handleGotFocus);
+        onLostFocus.add(this, &TreeView::handleLostFocus);
         controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+    }
+
+    SyncReturn TreeView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     void TreeView::setController(std::unique_ptr<TreeController> controller) {
@@ -3128,10 +3184,31 @@ namespace newui {
     DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
         setAcceptsFocus(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &DropDownList::handleMouseDown);
         onKeyDown.add(this, &DropDownList::handleKeyDown);
+        onGotFocus.add(this, &DropDownList::handleGotFocus);
+        onLostFocus.add(this, &DropDownList::handleLostFocus);
+    }
+
+    SyncReturn DropDownList::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn DropDownList::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     DropDownList::~DropDownList() {

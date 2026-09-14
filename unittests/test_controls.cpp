@@ -1086,6 +1086,94 @@ TEST(TextField, SetControllerWithNullptrDoesNotCrashOrReplaceTheExistingOne) {
     delete field;
 }
 
+// ---------------------------------------------------------------------------
+// Keeping ThemedEditStyle::focused (viewstyle.h) in sync with real
+// onGotFocus/onLostFocus - drives the real native ETS_FOCUSED border, and
+// (see ThemedEditStyle::paintFocusRing()) is why these controls suppress
+// View's generic dashed focus ring rather than drawing both. Fired directly
+// on the delegate (field->onGotFocus(*field), not through a real RootView -
+// same "no live HWND/RunLoop needed" pattern
+// SetControllerReplacesTheControllerAndReachesASubclassOverride above
+// already uses; RunLoop::current() is null in this headless test process,
+// so TextController::handleGotFocus()'s own caret_.start() call is
+// naturally skipped, same as that test's own comment describes.
+// ---------------------------------------------------------------------------
+
+TEST(TextField, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* field = new TextField();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(field->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    field->onGotFocus(*field);
+    EXPECT_TRUE(editStyle.focused);
+
+    field->onLostFocus(*field);
+    EXPECT_FALSE(editStyle.focused);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextControl, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* control = new TextControl();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(control->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    control->onGotFocus(*control);
+    EXPECT_TRUE(editStyle.focused);
+
+    control->onLostFocus(*control);
+    EXPECT_FALSE(editStyle.focused);
+
+    control->destroy();
+    delete control;
+}
+
+TEST(ListView, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* list = new ListView();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(list->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    list->onGotFocus(*list);
+    EXPECT_TRUE(editStyle.focused);
+
+    list->onLostFocus(*list);
+    EXPECT_FALSE(editStyle.focused);
+
+    list->destroy();
+    delete list;
+}
+
+TEST(TreeView, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* tree = new TreeView();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(tree->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    tree->onGotFocus(*tree);
+    EXPECT_TRUE(editStyle.focused);
+
+    tree->onLostFocus(*tree);
+    EXPECT_FALSE(editStyle.focused);
+
+    tree->destroy();
+    delete tree;
+}
+
+TEST(DropDownList, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* dropDown = new DropDownList();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(dropDown->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    dropDown->onGotFocus(*dropDown);
+    EXPECT_TRUE(editStyle.focused);
+
+    dropDown->onLostFocus(*dropDown);
+    EXPECT_FALSE(editStyle.focused);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
 TEST(TextField, SetModelReplacesTheModelAndReflectsItsContent) {
     auto* field = new TextField();
     field->setText(L"original");

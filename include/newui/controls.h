@@ -2049,6 +2049,13 @@ namespace newui {
         // TextControl::handleModelChanged() already documents for a text
         // edit.
         SyncReturn handleDataChanged(ListController& sender);
+        // Keeps editStyle_->focused (ThemedEditStyle, viewstyle.h) in sync
+        // with real keyboard focus, the same way TextController::
+        // handleGotFocus()/handleLostFocus() (controls.cpp) already does
+        // for TextField/TextControl - this class has no TextController to
+        // share that fix with, so it gets its own pair instead.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         // Common "did this actually change the selection" tail shared by
         // setSelectedIndex()/addToSelection()/removeFromSelection()/
@@ -2073,6 +2080,10 @@ namespace newui {
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredIndex_;
         std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // Captured from style() at construction (ListView::ListView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     // The hierarchical counterpart to ListView (above) - same overall
@@ -2193,6 +2204,12 @@ namespace newui {
         SyncReturn handleQueryContentSize(View& sender, Size& outSize);
         SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
         SyncReturn handleDataChanged(TreeController& sender);
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView's own pair (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         void replaceSelection(std::set<std::vector<std::size_t>> newSelection);
 
@@ -2202,6 +2219,10 @@ namespace newui {
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
+
+        // Captured from style() at construction (TreeView::TreeView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     class PopupFrame;
@@ -2299,6 +2320,16 @@ namespace newui {
         // extra focus-handling needed here.
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView/TreeView's own pairs (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror. This is the outer combo box
+        // control itself, not popupListView_ - see moveKeyboardHighlight()'s
+        // own comment above for why popupListView_ never reliably holds
+        // real keyboard focus at all.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
+
         // Moves popupListView_'s keyboardHighlightedIndex() by delta
         // (clamped to a valid row, never wrapping) - starts from
         // selectedIndex_ the first time (seeded in openPopup()), so the
@@ -2318,6 +2349,10 @@ namespace newui {
         ScrollView* popupScroll_ = nullptr;
         ListView* popupListView_ = nullptr;
         std::optional<std::size_t> selectedIndex_;
+
+        // Captured from style() at construction (DropDownList::DropDownList()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
 
         // Guards openPopup()'s own restore of the popup ListView's
         // selection (to match selectedIndex_ on reopen) from being

@@ -198,6 +198,20 @@ namespace newui {
             return highlighted_;
         }
 
+        // Whether this View is the RootView's current focusedSubView()
+        // (rootview.h) right now - computed live from that, not a stored
+        // flag, so it can never drift out of sync with the real focus
+        // state the way a cached bool toggled from onGotFocus/onLostFocus
+        // could. Needs RootView's full definition, so this can't stay
+        // inline here - same reasoning setName() above is out-of-line
+        // (view.cpp). Used by paintStyle() below to draw
+        // ViewStyle::paintFocusRing() only for the actually-focused View -
+        // not the same thing as Control::StateFlags::Focused (controls.h),
+        // which is a separate, currently-unused bit that can't cover this
+        // anyway (SegmentedControl/TabControl accept focus - view.h's
+        // acceptsFocus() - without being a Control at all).
+        bool isFocused() const;
+
         // Draws background/border/highlight from style() - see ViewStyle.
         // Called automatically before paint() by whatever's orchestrating
         // the draw (paintChildren() for children, RootView::repaint() for

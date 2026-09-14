@@ -239,10 +239,17 @@ namespace newui {
 		return nullptr;
 	}
 
+	bool View::isFocused() const {
+		return rootView_ != nullptr && rootView_->focusedSubView() == dynamic_cast<const SubView*>(this);
+	}
+
 	void View::paintStyle(BLContext& ctx) {
 		if (style_) {
-			Rect unused;
-			style_->paint(ctx, bounds_.size(), highlighted_, unused);
+			Rect clientBounds;
+			style_->paint(ctx, bounds_.size(), highlighted_, clientBounds);
+			if (isFocused()) {
+				style_->paintFocusRing(ctx, bounds_.size(), clientBounds);
+			}
 		}
 	}
 
