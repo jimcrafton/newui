@@ -250,6 +250,72 @@ TEST(Image, MoveConstructorTransfersStateAndLeavesSourceInvalid) {
     EXPECT_EQ(source.memDC(), nullptr);
 }
 
+// Real bug, live-reported downstream (cpp_codetools' gradient editor dialog): Linear/Radial/
+// Conic's own geometry (linearStart_/linearEnd_ etc.) used to be absolute local-space pixel
+// coordinates, frozen at whatever they were set to - applying a gradient looked right once, but
+// resizing whatever it was painted onto left the geometry stale (a gradient authored to span a
+// 100px-wide box rendered compressed into the leftmost 100px of a much wider one, padding the
+// rest with the last stop's color). Now proportional [0,1] fractions of localBounds, resolved
+// fresh on every toBLVar() call - these tests drive the real public API (toBLVar()), not the
+// private toBLGradient() directly, and check the same box twice at two different sizes to prove
+// it isn't a cached/frozen snapshot.
+TEST(Gradient, LinearDefaultSpansTheFullWidthOfWhateverBoxItsResolvedAgainst) {
+    newui::gfx::Gradient gradient;
+    gradient.setKind(newui::gfx::GradientKind::Linear);
+    gradient.stops().push_back(newui::gfx::GradientStop(0.0f, newui::Color(1.0f, 0.0f, 0.0f)));
+    gradient.stops().push_back(newui::gfx::GradientStop(1.0f, newui::Color(0.0f, 0.0f, 1.0f)));
+
+    BLVar smallBox = gradient.toBLVar(newui::Rect(0.0f, 0.0f, 100.0f, 50.0f));
+    ASSERT_TRUE(smallBox.is_gradient());
+    const BLLinearGradientValues& smallValues = smallBox.as<BLGradient>().linear();
+    EXPECT_DOUBLE_EQ(smallValues.x0, 0.0);
+    EXPECT_DOUBLE_EQ(smallValues.x1, 100.0);
+
+    // A much wider box, same Gradient object, no re-authoring - the whole point of resolving
+    // proportionally at paint time instead of baking absolute coordinates in once.
+    BLVar wideBox = gradient.toBLVar(newui::Rect(0.0f, 0.0f, 400.0f, 50.0f));
+    ASSERT_TRUE(wideBox.is_gradient());
+    const BLLinearGradientValues& wideValues = wideBox.as<BLGradient>().linear();
+    EXPECT_DOUBLE_EQ(wideValues.x0, 0.0);
+    EXPECT_DOUBLE_EQ(wideValues.x1, 400.0);
+}
+
+TEST(Gradient, LinearGeometryOffsetsWithANonZeroOriginBox) {
+    newui::gfx::Gradient gradient;
+    gradient.setKind(newui::gfx::GradientKind::Linear);
+
+    BLVar result = gradient.toBLVar(newui::Rect(10.0f, 20.0f, 200.0f, 60.0f));
+    ASSERT_TRUE(result.is_gradient());
+    const BLLinearGradientValues& values = result.as<BLGradient>().linear();
+    EXPECT_DOUBLE_EQ(values.x0, 10.0);
+    EXPECT_DOUBLE_EQ(values.y0, 20.0);
+    EXPECT_DOUBLE_EQ(values.x1, 210.0);
+    EXPECT_DOUBLE_EQ(values.y1, 20.0);
+}
+
+TEST(Gradient, RadialDefaultIsACircleCenteredInAndTouchingTheBoxsShorterSide) {
+    newui::gfx::Gradient gradient;
+    gradient.setKind(newui::gfx::GradientKind::Radial);
+
+    BLVar result = gradient.toBLVar(newui::Rect(0.0f, 0.0f, 100.0f, 50.0f));
+    ASSERT_TRUE(result.is_gradient());
+    const BLRadialGradientValues& values = result.as<BLGradient>().radial();
+    EXPECT_DOUBLE_EQ(values.x0, 50.0);
+    EXPECT_DOUBLE_EQ(values.y0, 25.0);
+    EXPECT_DOUBLE_EQ(values.r0, 25.0);  // half the shorter side (50), not the longer (100)
+}
+
+TEST(Gradient, ConicDefaultIsCenteredInTheBox) {
+    newui::gfx::Gradient gradient;
+    gradient.setKind(newui::gfx::GradientKind::Conic);
+
+    BLVar result = gradient.toBLVar(newui::Rect(0.0f, 0.0f, 100.0f, 50.0f));
+    ASSERT_TRUE(result.is_gradient());
+    const BLConicGradientValues& values = result.as<BLGradient>().conic();
+    EXPECT_DOUBLE_EQ(values.x0, 50.0);
+    EXPECT_DOUBLE_EQ(values.y0, 25.0);
+}
+
 TEST(Image, MoveAssignmentReleasesTheTargetsOwnedResourcesFirst) {
     newui::gfx::Image a(4, 4);
     ASSERT_TRUE(a.isValid());

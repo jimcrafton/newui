@@ -179,20 +179,36 @@ namespace newui::gfx {
         return memDC_;
     }
 
-    BLGradient Gradient::toBLGradient() const {
+    BLGradient Gradient::toBLGradient(const Rect& localBounds) const {
         BLGradient gradient;
 
+        // linearStart_/linearEnd_/radialCenter_/radialFocalOffset_/conicCenter_ are all
+        // proportional [0,1] fractions of localBounds (see their own getter/setter comments,
+        // graphics.h) - resolved to real, absolute local-space pixels here, fresh on every call,
+        // the same "never a stale snapshot" contract rasterizePoints() already gives Point kind
+        // below. radialRadius_ is a fraction of the box's *shorter* side specifically, so it
+        // always describes a true circle rather than stretching into an ellipse on a non-square
+        // box.
+        double left = double(localBounds.left());
+        double top = double(localBounds.top());
+        double w = double(localBounds.width());
+        double h = double(localBounds.height());
+        double shortSide = w < h ? w : h;
+
         switch (kind_) {
-            case GradientKind::Radial:
-                gradient.create(BLRadialGradientValues(
-                    double(radialCenter_.x), double(radialCenter_.y),
-                    double(radialCenter_.x + radialFocalOffset_.x), double(radialCenter_.y + radialFocalOffset_.y),
-                    double(radialRadius_), 0.0), toBLExtendMode(extendMode_));
+            case GradientKind::Radial: {
+                double cx = left + double(radialCenter_.x) * w;
+                double cy = top + double(radialCenter_.y) * h;
+                double fx = cx + double(radialFocalOffset_.x) * w;
+                double fy = cy + double(radialFocalOffset_.y) * h;
+                gradient.create(BLRadialGradientValues(cx, cy, fx, fy, double(radialRadius_) * shortSide, 0.0),
+                    toBLExtendMode(extendMode_));
                 break;
+            }
 
             case GradientKind::Conic:
                 gradient.create(BLConicGradientValues(
-                    double(conicCenter_.x), double(conicCenter_.y),
+                    left + double(conicCenter_.x) * w, top + double(conicCenter_.y) * h,
                     double(conicAngle_), double(conicRepeat_)), toBLExtendMode(extendMode_));
                 break;
 
@@ -200,8 +216,9 @@ namespace newui::gfx {
             case GradientKind::Point:  // unreachable via toBLVar() - Point never calls this
             default:
                 gradient.create(BLLinearGradientValues(
-                    double(linearStart_.x), double(linearStart_.y),
-                    double(linearEnd_.x), double(linearEnd_.y)), toBLExtendMode(extendMode_));
+                    left + double(linearStart_.x) * w, top + double(linearStart_.y) * h,
+                    left + double(linearEnd_.x) * w, top + double(linearEnd_.y) * h),
+                    toBLExtendMode(extendMode_));
                 break;
         }
 
@@ -300,7 +317,7 @@ namespace newui::gfx {
 
     BLVar Gradient::toBLVar(const Rect& localBounds) const {
         if (kind_ != GradientKind::Point) {
-            return BLVar(toBLGradient());
+            return BLVar(toBLGradient(localBounds));
         }
 
         BLImage raster = rasterizePoints(localBounds);

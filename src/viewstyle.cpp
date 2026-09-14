@@ -340,6 +340,16 @@ namespace newui {
 		// never preserved - gfx::Gradient's own model has no field for it, matching
 		// toBLGradient()'s reverse direction, which always passes 0.0 for it too - not a new
 		// limitation introduced here.
+		//
+		// KNOWN GAP: gfx::Gradient's own geometry fields (linearStart_/linearEnd_/radialCenter_/
+		// etc.) are proportional [0,1] fractions of whatever box they're eventually resolved
+		// against (toBLGradient()'s own comment) - src's absolute pixel values pass through here
+		// completely unconverted, since setBackgroundGradient() (this function's only caller) has
+		// no target box to normalize against at this call site. Left as-is rather than guessed at,
+		// since setBackgroundGradient(const BLGradient&) has zero real callers anywhere in this
+		// codebase as of this writing (grep confirmed) - revisit (likely by adding a Rect bounds
+		// parameter to setBackgroundGradient() itself) if a real caller ever needs this path to
+		// round-trip correctly.
 		gfx::Gradient toGfxGradient(const BLGradient& src) {
 			gfx::Gradient g;
 			switch (src.type()) {
