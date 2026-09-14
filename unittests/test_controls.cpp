@@ -1429,6 +1429,52 @@ TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     delete scrollView;
 }
 
+// Real, live-reported bug, same class as ListView's own (see
+// ListView.ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNextPaint
+// above): TextControl::paint() used to fire onRequestScrollIntoView() for
+// the caret unconditionally every single call, so dragging the hosting
+// ScrollView's own scrollbar away from the caret - which itself triggers a
+// repaint - immediately snapped straight back to it on the very next
+// paint(). A user could never scroll away from the caret to look at other
+// text at all.
+TEST(TextControl, ManuallyScrollingAwayFromTheCaretIsNotForciblyUndoneByTheNextPaint) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* textControl = new TextControl();
+    textControl->setText(kManyLines);
+    scrollView->addChild(textControl);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    textControl->paint(ctx);  // establishes real vBar range/pageSize, layout
+
+    // Moves the caret to the very end of kManyLines - many lines down,
+    // requiring the ScrollView to scroll to reveal it.
+    textControl->caret().setPosition(text::TextPosition(kManyLines.size()));
+    textControl->paint(ctx);  // paint() is what fires onRequestScrollIntoView
+
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f)
+        << "test assumption: the caret at the end of many lines required scrolling down";
+
+    // Simulates the user dragging the scrollbar thumb back to the top,
+    // away from the still-blinking caret - same handleVBarValueChanged()
+    // path a real drag goes through.
+    scrollView->vBar()->setValue(0.0f);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    // A second, unrelated repaint must NOT snap back to the caret just
+    // because it's still there - nothing about the caret's own position
+    // changed.
+    textControl->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "an unrelated repaint must not re-fire onRequestScrollIntoView() for a caret that hasn't moved";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
 // ---------------------------------------------------------------------
 // ListView - the first real consumer of the Item/Controller foundation
 // (items.h/controllers.h): rows painted via a pooled ListItem, never a
@@ -2059,6 +2105,53 @@ TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
     // for a fallback thickness), row 40 (top=800, bottom=820) must land
     // scrolled so its bottom is flush with the viewport bottom.
     EXPECT_FLOAT_EQ(value, 760.0f);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// Real, live-reported bug: paint() used to fire onRequestScrollIntoView()
+// unconditionally every single call (whenever selectedIndex() had a value
+// at all, not just when it actually changed) - so dragging this
+// ScrollView's own scrollbar to look at other rows, which itself triggers
+// a repaint (ScrollBar::onValueChanged -> handleVBarValueChanged() ->
+// child->redraw()), immediately snapped straight back to the still-
+// selected row on the very next paint(). The user could never actually
+// scroll a selected row *out* of view with the scrollbar at all.
+TEST(ListView, ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNextPaint) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    listView->setSelectedIndex(40u);
+    listView->paint(ctx);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 760.0f) << "test assumption: paint() scrolled to reveal row 40, same as the sibling test above";
+
+    // Simulates the user dragging the scrollbar thumb back to the top,
+    // away from the still-selected row 40 - same handleVBarValueChanged()
+    // path a real drag goes through.
+    scrollView->vBar()->setValue(0.0f);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    // A second, unrelated repaint - e.g. anything else in the window
+    // invalidating, or simply the redraw() the manual scroll itself
+    // triggered - must NOT snap the view back to row 40 just because it's
+    // still selectedIndex(); nothing about the *selection* changed.
+    listView->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "an unrelated repaint must not re-fire onRequestScrollIntoView() for a selection that hasn't changed";
 
     scrollView->destroy();
     delete scrollView;

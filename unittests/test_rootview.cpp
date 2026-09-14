@@ -1904,6 +1904,42 @@ TEST(RootViewChildListChanges, TogglingAChildsVisibilityInvalidatesTheParent) {
     delete root;
 }
 
+// Real, live-reported bug, end-to-end: tabbing through several plain
+// controls in a row showed the focus ring on some and not others,
+// seemingly at random. Root cause was ViewStyle::computePrePaintBounds()
+// (viewstyle.cpp) - see ViewStyleElevation.
+// ComputePrePaintBoundsAlwaysReservesRoomForTheFocusRingEvenAtZeroElevation
+// (test_viewstyle.cpp) for the isolated version of this same regression -
+// being a genuine no-op for any non-elevated View (nearly everything),
+// leaving View::redraw()'s own invalidated region at exactly the view's
+// plain bounds with zero allowance for postPaint()'s default focus ring,
+// which always draws 2px *outside* those bounds. This confirms the fix
+// actually reaches RootView::dirtyRect() through the real
+// setFocusedSubView() -> style().markDirty() -> View::redraw() ->
+// computePrePaintBounds() chain, not just the isolated ViewStyle method.
+TEST(RootViewChildListChanges, FocusingAChildInvalidatesEnoughRoomForTheDefaultFocusRing) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->setAcceptsFocus(true);
+    root->addChild(child);
+
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    root->setFocusedSubView(child);
+
+    ASSERT_FALSE(root->dirtyRect().empty());
+    EXPECT_GT(root->dirtyRect().size().width, child->bounds().size().width)
+        << "the invalidated region must extend beyond the child's own plain bounds to cover postPaint()'s ring";
+    EXPECT_GT(root->dirtyRect().size().height, child->bounds().size().height);
+
+    root->destroy();
+    delete root;
+}
+
 // ---------------------------------------------------------------------------
 // Focus-recovery-on-destroy: RootView::notifySubViewRemoved() no longer just
 // drops focusedSubView_ to nullptr when the removed subtree carries it away -

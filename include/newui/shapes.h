@@ -33,6 +33,21 @@
 // reach past.
 namespace newui::shapes {
 
+    // How far past a shape's own localBounds() a box-blurred glow/drop-
+    // shadow mask can still show visible (> ~1/255 alpha) coverage, in
+    // units of softness - matches Shape::paintEffect()'s own boxBlur3()
+    // call (shapes.cpp, 3 passes of a radius derived 1:1 from softness),
+    // padded a little further since a box blur's own tail isn't
+    // infinitely sharp. Public (not shapes.cpp-anonymous-namespace-local)
+    // specifically so a caller computing its own pre-paint dirty/reserved
+    // bounds for a Shape-based effect it's about to render - see
+    // ViewStyle::computePrePaintBounds()'s elevation-driven drop shadow,
+    // viewstyle.cpp - can mirror this exact padding instead of guessing
+    // or duplicating the constant somewhere else, where it could drift
+    // out of sync with what Shape::boundsWithEffects()/paintEffect()
+    // themselves actually use.
+    constexpr float kBlurPadFactor = 3.0f;
+
     // Scale, then rotate (about pivot), then translate - applied to ctx
     // in that order via applyTo(), which composes onto whatever transform
     // ctx already has (its "parent space") rather than replacing it.

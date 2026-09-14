@@ -1868,6 +1868,16 @@ namespace newui {
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+
+        // What paint() last fired onRequestScrollIntoView() for - same
+        // "only fire on a real change, not every paint()" fix as
+        // ListView/TreeView's own pair (controls.h) - see ListView::
+        // paint()'s own doc comment (controls.cpp) for the real,
+        // confirmed live bug this guards against (scrolling this
+        // TextControl's own hosting ScrollView away from the caret via
+        // its scrollbar got immediately undone by the very next repaint,
+        // which paint() firing unconditionally caused on its own).
+        std::optional<Rect> lastScrolledIntoViewCaretRect_;
     };
 
     // The first real consumer of the Item/Controller foundation (items.h/
@@ -2127,6 +2137,23 @@ namespace newui {
         std::optional<std::size_t> hoveredIndex_;
         std::optional<std::size_t> keyboardHighlightedIndex_;
 
+        // What paint() last fired onRequestScrollIntoView() for - a real,
+        // confirmed live bug otherwise: paint() used to fire it every
+        // single call whenever selectedIndex()/keyboardHighlightedIndex_
+        // had a value at all, not just when either one actually *changed*
+        // since the last paint(). Since dragging this ListView's own
+        // hosting ScrollView's scrollbar triggers a repaint itself
+        // (ScrollBar::onValueChanged -> handleScrollOffsetChanged() ->
+        // style().markDirty()), that unconditional firing meant every
+        // drag attempt to scroll the selected row *out* of view
+        // immediately snapped straight back to it on the very next
+        // paint() - the user could never actually scroll away from a
+        // selected row at all. paint() now only fires again when
+        // selectedIndex()/keyboardHighlightedIndex_ no longer matches
+        // what's stored here.
+        std::optional<std::size_t> lastScrolledIntoViewSelectedIndex_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
+
         // Captured from style() at construction (ListView::ListView()) -
         // see handleGotFocus()/handleLostFocus() above.
         ThemedEditStyle* editStyle_ = nullptr;
@@ -2301,6 +2328,13 @@ namespace newui {
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
         std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // Same "only fire onRequestScrollIntoView() on a real change, not
+        // every paint()" fix as ListView's own pair (controls.h) - see
+        // its own doc comment for the full reasoning (same scrollbar-
+        // fighting-the-user bug, same fix shape).
+        std::optional<std::vector<std::size_t>> lastScrolledIntoViewSelectedPath_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
 
         // Captured from style() at construction (TreeView::TreeView()) -
         // see handleGotFocus()/handleLostFocus() above.

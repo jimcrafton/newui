@@ -1148,6 +1148,122 @@ TEST(ThemedEditStyle, PostPaintUsesTheGenericDefault) {
 }
 
 // ---------------------------------------------------------------------------
+// elevation - ViewStyle::prePaint()'s drop shadow, computePrePaintBounds()'s
+// matching dirty-bounds inflation (both viewstyle.cpp). Fluent names discrete
+// elevation levels (Layer=1, Control=2, Card=8, Tooltip=16, Flyout=32,
+// Dialog/Window=128 - learn.microsoft.com/windows/apps/design/signature-
+// experiences/layering) but publishes no blur/offset formula (ThemeShadow is
+// an opaque WinUI3 composition effect) - these confirm the *properties* the
+// adapted formula here needs, not exact pixel values: bounded even at the
+// highest named level, monotonically non-decreasing as elevation rises, and
+// computePrePaintBounds() never reserving less room than prePaint() actually
+// paints into (the bug a mismatched pair of hand-maintained formulas could
+// silently reintroduce - the fix here deliberately has both read from the
+// same elevationBlurRadius()/elevationShadowOffsetMagnitude() helpers,
+// viewstyle.cpp, specifically to rule that out).
+// ---------------------------------------------------------------------------
+
+// Real, live-reported bug: computePrePaintBounds() used to be a genuine
+// no-op at zero elevation (every non-elevated View - nearly everything,
+// since almost nothing calls setElevation() at all), leaving View::
+// redraw()'s own invalidated region at exactly the plain bounds - zero
+// allowance for postPaint()'s own default focus ring, which always draws
+// 2px *outside* those bounds. Whether the ring actually showed up after
+// tabbing to a control then depended entirely on whether some other,
+// unrelated repaint happened to also cover that extra margin - reported
+// live as tabbing through several controls in a row showing the ring on
+// some and not others, seemingly at random. computePrePaintBounds() must
+// always reserve at least the focus-ring's own room, regardless of
+// elevation - see its own doc comment (viewstyle.cpp) for why that has to
+// be unconditional (postPaint() itself has no way to know in advance
+// whether a given redraw() is happening because focus is about to land on
+// this particular View).
+TEST(ViewStyleElevation, ComputePrePaintBoundsAlwaysReservesRoomForTheFocusRingEvenAtZeroElevation) {
+    newui::ViewStyle style;  // elevation() defaults to 0.0f
+
+    newui::Rect bounds(0, 0, 100, 40);
+    newui::Rect result = bounds;
+    style.computePrePaintBounds(result);
+
+    EXPECT_NE(result, bounds);
+    EXPECT_GT(result.size().width, bounds.size().width);
+    EXPECT_GT(result.size().height, bounds.size().height);
+}
+
+TEST(ViewStyleElevation, ComputePrePaintBoundsAtLowElevationIsNoSmallerThanTheFocusRingAlone) {
+    // A Control-level elevation (Fluent's own named value 2) must never
+    // make the reserved room *smaller* than a plain, non-elevated View
+    // would get - the two pads are combined via max(), not replacement.
+    newui::ViewStyle zeroElevation;
+    newui::Rect zeroResult(0, 0, 100, 40);
+    zeroElevation.computePrePaintBounds(zeroResult);
+
+    newui::ViewStyle lowElevation;
+    lowElevation.setElevation(2.0f);
+    newui::Rect lowResult(0, 0, 100, 40);
+    lowElevation.computePrePaintBounds(lowResult);
+
+    EXPECT_GE(lowResult.size().width, zeroResult.size().width);
+    EXPECT_GE(lowResult.size().height, zeroResult.size().height);
+}
+
+TEST(ViewStyleElevation, PrePaintDirtyBoundsPadStaysBoundedEvenAtDialogElevation) {
+    newui::ViewStyle style;
+    style.setElevation(128.0f);  // Fluent's own named "Dialog"/"Window" level
+
+    newui::Rect bounds(0, 0, 100, 40);
+    newui::Rect result = bounds;
+    style.computePrePaintBounds(result);
+
+    float pad = (result.size().width - bounds.size().width) * 0.5f;
+    EXPECT_GT(pad, 0.0f) << "a real dialog-elevation shadow needs some extra room";
+    // Generous but real upper bound - the log2-based formula this guards
+    // is exactly what keeps a 128-elevation dialog from reserving (and
+    // then box-blurring, Shape::paintEffect(), shapes.cpp) a mask
+    // hundreds of pixels larger per side than its own bounds.
+    EXPECT_LT(pad, 100.0f);
+}
+
+TEST(ViewStyleElevation, PrePaintDirtyBoundsPadGrowsMonotonicallyWithElevation) {
+    auto padFor = [](float elevation) {
+        newui::ViewStyle style;
+        style.setElevation(elevation);
+        newui::Rect bounds(0, 0, 100, 40);
+        newui::Rect result = bounds;
+        style.computePrePaintBounds(result);
+        return (result.size().width - bounds.size().width) * 0.5f;
+    };
+
+    // Fluent's own named levels, low to high.
+    float layer = padFor(1.0f);
+    float control = padFor(2.0f);
+    float card = padFor(8.0f);
+    float tooltip = padFor(16.0f);
+    float flyout = padFor(32.0f);
+    float dialog = padFor(128.0f);
+
+    EXPECT_LE(layer, control);
+    EXPECT_LE(control, card);
+    EXPECT_LE(card, tooltip);
+    EXPECT_LE(tooltip, flyout);
+    EXPECT_LE(flyout, dialog);
+}
+
+TEST(ViewStyleElevation, PrePaintDoesNotThrowAtDialogElevation) {
+    newui::ViewStyle style;
+    style.setElevation(128.0f);
+
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(400, 300), false));
+}
+
+TEST(ViewStyleElevation, PrePaintToleratesAZeroSizeEvenWithElevationSet) {
+    newui::ViewStyle style;
+    style.setElevation(8.0f);
+
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(0, 0), false));
+}
+
+// ---------------------------------------------------------------------------
 // Batch 2: ThemedListItemStyle / ThemedHeaderItemStyle /
 // ThemedHeaderSortArrowStyle / ThemedTreeItemStyle / ThemedTreeGlyphStyle /
 // ThemedTabItemStyle / ThemedTabPaneStyle / ThemedTrackbarTrackStyle /

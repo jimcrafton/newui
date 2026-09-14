@@ -2608,9 +2608,21 @@ namespace newui {
         }
         controller_->ensureLayoutUpToDate();
 
+        // Only fires when the caret's document-space rect has actually
+        // *changed* since the last paint() that fired it - real, confirmed
+        // live bug otherwise (same class as ListView::paint()'s own fix,
+        // controls.cpp, see its doc comment for the full reasoning):
+        // firing unconditionally every paint() meant scrolling this
+        // TextControl's own hosting ScrollView away from the caret via its
+        // scrollbar - which itself triggers a repaint - snapped straight
+        // back to the caret on the very next paint(), so a user could
+        // never actually scroll away from it to look at other text.
         Rect caretRect = controller_->caretDocumentRect();
-        if (caretRect.height() > 0.0f) {
+        if (caretRect.height() > 0.0f && caretRect != lastScrolledIntoViewCaretRect_) {
             onRequestScrollIntoView(*this, caretRect);
+        }
+        if (caretRect.height() > 0.0f) {
+            lastScrolledIntoViewCaretRect_ = caretRect;
         }
 
         ctx.save();
@@ -2813,17 +2825,31 @@ namespace newui {
         // one-frame display lag on every arrow-key/selection-driven
         // scroll (e.g. End wouldn't visibly scroll until a second
         // keypress).
+        //
+        // Only fires when selectedIndex()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - a
+        // real, confirmed live bug otherwise: firing unconditionally
+        // every single paint() (whenever either had a value at all, not
+        // just on a real change) meant dragging this ListView's own
+        // hosting ScrollView's scrollbar - which itself triggers a
+        // repaint via handleScrollOffsetChanged()'s style().markDirty() -
+        // immediately snapped straight back to the still-selected row on
+        // the very next paint(), so a user could never actually scroll a
+        // selected row *out* of view at all.
         std::optional<std::size_t> primaryForScroll = selectedIndex();
-        if (primaryForScroll.has_value()) {
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedIndex_) {
             Rect selectedRect(0.0f, controller_->itemOffset(*primaryForScroll), clientBounds.width(),
                 controller_->itemHeight(*primaryForScroll));
             onRequestScrollIntoView(*this, selectedRect);
         }
-        if (keyboardHighlightedIndex_.has_value()) {
+        lastScrolledIntoViewSelectedIndex_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
             Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
                 controller_->itemHeight(*keyboardHighlightedIndex_));
             onRequestScrollIntoView(*this, highlightedRect);
         }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
@@ -3239,8 +3265,17 @@ namespace newui {
         // Fired before scrollOffsetY_ is read below - see the matching
         // comment in ListView::paint() for why (same synchronous
         // scrollOffsetY_ update chain, same one-frame-lag bug otherwise).
+        //
+        // Only fires when selectedPath()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - see
+        // ListView::paint()'s own comment (controls.cpp) for the real,
+        // confirmed live bug this fixes (scrolling the selected row out
+        // of view via this TreeView's own hosting ScrollView's scrollbar
+        // immediately snapped straight back to it on the very next
+        // paint(), since that repaint alone used to be enough to re-fire
+        // this unconditionally).
         std::optional<std::vector<std::size_t>> primaryForScroll = selectedPath();
-        if (primaryForScroll.has_value()) {
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedPath_) {
             std::optional<std::size_t> primaryIndexForScroll = controller_->visibleIndexOf(*primaryForScroll);
             if (primaryIndexForScroll.has_value()) {
                 Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndexForScroll), clientBounds.width(),
@@ -3248,11 +3283,14 @@ namespace newui {
                 onRequestScrollIntoView(*this, selectedRect);
             }
         }
-        if (keyboardHighlightedIndex_.has_value()) {
+        lastScrolledIntoViewSelectedPath_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
             Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
                 controller_->itemHeight(*keyboardHighlightedIndex_));
             onRequestScrollIntoView(*this, highlightedRect);
         }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());

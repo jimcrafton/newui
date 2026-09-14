@@ -15,9 +15,113 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <vector>
 
 namespace {
+
+	// Elevation -> shadow blur radius/offset magnitude, for ViewStyle::
+	// prePaint()/computePrePaintBounds()'s elevation-driven drop shadow
+	// below. Adapted from Fluent's own named elevation scale - Layer=1,
+	// Control=2, Card=8, Tooltip=16, Flyout=32, Dialog/Window=128 (see
+	// learn.microsoft.com/windows/apps/design/signature-experiences/
+	// layering) - and its stated principle ("the higher the elevation,
+	// the larger and softer the shadow becomes"), not a literal port:
+	// Fluent's own ThemeShadow computes its actual blur/offset via an
+	// opaque WinUI3 composition effect with no published formula, so
+	// there's nothing to port literally - same "adapt the source
+	// material's real intent to this codebase's own architecture, don't
+	// assume a literal copy is even possible" approach used everywhere
+	// else a docx/design-doc source has driven this codebase's own work.
+	//
+	// log2(elevation+1), not linear - keeps both bounded even at Window/
+	// Dialog's elevation=128, instead of growing unboundedly. A *previous*
+	// version of this formula scaled softness linearly (2*elevation_),
+	// reaching a 256px blur radius there - once shapes::kBlurPadFactor
+	// (3x, shapes.h) pads the mask Shape::paintEffect() (shapes.cpp) has
+	// to allocate and box-blur, that's roughly 768px of padding *per
+	// side* - a multi-million-pixel offscreen mask, box-blurred fresh on
+	// every single paint() call, for one dialog's shadow.
+	constexpr float kElevationBlurBase = 2.0f;
+	constexpr float kElevationBlurScale = 3.0f;
+	constexpr float kElevationOffsetBase = 1.0f;
+	constexpr float kElevationOffsetScale = 1.5f;
+
+	// Shadow *darkness* deliberately does not scale with elevation at
+	// all - a previous version of this formula used 1.0f/elevation_,
+	// making a Dialog's shadow (elevation 128) sixteen times fainter
+	// than a Control's (elevation 2): exactly backwards from the real
+	// visual hierarchy Fluent describes - a more-elevated surface should
+	// read as *more* prominent, not nearly invisible. Real elevation-
+	// shadow systems (Material Design's own published key/ambient shadow
+	// alpha values - the only place either design language actually
+	// publishes a concrete number here) keep shadow alpha roughly
+	// constant across elevation too: it's the shadow's *size*, not its
+	// darkness, that communicates height.
+	constexpr float kElevationShadowAmount = 0.35f;
+
+	float elevationBlurRadius(float elevation) {
+		if (elevation <= 0.0f) {
+			return 0.0f;
+		}
+		return kElevationBlurBase + kElevationBlurScale * std::log2(elevation + 1.0f);
+	}
+
+	float elevationShadowOffsetMagnitude(float elevation) {
+		if (elevation <= 0.0f) {
+			return 0.0f;
+		}
+		return kElevationOffsetBase + kElevationOffsetScale * std::log2(elevation + 1.0f);
+	}
+
+	// How far outside clientBounds' own edge ViewStyle::postPaint()'s
+	// default focus ring is drawn - shared between postPaint() itself and
+	// computePrePaintBounds() below specifically so the two can never
+	// drift out of sync the way they did briefly: computePrePaintBounds()
+	// used to only account for the elevation-driven drop shadow (gated on
+	// elevation_ > 0.0f), so for any plain, non-elevated View (nearly
+	// everything - a Button/TextField/etc. never calls setElevation() at
+	// all) it left View::redraw()'s own invalidated region at exactly the
+	// view's plain bounds, zero allowance for this ring's own 2px
+	// outward bleed. Whether the ring actually showed up after a Tab
+	// then depended entirely on whether some *other*, unrelated repaint
+	// happened to also cover that extra margin - a real, confirmed live
+	// bug (intermittent: tabbing through several controls in a row would
+	// show the ring on some and not others, seemingly at random).
+	constexpr float kFocusRingOutset = 2.0f;
+
+	// The ring itself is a kFocusRingStrokeWidth-wide *stroke* centered on
+	// the kFocusRingOutset boundary (ctx.set_stroke_width() in postPaint(),
+	// below) - its actual painted pixels reach kFocusRingStrokeWidth/2
+	// *past* that boundary, not right up to it. computePrePaintBoundsRingPad()
+	// (below) is what computePrePaintBounds() actually reserves room with -
+	// kFocusRingOutset alone (the centerline) is what a first fix here
+	// used, and was still too small by exactly that half-stroke-width: a
+	// real, confirmed live artifact (a thin sliver of the ring's own top/
+	// left edge left behind on the previously-focused control after Tab
+	// moved focus elsewhere - only a full, unrelated repaint of the whole
+	// window, e.g. from a mouse move, happened to clear it, since nothing
+	// about the *targeted* invalidation for that one control's own redraw()
+	// covered where those last surviving pixels actually were). Rounded up
+	// to a full extra kFocusRingStrokeWidth, not just the exact half, as a
+	// deliberate safety margin against any further rounding (pixel-
+	// snapping elsewhere in this pipeline - see paintChildren()'s own
+	// snappedOutwardToPixels() call, view.cpp - already establishes that
+	// "round outward, don't cut it close" is the right default here).
+	constexpr float kFocusRingStrokeWidth = 1.0f;
+
+	// Getting the exact half-stroke-width figure above right down to the
+	// sub-pixel is brittle - AA coverage, the pixel-snapping in
+	// paintChildren() (view.cpp), and DPI scaling can all nudge the
+	// ring's true rightmost painted pixel a bit further than the strict
+	// math implies. An extra 1px margin costs nothing (this whole pad is
+	// tiny next to the elevation shadow pad below) and trades that
+	// brittleness for simply always reserving enough room.
+	constexpr float kFocusRingPadSafetyMargin = 1.0f;
+
+	float computePrePaintBoundsRingPad() {
+		return kFocusRingOutset + kFocusRingStrokeWidth + kFocusRingPadSafetyMargin;
+	}
 
 	// Greedy word-wrap for LabelStyle::paint()'s wordWrap() case - breaks
 	// text into as many lines as needed so each line's *shaped* width
@@ -611,7 +715,36 @@ namespace newui {
 
 	void ViewStyle::computePrePaintBounds(Rect& outDirtyBounds) const
 	{
-		outDirtyBounds = outDirtyBounds.inflate(((borderWidth_ + 1.0f) * 10.5f) + (((borderWidth_ + 1.0f) * 10.5f) * elevation_));
+		// postPaint()'s own default focus ring always *potentially* needs
+		// this much room, regardless of elevation - it's gated on
+		// isFocused() only at actual paint time (postPaint() has to run
+		// unconditionally every pass so an override stays free to draw
+		// something else regardless of focus state - see its own doc
+		// comment), so there's no way to know here, ahead of time,
+		// whether a given redraw() is happening because focus is about to
+		// land on (or leave) this particular View. Reserving the room
+		// unconditionally is the only correct option - see this
+		// constant's own comment (above) for the real bug leaving it out
+		// caused. Cheap either way: 2px is negligible next to the
+		// elevation pad below, when there is one.
+		float pad = computePrePaintBoundsRingPad();
+
+		if (elevation_ > 0.0f) {
+			// Mirrors Shape::boundsWithEffects()'s own drop-shadow pad
+			// formula exactly (shapes.cpp: softness * kBlurPadFactor +
+			// offsetMag), using the same shapes::kBlurPadFactor constant
+			// (shapes.h) - so this can never drift out of sync with what
+			// prePaint()'s own shapes::Rectangle actually ends up
+			// painting. Takes the max with the focus-ring pad above, not
+			// a sum - both are measured outward from the same edges, so
+			// what actually matters is the outer-most extent either
+			// effect could reach in a given direction, not their total.
+			float shadowPad = elevationBlurRadius(elevation_) * newui::shapes::kBlurPadFactor
+				+ elevationShadowOffsetMagnitude(elevation_);
+			pad = pad > shadowPad ? pad : shadowPad;
+		}
+
+		outDirtyBounds = outDirtyBounds.inflate(pad);
 	}
 
 	void ViewStyle::prePaint(BLContext& ctx, const Size& size, bool /*highlighted*/) const
@@ -624,16 +757,36 @@ namespace newui {
 			return;
 		}
 
-		// The "elevation" effect is a simple, blurred drop shadow
-		// behind the view's own fill - not a full, multi-layered
+		// The "elevation" effect is a soft drop shadow behind the view's
+		// own fill - see elevationBlurRadius()/elevationShadowOffsetMagnitude()'s
+		// own comments (above) for where the actual numbers come from.
 		newui::shapes::Rectangle dropShadow(0.0f, 0.0f, size.width, size.height);
-		dropShadow.style().fill().setColor(newui::Color(0.0f,0.0f,0.0f));
+		dropShadow.style().fill().setColor(newui::Color(0.0f, 0.0f, 0.0f));
 		dropShadow.style().fill().setKind(newui::gfx::PaintKind::Color);
+		dropShadow.style().stroke().setKind(newui::gfx::PaintKind::None);
+		// Near-zero, not the shadow's own opacity - deliberate, not a
+		// bug. Shape::render() (shapes.cpp) wraps both the plain fill/
+		// stroke above (only present to trace the mask *shape* from) and
+		// the dropShadow effect below in the same outer
+		// ctx.set_global_alpha(style_.opacity()) call, but
+		// Shape::paintEffect() then makes its own separate
+		// ctx.set_global_alpha(amount) call while blitting the shadow
+		// mask - a flat state overwrite, not a multiply-on-top (confirmed
+		// against Blend2D's own set_global_alpha(), a plain setter -
+		// core/context.h) - restoring back to style_.opacity() only
+		// afterward. So dropShadow().amount() below is genuinely the
+		// shadow's real effective opacity, independent of this - which
+		// exists purely to keep the plain black fill/stroke this Shape
+		// also carries from ever actually appearing on screen as a solid
+		// black box of its own.
+		dropShadow.style().setOpacity(0.001f);
+
+		float offsetMag = elevationShadowOffsetMagnitude(elevation_);
 		dropShadow.style().dropShadow().setEnabled(true);
-		dropShadow.style().dropShadow().setOffset(newui::Point(1.0f * elevation_, 1.0f * elevation_));
-		dropShadow.style().dropShadow().setSoftness(2.0f * elevation_);
-		dropShadow.style().dropShadow().setAmount(1.0f * (1.0f / elevation_));
-		dropShadow.style().setOpacity(0.25);
+		dropShadow.style().dropShadow().setOffset(newui::Point(offsetMag, offsetMag));
+		dropShadow.style().dropShadow().setSoftness(elevationBlurRadius(elevation_));
+		dropShadow.style().dropShadow().setAmount(kElevationShadowAmount);
+
 		dropShadow.render(ctx);
 	}
 
@@ -650,29 +803,25 @@ namespace newui {
 			return;
 		}
 
-		// kOutset pushes the ring outside clientBounds' own edge rather
-		// than inset within it - matches real Windows 11/Fluent keyboard
-		// focus visuals (the "high-visibility" focus rectangle's
-		// FocusVisualMargin - see learn.microsoft.com/windows/apps/
-		// design/accessibility/keyboard-accessibility), which draw with
-		// a small *outward* gap from the control's own edge, closer to a
-		// CSS outline than an inset box-shadow. This only actually
-		// renders visibly because postPaint() itself now runs in its own
-		// unclipped scope (View::paintChildren()'s phase 3, view.cpp) -
-		// an earlier attempt at this same outset, before that 3-phase
-		// split existed, was invisible: paintStyle() (phase 2, still
-		// clipped) was the only place this used to run, and phase 2's
-		// clip is (deliberately, for cross-sibling-paint-corruption
-		// reasons - see its own comment) strictly the child's own
-		// bounds, zero margin. deflate() with a negative amount inflates
-		// instead (see its own doc comment) - there's no separate
-		// inflate() method, this is the established way to grow a Rect
-		// here. kCornerRadius matches Fluent's own 4px standard for
-		// in-page controls (learn.microsoft.com/windows/apps/design/
-		// signature-experiences/geometry).
-		constexpr float kOutset = 2.0f;
+		// kFocusRingOutset (above) pushes the ring outside clientBounds'
+		// own edge rather than inset within it - matches real Windows 11/
+		// Fluent keyboard focus visuals (the "high-visibility" focus
+		// rectangle's FocusVisualMargin - see learn.microsoft.com/
+		// windows/apps/design/accessibility/keyboard-accessibility),
+		// which draw with a small *outward* gap from the control's own
+		// edge, closer to a CSS outline than an inset box-shadow. This
+		// only actually renders visibly because postPaint() itself now
+		// runs in its own unclipped scope (View::paintChildren()'s phase
+		// 3, view.cpp) *and* View::redraw()'s own invalidated region is
+		// grown to match (ViewStyle::computePrePaintBounds(), above,
+		// reads this same constant) - an earlier attempt at this same
+		// outset, before either of those existed, was invisible or only
+		// intermittently visible for exactly that reason. kCornerRadius
+		// matches Fluent's own 4px standard for in-page controls
+		// (learn.microsoft.com/windows/apps/design/signature-
+		// experiences/geometry).
 		constexpr float kCornerRadius = 4.0f;
-		Rect ring = clientBounds.deflate(-kOutset);
+		Rect ring = clientBounds.inflate(kFocusRingOutset);
 		if (ring.size().width <= 0.0f || ring.size().height <= 0.0f) {
 			return;
 		}
