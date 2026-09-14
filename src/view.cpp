@@ -225,6 +225,7 @@ namespace newui {
 			// ...) has real room to do so - see ViewStyle::prePaint()'s
 			// own doc comment (viewstyle.h) for the full reasoning.
 			ctx.save();
+			ctx.restore_clipping();
 			ctx.translate(bounds.left(), bounds.top());
 			child->prePaintStyle(ctx);
 			ctx.restore();
@@ -250,6 +251,7 @@ namespace newui {
 			// actually able to extend past this child's own bounds
 			// instead of being clipped away by phase 2's clip above.
 			ctx.save();
+			ctx.restore_clipping();
 			ctx.translate(bounds.left(), bounds.top());
 			child->postPaintStyle(ctx);
 			ctx.restore();
@@ -320,6 +322,16 @@ namespace newui {
 		}
 	}
 
+	void View::computePrePaintBounds(Rect& outDirtyBounds) const
+	{		
+		newui::Rect r(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+		outDirtyBounds = r;
+		if (style_) {
+			style_->computePrePaintBounds(outDirtyBounds);
+		}
+		printf("View::computePrePaintBounds() called for %s, outDirtyBounds: %f, %f, %f, %f\n", name_.c_str(), r.left(), r.top(), r.right(), r.bottom());
+	}
+
 	void View::redraw()
 	{
 		if (nullptr != rootView_) {
@@ -332,6 +344,7 @@ namespace newui {
 			// never gets its "unhover" repaint), visible as leftover
 			// artifacts while hovering across bordered/themed controls.
 			newui::Rect r(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+			computePrePaintBounds(r);
 			rootView_->markDirty(this, r);
 		}
 	}

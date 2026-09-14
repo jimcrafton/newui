@@ -322,6 +322,8 @@ namespace newui {
         //but it could be less than this
         virtual void redraw();
 
+		virtual void computePrePaintBounds(Rect& outDirtyBounds) const;
+
         // How far this view's own children are shifted when painted/hit-
         // tested - a scroll offset, not this view's own position (that's
         // still bounds()/setBounds(), untouched). (0,0) (the default) is a

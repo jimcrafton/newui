@@ -269,6 +269,10 @@ namespace newui::shapes {
         Rectangle() = default;
         ~Rectangle() override = default;
 
+		Rectangle(float x, float y, float width, float height)
+			: x_(x), y_(y), width_(width), height_(height) {
+		}
+
         float x() const { return x_; }
         void setX(float value) { x_ = value; }
         float y() const { return y_; }
@@ -296,6 +300,10 @@ namespace newui::shapes {
     public:
         RoundRect() = default;
         ~RoundRect() override = default;
+
+        RoundRect(float x, float y, float width, float height, float radius)
+            : Rectangle(x, y, width, height), radiusX_(radius), radiusY_(radius) {
+        }
 
         float radiusX() const { return radiusX_; }
         void setRadiusX(float value) { radiusX_ = value; }

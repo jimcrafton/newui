@@ -277,6 +277,14 @@ public:
         return deflate(amount, amount, amount, amount);
     }
 
+    Rect inflate(float left, float top, float right, float bottom) const {
+        return deflate(-left, -top, -right, -bottom);
+    }
+
+    Rect inflate(float amount) const {
+        return inflate(amount, amount, amount, amount);
+    }
+
     // Snaps outward to whole-pixel boundaries - floors the leading edges,
     // ceils the trailing ones, so the result only ever grows, never
     // shrinks and clips off a partial pixel (same recipe as rootview.cpp's

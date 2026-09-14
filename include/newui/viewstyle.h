@@ -294,6 +294,8 @@ namespace newui {
 
         void setHilightColor(const Color& color);
         
+		float elevation() const { return elevation_; }        
+		void setElevation(float value) { elevation_ = value; }
         
 
         // The rect (local to a view of this size, (0,0) at its top-left) a
@@ -325,7 +327,7 @@ namespace newui {
         // one would override. See postPaint() below for the same shape
         // on the other side of paint(), which does have a real user
         // already (the focus ring).
-        virtual void prePaint(BLContext& /*ctx*/, const Size& /*size*/, bool /*highlighted*/) const {}
+        virtual void prePaint(BLContext& /*ctx*/, const Size& /*size*/, bool /*highlighted*/) const;
 
         // Phase 2 of 3 - paints this style into ctx, which is already
         // translated/clipped to (0,0)-(size.width,size.height) for the
@@ -387,6 +389,9 @@ namespace newui {
         // another override here.
         virtual void postPaint(BLContext& ctx, const Size& size, bool highlighted, const Rect& clientBounds) const;
 
+
+        virtual void computePrePaintBounds(Rect& outDirtyBounds) const;
+
         // Non-owning upward back-reference to the owning View (View owns
         // *this via its own std::unique_ptr<ViewStyle> style_) - reachable
         // downward already via that View's own "style" property, so
@@ -425,6 +430,7 @@ namespace newui {
         float opacity_ = 1.0f;
         CompositingFlag compositingOp_ = CompSrcOver;
         Font font_;
+		float elevation_ = 0.0f;  // for drop shadow, etc.
 
         View* view_ = nullptr;
     };

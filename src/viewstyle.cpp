@@ -11,6 +11,8 @@
 #include "newui/themedata.h"
 #include "newui/uicolormanager.h"
 
+#include "newui/shapes.h"
+
 #include <array>
 #include <cassert>
 #include <vector>
@@ -605,6 +607,32 @@ namespace newui {
 		}
 
 		ctx.restore();
+	}
+
+	void ViewStyle::computePrePaintBounds(Rect& outDirtyBounds) const
+	{
+		outDirtyBounds = outDirtyBounds.inflate(((borderWidth_ + 1.0f) * 10.5f) + (((borderWidth_ + 1.0f) * 10.5f) * elevation_));
+	}
+
+	void ViewStyle::prePaint(BLContext& ctx, const Size& size, bool /*highlighted*/) const
+	{
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		if (elevation_ <= 0.0f) {
+			return;
+		}
+
+		// The "elevation" effect is a simple, blurred drop shadow
+		// behind the view's own fill - not a full, multi-layered
+		newui::shapes::Rectangle dropShadow(0.0f, 0.0f, size.width, size.height);
+		dropShadow.style().fill().setColor(newui::Color(0.0f,0.0f,0.0f));
+		dropShadow.style().fill().setKind(newui::gfx::PaintKind::Color);
+		dropShadow.style().dropShadow().setEnabled(true);
+		dropShadow.style().dropShadow().setOffset(newui::Point(1.0f * elevation_, 1.0f * elevation_));
+		dropShadow.style().dropShadow().setSoftness(2.0f * elevation_);
+		dropShadow.render(ctx);
 	}
 
 	void ViewStyle::postPaint(BLContext& ctx, const Size& /*size*/, bool /*highlighted*/, const Rect& clientBounds) const
