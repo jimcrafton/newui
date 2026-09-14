@@ -116,6 +116,7 @@ TEST(RootViewMouseEvents, MouseDownRoutesToHitChildAndSetsCaptureAndFocus) {
     auto* child = new newui::SubView();
     child->setBounds(newui::Rect(10, 10, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     child->onMouseDown += RecordDown;
     root->addChild(child);
 
@@ -139,6 +140,7 @@ TEST(RootViewMouseEvents, MouseDownOnEmptyAreaClearsCaptureAndFocus) {
     auto* child = new newui::SubView();
     child->setBounds(newui::Rect(10, 10, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     root->addChild(child);
 
     root->mouseDown(newui::Point(20, 20), 1, 0);
@@ -428,6 +430,7 @@ TEST(RootViewKeyEvents, KeyEventRoutesToFocusedSubViewAfterRootViewItself) {
     auto* child = new newui::SubView();
     child->setBounds(newui::Rect(0, 0, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     root->onKeyDown += RecordKeyDown;
     child->onKeyDown += RecordKeyDown;
     root->addChild(child);
@@ -462,6 +465,199 @@ TEST(RootViewKeyEvents, KeyEventIsNotRoutedToASubViewWhenNothingIsFocused) {
     root->keyEvent(newui::keKeyDown, 0, 'A', 1, 65);
 
     EXPECT_EQ(g_keyDownEvent.count, 0);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// acceptsFocus()/UIInputManager - mouse-click focus resolution (item 1) and
+// Tab/Shift+Tab navigation (item 3). A plain SubView defaults to
+// acceptsFocus(false) (view.h) - these cover the click and Tab policy that
+// default drives, on top of what the RootViewMouseEvents/RootViewKeyEvents
+// tests above already establish for capture/dispatch.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewFocusPolicy, MouseDownOnAPlainSubViewCapturesButDoesNotChangeFocus) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    // Default-constructed SubView: acceptsFocus() is false, so this click
+    // shouldn't hand it keyboard focus, even though it's still the exact
+    // View the mouse hit (and therefore still gets capture/onMouseDown).
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 50, 50));
+    child->setVisible(true);
+    child->onMouseDown += RecordDown;
+    root->addChild(child);
+
+    root->mouseDown(newui::Point(20, 20), 1, 0);
+
+    EXPECT_EQ(g_downEvent.count, 1);
+    EXPECT_EQ(g_downEvent.sender, child);
+    EXPECT_EQ(root->capturedSubView(), child);
+    EXPECT_EQ(root->focusedSubView(), nullptr);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusPolicy, MouseDownOnANonFocusableChildWalksUpToItsFocusableAncestor) {
+    ResetMouseEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    // e.g. Button's own drawn label: the exact hit target is a plain,
+    // non-focusable decoration, but its Control-like ancestor still opts
+    // in via acceptsFocus(true) - a click anywhere inside should focus
+    // that ancestor, not leave focus cleared.
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 100));
+    container->setVisible(true);
+    container->setAcceptsFocus(true);
+    root->addChild(container);
+
+    auto* label = new newui::SubView();
+    label->setBounds(newui::Rect(10, 10, 30, 30));  // local to container
+    label->setVisible(true);
+    label->onMouseDown += RecordDown;
+    container->addChild(label);
+
+    root->mouseDown(newui::Point(20, 20), 1, 0);
+
+    EXPECT_EQ(g_downEvent.count, 1);
+    EXPECT_EQ(g_downEvent.sender, label);
+    // Capture still targets the exact hit View...
+    EXPECT_EQ(root->capturedSubView(), label);
+    // ...but focus lands on the nearest ancestor that actually wants it.
+    EXPECT_EQ(root->focusedSubView(), container);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusPolicy, TabIsNotForwardedAsAnOrdinaryKeyEvent) {
+    ResetKeyEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    child->setAcceptsFocus(true);
+    root->onKeyDown += RecordKeyDown;
+    child->onKeyDown += RecordKeyDown;
+    root->addChild(child);
+    root->setFocusedSubView(child);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+
+    // Tab is consumed entirely by UIInputManager's focus navigation -
+    // neither this RootView's own onKeyDown nor focusedSubView_'s ever
+    // sees it, unlike an ordinary key (see
+    // KeyEventRoutesToFocusedSubViewAfterRootViewItself above).
+    EXPECT_EQ(g_keyDownEvent.count, 0);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusPolicy, TabMovesFocusToNextFocusableViewInReadingOrderAndWraps) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    // Added out of reading order (rightmost first) - the Tab order below
+    // has to come from geometry, not addChild() order.
+    auto* right = new newui::SubView();
+    right->setBounds(newui::Rect(100, 0, 50, 50));
+    right->setVisible(true);
+    right->setAcceptsFocus(true);
+    root->addChild(right);
+
+    auto* left = new newui::SubView();
+    left->setBounds(newui::Rect(0, 0, 50, 50));
+    left->setVisible(true);
+    left->setAcceptsFocus(true);
+    root->addChild(left);
+
+    ASSERT_EQ(root->focusedSubView(), nullptr);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), left);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), right);
+
+    // Wraps back around to the first candidate.
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), left);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusPolicy, ShiftTabMovesFocusToPreviousFocusableViewAndWraps) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* left = new newui::SubView();
+    left->setBounds(newui::Rect(0, 0, 50, 50));
+    left->setVisible(true);
+    left->setAcceptsFocus(true);
+    root->addChild(left);
+
+    auto* right = new newui::SubView();
+    right->setBounds(newui::Rect(100, 0, 50, 50));
+    right->setVisible(true);
+    right->setAcceptsFocus(true);
+    root->addChild(right);
+
+    ASSERT_EQ(root->focusedSubView(), nullptr);
+
+    // Shift+Tab with nothing focused yet starts from the last candidate.
+    root->keyEvent(newui::keKeyDown, newui::kmShift, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), right);
+
+    root->keyEvent(newui::keKeyDown, newui::kmShift, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), left);
+
+    // Wraps back around to the last candidate.
+    root->keyEvent(newui::keKeyDown, newui::kmShift, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), right);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusPolicy, TabSkipsNonFocusableViewsAndDisabledControls) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::Button();
+    first->setBounds(newui::Rect(0, 0, 50, 30));
+    first->setVisible(true);
+    root->addChild(first);
+
+    // A plain decorative SubView between the two Buttons - never a tab
+    // stop regardless of position.
+    auto* decoration = new newui::SubView();
+    decoration->setBounds(newui::Rect(60, 0, 20, 30));
+    decoration->setVisible(true);
+    root->addChild(decoration);
+
+    // Disabled - Control::canBecomeFocused() excludes it even though
+    // Button::Button() sets acceptsFocus(true).
+    auto* disabledButton = new newui::Button();
+    disabledButton->setBounds(newui::Rect(90, 0, 50, 30));
+    disabledButton->setVisible(true);
+    disabledButton->setEnabled(false);
+    root->addChild(disabledButton);
+
+    auto* last = new newui::Button();
+    last->setBounds(newui::Rect(150, 0, 50, 30));
+    last->setVisible(true);
+    root->addChild(last);
+
+    root->setFocusedSubView(first);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+
+    EXPECT_EQ(root->focusedSubView(), last);
 
     root->destroy();
     delete root;
@@ -651,6 +847,7 @@ TEST(RootViewFocusTransfer, VetoingBecomeFocusedLeavesFocusedSubViewUnchanged) {
     auto* first = new newui::SubView();
     first->setBounds(newui::Rect(0, 0, 50, 50));
     first->setVisible(true);
+    first->setAcceptsFocus(true);
     root->addChild(first);
 
     auto* second = new VetoableSubView();
@@ -706,6 +903,7 @@ TEST(RootViewCommandDispatch, CanPerformCommandChecksFocusedSubViewFirst) {
     auto* child = new CommandAnsweringSubView(newui::commands::copy);
     child->setBounds(newui::Rect(0, 0, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     root->addChild(child);
 
     root->setFocusedSubView(child);
@@ -728,6 +926,7 @@ TEST(RootViewCommandDispatch, WalksUpParentChainWhenFocusedSubViewDoesNotHandleI
     auto* child = new newui::SubView();  // doesn't answer anything itself
     child->setBounds(newui::Rect(0, 0, 20, 20));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     parent->addChild(child);
 
     root->setFocusedSubView(child);
@@ -747,6 +946,7 @@ TEST(RootViewCommandDispatch, PerformCommandIsANoOpWhenNothingInTheChainHandlesI
     auto* child = new newui::SubView();
     child->setBounds(newui::Rect(0, 0, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     root->addChild(child);
 
     root->setFocusedSubView(child);
@@ -813,6 +1013,7 @@ TEST(RootViewSubViewRemoval, RemovingDirectChildClearsHoverCaptureFocus) {
     auto* child = new newui::SubView();
     child->setBounds(newui::Rect(0, 0, 50, 50));
     child->setVisible(true);
+    child->setAcceptsFocus(true);
     root->addChild(child);
 
     root->mouseMove(newui::Point(10, 10), 0, 0);
@@ -843,6 +1044,7 @@ TEST(RootViewSubViewRemoval, RemovingNestedGrandchildClearsHoverCaptureFocus) {
     auto* grandchild = new newui::SubView();
     grandchild->setBounds(newui::Rect(0, 0, 50, 50));
     grandchild->setVisible(true);
+    grandchild->setAcceptsFocus(true);
     container->addChild(grandchild);
 
     root->mouseMove(newui::Point(10, 10), 0, 0);

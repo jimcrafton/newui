@@ -458,6 +458,26 @@ namespace newui {
         KeyEventDelegate onKeyDown;
         KeyEventDelegate onKeyUp;
 
+        // Whether this View is even a *candidate* for keyboard focus at
+        // all - checked by canBecomeFocused() below, and what
+        // UIInputManager (uiinputmanager.h) consults to decide which View
+        // a mouse click should actually focus (walking up parent() past
+        // any that answer false - see resolveClickFocusTarget()) and which
+        // Views Tab/Shift+Tab should ever land on (see moveFocus()).
+        // False by default - a plain SubView (a container/decoration) has
+        // nothing to do with a key press or a tab stop. Button/Toggle/
+        // TextField/etc. (controls.h) set this true in their own
+        // constructors; reflectgen pairs this getter with setAcceptsFocus()
+        // below into a real read/write "acceptsFocus" property, so a
+        // .newui file can flip it per-instance with no code change.
+        bool acceptsFocus() const {
+            return acceptsFocus_;
+        }
+
+        void setAcceptsFocus(bool value) {
+            acceptsFocus_ = value;
+        }
+
         // Asked by RootView::setFocusedSubView() (rootview.h) before
         // taking focus away from this View / handing it to this View,
         // respectively - default true (no veto) so existing overrides
@@ -466,7 +486,7 @@ namespace newui {
         // e.g. a control mid-validation with an invalid value can
         // refuse to give up focus until that's resolved.
         virtual bool canResignFocus() const { return true; }
-        virtual bool canBecomeFocused() const { return !isDesignTime(); }
+        virtual bool canBecomeFocused() const { return acceptsFocus_ && !isDesignTime(); }
 
         // Answers whether this View itself (not its children) can
         // currently carry out cmd - default false, so a View that
@@ -576,6 +596,9 @@ namespace newui {
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;
+
+        // Backs acceptsFocus()/setAcceptsFocus() above.
+        bool acceptsFocus_ = false;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for

@@ -86,6 +86,14 @@ namespace newui {
 
         bool isEnabled() const { return state_.isEnabled(); }
 
+        // A disabled Control is never a valid focus target - by mouse
+        // click (UIInputManager::resolveClickFocusTarget()) or by Tab
+        // (UIInputManager::moveFocus()) - even if acceptsFocus() is true,
+        // matching how a real disabled Win32 control is skipped in tab
+        // order. View::canBecomeFocused() already covers acceptsFocus()/
+        // isDesignTime(); this only adds the isEnabled() gate on top.
+        bool canBecomeFocused() const override { return View::canBecomeFocused() && isEnabled(); }
+
         // Non-owning - see Action's own class comment. Setting this does
         // not by itself wire this Control's onClick to action's
         // perform(), nor register action with a RunLoop for hotkey

@@ -67,6 +67,12 @@ namespace newui {
 TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(alignment) {
     setName("TabControl");
     setVisible(true);
+    // The whole strip is one tab stop, like a real Win32 tab control -
+    // individual TabItemButtonView instances (addTab(), below) stay
+    // non-focusable; switching which tab is selected once this control
+    // has focus is a job for arrow keys, not Tab, matching native tab
+    // control behavior (not yet implemented here).
+    setAcceptsFocus(true);
     setStyle(std::make_unique<ThemedTabPaneStyle>());
 
     const bool stripHorizontal = IsHorizontalStrip(alignment_);

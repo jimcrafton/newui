@@ -131,6 +131,7 @@ namespace newui {
 
     Button::Button() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedButtonStyle>();
         buttonStyle_ = buttonStyle.get();
@@ -278,6 +279,7 @@ namespace newui {
 
     Toggle::Toggle() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         rebuildStyle();
 
@@ -481,6 +483,7 @@ namespace newui {
 
     Slider::Slider() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto trackStyle = std::make_unique<ThemedTrackbarTrackStyle>();
         trackStyle_ = trackStyle.get();
@@ -2443,6 +2446,7 @@ namespace newui {
 
     TextField::TextField() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
@@ -2488,6 +2492,7 @@ namespace newui {
 
     TextControl::TextControl() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
@@ -2555,6 +2560,7 @@ namespace newui {
 
     ListView::ListView() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
+        setAcceptsFocus(true);
         setStyle(std::make_unique<ThemedEditStyle>());
 
         onMouseDown.add(this, &ListView::handleMouseDown);
@@ -2841,6 +2847,7 @@ namespace newui {
 
     TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
         setVisible(true);
+        setAcceptsFocus(true);
         setStyle(std::make_unique<ThemedEditStyle>());
 
         onMouseDown.add(this, &TreeView::handleMouseDown);
@@ -3120,6 +3127,7 @@ namespace newui {
 
     DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
+        setAcceptsFocus(true);
         setStyle(std::make_unique<ThemedEditStyle>());
 
         onMouseDown.add(this, &DropDownList::handleMouseDown);

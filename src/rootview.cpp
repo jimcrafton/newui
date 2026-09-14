@@ -5,6 +5,7 @@
 #include "newui/frame.h"
 #include "newui/mouse_constants.h"
 #include "newui/subview.h"
+#include "newui/uiinputmanager.h"
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
 #include "newui/uicolormanager.h"
@@ -743,7 +744,17 @@ namespace newui {
 		Point localPt;
 		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
-		setFocusedSubView(target);
+
+		// Mouse *capture* (and therefore which View this gesture's own
+		// onMouseDown/onMouseMove/onMouseUp reach) always stays the exact
+		// hit target above - only which View this click hands *keyboard
+		// focus* to goes through UIInputManager's policy: a plain
+		// non-focusable SubView (a container/decoration, or a control
+		// like Stepper/ScrollBar that deliberately shouldn't steal focus -
+		// see View::acceptsFocus(), view.h) walks up to the nearest
+		// focusable ancestor instead of focusing itself, same as clicking
+		// a Button's own drawn label still focuses the Button.
+		setFocusedSubView(UIInputManager::instance().resolveClickFocusTarget(target));
 
 		if (target != nullptr) {
 			if (!target->isDesignTime()) {
@@ -937,7 +948,8 @@ namespace newui {
 		Point localPt;
 		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
-		setFocusedSubView(target);
+		// See mouseDown()'s own comment - same capture-vs-focus split.
+		setFocusedSubView(UIInputManager::instance().resolveClickFocusTarget(target));
 
 		if (target != nullptr) {
 			if (!target->isDesignTime()) {
@@ -967,6 +979,23 @@ namespace newui {
 
 	void RootView::keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode)
 	{
+		// Tab is reserved for UIInputManager's focus navigation, never
+		// forwarded to onKeyDown/onKeyPress/onKeyUp - this RootView's own
+		// or focusedSubView_'s - the same way a real dialog's tab order
+		// swallows Tab rather than letting a control see it as an
+		// ordinary keystroke. keKeyDown is the one that actually
+		// navigates; keKeyPress (WM_CHAR's synthesized '\t', delivered
+		// via handleMessage()'s TranslateMessage() call same as any other
+		// character) and keKeyUp for the same physical keypress are just
+		// as deliberately ignored here, not merely unhandled.
+		if (VKeyCode == vkTab) {
+			if (eventType == keKeyDown) {
+				UIInputManager::instance().moveFocus(*this,
+					(keyMask & kmShift) != 0 ? FocusNavigationDirection::Previous : FocusNavigationDirection::Next);
+			}
+			return;
+		}
+
 		switch (eventType) {
 			case keKeyPress: {
 				onKeyPress(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
