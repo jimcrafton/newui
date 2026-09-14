@@ -48,13 +48,34 @@ namespace newui {
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);
-		
+
 		updateLayout();
+		// A brand-new child usually gets drawn anyway (the next unrelated
+		// repaint walks every current child, this one now included) - but
+		// nothing *guarantees* one happens, and updateLayout() above can
+		// also reflow every existing sibling around it. redraw() invalidates
+		// this whole View's own bounds (not just the new child's) for
+		// exactly that reason - see removeChild()'s own comment below,
+		// same fix, same reasoning, just the "child appeared" side of it.
+		redraw();
 	}
 
 	void View::removeChild(SubView* child) {
 		childViews_.erase(std::remove(childViews_.begin(), childViews_.end(), child), childViews_.end());
 		updateLayout();
+		// redraw() (not just updateLayout() above) - a real, confirmed
+		// live bug without this: updateLayout() only repositions the
+		// *remaining* children via the attached Layout, which has no
+		// reason to ever touch the pixels the just-removed child used to
+		// occupy. Nothing else invalidates that region either - the next
+		// full paint() walk simply skips a child that's no longer in
+		// childViews_, it never erases what an earlier frame already
+		// composited there - so the old bitmap content stays on screen
+		// until some *unrelated* later event happens to repaint over it.
+		// Invalidates this whole View's own bounds, not a narrower rect
+		// around just the vacated spot, since updateLayout() may also have
+		// moved surviving siblings into (or out of) that same area.
+		redraw();
 	}
 
 	void View::reorderChild(SubView* child, std::size_t newIndex) {
@@ -68,6 +89,10 @@ namespace newui {
 		}
 		childViews_.insert(childViews_.begin() + newIndex, child);
 		updateLayout();
+		// Same reasoning as removeChild() above - reordering can move
+		// every sibling to a new on-screen position, and nothing else
+		// guarantees a repaint of wherever they used to be.
+		redraw();
 	}
 
 	bool View::setParent(View* newParent) {

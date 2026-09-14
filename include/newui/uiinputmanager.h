@@ -13,6 +13,18 @@ namespace newui {
         Previous
     };
 
+    // Which way an arrow key should spatially jump focus - see
+    // UIInputManager::moveFocusSpatially(). Deliberately distinct from
+    // FocusNavigationDirection above: that one is about *reading order*
+    // (Tab's Next/Previous through a 1-D sequence), this one is about
+    // real on-screen geometry in all four directions.
+    enum class SpatialDirection {
+        Up,
+        Down,
+        Left,
+        Right
+    };
+
     // An invisible SubView that redirects Tab/Shift+Tab through to a
     // different real View - this toolkit's answer to "put this specific
     // View next in Tab order without renumbering everything else",
@@ -176,6 +188,72 @@ namespace newui {
         // makes landing on it a no-op (focus stays exactly where it was)
         // rather than ever focusing the guide itself or crashing.
         void moveFocus(RootView& root, FocusNavigationDirection direction) const;
+
+        // Arrow-key equivalent of moveFocus() above, called directly by
+        // RootView::keyEvent() for VKeyCode in {vkUpArrow, vkDownArrow,
+        // vkLeftArrow, vkRightArrow} on keKeyDown - same shape as Tab's
+        // own handling there, just dispatch-then-fallback instead of
+        // intercept-first: unlike Tab (always swallowed before it ever
+        // reaches a View's own onKeyDown), an arrow key must always be
+        // offered to root's focusedSubView() first - a ListView moving
+        // its selection, a Slider changing its value, DropDownList's
+        // popup navigation, ... - and only falls back to a spatial jump
+        // if that View's onKeyDown doesn't handle it. This keeps
+        // RootView::keyEvent itself a thin "detect the key, hand off to
+        // UIInputManager" dispatcher for both, rather than splitting
+        // "who owns focusedSubView_ dispatch" one way for Tab and another
+        // for arrows - focusedSubView_ itself stays owned by RootView
+        // throughout (read here only via its own public focusedSubView()
+        // accessor, same as every other method in this class), so this
+        // doesn't need RootView::keyEvent to also separately dispatch
+        // onKeyDown to it beforehand the way the plain (non-arrow) key
+        // path still does for every other key.
+        //
+        // A no-op if root's focusedSubView() is nullptr. Returns true if
+        // the key was consumed locally (the focused View's own onKeyDown
+        // handled it) or by a resulting spatial jump; false if neither
+        // did anything - RootView::keyEvent doesn't currently need this,
+        // but it's cheap to report and mirrors moveFocusSpatially()'s own
+        // "did anything actually happen" return below.
+        bool routeArrowKeyDown(RootView& root, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) const;
+
+        // The actual spatial-jump policy routeArrowKeyDown() above falls
+        // back to once it finds root's focusedSubView() didn't handle the
+        // arrow key itself - a ListView/TreeView reporting that because
+        // Up/Down already clamped at its own first/last row (nothing left
+        // for it to do internally), but equally any other focused View
+        // that simply never hooks arrow keys at all (a Button, Toggle,
+        // Label, ...): a control that already consumes arrow keys for its
+        // own purpose (Slider, DropDownList, ...) always reports Handled
+        // and this never runs for it, so behavior for those is unchanged
+        // either way - see routeArrowKeyDown()'s own doc comment for why
+        // that generalization (not just ListView/TreeView) is the right
+        // shape here, not scope creep. Adapted from the docx/plan.md's
+        // own ArrowResult::BoundaryReached design (see
+        // uiinputmanager-plan.md's HandleArrowKeyPressed) - real
+        // accumulatedOffset()-based geometry here instead of a
+        // GetGlobalBounds() RECT, and FocusGuide-aware/scope-respecting
+        // candidate gathering reused straight from moveFocus() instead of
+        // a flat GatherAllFocusableViews(). Exposed as its own public
+        // method (rather than folded entirely into routeArrowKeyDown())
+        // since the geometric jump itself is a reusable piece of policy
+        // in its own right - e.g. a future explicit "jump focus" command
+        // wired to something other than a raw arrow keystroke.
+        //
+        // Searches every focusable candidate in root's currently active
+        // focus scope (same scope-trapping moveFocus() itself respects -
+        // an arrow jump escaping a properties-panel/inspector container
+        // would be exactly as surprising as Tab doing it), filters out
+        // anything that isn't actually positioned in direction relative
+        // to the current View's own edge (not just "happens to be
+        // closer" - a candidate to the upper-left is never a valid
+        // Down-jump target no matter how close), and moves focus to
+        // whichever of those remaining candidates has the nearest
+        // center-to-center distance. A no-op (returns false) if nothing
+        // qualifies - root's focusedSubView() is nullptr, no other
+        // candidate exists, or nothing lies in the requested direction at
+        // all. Returns true if focus actually moved.
+        bool moveFocusSpatially(RootView& root, SpatialDirection direction) const;
 
     private:
         UIInputManager() = default;

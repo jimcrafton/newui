@@ -31,6 +31,7 @@ public:
     using newui::RootView::lostFocus;
     using newui::RootView::keyEvent;
     using newui::RootView::cursorTargetAt;
+    using newui::RootView::dirtyRect;
 };
 
 // Delegate::FunctionPtr is a plain function pointer (no capturing lambdas),
@@ -1069,6 +1070,334 @@ TEST(RootViewFocusGuide, MouseClickResolvesThroughAGuideTooViaResolveClickFocusT
 }
 
 // ---------------------------------------------------------------------------
+// Arrow-key cross-control spatial jump: UIInputManager::moveFocusSpatially()
+// (called via routeArrowKeyDown(), in turn called from RootView::keyEvent()
+// for an arrow key the focused View's own onKeyDown doesn't handle) moves
+// focus to the nearest focusable View actually positioned in the requested
+// direction - real accumulatedOffset()-based geometry, edge-filtered (not
+// just "closer by raw distance"), scope-respecting and FocusGuide-aware the
+// same way moveFocus() (Tab) already is. See uiinputmanager.h's own doc
+// comments on both methods for the full design, adapted from
+// uiinputmanager-plan.md's ArrowResult::BoundaryReached/
+// HandleArrowKeyPressed.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class StubListRowModel : public newui::ListModel {
+public:
+    std::size_t rowCount = 0;
+
+    std::any value(const std::any& /*key*/) override { return std::any(); }
+    std::size_t size() const override { return rowCount; }
+};
+
+}  // namespace
+
+TEST(RootViewArrowKeySpatialJump, DownJumpsToTheNearestFocusableViewBelow) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    auto* top = new newui::SubView();
+    top->setBounds(newui::Rect(0, 0, 50, 50));
+    top->setVisible(true);
+    top->setAcceptsFocus(true);
+    root->addChild(top);
+
+    auto* below = new newui::SubView();
+    below->setBounds(newui::Rect(0, 100, 50, 50));
+    below->setVisible(true);
+    below->setAcceptsFocus(true);
+    root->addChild(below);
+
+    root->setFocusedSubView(top);
+    ASSERT_TRUE(newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down));
+
+    EXPECT_EQ(root->focusedSubView(), below);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, EdgeFilterExcludesACandidateNotActuallyBelowEvenIfNumericallyCloser) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 0, 50, 50));  // bottom edge at y=50
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    // Same row, off to the side - raw center-to-center distance (60px) is
+    // closer than belowCandidate's (100px), but it overlaps current's own
+    // vertical span (top=0 < current's bottom=50), so it must never be a
+    // valid Down target no matter how close.
+    auto* sideCandidate = new newui::SubView();
+    sideCandidate->setBounds(newui::Rect(60, 0, 50, 50));
+    sideCandidate->setVisible(true);
+    sideCandidate->setAcceptsFocus(true);
+    root->addChild(sideCandidate);
+
+    auto* belowCandidate = new newui::SubView();
+    belowCandidate->setBounds(newui::Rect(0, 100, 50, 50));  // top=100 >= current's bottom=50
+    belowCandidate->setVisible(true);
+    belowCandidate->setAcceptsFocus(true);
+    root->addChild(belowCandidate);
+
+    root->setFocusedSubView(current);
+    newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down);
+
+    EXPECT_EQ(root->focusedSubView(), belowCandidate);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, PicksTheNearestOfSeveralValidCandidates) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 300, 400), "root");
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 0, 50, 50));
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    auto* nearer = new newui::SubView();
+    nearer->setBounds(newui::Rect(0, 100, 50, 50));
+    nearer->setVisible(true);
+    nearer->setAcceptsFocus(true);
+    root->addChild(nearer);
+
+    auto* farther = new newui::SubView();
+    farther->setBounds(newui::Rect(0, 250, 50, 50));
+    farther->setVisible(true);
+    farther->setAcceptsFocus(true);
+    root->addChild(farther);
+
+    root->setFocusedSubView(current);
+    newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down);
+
+    EXPECT_EQ(root->focusedSubView(), nearer);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, NoOpWhenNothingLiesInTheRequestedDirection) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 100, 50, 50));
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    // Only other candidate is above, not below.
+    auto* above = new newui::SubView();
+    above->setBounds(newui::Rect(0, 0, 50, 50));
+    above->setVisible(true);
+    above->setAcceptsFocus(true);
+    root->addChild(above);
+
+    root->setFocusedSubView(current);
+    bool moved = newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down);
+
+    EXPECT_FALSE(moved);
+    EXPECT_EQ(root->focusedSubView(), current);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, RespectsTheActiveFocusScopeAndWontJumpOutOfIt) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 400), "root");
+
+    auto* scope = new newui::SubView();
+    scope->setBounds(newui::Rect(0, 0, 200, 100));
+    scope->setVisible(true);
+    scope->setFocusScope(true);
+    root->addChild(scope);
+
+    auto* insideScope = new newui::SubView();
+    insideScope->setBounds(newui::Rect(0, 0, 50, 50));
+    insideScope->setVisible(true);
+    insideScope->setAcceptsFocus(true);
+    scope->addChild(insideScope);
+
+    // Outside the scope, and the only thing actually positioned below -
+    // trapping must mean the jump finds nothing valid instead of
+    // escaping to it, same as Tab can't leak out of a scope either.
+    auto* outsideScope = new newui::SubView();
+    outsideScope->setBounds(newui::Rect(0, 200, 50, 50));
+    outsideScope->setVisible(true);
+    outsideScope->setAcceptsFocus(true);
+    root->addChild(outsideScope);
+
+    root->setFocusedSubView(insideScope);
+    bool moved = newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down);
+
+    EXPECT_FALSE(moved);
+    EXPECT_EQ(root->focusedSubView(), insideScope);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, ResolvesThroughAFocusGuideToItsRealTarget) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 400), "root");
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 0, 50, 50));
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    auto* realTarget = new newui::SubView();
+    realTarget->setBounds(newui::Rect(0, 300, 50, 50));
+    realTarget->setVisible(true);
+    realTarget->setAcceptsFocus(true);
+    root->addChild(realTarget);
+
+    // Nearest thing below current, but a guide - never itself becomes
+    // focusedSubView(), same contract moveFocus() (Tab) relies on.
+    auto* guide = new newui::FocusGuide();
+    guide->setBounds(newui::Rect(0, 100, 0, 0));
+    guide->setRedirectTarget(realTarget);
+    root->addChild(guide);
+
+    root->setFocusedSubView(current);
+    newui::UIInputManager::instance().moveFocusSpatially(*root, newui::SpatialDirection::Down);
+
+    EXPECT_EQ(root->focusedSubView(), realTarget);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, KeyEventDoesNotJumpWhenTheFocusedViewHandlesTheArrowKeyItself) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 0, 50, 50));
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    int handledCount = 0;
+    current->onKeyDown.add([&handledCount](newui::View&, std::uint32_t, int, int, std::uint32_t) {
+        ++handledCount;
+        return newui::SyncReturn::Handled;
+    });
+    root->addChild(current);
+
+    auto* below = new newui::SubView();
+    below->setBounds(newui::Rect(0, 100, 50, 50));
+    below->setVisible(true);
+    below->setAcceptsFocus(true);
+    root->addChild(below);
+
+    root->setFocusedSubView(current);
+    root->keyEvent(newui::keKeyDown, 0, 0, 1, newui::vkDownArrow);
+
+    EXPECT_EQ(handledCount, 1);
+    EXPECT_EQ(root->focusedSubView(), current) << "the focused View's own onKeyDown handled it - no fallback jump";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, KeyEventFallsBackToASpatialJumpWhenTheFocusedViewIgnoresTheArrowKey) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    // A plain SubView never hooks onKeyDown at all - onKeyDown.syncCallFirst()
+    // reports Ignored for it automatically, exactly like a Button/Toggle/
+    // Label that's never touched arrow keys, and (via the fix in
+    // ListView::handleKeyDown()/TreeView::handleKeyDown()) exactly like a
+    // ListView/TreeView already clamped at its own first/last row.
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 0, 50, 50));
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    auto* below = new newui::SubView();
+    below->setBounds(newui::Rect(0, 100, 50, 50));
+    below->setVisible(true);
+    below->setAcceptsFocus(true);
+    root->addChild(below);
+
+    root->setFocusedSubView(current);
+    root->keyEvent(newui::keKeyDown, 0, 0, 1, newui::vkDownArrow);
+
+    EXPECT_EQ(root->focusedSubView(), below);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, DownArrowOnAListViewAtItsLastRowJumpsToTheControlBelow) {
+    // The original ask this whole feature exists for: a real ListView
+    // reaching its own last row (not just a plain SubView that never
+    // handled arrows at all) hands off to a spatial jump instead of
+    // silently re-selecting the last row forever.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    auto* list = new newui::ListView();
+    list->setBounds(newui::Rect(0, 0, 200, 60));
+    list->setVisible(true);
+    StubListRowModel model;
+    model.rowCount = 3;
+    list->setModel(&model);
+    root->addChild(list);
+
+    auto* below = new newui::SubView();
+    below->setBounds(newui::Rect(0, 100, 50, 50));
+    below->setVisible(true);
+    below->setAcceptsFocus(true);
+    root->addChild(below);
+
+    root->setFocusedSubView(list);
+    list->setSelectedIndex(2u);  // already the last row
+
+    root->keyEvent(newui::keKeyDown, 0, 0, 1, newui::vkDownArrow);
+
+    EXPECT_EQ(root->focusedSubView(), below);
+    EXPECT_EQ(*list->selectedIndex(), 2u) << "the ListView's own selection must be untouched by the jump";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewArrowKeySpatialJump, DownArrowOnAListViewNotYetAtItsLastRowStillMovesSelectionLocally) {
+    // Regression guard for the fix itself: only the *boundary* case hands
+    // off - ordinary in-bounds Down must still move the selection exactly
+    // as before, never jumping out early.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 300), "root");
+
+    auto* list = new newui::ListView();
+    list->setBounds(newui::Rect(0, 0, 200, 60));
+    list->setVisible(true);
+    StubListRowModel model;
+    model.rowCount = 3;
+    list->setModel(&model);
+    root->addChild(list);
+
+    auto* below = new newui::SubView();
+    below->setBounds(newui::Rect(0, 100, 50, 50));
+    below->setVisible(true);
+    below->setAcceptsFocus(true);
+    root->addChild(below);
+
+    root->setFocusedSubView(list);
+    list->setSelectedIndex(0u);
+
+    root->keyEvent(newui::keKeyDown, 0, 0, 1, newui::vkDownArrow);
+
+    EXPECT_EQ(root->focusedSubView(), list);
+    EXPECT_EQ(*list->selectedIndex(), 1u);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
 // A design-time SubView (isDesignTime(), e.g. content loaded into a
 // Designer's RootViewProxy) never receives a real mouse/keyboard event and
 // never takes keyboard focus - every dispatch site (onMouseDown/onMouseMove/
@@ -1468,6 +1797,109 @@ TEST(RootViewSubViewRemoval, RemovingNestedGrandchildClearsHoverCaptureFocus) {
     EXPECT_EQ(root->focusedSubView(), nullptr);
 
     delete grandchild;
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// View::addChild()/removeChild()/reorderChild() (view.cpp) each call
+// redraw() after their own updateLayout() - a real, confirmed live bug
+// otherwise: updateLayout() only repositions the *Layout-arranged*
+// children still in childViews_, so removing (or reordering) a child left
+// its old on-screen pixels stale until some *unrelated* later event (a
+// mouse hover, say) happened to repaint over that area. Caught live: an
+// example's "destroy the focused button" demo left the button's stale
+// pixels on screen after the button object itself was actually gone.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewChildListChanges, AddingAChildInvalidatesTheParent) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    EXPECT_FALSE(root->dirtyRect().empty());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewChildListChanges, RemovingAChildInvalidatesTheVacatedArea) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    root->removeChild(child);
+
+    EXPECT_FALSE(root->dirtyRect().empty())
+        << "the vacated area must be repainted, not left showing the removed child's stale pixels";
+
+    delete child;
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewChildListChanges, ReorderingAChildInvalidatesTheParent) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    root->addChild(first);
+
+    auto* second = new newui::SubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    root->addChild(second);
+
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    root->reorderChild(first, 1);
+
+    EXPECT_FALSE(root->dirtyRect().empty());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewChildListChanges, TogglingAChildsVisibilityInvalidatesTheParent) {
+    // Same bug, same fix, one level down from add/remove/reorder above:
+    // SubView::setVisible() (subview.cpp) is what CardLayout::arrange()
+    // (layout.cpp) actually calls to swap which page a TabControl shows -
+    // confirmed live: switching tabs via TabControl's own arrow-key
+    // handling correctly changed the active tab button and the underlying
+    // page state, but the old page's pixels stayed on screen until an
+    // unrelated mouse move happened to repaint over them.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 50, 50));
+    child->setVisible(true);
+    root->addChild(child);
+
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    child->setVisible(false);
+    EXPECT_FALSE(root->dirtyRect().empty()) << "hiding a child must invalidate where it used to be drawn";
+
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    child->setVisible(true);
+    EXPECT_FALSE(root->dirtyRect().empty()) << "showing a child must invalidate where it's now drawn";
+
     root->destroy();
     delete root;
 }

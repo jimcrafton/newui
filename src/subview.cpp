@@ -27,6 +27,16 @@ void SubView::setVisible(bool visible) {
 
     visible_ = visible;
     onVisibilityChanged(*this);
+    // Same real, confirmed live bug (and same fix) as View::addChild()/
+    // removeChild()/reorderChild() (view.cpp) - a real caller (CardLayout::
+    // arrange(), layout.cpp, switching which page is the active tab)
+    // toggles this correctly, but nothing else ever invalidated the
+    // region either the just-hidden or just-shown child occupies, so the
+    // old page's pixels stayed on screen until some *unrelated* later
+    // event (a mouse move, say) happened to repaint over them - the
+    // control's own internal state (which page is active) was already
+    // correct the whole time, only the pixels were stale.
+    redraw();
 }
 
 void SubView::addChild(SubView* child) {

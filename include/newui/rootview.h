@@ -371,6 +371,17 @@ namespace newui {
 
         newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);
 
+        // Whatever's currently accumulated in dirtyRect_ (empty Rect if
+        // nothing's pending) - protected purely for testability, same
+        // pattern as every other method in this block, so a test can
+        // confirm a given action actually invalidated something (e.g.
+        // View::addChild()/removeChild()/reorderChild() each calling
+        // redraw()) without needing a real HWND/message pump to observe a
+        // real repaint.
+        const newui::Rect& dirtyRect() const {
+            return dirtyRect_;
+        }
+
     private:
         // See its own definition comment (rootview.cpp) - called once
         // from each constructor.

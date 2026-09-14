@@ -521,6 +521,9 @@ namespace newui {
 
 		visible_ = visible;
 		onVisibilityChanged(*this);
+		// Same fix as SubView::setVisible() (subview.cpp) - see its own
+		// comment for the real bug this guards against.
+		redraw();
 	}
 
 	void RootView::addChild(SubView* child)
@@ -1075,6 +1078,26 @@ namespace newui {
 		}
 
 		if (focusedSubView_ == nullptr) {
+			return;
+		}
+
+		// Arrow keys route through UIInputManager instead of the plain
+		// focusedSubView_->onKeyDown() call below, same "detect the key,
+		// hand the whole thing off to UIInputManager" shape the vkTab
+		// block above already uses - routeArrowKeyDown() does its own
+		// dispatch to focusedSubView_ first (a ListView moving its
+		// selection, a Slider changing its value, ...) and only falls
+		// back to a cross-control spatial jump if that dispatch goes
+		// unhandled, so this doesn't *also* need to call
+		// focusedSubView_->onKeyDown() itself - see routeArrowKeyDown()'s
+		// own doc comment (uiinputmanager.h) for the rest. Only
+		// keKeyDown - keKeyPress never fires for a non-character key like
+		// an arrow anyway, and keKeyUp still wants the plain dispatch
+		// below (a View reacting to the key actually being released is
+		// no different for an arrow than for any other key).
+		bool isArrowKey = VKeyCode == vkUpArrow || VKeyCode == vkDownArrow || VKeyCode == vkLeftArrow || VKeyCode == vkRightArrow;
+		if (isArrowKey && eventType == keKeyDown) {
+			UIInputManager::instance().routeArrowKeyDown(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
 			return;
 		}
 

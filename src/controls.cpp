@@ -2953,15 +2953,18 @@ namespace newui {
         }
 
         std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
         switch (VKeyCode) {
             case vkUpArrow: {
                 std::size_t lead = currentKeyboardLead();
                 next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
                 break;
             }
             case vkDownArrow: {
                 std::size_t lead = currentKeyboardLead();
                 next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
                 break;
             }
             case vkHome:
@@ -2976,6 +2979,23 @@ namespace newui {
 
         bool shift = (keyMask & kmShift) != 0;
         bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Already at the first/last row - nothing left to do locally,
+            // so unlike every other case below (which always reports
+            // Handled even when next happens to equal the current
+            // selection already), this specifically reports Ignored -
+            // RootView::keyEvent's arrow-key routing (rootview.cpp) reads
+            // that as "the focused View didn't want this" and falls back
+            // to UIInputManager::routeArrowKeyDown()'s cross-control
+            // spatial jump (uiinputmanager.cpp) instead of silently
+            // re-selecting the same row. Shift/Ctrl-modified Up/Down
+            // deliberately stay Handled even at the boundary below -
+            // those are local selection-extension/preview gestures, not
+            // something that should eject focus out of this control
+            // mid-gesture.
+            return SyncReturn::Ignored;
+        }
 
         if (ctrl && !shift) {
             // Move only - see handleKeyDown()'s own doc comment (controls.h).
@@ -3400,15 +3420,18 @@ namespace newui {
         }
 
         std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
         switch (VKeyCode) {
             case vkUpArrow: {
                 std::size_t lead = currentKeyboardLead();
                 next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
                 break;
             }
             case vkDownArrow: {
                 std::size_t lead = currentKeyboardLead();
                 next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
                 break;
             }
             case vkHome:
@@ -3421,10 +3444,19 @@ namespace newui {
                 return SyncReturn::Ignored;
         }
 
-        std::vector<std::size_t> nextPath = controller_->pathAt(next);
-
         bool shift = (keyMask & kmShift) != 0;
         bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Same "hand off to UIInputManager's cross-control spatial
+            // jump instead of silently re-selecting the same row" reasoning
+            // as ListView::handleKeyDown()'s own Up/Down boundary case
+            // (controls.cpp) - kept ahead of nextPath's own computation
+            // below since there's nothing to do with it in this case.
+            return SyncReturn::Ignored;
+        }
+
+        std::vector<std::size_t> nextPath = controller_->pathAt(next);
 
         if (ctrl && !shift) {
             setKeyboardHighlightedIndex(next);

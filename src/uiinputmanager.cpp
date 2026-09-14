@@ -1,9 +1,11 @@
 #include "newui/uiinputmanager.h"
+#include "newui/keyboard_constants.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -167,6 +169,109 @@ namespace newui {
         }
 
         root.setFocusedSubView(next);
+    }
+
+    bool UIInputManager::routeArrowKeyDown(RootView& root, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) const {
+        SubView* focused = root.focusedSubView();
+        if (focused == nullptr) {
+            return false;
+        }
+
+        SyncReturn result = focused->onKeyDown.syncCallFirst(*focused, keyMask, keyCharVal, repeatCount, VKeyCode);
+        if (result.handled()) {
+            return true;
+        }
+
+        SpatialDirection direction;
+        switch (VKeyCode) {
+            case vkUpArrow:    direction = SpatialDirection::Up;    break;
+            case vkDownArrow:  direction = SpatialDirection::Down;  break;
+            case vkLeftArrow:  direction = SpatialDirection::Left;  break;
+            case vkRightArrow: direction = SpatialDirection::Right; break;
+            default:
+                // Not actually an arrow key - callers (RootView::keyEvent)
+                // only ever pass one of the four above, but fail safe
+                // (no jump) rather than reading an uninitialized
+                // direction if that ever changes.
+                return false;
+        }
+        return moveFocusSpatially(root, direction);
+    }
+
+    bool UIInputManager::moveFocusSpatially(RootView& root, SpatialDirection direction) const {
+        SubView* current = root.focusedSubView();
+        if (current == nullptr) {
+            return false;
+        }
+
+        SubView* activeScope = findActiveScope(current);
+        std::vector<SubView*> candidates;
+        if (activeScope != nullptr) {
+            for (SubView* child : activeScope->childViews()) {
+                gatherFocusableInScope(child, candidates);
+            }
+        } else {
+            for (SubView* child : root.childViews()) {
+                gatherFocusableInScope(child, candidates);
+            }
+        }
+
+        Rect currentRect(root.accumulatedOffset(current), current->bounds().size());
+        Point currentCenter(currentRect.left() + currentRect.width() * 0.5f, currentRect.top() + currentRect.height() * 0.5f);
+
+        SubView* best = nullptr;
+        float bestDistanceSq = std::numeric_limits<float>::max();
+        for (SubView* candidate : candidates) {
+            if (candidate == current) {
+                continue;
+            }
+
+            Rect candidateRect(root.accumulatedOffset(candidate), candidate->bounds().size());
+
+            // Must actually lie in the requested direction relative to
+            // current's own edge, not just "happen to be closer" - same
+            // edge-based filter uiinputmanager-plan.md's own
+            // HandleArrowKeyPressed uses (there against GetGlobalBounds()
+            // RECTs), just against real accumulatedOffset() geometry
+            // here. A candidate straddling the edge (overlapping it) is
+            // deliberately excluded too, same as the plan's own strict
+            // less-than - it isn't unambiguously "in that direction" yet.
+            switch (direction) {
+                case SpatialDirection::Down:
+                    if (candidateRect.top() < currentRect.bottom()) continue;
+                    break;
+                case SpatialDirection::Up:
+                    if (candidateRect.bottom() > currentRect.top()) continue;
+                    break;
+                case SpatialDirection::Right:
+                    if (candidateRect.left() < currentRect.right()) continue;
+                    break;
+                case SpatialDirection::Left:
+                    if (candidateRect.right() > currentRect.left()) continue;
+                    break;
+            }
+
+            Point candidateCenter(candidateRect.left() + candidateRect.width() * 0.5f, candidateRect.top() + candidateRect.height() * 0.5f);
+            float dx = candidateCenter.x - currentCenter.x;
+            float dy = candidateCenter.y - currentCenter.y;
+            float distanceSq = dx * dx + dy * dy;
+            if (distanceSq < bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                best = candidate;
+            }
+        }
+
+        if (best == nullptr) {
+            return false;
+        }
+
+        SubView* resolved = resolveFocusRedirect(best);
+        if (resolved == nullptr) {
+            return false;
+        }
+
+        root.setFocusedSubView(resolved);
+        return true;
     }
 
 }
