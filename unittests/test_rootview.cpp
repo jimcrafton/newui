@@ -2,6 +2,7 @@
 #include "newui/subview.h"
 #include "newui/controls.h"
 #include "newui/keyboard_constants.h"
+#include "newui/uiinputmanager.h"
 
 #include <gtest/gtest.h>
 
@@ -903,6 +904,168 @@ TEST(RootViewFocusScope, WantsTabKeyPreventsTabInterceptionEntirely) {
 
     root->destroy();
     delete root;
+}
+
+// ---------------------------------------------------------------------------
+// newui::FocusGuide (uiinputmanager.h) - UIKit's UIFocusGuide adapted to
+// this framework's list-based Tab order: a position-anchored placeholder
+// that redirects to a real View, instead of a numeric priority that can
+// silently drift out of sync as a layout changes.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewFocusGuide, ForcesZeroSizeRegardlessOfWhatSetBoundsIsGiven) {
+    newui::FocusGuide guide;
+
+    guide.setBounds(newui::Rect(10.0f, 20.0f, 100.0f, 50.0f));
+
+    EXPECT_FLOAT_EQ(guide.bounds().pos().x, 10.0f);
+    EXPECT_FLOAT_EQ(guide.bounds().pos().y, 20.0f);
+    EXPECT_FLOAT_EQ(guide.bounds().size().width, 0.0f);
+    EXPECT_FLOAT_EQ(guide.bounds().size().height, 0.0f);
+}
+
+TEST(RootViewFocusGuide, TabRedirectsThroughToTheGuidesTargetNotTheGuideItself) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 30));
+    first->setVisible(true);
+    first->setAcceptsFocus(true);
+    root->addChild(first);
+
+    // Would be geometrically next after `first` in reading order, but the
+    // guide below sits ahead of it (x=30, between `first`'s x=0 and this
+    // one's x=60) and intercepts Tab first, redirecting straight past it
+    // to `target` instead.
+    auto* geometricallyNext = new newui::SubView();
+    geometricallyNext->setBounds(newui::Rect(60, 0, 50, 30));
+    geometricallyNext->setVisible(true);
+    geometricallyNext->setAcceptsFocus(true);
+    root->addChild(geometricallyNext);
+
+    auto* target = new newui::SubView();
+    target->setBounds(newui::Rect(0, 150, 50, 30));  // geometrically last
+    target->setVisible(true);
+    target->setAcceptsFocus(true);
+    root->addChild(target);
+
+    auto* guide = new newui::FocusGuide();
+    guide->setBounds(newui::Rect(30, 0, 0, 0));  // between first and geometricallyNext
+    guide->setVisible(true);
+    guide->setRedirectTarget(target);
+    root->addChild(guide);
+
+    root->setFocusedSubView(first);
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+
+    EXPECT_EQ(root->focusedSubView(), target)
+        << "the guide must redirect through to its target, never become focusedSubView() itself";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusGuide, ShiftTabRedirectsThroughAGuideTheSameWay) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* target = new newui::SubView();
+    target->setBounds(newui::Rect(0, 0, 50, 30));
+    target->setVisible(true);
+    target->setAcceptsFocus(true);
+    root->addChild(target);
+
+    auto* current = new newui::SubView();
+    current->setBounds(newui::Rect(0, 150, 50, 30));  // geometrically last
+    current->setVisible(true);
+    current->setAcceptsFocus(true);
+    root->addChild(current);
+
+    auto* guide = new newui::FocusGuide();
+    guide->setBounds(newui::Rect(0, 75, 0, 0));  // between them in reading order
+    guide->setVisible(true);
+    guide->setRedirectTarget(target);
+    root->addChild(guide);
+
+    root->setFocusedSubView(current);
+    root->keyEvent(newui::keKeyDown, newui::kmShift, '\t', 1, newui::vkTab);
+
+    EXPECT_EQ(root->focusedSubView(), target);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusGuide, AGuideWithNoRedirectTargetIsANoOp) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 30));
+    first->setVisible(true);
+    first->setAcceptsFocus(true);
+    root->addChild(first);
+
+    auto* guide = new newui::FocusGuide();  // redirectTarget() never set
+    guide->setBounds(newui::Rect(60, 0, 0, 0));
+    guide->setVisible(true);
+    root->addChild(guide);
+
+    root->setFocusedSubView(first);
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+
+    EXPECT_EQ(root->focusedSubView(), first) << "must not crash or focus the guide itself";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusGuide, ACyclicGuideChainIsANoOpRatherThanCrashing) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 30));
+    first->setVisible(true);
+    first->setAcceptsFocus(true);
+    root->addChild(first);
+
+    auto* guideA = new newui::FocusGuide();
+    guideA->setBounds(newui::Rect(60, 0, 0, 0));
+    guideA->setVisible(true);
+    root->addChild(guideA);
+
+    auto* guideB = new newui::FocusGuide();
+    guideB->setBounds(newui::Rect(70, 0, 0, 0));
+    guideB->setVisible(true);
+    root->addChild(guideB);
+
+    guideA->setRedirectTarget(guideB);
+    guideB->setRedirectTarget(guideA);
+
+    root->setFocusedSubView(first);
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);  // must not infinite-loop or crash
+
+    EXPECT_EQ(root->focusedSubView(), first);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusGuide, MouseClickResolvesThroughAGuideTooViaResolveClickFocusTarget) {
+    // A FocusGuide's forced (0,0) size makes it unhittable on its own -
+    // this exercises UIInputManager::resolveClickFocusTarget()'s own
+    // redirect resolution directly instead, the same defensive path a
+    // real click would only ever reach if something were (unusually)
+    // nested inside a guide.
+    auto* guide = new newui::FocusGuide();
+    auto* target = new newui::SubView();
+    target->setAcceptsFocus(true);
+    guide->setRedirectTarget(target);
+
+    newui::SubView* resolved = newui::UIInputManager::instance().resolveClickFocusTarget(guide);
+
+    EXPECT_EQ(resolved, target);
+
+    delete guide;
+    delete target;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,15 +1,86 @@
 #pragma once
 
+#include <newui/subview.h>
+
 namespace newui {
 
     class RootView;
-    class SubView;
     class View;
 
     // Which way Tab/Shift+Tab should move focus - see UIInputManager::moveFocus().
     enum class FocusNavigationDirection {
         Next,
         Previous
+    };
+
+    // An invisible SubView that redirects Tab/Shift+Tab through to a
+    // different real View - this toolkit's answer to "put this specific
+    // View next in Tab order without renumbering everything else",
+    // modeled on UIKit's own UIFocusGuide rather than a numeric priority
+    // field (the web/Win32 tabindex idea considered and rejected here -
+    // a plain int silently drifts out of sync as a layout changes, the
+    // exact failure mode a position-anchored placeholder avoids: this
+    // guide's *position* in the tree/layout is itself the only thing
+    // that determines where the redirect fires from, so moving real
+    // content around it can't desync anything the way renumbering a
+    // dozen tabOrder values by hand could).
+    //
+    // Usage: construct one, addChild() it wherever in the tree the
+    // desired jump point falls in reading order (its parent's own
+    // geometric position is what places it in the Tab sequence - see
+    // setBounds() below), then setRedirectTarget() to the real View that
+    // should actually receive focus when UIInputManager::moveFocus()
+    // (uiinputmanager.h) reaches it. Never itself becomes RootView::
+    // focusedSubView() - moveFocus()/UIInputManager::resolveClickFocusTarget()
+    // both resolve straight through it (and, in a chain, through however
+    // many further guides it points at) to the first real SubView they
+    // find; a redirectTarget() left null, or a cyclic chain of guides,
+    // makes reaching this guide a no-op rather than getting stuck on it
+    // or crashing.
+    //
+    // setBounds() only ever keeps the position you pass it, forcing the
+    // size to (0,0) regardless of what's given - a real footprint would
+    // make this guide hit-testable (View::hitTestChildren()) and able to
+    // steal real mouse clicks meant for whatever it's sitting near, which
+    // UIKit's own UIFocusGuide never does either (it participates in the
+    // focus engine only, never in touch hit-testing). Only position
+    // matters for sorting into the reading-order candidate list
+    // (UIInputManager::moveFocus() only ever reads accumulatedOffset(),
+    // never size, for that).
+    //
+    // Purely a code-time construct today, not .newui-persistable -
+    // redirectTarget() is a plain non-owning View* into elsewhere in the
+    // same tree (a forward reference, not a back-reference like View::
+    // parent()/rootView()), and this codebase has no established pattern
+    // yet for persisting a cross-reference like that (see RootView::
+    // hoveredSubView()'s own doc comment, rootview.h, for the reflectgen
+    // double-serialization trap a raw structural pointer property would
+    // hit here too). Wire it up programmatically instead - e.g. right
+    // after building the two real Views it connects.
+    //@reflect ignore=true
+    class FocusGuide : public SubView {
+    public:
+        FocusGuide() {
+            setAcceptsFocus(true);
+        }
+
+        void setBounds(const Rect& bounds) override {
+            SubView::setBounds(Rect(bounds.pos(), Size(0.0f, 0.0f)));
+        }
+
+        View* redirectTarget() const {
+            return redirectTarget_;
+        }
+
+        // Non-owning - same convention as Control::action() (controls.h):
+        // whoever built the tree keeps owning the real target, this is
+        // just a pointer to it.
+        void setRedirectTarget(View* target) {
+            redirectTarget_ = target;
+        }
+
+    private:
+        View* redirectTarget_ = nullptr;
     };
 
     // Singleton home for the mouse/keyboard *policy* decisions this
@@ -50,7 +121,12 @@ namespace newui {
         // right thing to focus. Returns nullptr if nothing in the chain
         // qualifies - clicking empty space, or a plain non-focusable
         // SubView with no focusable ancestor either, clears focus rather
-        // than leaving it wherever it happened to be.
+        // than leaving it wherever it happened to be. If the walk lands on
+        // a FocusGuide (above - vanishingly unlikely given its forced
+        // (0,0) size makes it unhittable on its own, but not impossible if
+        // something real were nested inside one), resolves straight
+        // through its redirectTarget() chain the same way moveFocus()
+        // does, rather than ever returning the guide itself.
         SubView* resolveClickFocusTarget(SubView* hitView) const;
 
         // Moves root's focusedSubView() to the next (direction Next) or
@@ -80,6 +156,14 @@ namespace newui {
         // reachable stop would make Tab appear to do nothing - its
         // descendants stay reachable by a mouse click instead, same as
         // any other unscoped container.
+        //
+        // Whatever candidate this lands on - the computed "next"/
+        // "previous" entry, or the fallback first/last one - is resolved
+        // through FocusGuide::redirectTarget() (above) before actually
+        // being focused, exactly like resolveClickFocusTarget() does. A
+        // guide with no redirectTarget() set, or a cyclic chain of them,
+        // makes landing on it a no-op (focus stays exactly where it was)
+        // rather than ever focusing the guide itself or crashing.
         void moveFocus(RootView& root, FocusNavigationDirection direction) const;
 
     private:

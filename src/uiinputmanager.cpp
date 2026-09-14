@@ -58,6 +58,34 @@ namespace {
         return nullptr;
     }
 
+    // Follows a chain of FocusGuide::redirectTarget()s (uiinputmanager.h)
+    // until it reaches a real, non-guide SubView - the "never actually
+    // focus the guide itself" contract both UIInputManager::moveFocus()
+    // and ::resolveClickFocusTarget() rely on this for. target itself may
+    // already be a real (non-guide) SubView, in which case this returns
+    // it unchanged immediately. Returns nullptr for a guide whose chain
+    // never reaches a real SubView - an unset redirectTarget(), one
+    // pointing at something that isn't even a SubView, or a cycle among
+    // several guides (guarded via visited, so a misconfigured cycle can
+    // never spin this loop forever) - callers treat that the same as "no
+    // candidate to focus", a safe no-op rather than a crash or a stuck
+    // guide.
+    newui::SubView* resolveFocusRedirect(newui::SubView* target) {
+        std::vector<newui::FocusGuide*> visited;
+        while (target != nullptr) {
+            auto* guide = dynamic_cast<newui::FocusGuide*>(target);
+            if (guide == nullptr) {
+                return target;
+            }
+            if (std::find(visited.begin(), visited.end(), guide) != visited.end()) {
+                return nullptr;
+            }
+            visited.push_back(guide);
+            target = dynamic_cast<newui::SubView*>(guide->redirectTarget());
+        }
+        return nullptr;
+    }
+
 }
 
 namespace newui {
@@ -76,7 +104,7 @@ namespace newui {
         // ending the loop) without needing to special-case RootView here.
         for (SubView* v = hitView; v != nullptr; v = dynamic_cast<SubView*>(v->parent())) {
             if (v->canBecomeFocused()) {
-                return v;
+                return resolveFocusRedirect(v);
             }
         }
         return nullptr;
@@ -104,8 +132,12 @@ namespace newui {
         // same 5px tolerance a real toolkit's tab order needs to treat two
         // controls whose tops are nearly, but not exactly, level (a Label
         // and its paired TextField, say) as being on the same row rather
-        // than sorting purely on a pixel-perfect y coordinate.
-        std::sort(candidates.begin(), candidates.end(), [&root](SubView* a, SubView* b) {
+        // than sorting purely on a pixel-perfect y coordinate. stable_sort,
+        // not sort - two candidates at the exact same position (a
+        // FocusGuide deliberately placed exactly where a real View already
+        // sits, say) need a deterministic relative order (gather order),
+        // not whatever an unstable sort happens to produce.
+        std::stable_sort(candidates.begin(), candidates.end(), [&root](SubView* a, SubView* b) {
             Point posA = root.accumulatedOffset(a);
             Point posB = root.accumulatedOffset(b);
             if (std::abs(posA.y - posB.y) > 5.0f) {
@@ -127,6 +159,11 @@ namespace newui {
                 idx = (idx + 1) % candidates.size();
             }
             next = candidates[idx];
+        }
+
+        next = resolveFocusRedirect(next);
+        if (next == nullptr) {
+            return;
         }
 
         root.setFocusedSubView(next);
