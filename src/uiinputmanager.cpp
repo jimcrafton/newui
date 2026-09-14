@@ -17,16 +17,45 @@ namespace {
     // invisible container's children are never real tab stops regardless
     // of their own isVisible(), and pruning the walk here gets that for
     // free.
-    void gatherFocusable(newui::SubView* node, std::vector<newui::SubView*>& out) {
+    //
+    // A focus scope (View::isFocusScope(), view.h) is never recursed
+    // into - it's added as a single opaque stop instead (and only if it
+    // can actually receive that stop's focus itself - see moveFocus()'s
+    // own doc comment, uiinputmanager.h, for why a non-focusable scope is
+    // skipped here rather than added as a dead stop). Its own descendants
+    // only ever join a *different* candidate list - the one gathered once
+    // something inside it is the active scope (findActiveScope() below).
+    void gatherFocusableInScope(newui::SubView* node, std::vector<newui::SubView*>& out) {
         if (node == nullptr || !node->isVisible()) {
+            return;
+        }
+        if (node->isFocusScope()) {
+            if (node->canBecomeFocused()) {
+                out.push_back(node);
+            }
             return;
         }
         if (node->canBecomeFocused()) {
             out.push_back(node);
         }
         for (newui::SubView* child : node->childViews()) {
-            gatherFocusable(child, out);
+            gatherFocusableInScope(child, out);
         }
+    }
+
+    // Walks up from current (current itself included) looking for the
+    // nearest View flagged as a focus scope - nullptr means "no scope
+    // applies", i.e. the whole RootView tree is the (unscoped) candidate
+    // pool, same as before focus scopes existed. Same parent()-walk-with-
+    // a-cast shape as UIInputManager::resolveClickFocusTarget() - stops
+    // naturally once it reaches the RootView itself.
+    newui::SubView* findActiveScope(newui::SubView* current) {
+        for (newui::SubView* runner = current; runner != nullptr; runner = dynamic_cast<newui::SubView*>(runner->parent())) {
+            if (runner->isFocusScope()) {
+                return runner;
+            }
+        }
+        return nullptr;
     }
 
 }
@@ -54,9 +83,18 @@ namespace newui {
     }
 
     void UIInputManager::moveFocus(RootView& root, FocusNavigationDirection direction) const {
+        SubView* current = root.focusedSubView();
+        SubView* activeScope = (current != nullptr) ? findActiveScope(current) : nullptr;
+
         std::vector<SubView*> candidates;
-        for (SubView* child : root.childViews()) {
-            gatherFocusable(child, candidates);
+        if (activeScope != nullptr) {
+            for (SubView* child : activeScope->childViews()) {
+                gatherFocusableInScope(child, candidates);
+            }
+        } else {
+            for (SubView* child : root.childViews()) {
+                gatherFocusableInScope(child, candidates);
+            }
         }
         if (candidates.empty()) {
             return;
@@ -76,7 +114,6 @@ namespace newui {
             return posA.x < posB.x;
         });
 
-        SubView* current = root.focusedSubView();
         auto it = current != nullptr ? std::find(candidates.begin(), candidates.end(), current) : candidates.end();
 
         SubView* next = nullptr;

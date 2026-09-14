@@ -664,6 +664,248 @@ TEST(RootViewFocusPolicy, TabSkipsNonFocusableViewsAndDisabledControls) {
 }
 
 // ---------------------------------------------------------------------------
+// isFocusScope()/wantsTabKey() (view.h) - UIInputManager::moveFocus()'s
+// scoped Tab cycling ("Scoped Geometric Hierarchy" -
+// "UIInputManager possible implementation notes.docx") and RootView::
+// keyEvent()'s opt-out from Tab interception entirely, respectively.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewFocusScope, TabStaysWithinAFocusScopeAndWraps) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* outerButton = new newui::SubView();
+    outerButton->setBounds(newui::Rect(0, 0, 50, 30));
+    outerButton->setVisible(true);
+    outerButton->setAcceptsFocus(true);
+    root->addChild(outerButton);
+
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 40, 200, 100));
+    panel->setVisible(true);
+    panel->setAcceptsFocus(true);
+    panel->setFocusScope(true);
+    root->addChild(panel);
+
+    auto* panelChild1 = new newui::SubView();
+    panelChild1->setBounds(newui::Rect(0, 0, 50, 30));
+    panelChild1->setVisible(true);
+    panelChild1->setAcceptsFocus(true);
+    panel->addChild(panelChild1);
+
+    auto* panelChild2 = new newui::SubView();
+    panelChild2->setBounds(newui::Rect(60, 0, 50, 30));
+    panelChild2->setVisible(true);
+    panelChild2->setAcceptsFocus(true);
+    panel->addChild(panelChild2);
+
+    root->setFocusedSubView(panelChild1);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), panelChild2);
+
+    // Wraps back to panelChild1 - never escapes to outerButton or the
+    // panel container itself, even though both are geometrically/tree-
+    // wise reachable from panelChild2.
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), panelChild1);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusScope, ShiftTabWithinAFocusScopeWrapsBackward) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 0, 200, 100));
+    panel->setVisible(true);
+    panel->setAcceptsFocus(true);
+    panel->setFocusScope(true);
+    root->addChild(panel);
+
+    auto* panelChild1 = new newui::SubView();
+    panelChild1->setBounds(newui::Rect(0, 0, 50, 30));
+    panelChild1->setVisible(true);
+    panelChild1->setAcceptsFocus(true);
+    panel->addChild(panelChild1);
+
+    auto* panelChild2 = new newui::SubView();
+    panelChild2->setBounds(newui::Rect(60, 0, 50, 30));
+    panelChild2->setVisible(true);
+    panelChild2->setAcceptsFocus(true);
+    panel->addChild(panelChild2);
+
+    root->setFocusedSubView(panelChild1);
+
+    root->keyEvent(newui::keKeyDown, newui::kmShift, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), panelChild2);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusScope, TabFromOutsideLandsOnTheScopeContainerThenEntersItOnTheNextPress) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* outerButton = new newui::SubView();
+    outerButton->setBounds(newui::Rect(0, 0, 50, 30));
+    outerButton->setVisible(true);
+    outerButton->setAcceptsFocus(true);
+    root->addChild(outerButton);
+
+    // A focus scope that also opts into acceptsFocus() itself - the
+    // "door" a Tab from outside can actually land on (see moveFocus()'s
+    // own doc comment, uiinputmanager.h, on why a non-focusable scope
+    // can't work as one).
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 40, 200, 100));
+    panel->setVisible(true);
+    panel->setAcceptsFocus(true);
+    panel->setFocusScope(true);
+    root->addChild(panel);
+
+    auto* panelChild = new newui::SubView();
+    panelChild->setBounds(newui::Rect(0, 0, 50, 30));
+    panelChild->setVisible(true);
+    panelChild->setAcceptsFocus(true);
+    panel->addChild(panelChild);
+
+    root->setFocusedSubView(outerButton);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), panel)
+        << "the scope container itself is one opaque stop from outside, not its children directly";
+
+    // Now that the panel itself is focused, findActiveScope() resolves to
+    // the panel (it's isFocusScope() and it's now `current`), so this next
+    // Tab enters it instead of moving to whatever's after it at the outer
+    // level.
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), panelChild);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusScope, ANonFocusableScopeIsSkippedFromOutsideRatherThanFreezingTab) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* outerButton = new newui::SubView();
+    outerButton->setBounds(newui::Rect(0, 0, 50, 30));
+    outerButton->setVisible(true);
+    outerButton->setAcceptsFocus(true);
+    root->addChild(outerButton);
+
+    // isFocusScope() but never opted into acceptsFocus() - can never
+    // itself receive focus, so it must not appear as a dead Tab stop that
+    // leaves focus stuck once reached.
+    auto* panel = new newui::SubView();
+    panel->setBounds(newui::Rect(0, 40, 200, 100));
+    panel->setVisible(true);
+    panel->setFocusScope(true);
+    root->addChild(panel);
+
+    auto* panelChild = new newui::SubView();
+    panelChild->setBounds(newui::Rect(0, 0, 50, 30));
+    panelChild->setVisible(true);
+    panelChild->setAcceptsFocus(true);
+    panel->addChild(panelChild);
+
+    auto* afterPanel = new newui::SubView();
+    afterPanel->setBounds(newui::Rect(0, 150, 50, 30));
+    afterPanel->setVisible(true);
+    afterPanel->setAcceptsFocus(true);
+    root->addChild(afterPanel);
+
+    root->setFocusedSubView(outerButton);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), afterPanel)
+        << "a non-focusable scope's own children stay unreachable from outside via Tab, "
+           "but the scope itself must not be a dead stop that freezes on";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusScope, NestedFocusScopeIsASingleStopInsideItsParentScope) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* outerScope = new newui::SubView();
+    outerScope->setBounds(newui::Rect(0, 0, 200, 200));
+    outerScope->setVisible(true);
+    outerScope->setAcceptsFocus(true);
+    outerScope->setFocusScope(true);
+    root->addChild(outerScope);
+
+    auto* outerChild = new newui::SubView();
+    outerChild->setBounds(newui::Rect(0, 0, 50, 30));
+    outerChild->setVisible(true);
+    outerChild->setAcceptsFocus(true);
+    outerScope->addChild(outerChild);
+
+    auto* innerScope = new newui::SubView();
+    innerScope->setBounds(newui::Rect(60, 0, 100, 100));
+    innerScope->setVisible(true);
+    innerScope->setAcceptsFocus(true);
+    innerScope->setFocusScope(true);
+    outerScope->addChild(innerScope);
+
+    auto* innerChild = new newui::SubView();
+    innerChild->setBounds(newui::Rect(0, 0, 50, 30));
+    innerChild->setVisible(true);
+    innerChild->setAcceptsFocus(true);
+    innerScope->addChild(innerChild);
+
+    root->setFocusedSubView(outerChild);
+
+    // Cycling the outer scope reaches innerScope as one stop - innerChild
+    // is never mixed into this outer cycle.
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), innerScope);
+
+    // Now inside innerScope (it's isFocusScope() and it's `current`) -
+    // this Tab enters it instead of returning to outerChild.
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+    EXPECT_EQ(root->focusedSubView(), innerChild);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewFocusScope, WantsTabKeyPreventsTabInterceptionEntirely) {
+    ResetKeyEvents();
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* editor = new newui::SubView();
+    editor->setBounds(newui::Rect(0, 0, 50, 30));
+    editor->setVisible(true);
+    editor->setAcceptsFocus(true);
+    editor->setWantsTabKey(true);
+    editor->onKeyDown += RecordKeyDown;
+    root->addChild(editor);
+
+    auto* other = new newui::SubView();
+    other->setBounds(newui::Rect(60, 0, 50, 30));
+    other->setVisible(true);
+    other->setAcceptsFocus(true);
+    root->addChild(other);
+
+    root->setFocusedSubView(editor);
+
+    root->keyEvent(newui::keKeyDown, 0, '\t', 1, newui::vkTab);
+
+    // Never intercepted for navigation - falls through to ordinary
+    // dispatch instead, unlike TabIsNotForwardedAsAnOrdinaryKeyEvent above.
+    EXPECT_EQ(root->focusedSubView(), editor);
+    EXPECT_EQ(g_keyDownEvent.count, 1);
+    EXPECT_EQ(g_keyDownEvent.sender, editor);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
 // A design-time SubView (isDesignTime(), e.g. content loaded into a
 // Designer's RootViewProxy) never receives a real mouse/keyboard event and
 // never takes keyboard focus - every dispatch site (onMouseDown/onMouseMove/

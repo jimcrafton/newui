@@ -988,7 +988,14 @@ namespace newui {
 		// via handleMessage()'s TranslateMessage() call same as any other
 		// character) and keKeyUp for the same physical keypress are just
 		// as deliberately ignored here, not merely unhandled.
-		if (VKeyCode == vkTab) {
+		//
+		// Unless the currently focused View opts out via wantsTabKey()
+		// (view.h) - e.g. a future code editor that wants a literal tab
+		// character instead of a focus change - in which case Tab isn't
+		// intercepted at all here; it falls straight through to the
+		// ordinary dispatch below, same as any other key.
+		bool focusedViewWantsTabKey = focusedSubView_ != nullptr && focusedSubView_->wantsTabKey();
+		if (VKeyCode == vkTab && !focusedViewWantsTabKey) {
 			if (eventType == keKeyDown) {
 				UIInputManager::instance().moveFocus(*this,
 					(keyMask & kmShift) != 0 ? FocusNavigationDirection::Previous : FocusNavigationDirection::Next);

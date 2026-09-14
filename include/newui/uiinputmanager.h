@@ -56,14 +56,30 @@ namespace newui {
         // Moves root's focusedSubView() to the next (direction Next) or
         // previous (direction Previous) focusable SubView in reading
         // order - top-to-bottom, then left-to-right within a 5px-
-        // tolerance row (see gatherFocusable()/the sort in
-        // uiinputmanager.cpp) - across root's entire tree. Wraps around
-        // at either end; a no-op if root has no focusable SubView at all.
-        // If root's own focusedSubView() isn't itself a focusable
+        // tolerance row (see the sort in uiinputmanager.cpp). Wraps around
+        // at either end; a no-op if there's no focusable SubView to move
+        // to. If root's own focusedSubView() isn't itself a focusable
         // candidate right now (nothing focused yet, or a focus veto has
         // otherwise left something odd in place), starts from the first
         // (direction Next) or last (direction Previous) candidate rather
         // than treating that as an error.
+        //
+        // Scoped, not always root's whole tree: walks up from
+        // focusedSubView() looking for the nearest ancestor with
+        // isFocusScope() true (View::, view.h) and, if one exists, cycles
+        // only among candidates inside *that* subtree - the "Scoped
+        // Geometric Hierarchy" a properties panel/inspector/timeline needs
+        // so Tab can't leak out of it into unrelated parts of the same
+        // window. A nested scope found while gathering candidates becomes
+        // a single opaque stop in its parent scope's own cycle (its own
+        // descendants aren't mixed in) rather than being recursed into -
+        // but only if it can itself become focused (canBecomeFocused()):
+        // an isFocusScope() View that never opted into acceptsFocus() too
+        // has no way to actually receive that stop's focus (setFocusedSubView()
+        // just no-ops against a non-focusable target), so treating it as a
+        // reachable stop would make Tab appear to do nothing - its
+        // descendants stay reachable by a mouse click instead, same as
+        // any other unscoped container.
         void moveFocus(RootView& root, FocusNavigationDirection direction) const;
 
     private:

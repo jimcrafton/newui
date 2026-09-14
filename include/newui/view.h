@@ -492,6 +492,57 @@ namespace newui {
             acceptsFocus_ = value;
         }
 
+        // Traps Tab/Shift+Tab cycling to this View's own subtree - the
+        // "Scoped Geometric Hierarchy" "UIInputManager possible
+        // implementation notes.docx" describes for complex/creative apps
+        // (a properties panel, an inspector, a timeline): pressing Tab
+        // while focus is anywhere inside a View with isFocusScope() true
+        // only ever cycles among *its own* focusable descendants
+        // (UIInputManager::moveFocus(), uiinputmanager.h) - it can never
+        // leak out into unrelated parts of the same window the way plain
+        // geometric ordering otherwise would. Scopes nest: a focus scope
+        // inside another one becomes a single Tab stop from its parent
+        // scope's own cycle (its descendants only become reachable once
+        // something inside it is actually focused - typically by a mouse
+        // click - not by Tabbing "into" it from outside; see moveFocus()'s
+        // own comment for why entering a non-focusable scope purely via
+        // Tab isn't supported). False by default - most Views (and every
+        // plain SubView) aren't scope boundaries at all, same "opt-in,
+        // costs nothing until used" reasoning acceptsFocus() above has.
+        //
+        // Distinct from RootView's own already-existing modal isolation
+        // (a Dialog/PopupFrame is a genuinely separate HWND/RootView, so
+        // Tab already can't cross that boundary regardless of this flag) -
+        // this is for scoping *within* a single RootView's own tree, which
+        // nothing here handled before.
+        bool isFocusScope() const {
+            return isFocusScope_;
+        }
+
+        void setFocusScope(bool value) {
+            isFocusScope_ = value;
+        }
+
+        // Lets this View's own onKeyDown/onKeyPress see a real Tab
+        // keystroke instead of UIInputManager::moveFocus() swallowing it
+        // for navigation (RootView::keyEvent(), rootview.cpp checks this
+        // on whichever View currently has focus before intercepting Tab
+        // at all) - for a future multi-line code/text editor that wants to
+        // insert a literal tab character rather than move focus, the same
+        // "WantsTabKey" escape hatch the docx's own IView sketch has.
+        // False by default, and nothing in this codebase currently sets it
+        // true - TextController (controls.h) has no literal-tab-insertion
+        // path to opt into yet (confirmed: no `case vkTab` anywhere in its
+        // handleKeyDown()), so this is a pure extension point today, not
+        // dead code serving an existing caller.
+        bool wantsTabKey() const {
+            return wantsTabKey_;
+        }
+
+        void setWantsTabKey(bool value) {
+            wantsTabKey_ = value;
+        }
+
         // Asked by RootView::setFocusedSubView() (rootview.h) before
         // taking focus away from this View / handing it to this View,
         // respectively - default true (no veto) so existing overrides
@@ -613,6 +664,11 @@ namespace newui {
 
         // Backs acceptsFocus()/setAcceptsFocus() above.
         bool acceptsFocus_ = false;
+
+        // Backs isFocusScope()/setFocusScope() and wantsTabKey()/
+        // setWantsTabKey() above.
+        bool isFocusScope_ = false;
+        bool wantsTabKey_ = false;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for
