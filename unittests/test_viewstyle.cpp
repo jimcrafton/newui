@@ -1,7 +1,9 @@
 #include "newui/viewstyle.h"
+#include "newui/rootview.h"
 #include "newui/subview.h"
 
 #include <gtest/gtest.h>
+#include <memory>
 
 namespace {
 
@@ -1056,38 +1058,93 @@ TEST(ThemedEditStyle, StateIdPrecedence) {
 }
 
 // ---------------------------------------------------------------------------
-// paintFocusRing() - View::paintStyle() (view.cpp) calls this after paint()
-// itself, but only when the owning View isFocused(); these cases only cover
-// "doesn't crash / doesn't draw" since (same as every paint() test above)
-// nothing here inspects actual pixels.
+// postPaint() - View::postPaintStyle() (view.cpp) calls this in its own
+// unclipped scope (phase 3 of View::paintChildren()'s 3-phase paint split -
+// see ViewStyle::prePaint()/paint()/postPaint()'s own doc comments,
+// viewstyle.h), unconditionally, every paint pass. The default
+// implementation's own isFocused() gate (moved here from the caller when
+// postPaint() replaced the old, focus-ring-only-named paintFocusRing()) is
+// real logic worth covering directly - these attach a real View to a real
+// RootView specifically to exercise both sides of it, not just call the
+// unattached style in isolation the way every other paint() test in this
+// file does. Still only "doesn't crash / doesn't draw" - nothing here
+// inspects actual pixels, same as every paint() test above.
 // ---------------------------------------------------------------------------
 
-TEST(ViewStyleFocusRing, DefaultDrawsWithoutCrashing) {
-    newui::ViewStyle style;
+namespace {
+
+// A minimal real View+RootView pair, focused or not per focusIt - postPaint()'s
+// own isFocused() gate needs a real attached View to mean anything at all
+// (view() is nullptr for a bare stack-local ViewStyle, which the gate
+// already short-circuits on before ever reaching isFocused()).
+struct FocusRingFixture {
+    newui::RootView* root;
+    newui::SubView* child;
+    newui::ViewStyle* style;
+
+    explicit FocusRingFixture(bool focusIt) {
+        root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
+        child = new newui::SubView();
+        child->setBounds(newui::Rect(0, 0, 64, 64));
+        child->setVisible(true);
+        child->setAcceptsFocus(true);
+        auto ownedStyle = std::make_unique<newui::ViewStyle>();
+        style = ownedStyle.get();
+        child->setStyle(std::move(ownedStyle));
+        root->addChild(child);
+        if (focusIt) {
+            root->setFocusedSubView(child);
+        }
+    }
+
+    ~FocusRingFixture() {
+        root->destroy();
+        delete root;
+    }
+};
+
+}  // namespace
+
+TEST(ViewStyleFocusRing, NoOpWhenStyleIsNotAttachedToAView) {
+    newui::ViewStyle style;  // never setStyle()'d onto a real View - view() is nullptr
 
     newui::Rect clientBounds(0, 0, 64, 64);
-    style.paintFocusRing(SharedContext(), newui::Size(64, 64), clientBounds);
+    style.postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
 }
 
-TEST(ViewStyleFocusRing, DefaultToleratesAZeroSizeClientBounds) {
-    newui::ViewStyle style;
+TEST(ViewStyleFocusRing, NoOpWhenAttachedButNotFocused) {
+    FocusRingFixture fixture(/*focusIt=*/false);
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    fixture.style->postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+}
+
+TEST(ViewStyleFocusRing, DrawsWithoutCrashingWhenFocused) {
+    FocusRingFixture fixture(/*focusIt=*/true);
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    fixture.style->postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+}
+
+TEST(ViewStyleFocusRing, ToleratesAZeroSizeClientBoundsWhenFocused) {
+    FocusRingFixture fixture(/*focusIt=*/true);
 
     newui::Rect clientBounds;  // width/height both 0
-    style.paintFocusRing(SharedContext(), newui::Size(0, 0), clientBounds);
+    fixture.style->postPaint(SharedContext(), newui::Size(0, 0), false, clientBounds);
 }
 
-TEST(ThemedEditStyle, PaintFocusRingUsesTheGenericDefault) {
-    // Deliberately does NOT override paintFocusRing() - see the class's
-    // own comment (viewstyle.h) for why an earlier version did (relying
-    // on ETS_FOCUSED's own native border instead) and was confirmed live
-    // to be wrong (that border renders identically to unfocused on at
-    // least one real Windows theme). Nothing to assert beyond "doesn't
-    // crash", same as every other paint() case in this file - the actual
-    // visual is what ViewStyleFocusRing's own tests above already cover.
+TEST(ThemedEditStyle, PostPaintUsesTheGenericDefault) {
+    // Deliberately does NOT override postPaint() - see the class's own
+    // comment (viewstyle.h) for why an earlier version did (relying on
+    // ETS_FOCUSED's own native border instead) and was confirmed live to
+    // be wrong (that border renders identically to unfocused on at least
+    // one real Windows theme). Nothing to assert beyond "doesn't crash",
+    // same as every other paint() case in this file - the actual visual
+    // is what ViewStyleFocusRing's own tests above already cover.
     newui::ThemedEditStyle style;
 
     newui::Rect clientBounds(0, 0, 120, 24);
-    style.paintFocusRing(SharedContext(), newui::Size(120, 24), clientBounds);
+    style.postPaint(SharedContext(), newui::Size(120, 24), false, clientBounds);
 }
 
 // ---------------------------------------------------------------------------

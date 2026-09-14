@@ -320,9 +320,10 @@ TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
 
 // ---------------------------------------------------------------------------
 // isFocused() - computed live from rootView()->focusedSubView() (view.cpp),
-// not a stored flag. Used by paintStyle() to decide whether to draw
-// ViewStyle::paintFocusRing() - see RootViewFocusPolicy in test_rootview.cpp
-// for the fuller Tab/click-driven focus routing this reads from.
+// not a stored flag. Used by ViewStyle::postPaint()'s own default
+// implementation (viewstyle.h/.cpp) to decide whether to draw the focus
+// ring - see RootViewFocusPolicy in test_rootview.cpp for the fuller
+// Tab/click-driven focus routing this reads from.
 // ---------------------------------------------------------------------------
 
 TEST(ViewIsFocused, FalseWithNoRootView) {

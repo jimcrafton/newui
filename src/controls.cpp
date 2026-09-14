@@ -134,8 +134,7 @@ namespace newui {
         setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         // UIColorManager::colorFor(), not Color::fromSystemColor() - the
@@ -183,13 +182,23 @@ namespace newui {
     }
 
     void Button::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedButtonStyle* - see this
+        // class's own doc comment (controls.h) for why: style() can be
+        // swapped out from under a Button (setStyle() is public on View),
+        // and a cached typed pointer would either dangle (if the old
+        // style was destroyed) or silently alias the wrong layout (if
+        // the new one isn't actually a ThemedButtonStyle). Deriving it
+        // live here costs one runtime check per call, in exchange for
+        // failing loud (std::bad_cast) instead of either.
+        auto& buttonStyle = dynamic_cast<ThemedButtonStyle&>(style());
+
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
         bool wantEnabled = isEnabled();
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->enabled == wantEnabled) {
+        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
-        buttonStyle_->enabled = wantEnabled;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
     }
 
@@ -227,13 +236,22 @@ namespace newui {
             return;
         }
 
-        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
-        // cpp_codetools, which already rejects an edit that wouldn't resolve - see its own
-        // fontResolves() comment) - but a font set some other way (loading a saved document on a
-        // machine missing that face, say) can still fail to resolve here. A real, live-reported
-        // crash when this used to throw: skipping the text draw is the graceful degradation; the
-        // rest of this Button (its native chrome) still paints normally either way.
-        BLFont* blFont = buttonStyle_->font().blFont();
+        // style().font() - font()/compositingOp()/opacity() below are all
+        // declared on ViewStyle itself (viewstyle.h), not ThemedButtonStyle
+        // specifically, so no cast is needed to reach them - only
+        // updatePressedVisual()'s own .pressed/.enabled (real
+        // ThemedButtonStyle-only fields) needs dynamic_cast<ThemedButtonStyle&>.
+        //
+        // This is a real, Properties-panel-editable property
+        // (FontPropertyEditor, cpp_codetools, which already rejects an
+        // edit that wouldn't resolve - see its own fontResolves()
+        // comment) - but a font set some other way (loading a saved
+        // document on a machine missing that face, say) can still fail
+        // to resolve here. A real, live-reported crash when this used to
+        // throw: skipping the text draw is the graceful degradation; the
+        // rest of this Button (its native chrome) still paints normally
+        // either way.
+        BLFont* blFont = style().font().blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
             return;
         }
@@ -266,9 +284,9 @@ namespace newui {
             : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
         ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
+        ctx.set_comp_op( toBLCompOp( style().compositingOp()));
         ctx.set_fill_style(effectiveTextColor);
-        ctx.set_fill_alpha(buttonStyle_->opacity());
+        ctx.set_fill_alpha(style().opacity());
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
         ctx.restore();
     }
@@ -308,28 +326,31 @@ namespace newui {
 
     void Toggle::rebuildStyle() {
         if (radioStyle_) {
-            auto radioButtonStyle = std::make_unique<ThemedRadioButtonStyle>();
-            radioButtonStyle_ = radioButtonStyle.get();
-            checkBoxStyle_ = nullptr;
-            setStyle(std::move(radioButtonStyle));
+            setStyle(std::make_unique<ThemedRadioButtonStyle>());
         } else {
-            auto checkBoxStyle = std::make_unique<ThemedCheckBoxStyle>();
-            checkBoxStyle_ = checkBoxStyle.get();
-            radioButtonStyle_ = nullptr;
-            setStyle(std::move(checkBoxStyle));
+            setStyle(std::make_unique<ThemedCheckBoxStyle>());
         }
         updateStyleFields();
     }
 
     void Toggle::updateStyleFields() {
-        if (radioButtonStyle_ != nullptr) {
-            radioButtonStyle_->checked = checked_;
-            radioButtonStyle_->pressed = pressing_;
-            radioButtonStyle_->enabled = isEnabled();
+        // dynamic_cast, not a cached ThemedCheckBoxStyle*/
+        // ThemedRadioButtonStyle* - see Button::updatePressedVisual()'s
+        // own comment (above) for why. The pointer-form cast (not a
+        // throwing reference-form one) is what actually distinguishes
+        // which of the two style() legitimately is right now, not just a
+        // defensive habit - rebuildStyle() just set it to one or the
+        // other above.
+        if (auto* radio = dynamic_cast<ThemedRadioButtonStyle*>(&style())) {
+            radio->checked = checked_;
+            radio->pressed = pressing_;
+            radio->enabled = isEnabled();
+        } else if (auto* check = dynamic_cast<ThemedCheckBoxStyle*>(&style())) {
+            check->checked = checked_;
+            check->pressed = pressing_;
+            check->enabled = isEnabled();
         } else {
-            checkBoxStyle_->checked = checked_;
-            checkBoxStyle_->pressed = pressing_;
-            checkBoxStyle_->enabled = isEnabled();
+            throw std::runtime_error("Toggle::updateStyleFields: style() is neither ThemedRadioButtonStyle nor ThemedCheckBoxStyle");
         }
         style().markDirty();
     }
@@ -1831,8 +1852,7 @@ namespace newui {
         setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
@@ -1874,16 +1894,20 @@ namespace newui {
     }
 
     void ToolbarButton::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedToolbarButtonStyle* - see
+        // Button::updatePressedVisual()'s own comment (above) for why.
+        auto& buttonStyle = dynamic_cast<ThemedToolbarButtonStyle&>(style());
+
         bool wantPressed = pressing_;
         bool wantChecked = isToggleButton_ && checked_;
         bool wantEnabled = isEnabled();
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked
-                && buttonStyle_->enabled == wantEnabled) {
+        if (buttonStyle.pressed == wantPressed && buttonStyle.checked == wantChecked
+                && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
-        buttonStyle_->checked = wantChecked;
-        buttonStyle_->enabled = wantEnabled;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.checked = wantChecked;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
     }
 
@@ -1932,9 +1956,11 @@ namespace newui {
         double textWidth = 0.0;
         double textHeight = 0.0;
         if (hasText) {
-            blFont = buttonStyle_->font().blFont();
+            // style().font() - no cast needed, font() is declared on
+            // ViewStyle itself (see Button::paint()'s own comment).
+            blFont = style().font().blFont();
         }
-        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
+        // style().font() is a real, Properties-panel-editable property (FontPropertyEditor,
         // cpp_codetools) - see Button::paint()'s own comment on why an unresolved font must
         // degrade gracefully (skip drawing the text) instead of throwing/crashing here too.
         if (hasText && (blFont == nullptr || !blFont->is_valid())) {
@@ -1962,8 +1988,8 @@ namespace newui {
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
 
         // A flat toolbar button shows no visible border/fill at rest either
-        // way (buttonStyle_->enabled only changes the native TS_DISABLED/
-        // TS_NORMAL background chrome, invisible here) - dimming this
+        // way (the style's own enabled field only changes the native
+        // TS_DISABLED/TS_NORMAL background chrome, invisible here) - dimming this
         // foreground content is the only real visual signal a disabled
         // ToolbarButton has, same UIColorRole::DisabledText convention
         // Label::handleStateChanged() already uses for its own text.
@@ -1985,9 +2011,9 @@ namespace newui {
                 : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
             ctx.save();
-            ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
+            ctx.set_comp_op( toBLCompOp( style().compositingOp()));
             ctx.set_fill_style(effectiveTextColor);
-            ctx.set_fill_alpha(buttonStyle_->opacity());
+            ctx.set_fill_alpha(style().opacity());
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
             ctx.restore();
         }

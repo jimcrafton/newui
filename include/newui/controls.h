@@ -193,7 +193,6 @@ namespace newui {
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A checkable Control drawn as a native checkbox (BUTTON/BP_CHECKBOX)
@@ -244,8 +243,12 @@ namespace newui {
         // pressing_/isEnabled() over into it - called once from the
         // constructor and again on every setRadioStyle() change.
         void rebuildStyle();
-        // Pushes checked_/pressing_/isEnabled() into whichever of
-        // checkBoxStyle_/radioButtonStyle_ is currently installed.
+        // Pushes checked_/pressing_/isEnabled() into style() - a
+        // dynamic_cast<ThemedRadioButtonStyle*>/<ThemedCheckBoxStyle*> to
+        // whichever one it actually currently is, not a cached typed
+        // pointer (same "style() can be swapped out from under this
+        // Control" reasoning Button::updatePressedVisual()'s own comment,
+        // controls.cpp, gives).
         void updateStyleFields();
 
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -256,10 +259,6 @@ namespace newui {
         bool radioStyle_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        // Only one of these two is ever non-null at a time - whichever
-        // matches the currently-installed style() (see rebuildStyle()).
-        ThemedCheckBoxStyle* checkBoxStyle_ = nullptr;
-        ThemedRadioButtonStyle* radioButtonStyle_ = nullptr;
     };
 
     // A text-only Control - own style() is a LabelStyle (which already
@@ -1171,7 +1170,6 @@ namespace newui {
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedToolbarButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A toolbar separator (TOOLBAR/TP_SEPARATOR or TP_SEPARATORVERT, via

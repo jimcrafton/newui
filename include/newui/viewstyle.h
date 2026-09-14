@@ -310,11 +310,29 @@ namespace newui {
         // whatever they add; see ButtonStyle/CheckBoxStyle.
         virtual Rect computeClientBounds(const Size& size) const;
 
-        // Paints this style into ctx, which is already translated/clipped
-        // to (0,0)-(size.width,size.height) for the view being styled;
-        // highlighted mirrors the view's isHighlighted() at paint time.
-        // Base implementation: background (backgroundFill, or
-        // highlightFill when highlighted and set) then border.
+        // Phase 1 of 3 - draws an effect that needs to extend *outside*
+        // this View's own bounds (a drop shadow, a glow, ...), before
+        // paint() below even runs. Called by View::prePaintStyle()
+        // (view.h), with ctx translated to this View's own origin but
+        // deliberately *not* clipped to its bounds the way paint() is -
+        // View::paintChildren() (view.cpp) opens a separate, unclipped
+        // save()/restore() scope around this call specifically so an
+        // override has real room to paint beyond (0,0)-(size.width,
+        // size.height) without anything cutting it off.
+        //
+        // Base implementation: no-op - nothing in this codebase needs a
+        // pre-paint effect yet (YAGNI), this is purely the hook a future
+        // one would override. See postPaint() below for the same shape
+        // on the other side of paint(), which does have a real user
+        // already (the focus ring).
+        virtual void prePaint(BLContext& /*ctx*/, const Size& /*size*/, bool /*highlighted*/) const {}
+
+        // Phase 2 of 3 - paints this style into ctx, which is already
+        // translated/clipped to (0,0)-(size.width,size.height) for the
+        // view being styled; highlighted mirrors the view's
+        // isHighlighted() at paint time. Base implementation: background
+        // (backgroundFill, or highlightFill when highlighted and set)
+        // then border.
         //
         // clientBounds is an out parameter, set to computeClientBounds(size)
         // above - since that call is unqualified, it dispatches virtually
@@ -326,28 +344,38 @@ namespace newui {
         // this and don't need to touch clientBounds again themselves.
         virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const;
 
-        // Draws the keyboard-focus indicator - called by View::paintStyle()
-        // (view.h) right after paint() above, but only when the owning
-        // View is the RootView's current focusedSubView() (View::
-        // isFocused()); ctx/clientBounds are exactly what that same paint()
-        // call already produced, so most overrides never need to touch
-        // this at all. Deliberately a separate call, not folded into
-        // paint()'s own highlighted-keyed signature - unlike highlighted
-        // (a real uxtheme part/state, PBS_HOT etc.), "focused" has no
-        // theme-part equivalent for most controls (real Windows draws
-        // keyboard focus as a dotted rect layered *over* a control's own
-        // chrome, not as a different theme state of it), so threading it
-        // through every ThemedViewStyle subclass's stateId() would be both
-        // a much larger change and the wrong shape for what it's modeling.
+        // Phase 3 of 3 - draws an effect that, like prePaint() above,
+        // needs to extend outside this View's own bounds - called by
+        // View::postPaintStyle() (view.h) in its own separate unclipped
+        // scope, same shape as prePaint() but on the other side of
+        // paint(). clientBounds is computeClientBounds(size) recomputed
+        // fresh (paint()'s own out-parameter copy doesn't survive past
+        // the clipped scope it was produced in), not necessarily the
+        // exact same BLContext state paint() left behind.
         //
-        // Base implementation: a solid rounded-rect outline inset from
-        // clientBounds in UIColorRole::HighlightBackground
-        // (uicolormanager.h - the user's accent color, same role
-        // selection highlights already use). Solid, not the classic
-        // dashed DrawFocusRect() look, on purpose - see this method's own
-        // definition (viewstyle.cpp) for why (this vendored Blend2D
-        // build's path stroker doesn't actually implement dashing at
-        // all, confirmed live).
+        // Called unconditionally, every paint pass - unlike this
+        // method's predecessor (paintFocusRing(), gated by the *caller*
+        // on View::isFocused() before ever calling in) this is called
+        // regardless of focus state, so an override stays free to draw
+        // something else here too (a hover glow, say) without fighting a
+        // caller-side gate that assumed "post-paint == focus ring only".
+        // The default implementation below does its own view()->
+        // isFocused() check internally instead, for exactly that reason.
+        //
+        // Base implementation: when the owning View is focused, a solid
+        // rounded-rect outline inset from clientBounds in
+        // UIColorRole::HighlightBackground (uicolormanager.h - the
+        // user's accent color, same role selection highlights already
+        // use). Solid, not the classic dashed DrawFocusRect() look, on
+        // purpose - see this method's own definition (viewstyle.cpp) for
+        // why (this vendored Blend2D build's path stroker doesn't
+        // actually implement dashing at all, confirmed live). Inset, not
+        // Fluent's own real outward-offset convention - tried outward
+        // and confirmed live to render invisibly: View::paintChildren()
+        // clips every child strictly to its own bounds (zero margin)
+        // during phase 2, but that constraint is exactly what this
+        // 3-phase split (and this method's own unclipped calling scope)
+        // now removes - an outward ring is worth retrying here.
         //
         // Override to suppress or customize where the default would look
         // wrong for a specific style. ThemedEditStyle (below) was tried as
@@ -357,7 +385,7 @@ namespace newui {
         // real Windows theme, so it now keeps this default instead. Treat
         // that as a cautionary precedent, not a template, before adding
         // another override here.
-        virtual void paintFocusRing(BLContext& ctx, const Size& size, const Rect& clientBounds) const;
+        virtual void postPaint(BLContext& ctx, const Size& size, bool highlighted, const Rect& clientBounds) const;
 
         // Non-owning upward back-reference to the owning View (View owns
         // *this via its own std::unique_ptr<ViewStyle> style_) - reachable
@@ -765,6 +793,49 @@ namespace newui {
             if (highlighted) return PBS_HOT;
             return PBS_NORMAL;
         }
+    };
+
+    // Experimental: a Fluent-style rounded-corner Button chrome, custom-
+    // drawn with Blend2D instead of ThemedButtonStyle's native
+    // DrawThemeBackground(BP_PUSHBUTTON) - confirmed live that the native
+    // path still renders the classic square-cornered look even on
+    // Windows 11 (DrawThemeBackground has no rounded-corner Win11 visual
+    // data to draw; that's a WinUI3/XAML-only rendering, not something
+    // classic UxTheme exposes to a raw Win32 app), so matching Fluent's
+    // own 4px corner-radius convention for in-page controls (see
+    // learn.microsoft.com/windows/apps/design/signature-experiences/
+    // geometry) means not using DrawThemeBackground for this one at all.
+    //
+    // Deliberately a *subclass* of ThemedButtonStyle, not a ViewStyle
+    // sibling - Button (controls.h) holds `buttonStyle_` as a concrete
+    // `ThemedButtonStyle*` and reads `.pressed`/`.enabled`/`.font()`/
+    // `.compositingOp()`/`.opacity()` off it directly, all inherited
+    // unchanged here; only paint()/computeClientBounds() are overridden,
+    // to a genuinely different rendering path rather than routing back
+    // through ThemedViewStyle::paint()'s theme machinery at all - no
+    // uxtheme calls happen for this style, ever.
+    //
+    // Opt-in only, today - `Button::Button()` still defaults to
+    // `ThemedButtonStyle` (the native look); a caller previews this by
+    // `button->setStyle(std::make_unique<FluentButtonStyle>())` after
+    // construction. Not yet decided whether this becomes Button's new
+    // default - a deliberate visual-philosophy departure from this
+    // codebase's usual "look exactly like a native Win32 control"
+    // approach elsewhere, worth seeing live before committing to it
+    // more broadly.
+    class FluentButtonStyle : public ThemedButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            // ViewStyle::computeClientBounds(), not ThemedViewStyle's own
+            // override two levels up - that one queries
+            // GetThemeBackgroundContentRect(), meaningless here since
+            // paint() below never opens a theme at all. No native chrome
+            // to deflate for - the 1px border below is thin enough that
+            // text laid out at the full bounds still looks right.
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native checkbox (BUTTON/BP_CHECKBOX).

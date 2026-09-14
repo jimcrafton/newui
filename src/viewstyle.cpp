@@ -607,15 +607,42 @@ namespace newui {
 		ctx.restore();
 	}
 
-	void ViewStyle::paintFocusRing(BLContext& ctx, const Size& /*size*/, const Rect& clientBounds) const
+	void ViewStyle::postPaint(BLContext& ctx, const Size& /*size*/, bool /*highlighted*/, const Rect& clientBounds) const
 	{
-		// kInset keeps the ring inside clientBounds' own edge rather than
-		// sitting exactly on it - a plain style has no border chrome of
-		// its own to naturally separate the two, so without this the ring
-		// would visually merge with clientBounds' own boundary.
-		constexpr float kInset = 1.5f;
-		constexpr float kCornerRadius = 3.0f;
-		Rect ring = clientBounds.deflate(kInset);
+		// This is the default *effect*, not a mandatory part of what
+		// postPaint() itself means - only draw it while the owning View
+		// is actually focused. Checked here, not by the caller (View::
+		// postPaintStyle(), view.cpp) - postPaint() is called
+		// unconditionally every paint pass now (see this method's own
+		// doc comment, viewstyle.h), so a future override drawing some
+		// other unclipped effect stays free to run regardless of focus.
+		if (view() == nullptr || !view()->isFocused()) {
+			return;
+		}
+
+		// kOutset pushes the ring outside clientBounds' own edge rather
+		// than inset within it - matches real Windows 11/Fluent keyboard
+		// focus visuals (the "high-visibility" focus rectangle's
+		// FocusVisualMargin - see learn.microsoft.com/windows/apps/
+		// design/accessibility/keyboard-accessibility), which draw with
+		// a small *outward* gap from the control's own edge, closer to a
+		// CSS outline than an inset box-shadow. This only actually
+		// renders visibly because postPaint() itself now runs in its own
+		// unclipped scope (View::paintChildren()'s phase 3, view.cpp) -
+		// an earlier attempt at this same outset, before that 3-phase
+		// split existed, was invisible: paintStyle() (phase 2, still
+		// clipped) was the only place this used to run, and phase 2's
+		// clip is (deliberately, for cross-sibling-paint-corruption
+		// reasons - see its own comment) strictly the child's own
+		// bounds, zero margin. deflate() with a negative amount inflates
+		// instead (see its own doc comment) - there's no separate
+		// inflate() method, this is the established way to grow a Rect
+		// here. kCornerRadius matches Fluent's own 4px standard for
+		// in-page controls (learn.microsoft.com/windows/apps/design/
+		// signature-experiences/geometry).
+		constexpr float kOutset = 2.0f;
+		constexpr float kCornerRadius = 4.0f;
+		Rect ring = clientBounds.deflate(-kOutset);
 		if (ring.size().width <= 0.0f || ring.size().height <= 0.0f) {
 			return;
 		}
@@ -949,6 +976,50 @@ namespace newui {
 		}
 
 		::DeleteDC(targetDC);
+	}
+
+	void FluentButtonStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 4.0f;  // Fluent's own "in-page control" standard - see class comment (viewstyle.h)
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+		ctx.fill_path(path);
+
+		if (enabled) {
+			// Fluent's own "state layer" convention for hover/pressed
+			// feedback - a translucent overlay in the text color, not a
+			// hand-tuned per-mode brightness multiplier. WindowText is
+			// already dark/light-mode-correct (near-black in light mode,
+			// near-white in dark), so a low-alpha overlay of it darkens a
+			// light fill and lightens a dark one automatically, in
+			// whichever direction each mode actually needs - a fixed
+			// brightness multiplier can't do that (it would barely
+			// register against an already-near-black dark-mode fill).
+			float overlayAlpha = pressed ? 0.15f : (highlighted ? 0.08f : 0.0f);
+			if (overlayAlpha > 0.0f) {
+				Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+				ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+				ctx.fill_path(path);
+			}
+		}
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
 	}
 
 	void ThemedTrackbarTicksStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {

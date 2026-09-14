@@ -640,7 +640,7 @@ namespace newui {
 		// function returns - Control::canPerformCommand()/keyEvent()
 		// dispatch, TextController's own markDirty() calls, etc. all
 		// already worked correctly - but nothing ever asked for a
-		// repaint, so View::paintStyle()'s ViewStyle::paintFocusRing()
+		// repaint, so View::postPaintStyle()'s ViewStyle::postPaint()
 		// call (the generic dashed ring every non-ThemedEditStyle control
 		// relies on - Button, Toggle, Slider, a FocusScope panel, ...)
 		// never actually ran again until some *unrelated* later event

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <typeinfo>
 #include <vector>
 
 // ScrollBar/ScrollView's pure logic (range/value/pageSize clamping,
@@ -707,6 +708,88 @@ TEST(Button, PaintWithAnUnresolvedFontDoesNotThrowAndSkipsDrawingText) {
 }
 
 // ---------------------------------------------------------------------
+// Button/ToolbarButton no longer cache a typed ThemedButtonStyle*/
+// ThemedToolbarButtonStyle* member - each derives it live via
+// dynamic_cast<...&>(style()) on every use instead (Button::
+// updatePressedVisual()'s own comment, controls.cpp, has the full
+// reasoning). These prove the actual safety property that refactor
+// exists for: setStyle() (public on View) can be called on an already-
+// constructed Button at any time, and it must never dangle or silently
+// misbehave against the wrong layout - it must keep working (a
+// compatible ThemedButtonStyle subclass) or fail loud (std::bad_cast on
+// an incompatible one), never corrupt silently.
+// ---------------------------------------------------------------------
+
+TEST(Button, SwappingToADifferentThemedButtonStyleSubclassStaysSafe) {
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+    button->setText("Click Me");
+
+    button->setStyle(std::make_unique<FluentButtonStyle>());
+
+    // Both read style() live (dynamic_cast) - neither should dangle into
+    // the ThemedButtonStyle the constructor originally installed, now
+    // long destroyed.
+    EXPECT_NO_THROW(button->setEnabled(false));
+    EXPECT_NO_THROW(button->setEnabled(true));
+
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
+}
+
+TEST(Button, SwappingToAnIncompatibleViewStyleFailsLoudNotSilently) {
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+
+    // ButtonStyle (viewstyle.h) - a real ViewStyle, but not a
+    // ThemedButtonStyle at all, so it has no .pressed/.enabled fields.
+    // setStyle() itself (View::, view.h) accepts any ViewStyle
+    // subclass - nothing at compile time stops this.
+    button->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(button->setEnabled(false), std::bad_cast);
+
+    button->destroy();
+    delete button;
+}
+
+TEST(FluentButtonStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentButtonStyle style;
+    Size size(100.0f, 30.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 100.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 30.0f);
+}
+
+TEST(FluentButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool pressed : { true, false }) {
+            for (bool highlighted : { true, false }) {
+                FluentButtonStyle style;
+                style.enabled = enabled;
+                style.pressed = pressed;
+                Rect clientBounds;
+                EXPECT_NO_THROW(style.paint(ctx, Size(80.0f, 24.0f), highlighted, clientBounds));
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+// ---------------------------------------------------------------------
 // ToolbarButton - same momentary-vs-toggle click gesture as Button,
 // just checked via ThemedToolbarButtonStyle instead
 // ---------------------------------------------------------------------
@@ -1104,7 +1187,7 @@ TEST(TextField, SetControllerWithNullptrDoesNotCrashOrReplaceTheExistingOne) {
 // ---------------------------------------------------------------------------
 // Keeping ThemedEditStyle::focused (viewstyle.h) in sync with real
 // onGotFocus/onLostFocus - drives the real native ETS_FOCUSED border, and
-// (see ThemedEditStyle::paintFocusRing()) is why these controls suppress
+// (see ThemedEditStyle::postPaint()) is why these controls suppress
 // View's generic dashed focus ring rather than drawing both. Fired directly
 // on the delegate (field->onGotFocus(*field), not through a real RootView -
 // same "no live HWND/RunLoop needed" pattern

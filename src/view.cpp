@@ -219,6 +219,20 @@ namespace newui {
 			// applied here too until this crash surfaced it.
 			Rect bounds = child->bounds().snappedOutwardToPixels();
 
+			// Phase 1 (pre-paint) - translated but deliberately NOT
+			// clipped, its own separate save()/restore() scope so an
+			// effect that needs to extend outside bounds (a drop shadow,
+			// ...) has real room to do so - see ViewStyle::prePaint()'s
+			// own doc comment (viewstyle.h) for the full reasoning.
+			ctx.save();
+			ctx.translate(bounds.left(), bounds.top());
+			child->prePaintStyle(ctx);
+			ctx.restore();
+
+			// Phase 2 (regular paint) - translated AND clipped to this
+			// child's own bounds, unchanged from before this 3-phase
+			// split - the crash-prevention/cross-sibling-paint-corruption
+			// clip below stays exactly as strict as it's always been.
 			ctx.save();
 			ctx.translate(bounds.left(), bounds.top());
 			ctx.clip_to_rect(BLRect(0, 0, bounds.size().width, bounds.size().height));
@@ -227,6 +241,17 @@ namespace newui {
 			child->paint(ctx);
 			child->paintChildren(ctx);
 
+			ctx.restore();
+
+			// Phase 3 (post-paint) - same unclipped shape as phase 1, on
+			// the other side of the clipped phase 2 - see ViewStyle::
+			// postPaint()'s own doc comment (viewstyle.h). This is what
+			// makes the focus ring (postPaint()'s own default effect)
+			// actually able to extend past this child's own bounds
+			// instead of being clipped away by phase 2's clip above.
+			ctx.save();
+			ctx.translate(bounds.left(), bounds.top());
+			child->postPaintStyle(ctx);
 			ctx.restore();
 		}
 		ctx.restore();
@@ -268,13 +293,30 @@ namespace newui {
 		return rootView_ != nullptr && rootView_->focusedSubView() == dynamic_cast<const SubView*>(this);
 	}
 
+	void View::prePaintStyle(BLContext& ctx) {
+		if (style_) {
+			style_->prePaint(ctx, bounds_.size(), highlighted_);
+		}
+	}
+
 	void View::paintStyle(BLContext& ctx) {
 		if (style_) {
 			Rect clientBounds;
 			style_->paint(ctx, bounds_.size(), highlighted_, clientBounds);
-			if (isFocused()) {
-				style_->paintFocusRing(ctx, bounds_.size(), clientBounds);
-			}
+		}
+	}
+
+	void View::postPaintStyle(BLContext& ctx) {
+		if (style_) {
+			// Recomputed, not carried over from paintStyle()'s own
+			// clientBounds - that local went out of scope with the
+			// clipped ctx save/restore scope paintStyle() ran inside
+			// (see View::paintChildren(), view.cpp), and computeClientBounds()
+			// is cheap/pure (no BLContext needed) precisely so recomputing
+			// it here is the normal, expected way to get it back rather
+			// than something this needs to avoid.
+			Rect clientBounds = style_->computeClientBounds(bounds_.size());
+			style_->postPaint(ctx, bounds_.size(), highlighted_, clientBounds);
 		}
 	}
 

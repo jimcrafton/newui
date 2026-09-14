@@ -204,20 +204,35 @@ namespace newui {
         // state the way a cached bool toggled from onGotFocus/onLostFocus
         // could. Needs RootView's full definition, so this can't stay
         // inline here - same reasoning setName() above is out-of-line
-        // (view.cpp). Used by paintStyle() below to draw
-        // ViewStyle::paintFocusRing() only for the actually-focused View -
-        // not the same thing as Control::StateFlags::Focused (controls.h),
-        // which is a separate, currently-unused bit that can't cover this
-        // anyway (SegmentedControl/TabControl accept focus - view.h's
+        // (view.cpp). ViewStyle::postPaint()'s own default implementation
+        // (viewstyle.h) uses this (via its view() back-reference) to
+        // decide whether to draw the focus ring - not the same thing as
+        // Control::StateFlags::Focused (controls.h), which is a separate,
+        // currently-unused bit that can't cover this anyway
+        // (SegmentedControl/TabControl accept focus - view.h's
         // acceptsFocus() - without being a Control at all).
         bool isFocused() const;
 
-        // Draws background/border/highlight from style() - see ViewStyle.
-        // Called automatically before paint() by whatever's orchestrating
-        // the draw (paintChildren() for children, RootView::repaint() for
-        // itself), so it always runs first without subclasses needing to
-        // remember to call it.
+        // The three-phase style paint sequence - see ViewStyle::
+        // prePaint()/paint()/postPaint() (viewstyle.h) for what each
+        // phase is for. All three are called automatically by whatever's
+        // orchestrating the draw (paintChildren() for children,
+        // RootView::repaint() for itself - the latter only ever calls
+        // paintStyle() directly, since a RootView is never itself
+        // isFocused() and has never needed a pre-paint effect either),
+        // so subclasses never need to remember to call any of them.
+        //
+        // prePaintStyle()/postPaintStyle() are deliberately separate
+        // calls from paintStyle(), not folded into one method that calls
+        // all three ViewStyle phases back to back - paintChildren() needs
+        // to open and close a *different* ctx clip scope around each
+        // (unclipped for pre/post, clipped to this View's own bounds for
+        // the paintStyle()/paint()/paintChildren() run in between), so
+        // the phases have to be genuinely separate calls the caller can
+        // wrap independently.
+        void prePaintStyle(BLContext& ctx);
         void paintStyle(BLContext& ctx);
+        void postPaintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)
         // left over for content/children after style()'s chrome (border,
