@@ -1477,6 +1477,7 @@ namespace newui {
         // without this ScrollView ever finding out, so its bars stay stale until some unrelated
         // event (a resize) happens to call updateLayout() again.
         child->onContentSizeChanged.add(this, &ScrollView::handleContentChildContentSizeChanged);
+        child->onRequestScrollIntoView.add(this, &ScrollView::handleContentRequestScrollIntoView);
         // Picks up child's own contentSize() immediately (see
         // updateLayout()'s own comment) rather than leaving contentSize_
         // at whatever it was (typically the default Size(), showing no
@@ -1608,9 +1609,22 @@ namespace newui {
         // can newly make a horizontal bar necessary, and vice versa) -
         // check both against the full client first, then re-check each
         // against the space actually left after the other is reserved.
+        //
+        // The needH re-check is skipped for a virtualizedChild: its
+        // contentSize_.width was just pinned to the *full* client width
+        // above (see "Pin to the full client width first"), so it's
+        // self-referential - it always equals client.size().width
+        // exactly, never an independent "wants more width" signal. Left
+        // ungated, contentSize_.width > (client.size().width - vBarWidth)
+        // is trivially true any time needV is true at all, spuriously
+        // reserving a horizontal bar for every vertically-scrolling
+        // ListView/TreeView/TextControl regardless of actual content
+        // width. contentSizeOverridden_ isn't checked here since
+        // overriding it doesn't change whether a virtualizedChild's
+        // *natural* answer would have been self-referential.
         bool needV = contentSize_.height > client.size().height;
         bool needH = contentSize_.width > client.size().width;
-        if (needV && !needH && contentSize_.width > (client.size().width - vBarWidth)) {
+        if (needV && !needH && !virtualizedChild && contentSize_.width > (client.size().width - vBarWidth)) {
             needH = true;
         }
         if (needH && !needV && contentSize_.height > (client.size().height - hBarHeight)) {
@@ -1673,13 +1687,13 @@ namespace newui {
     }
 
     SyncReturn ScrollView::handleVBarValueChanged(ScrollBar& /*sender*/) {
-        if (SubView* child = virtualizedContentChild()) {
+        if (SubView* child = virtualizedContentChild()) {            
             child->onScrollOffsetChanged.syncCall(*child, Point(hBar_->isVisible() ? hBar_->value() : 0.0f, vBar_->value()));
             child->redraw();
             return SyncReturn::Handled;
         }
         Point origin = viewport_->origin();
-        origin.y = vBar_->value();
+        origin.y = vBar_->value();        
         viewport_->setOrigin(origin);
         viewport_->redraw();
         return SyncReturn::Handled;
@@ -1695,6 +1709,34 @@ namespace newui {
         origin.x = hBar_->value();
         viewport_->setOrigin(origin);
         viewport_->redraw();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleContentRequestScrollIntoView(View& /*sender*/, const Rect& requestedRect) {
+        // setValue() on each bar, not a direct viewport_->setOrigin()/
+        // onScrollOffsetChanged call - that's what handleVBarValueChanged()/
+        // handleHBarValueChanged() above already do correctly for both the
+        // virtualized and ordinary cases, the exact same path a real
+        // scrollbar drag goes through. Nothing here needs to know which
+        // case applies.
+        if (vBar_->isVisible()) {
+            float viewportHeight = viewport_->bounds().size().height;
+            float currentTop = vBar_->value();
+            if (requestedRect.top() < currentTop) {
+                vBar_->setValue(requestedRect.top());
+            } else if (requestedRect.bottom() > currentTop + viewportHeight) {
+                vBar_->setValue(requestedRect.bottom() - viewportHeight);
+            }
+        }
+        if (hBar_->isVisible()) {
+            float viewportWidth = viewport_->bounds().size().width;
+            float currentLeft = hBar_->value();
+            if (requestedRect.left() < currentLeft) {
+                hBar_->setValue(requestedRect.left());
+            } else if (requestedRect.right() > currentLeft + viewportWidth) {
+                hBar_->setValue(requestedRect.right() - viewportWidth);
+            }
+        }
         return SyncReturn::Handled;
     }
 
@@ -2731,6 +2773,32 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below (matching
+        // TextControl::paint()'s own ordering) - not after the row loop.
+        // A hosting ScrollView's handleContentRequestScrollIntoView()
+        // updates scrollOffsetY_ synchronously (setValue() ->
+        // onValueChanged -> handleVBarValueChanged() ->
+        // onScrollOffsetChanged.syncCall() -> handleScrollOffsetChanged()
+        // above), so firing this first lets the very same paint() pass
+        // already draw rows at the corrected offset. Firing it after (the
+        // original ordering) meant this frame's rows were drawn with the
+        // stale pre-adjustment offset, and the corrected scroll position
+        // only became visible on the *next* paint() - a real, confirmed
+        // one-frame display lag on every arrow-key/selection-driven
+        // scroll (e.g. End wouldn't visibly scroll until a second
+        // keypress).
+        std::optional<std::size_t> primaryForScroll = selectedIndex();
+        if (primaryForScroll.has_value()) {
+            Rect selectedRect(0.0f, controller_->itemOffset(*primaryForScroll), clientBounds.width(),
+                controller_->itemHeight(*primaryForScroll));
+            onRequestScrollIntoView(*this, selectedRect);
+        }
+        if (keyboardHighlightedIndex_.has_value()) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2791,18 +2859,6 @@ namespace newui {
         }
 
         ctx.restore();
-
-        std::optional<std::size_t> primary = selectedIndex();
-        if (primary.has_value()) {
-            Rect selectedRect(0.0f, controller_->itemOffset(*primary), clientBounds.width(),
-                controller_->itemHeight(*primary));
-            onRequestScrollIntoView(*this, selectedRect);
-        }
-        if (keyboardHighlightedIndex_.has_value()) {
-            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
-                controller_->itemHeight(*keyboardHighlightedIndex_));
-            onRequestScrollIntoView(*this, highlightedRect);
-        }
     }
 
     SyncReturn ListView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
@@ -2937,6 +2993,7 @@ namespace newui {
             setSelectedIndex(next);
             selectionAnchor_ = next;
             setKeyboardHighlightedIndex(std::nullopt);
+			this->redraw();
         }
         return SyncReturn::Handled;
     }
@@ -3133,6 +3190,24 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below - see the matching
+        // comment in ListView::paint() for why (same synchronous
+        // scrollOffsetY_ update chain, same one-frame-lag bug otherwise).
+        std::optional<std::vector<std::size_t>> primaryForScroll = selectedPath();
+        if (primaryForScroll.has_value()) {
+            std::optional<std::size_t> primaryIndexForScroll = controller_->visibleIndexOf(*primaryForScroll);
+            if (primaryIndexForScroll.has_value()) {
+                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndexForScroll), clientBounds.width(),
+                    controller_->itemHeight(*primaryIndexForScroll));
+                onRequestScrollIntoView(*this, selectedRect);
+            }
+        }
+        if (keyboardHighlightedIndex_.has_value()) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -3163,21 +3238,6 @@ namespace newui {
         }
 
         ctx.restore();
-
-        std::optional<std::vector<std::size_t>> primary = selectedPath();
-        if (primary.has_value()) {
-            std::optional<std::size_t> primaryIndex = controller_->visibleIndexOf(*primary);
-            if (primaryIndex.has_value()) {
-                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndex), clientBounds.width(),
-                    controller_->itemHeight(*primaryIndex));
-                onRequestScrollIntoView(*this, selectedRect);
-            }
-        }
-        if (keyboardHighlightedIndex_.has_value()) {
-            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
-                controller_->itemHeight(*keyboardHighlightedIndex_));
-            onRequestScrollIntoView(*this, highlightedRect);
-        }
     }
 
     std::optional<Rect> TreeView::rectForPath(const std::vector<std::size_t>& path) const {

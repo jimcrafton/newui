@@ -1076,13 +1076,14 @@ TEST(ViewStyleFocusRing, DefaultToleratesAZeroSizeClientBounds) {
     style.paintFocusRing(SharedContext(), newui::Size(0, 0), clientBounds);
 }
 
-TEST(ThemedEditStyle, PaintFocusRingIsSuppressed) {
-    // ThemedEditStyle's own stateId() already draws the real native
-    // ETS_FOCUSED border once focused is true (see StateIdPrecedence
-    // above) - the generic dashed ring would be redundant/non-native on
-    // top of it, so this override is a deliberate no-op. Nothing to
-    // assert beyond "doesn't crash" - same as every other paint() case in
-    // this file.
+TEST(ThemedEditStyle, PaintFocusRingUsesTheGenericDefault) {
+    // Deliberately does NOT override paintFocusRing() - see the class's
+    // own comment (viewstyle.h) for why an earlier version did (relying
+    // on ETS_FOCUSED's own native border instead) and was confirmed live
+    // to be wrong (that border renders identically to unfocused on at
+    // least one real Windows theme). Nothing to assert beyond "doesn't
+    // crash", same as every other paint() case in this file - the actual
+    // visual is what ViewStyleFocusRing's own tests above already cover.
     newui::ThemedEditStyle style;
 
     newui::Rect clientBounds(0, 0, 120, 24);

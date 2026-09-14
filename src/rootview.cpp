@@ -622,10 +622,30 @@ namespace newui {
 		}
 
 		if (target != nullptr) {
-			
+
 			if (!target->canBecomeFocused()) {
 				return;
 			}
+		}
+
+		// markDirty() on both the outgoing and incoming View - same
+		// "whoever's tracking this state is also responsible for
+		// scheduling the repaint it visually depends on" convention
+		// updateHoveredSubView() already established just above for
+		// hoveredSubView_/isHighlighted(). Without this, isFocused()
+		// (view.h) genuinely does flip for both Views the instant this
+		// function returns - Control::canPerformCommand()/keyEvent()
+		// dispatch, TextController's own markDirty() calls, etc. all
+		// already worked correctly - but nothing ever asked for a
+		// repaint, so View::paintStyle()'s ViewStyle::paintFocusRing()
+		// call (the generic dashed ring every non-ThemedEditStyle control
+		// relies on - Button, Toggle, Slider, a FocusScope panel, ...)
+		// never actually ran again until some *unrelated* later event
+		// happened to trigger one - a real, confirmed live bug: tabbing
+		// from a Button through several more controls visibly changed
+		// nothing at all, even though focus really was moving underneath.
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->style().markDirty();
 		}
 
 		if (focusedSubView_ != nullptr) {
@@ -636,6 +656,7 @@ namespace newui {
 
 		if (focusedSubView_ != nullptr) {
 			focusedSubView_->onGotFocus(*focusedSubView_);
+			focusedSubView_->style().markDirty();
 		}
 	}
 
@@ -1354,8 +1375,11 @@ namespace newui {
 					case WM_KEYDOWN: {
 						keyCharVal = keyData.character;
 						eventType = keKeyDown;
-						
+
 						keyData.VKeyCode = translateVirtualKey(wParam,0);
+						printf("DEBUG WM_KEYDOWN wParam=%llu (0x%llx) -> VKeyCode=%u focusedSubView_=%p\n",
+							(unsigned long long)wParam, (unsigned long long)wParam, keyData.VKeyCode, (void*)focusedSubView_);
+						fflush(stdout);
 					}
 					break;
 

@@ -614,6 +614,7 @@ namespace newui {
 		// its own to naturally separate the two, so without this the ring
 		// would visually merge with clientBounds' own boundary.
 		constexpr float kInset = 1.5f;
+		constexpr float kCornerRadius = 3.0f;
 		Rect ring = clientBounds.deflate(kInset);
 		if (ring.size().width <= 0.0f || ring.size().height <= 0.0f) {
 			return;
@@ -624,17 +625,25 @@ namespace newui {
 		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
 		ctx.set_stroke_width(1.0f);
 
-		// A short dash/gap pair, not a solid stroke - the classic
-		// DrawFocusRect() look every native Win32 dialog uses, hand-drawn
-		// here since this toolkit's buffer is an offscreen DIB blitted via
-		// BitBlt (RootView::paintImageBufferToWindow()), not a live HDC an
-		// XOR-pattern trick could round-trip against.
-		BLArray<double> dashArray;
-		dashArray.append(2.0, 2.0);
-		ctx.set_stroke_dash_array(dashArray);
-		ctx.set_stroke_dash_offset(0.0);
-
-		ctx.stroke_box(ring.left(), ring.top(), ring.right(), ring.bottom());
+		// A solid rounded-rect outline in the accent color - not the
+		// classic dashed DrawFocusRect() look, a deliberate choice, not a
+		// missing feature: BLContext::set_stroke_dash_array()/
+		// set_stroke_dash_offset() exist and correctly store the dash
+		// pattern into the context's stroke_options (confirmed by reading
+		// raster/rastercontext.cpp's own setter implementations), but
+		// this vendored Blend2D's actual path stroker
+		// (core/pathstroke.cpp) never reads stroke_options.dash_array at
+		// all - dashing is simply unimplemented in this build, tried and
+		// confirmed live (a 6px dash/gap pattern still rendered as one
+		// unbroken line). A solid accent-colored ring is a legitimate,
+		// modern focus style in its own right (the same idea CSS's
+		// :focus-visible/Fluent/Material conventions already use), not a
+		// downgrade - implementing dashing by hand (segmenting the path
+		// into alternating drawn/skipped pieces around the rounded
+		// corners) was considered and deliberately not done.
+		BLPath path;
+		path.add_round_rect(BLRoundRect(ring.left(), ring.top(), ring.size().width, ring.size().height, kCornerRadius));
+		ctx.stroke_path(path);
 		ctx.restore();
 	}
 

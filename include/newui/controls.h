@@ -1019,6 +1019,24 @@ namespace newui {
         // rely on (see this class's own constructor).
         SyncReturn handleContentChildContentSizeChanged(View& sender);
 
+        // Subscribed to every real content child's own
+        // onRequestScrollIntoView (view.h) in addChild() below - a
+        // content-space rect a caret (TextControl), a selected row
+        // (ListView), or a keyboard-highlighted row/node (ListView/
+        // TreeView, and everything's Ctrl+Arrow preview highlight) wants
+        // scrolled fully into view. Nudges vBar_/hBar_'s own value() just
+        // far enough (never further - already-visible is left alone) via
+        // their normal setValue(), which is what actually moves the
+        // scroll position (see handleVBarValueChanged()/
+        // handleHBarValueChanged() above - the exact same path a real
+        // scrollbar drag already goes through), so this never needs to
+        // touch viewport_'s origin()/the virtualized child's
+        // onScrollOffsetChanged directly itself. A bar that isn't
+        // currently visible() (content fits on that axis already) is
+        // left untouched - there's nothing to scroll there regardless of
+        // what requestedRect says.
+        SyncReturn handleContentRequestScrollIntoView(View& sender, const Rect& requestedRect);
+
         Size contentSize_;
         // False (the default) until setContentSize() is called explicitly
         // at least once - see updateLayout()'s own comment for what that

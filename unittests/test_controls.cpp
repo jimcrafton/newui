@@ -1313,12 +1313,21 @@ TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     textControl->setText(kManyLines);
     scrollView->addChild(textControl);
 
-    // No scrollbar of its own, and pinned to the (much smaller) viewport
-    // rather than grown to its true content height - the whole point of
-    // being hosted rather than standalone.
+    // No scrollbar of its own, and pinned to the viewport's own height
+    // rather than grown to its true (much larger) content height - the
+    // whole point of being hosted rather than standalone. No horizontal
+    // bar either: TextControl's reported content width is always exactly
+    // whatever width it's given (self-referential, wraps to fit), so it
+    // never legitimately wants more horizontal space than its viewport -
+    // a regression guard for a real bug where ScrollView::updateLayout()
+    // mistook that self-referential width for "wants a horizontal bar"
+    // any time a vertical bar was needed at all, silently stealing height
+    // from every vertically-scrolling virtualized child.
     EXPECT_TRUE(textControl->childViews().empty());
     ASSERT_TRUE(scrollView->vBar()->isVisible());
-    EXPECT_LT(textControl->bounds().size().height, 60.0f);
+    EXPECT_FALSE(scrollView->hBar()->isVisible());
+    EXPECT_FLOAT_EQ(textControl->bounds().size().height, 60.0f);
+    EXPECT_LT(textControl->bounds().size().height, textControl->contentSize().height);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
     BLContext ctx(image);
@@ -1360,6 +1369,24 @@ public:
     }
 
     std::size_t size() const override { return rows.size(); }
+};
+
+// Records which row indices a ListView actually asks to be painted -
+// used to prove a given paint() call's own visible rows, not just the
+// resulting vBar value, land at the corrected scroll offset. See
+// ListView::paint()'s own comment (controls.cpp) for the bug this guards
+// against: onRequestScrollIntoView() firing after (rather than before)
+// scrollOffsetY_ is read for the row loop meant the *value* was already
+// correct after one paint() but that same paint()'s actual pixels were
+// still drawn one frame stale.
+class SpyListController : public ListController {
+public:
+    std::vector<std::size_t> paintedIndices;
+
+    ListItem* createItem(std::size_t index) override {
+        paintedIndices.push_back(index);
+        return ListController::createItem(index);
+    }
 };
 
 }  // namespace
@@ -1895,6 +1922,216 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
 
     scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
     listView->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// ---------------------------------------------------------------------
+// ScrollView::handleContentRequestScrollIntoView() (controls.cpp) - a
+// content child's onRequestScrollIntoView (view.h, fired from paint())
+// actually nudging the hosting ScrollView's own scrollbar. Confirmed
+// live as a real, pre-existing gap: onRequestScrollIntoView was fired in
+// five places across this codebase (TextControl's caret, ListView/
+// TreeView's selection and keyboard highlight) but never subscribed to
+// anywhere - arrow-key-driven selection moved correctly but never
+// scrolled the newly-selected row into view once it left the viewport.
+// ---------------------------------------------------------------------
+
+TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // establishes real vBar range/pageSize
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    ASSERT_FALSE(scrollView->hBar()->isVisible())
+        << "ListView content is exactly as wide as its viewport - a "
+           "horizontal bar here would silently shrink viewportHeight and "
+           "throw off the scroll-into-view target below";
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    listView->setSelectedIndex(40u);
+    listView->paint(ctx);  // paint() is what fires onRequestScrollIntoView
+
+    float rowTop = listView->controller().itemOffset(40);
+    float rowBottom = rowTop + listView->controller().itemHeight(40);
+    float value = scrollView->vBar()->value();
+    float pageSize = scrollView->vBar()->pageSize();
+
+    EXPECT_GT(value, 0.0f) << "row 40 required scrolling down from the top";
+    EXPECT_GE(rowTop, value - 0.01f);
+    EXPECT_LE(rowBottom, value + pageSize + 0.01f);
+    // Pinned exact value, not just the tolerant bounds above: with the
+    // full 60px viewport height (no phantom horizontal bar stealing 16px
+    // for a fallback thickness), row 40 (top=800, bottom=820) must land
+    // scrolled so its bottom is flush with the viewport bottom.
+    EXPECT_FLOAT_EQ(value, 760.0f);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, SelectingARowBelowTheViewportRepaintsItInTheSamePaintCall) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto* spyController = new SpyListController();
+    listView->setController(std::unique_ptr<ListController>(spyController));
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // establishes real vBar range/pageSize
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    listView->setSelectedIndex(40u);
+    spyController->paintedIndices.clear();
+    listView->paint(ctx);
+
+    // Row 40 must be among the rows THIS SAME paint() call actually drew
+    // - not just something a *second* paint() would eventually catch up
+    // to. Before the fix, onRequestScrollIntoView() fired after the row
+    // loop had already read the stale scrollOffsetY_, so this call would
+    // still only draw rows 0-2 (the old, pre-scroll viewport) and row 40
+    // would only appear on a subsequent paint().
+    EXPECT_NE(std::find(spyController->paintedIndices.begin(), spyController->paintedIndices.end(), 40u),
+        spyController->paintedIndices.end())
+        << "row 40 was not painted in the same paint() call that scrolled it into view";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, SelectingARowAboveTheViewportScrollsUpToRevealIt) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
+    listView->paint(ctx);
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f);
+
+    listView->setSelectedIndex(0u);
+    listView->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f) << "row 0 required scrolling back up to the top";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, HomeAndEndKeysScrollTheHostingScrollViewToo) {
+    // Same end-to-end path as SelectingARow[Below/Above]TheViewport... above,
+    // but driven through real handleKeyDown() (PressKey(), same helper
+    // ListView's own arrow-key test group uses) instead of calling
+    // setSelectedIndex() directly - vkHome/vkEnd share the exact same
+    // setSelectedIndex() tail every other non-modified arrow key does
+    // (see handleKeyDown()'s own switch, controls.cpp), so this is
+    // mainly a regression guard confirming that shared path really does
+    // behave identically when reached via Home/End specifically.
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    PressKey(listView, vkEnd, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 49u);
+    float lastRowBottom = listView->controller().itemOffset(49) + listView->controller().itemHeight(49);
+    EXPECT_GE(scrollView->vBar()->value() + scrollView->vBar()->pageSize(), lastRowBottom - 0.01f)
+        << "End must scroll all the way to the bottom, not leave the last row still offscreen";
+
+    PressKey(listView, vkHome, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 0u);
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "Home must scroll all the way back to the top";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, HomeAfterRepeatedDownArrowsScrollsAllTheWayBackToTheTop) {
+    // Reproduces the exact real-app sequence reported live: Tab into the
+    // ListView (real keyboard focus, not a click - PressKey() drives
+    // handleKeyDown() directly, same as any real focused-View key
+    // dispatch), press Down repeatedly past the viewport (each one its
+    // own real Down keystroke, not a single jump to a far index the way
+    // ClickRow()/setSelectedIndex() elsewhere in this file would be), then
+    // Home. Down alone was confirmed working live; Home was not.
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    StubRowModel model;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(&model);
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    listView->setSelectedIndex(0u);
+    for (int i = 0; i < 20; ++i) {
+        PressKey(listView, vkDownArrow, 0);
+        listView->paint(ctx);
+    }
+
+    ASSERT_EQ(*listView->selectedIndex(), 20u);
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f) << "20 Down presses must have actually scrolled";
+
+    PressKey(listView, vkHome, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 0u);
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "Home must scroll all the way back to the top even after many prior Down presses";
 
     scrollView->destroy();
     delete scrollView;

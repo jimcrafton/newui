@@ -60,7 +60,18 @@ namespace newui {
     //@reflect ignore=true
     class FocusGuide : public SubView {
     public:
+        // setVisible(true) - not "this is drawn", "this participates in
+        // the tree at all": SubView (like every View) defaults to
+        // isVisible() == false, and gatherFocusableInScope()
+        // (uiinputmanager.cpp) prunes invisible nodes before ever
+        // checking canBecomeFocused() - so a guide the caller forgot to
+        // setVisible(true) on would silently never be gathered as a
+        // candidate in the first place, well before redirectTarget() ever
+        // got a chance to matter. Same "the caller shouldn't have to
+        // remember this" reasoning every concrete Control already applies
+        // to itself in its own constructor (Button::Button(), e.g.).
         FocusGuide() {
+            setVisible(true);
             setAcceptsFocus(true);
         }
 

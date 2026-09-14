@@ -340,17 +340,23 @@ namespace newui {
         // through every ThemedViewStyle subclass's stateId() would be both
         // a much larger change and the wrong shape for what it's modeling.
         //
-        // Base implementation: a dashed rect inset from clientBounds in
-        // UIColorRole::HighlightBackground (uicolormanager.h - the user's
-        // accent color, same role selection highlights already use).
-        // Hand-drawn via Blend2D dash support, not GDI's DrawFocusRect() -
-        // this toolkit's whole buffer is an offscreen DIB blitted via
-        // BitBlt (see RootView::paintImageBufferToWindow()), not a live
-        // HDC an XOR-pattern trick could round-trip against.
+        // Base implementation: a solid rounded-rect outline inset from
+        // clientBounds in UIColorRole::HighlightBackground
+        // (uicolormanager.h - the user's accent color, same role
+        // selection highlights already use). Solid, not the classic
+        // dashed DrawFocusRect() look, on purpose - see this method's own
+        // definition (viewstyle.cpp) for why (this vendored Blend2D
+        // build's path stroker doesn't actually implement dashing at
+        // all, confirmed live).
         //
         // Override to suppress or customize where the default would look
-        // wrong - e.g. a themed Edit control's own caret already signals
-        // focus, so ThemedEditStyle overrides this to do nothing.
+        // wrong for a specific style. ThemedEditStyle (below) was tried as
+        // exactly such an override once - relying on ETS_FOCUSED's own
+        // native border instead - and confirmed live to be the wrong call:
+        // that border renders pixel-identical to unfocused on at least one
+        // real Windows theme, so it now keeps this default instead. Treat
+        // that as a cautionary precedent, not a template, before adding
+        // another override here.
         virtual void paintFocusRing(BLContext& ctx, const Size& size, const Rect& clientBounds) const;
 
         // Non-owning upward back-reference to the owning View (View owns
@@ -1105,15 +1111,22 @@ namespace newui {
         bool readOnly = false;
         bool enabled = true;
 
-        // Suppresses ViewStyle's default dashed focus ring (viewstyle.cpp) -
-        // stateId() above already draws the real native ETS_FOCUSED border
-        // once focused is true, matching how a real Windows Edit control
-        // signals keyboard focus (a highlighted border, not a ring drawn
-        // over top of it). See TextController::handleGotFocus()/
-        // handleLostFocus() (controls.cpp) - and ListView/TreeView/
-        // DropDownList's own handleGotFocus()/handleLostFocus() - for what
-        // actually keeps focused in sync with real keyboard focus.
-        void paintFocusRing(BLContext&, const Size&, const Rect&) const override {}
+        // Deliberately does NOT override paintFocusRing() - an earlier
+        // version of this class did, on the assumption that stateId()'s
+        // own ETS_FOCUSED (above) would draw a visibly distinct native
+        // border once focused is true, making the generic dashed ring
+        // redundant. Confirmed live to be wrong: on at least one real
+        // Windows install/theme, ETS_FOCUSED renders pixel-identical to
+        // ETS_NORMAL for EP_EDITTEXT - the only real difference a focused
+        // TextField/TextControl had was the blinking caret itself (see
+        // TextController::drawCaret(), controls.cpp), easy to miss and
+        // not present at all for ListView/TreeView/DropDownList (no
+        // caret there). So this now falls through to ViewStyle's own
+        // default ring like every other control - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // and ListView/TreeView/DropDownList's own handleGotFocus()/
+        // handleLostFocus() for what keeps `focused` above in sync with
+        // real keyboard focus regardless.
 
     protected:
         int partId() const override { return EP_EDITTEXT; }

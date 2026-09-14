@@ -69,6 +69,12 @@ add_executable(mvc1
 
 target_link_libraries(mvc1 PRIVATE newui)
 
+add_executable(uiinputmanager1
+    uiinputmanager1.cpp
+)
+
+target_link_libraries(uiinputmanager1 PRIVATE newui)
+
 add_executable(shapes1
     shapes1.cpp
 )
