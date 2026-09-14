@@ -353,6 +353,7 @@ namespace newui {
 
         onModalStart(*this);
 
+        HWND hwndTrueRoot = nullptr;
         if (ownerHandle != nullptr) {
 
             
@@ -362,7 +363,7 @@ namespace newui {
             }
 
             //find root windows for app
-            HWND hwndTrueRoot = GetAncestor(ownerHandle, GA_ROOT);
+            hwndTrueRoot = GetAncestor(ownerHandle, GA_ROOT);
             if (hwndTrueRoot != ::GetDesktopWindow()) {
                 ::EnableWindow(hwndTrueRoot, FALSE);
             }
@@ -456,9 +457,17 @@ namespace newui {
         }
 
         if (ownerHandle != nullptr) {
-            ::EnableWindow(ownerHandle, TRUE);
-            ::SetForegroundWindow(ownerHandle);
-            ::SetFocus(ownerHandle);
+
+            if (hwndTrueRoot != ::GetDesktopWindow()) {
+                //::EnableWindow(hwndTrueRoot, FALSE);
+
+                ::EnableWindow(hwndTrueRoot, TRUE);
+                ::SetForegroundWindow(hwndTrueRoot);
+                ::SetFocus(hwndTrueRoot);
+
+            }
+
+            
         }
 
         onModalEnd(*this);
