@@ -1263,6 +1263,51 @@ TEST(ViewStyleElevation, PrePaintToleratesAZeroSizeEvenWithElevationSet) {
     EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(0, 0), false));
 }
 
+TEST(FluentCardStyle, DefaultsToCardElevationAndAVisibleCornerRadius) {
+    newui::FluentCardStyle style;
+
+    EXPECT_FLOAT_EQ(style.elevation(), newui::ElevationLevel::Card);
+    EXPECT_GT(style.rectRadius(), 0.0f);
+}
+
+TEST(FluentCardStyle, ComputePrePaintBoundsGrowsToCoverItsOwnDefaultShadow) {
+    // The whole point of FluentCardStyle defaulting elevation() on
+    // (class comment, viewstyle.h) is that a caller gets a real shadow
+    // for free - this confirms the inherited ViewStyle::
+    // computePrePaintBounds() actually sees that default and grows the
+    // invalidated region for it, not just that setElevation() was
+    // technically called.
+    newui::FluentCardStyle card;
+    newui::Rect cardResult(0, 0, 200, 120);
+    card.computePrePaintBounds(cardResult);
+
+    newui::ViewStyle plain;
+    newui::Rect plainResult(0, 0, 200, 120);
+    plain.computePrePaintBounds(plainResult);
+
+    EXPECT_GT(cardResult.size().width, plainResult.size().width);
+    EXPECT_GT(cardResult.size().height, plainResult.size().height);
+}
+
+TEST(FluentCardStyle, PaintDoesNotThrowAcrossEveryState) {
+    for (bool highlighted : { true, false }) {
+        newui::FluentCardStyle style;
+        newui::Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(SharedContext(), newui::Size(200, 120), highlighted, clientBounds));
+    }
+}
+
+TEST(FluentCardStyle, PaintToleratesAZeroSize) {
+    newui::FluentCardStyle style;
+    newui::Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(SharedContext(), newui::Size(0, 0), false, clientBounds));
+}
+
+TEST(FluentCardStyle, PrePaintDoesNotThrowAtItsOwnDefaultElevation) {
+    newui::FluentCardStyle style;
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(200, 120), false));
+}
+
 // ---------------------------------------------------------------------------
 // Batch 2: ThemedListItemStyle / ThemedHeaderItemStyle /
 // ThemedHeaderSortArrowStyle / ThemedTreeItemStyle / ThemedTreeGlyphStyle /

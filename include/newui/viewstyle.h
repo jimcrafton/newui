@@ -142,6 +142,26 @@ namespace newui {
     BLCompOp toBLCompOp(CompositingFlag f);
     CompositingFlag toCompositingFlag(BLCompOp f);
 
+    // Convenient, doc-matched starting points for ViewStyle::setElevation()
+    // (below) - Fluent's own named elevation scale (learn.microsoft.com/
+    // windows/apps/design/signature-experiences/layering) publishes these
+    // names/relative magnitudes, not a concrete blur/offset formula (see
+    // viewstyle.cpp's own elevationBlurRadius()/
+    // elevationShadowOffsetMagnitude() for the bounded approximation that
+    // actually turns a value from here into pixels). setElevation() itself
+    // takes any float - these are just recognizable reference points, not
+    // an enum a caller is restricted to. "Control" is spelled out in full
+    // (not just Control) to avoid colliding with newui::Control
+    // (controls.h) for anyone who brings this whole namespace in scope.
+    namespace ElevationLevel {
+        constexpr float Layer = 1.0f;
+        constexpr float ControlLevel = 2.0f;
+        constexpr float Card = 8.0f;
+        constexpr float Tooltip = 16.0f;
+        constexpr float Flyout = 32.0f;
+        constexpr float Dialog = 128.0f;
+    }
+
     // Common appearance drawn by View::paintStyle() before a view's own
     // paint() runs. backgroundFill/borderFill/highlightFill are gfx::Fill
     // (graphics.h), so each can independently hold a solid color, a
@@ -865,6 +885,33 @@ namespace newui {
         }
     };
 
+    // Fluent-style checkbox glyph, custom-drawn instead of
+    // ThemedCheckBoxStyle's native DrawThemeBackground(BP_CHECKBOX) - same
+    // rationale/precedent as FluentButtonStyle above (classic UxTheme has
+    // no Windows 11 visual data for this either). A subclass of
+    // ThemedCheckBoxStyle, not a ViewStyle sibling, for the same reason
+    // FluentButtonStyle is a ThemedButtonStyle subclass: Toggle
+    // (controls.h) dynamic_casts style() to ThemedCheckBoxStyle* to push
+    // checked/pressed/enabled into it (Toggle::updateStyleFields()) - this
+    // stays a valid target for that cast unchanged, opted into via
+    // `toggle->setStyle(std::make_unique<FluentCheckBoxStyle>())` after
+    // construction (Toggle::rebuildStyle() still defaults to the native
+    // ThemedCheckBoxStyle/ThemedRadioButtonStyle pair).
+    //
+    // Fills its whole given size (Toggle has no separate label - the
+    // glyph View's own bounds *are* the whole control, same as a native
+    // BP_CHECKBOX part), so a caller sizes the Toggle itself to whatever
+    // glyph size they want rather than this style centering a fixed-size
+    // glyph inside a larger box.
+    class FluentCheckBoxStyle : public ThemedCheckBoxStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a native radio button (BUTTON/BP_RADIOBUTTON) -
     // same field/state shape as ThemedCheckBoxStyle above, just a
     // different part.
@@ -886,6 +933,19 @@ namespace newui {
             if (highlighted) return checked ? RBS_CHECKEDHOT : RBS_UNCHECKEDHOT;
             return checked ? RBS_CHECKEDNORMAL : RBS_UNCHECKEDNORMAL;
         }
+    };
+
+    // Fluent-style radio glyph - same rationale/opt-in shape as
+    // FluentCheckBoxStyle just above (a ThemedRadioButtonStyle subclass,
+    // so Toggle's own dynamic_cast<ThemedRadioButtonStyle*> still finds
+    // it), just a circle instead of a rounded square.
+    class FluentRadioButtonStyle : public ThemedRadioButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native group box frame (BUTTON/BP_GROUPBOX) -
@@ -911,6 +971,31 @@ namespace newui {
         }
     };
 
+    // A Fluent-style elevated "Card" surface - a plain rounded-rect panel
+    // background/border for grouping in-page content, with a Card-level
+    // drop shadow (ElevationLevel::Card above) on by default. Unlike
+    // every other Fluent* style in this file, this one is a direct
+    // ViewStyle subclass, not a Themed*Style subclass - there's no native
+    // uxtheme part this replaces (no existing GroupBox/Card control class
+    // in this codebase to stay cast-compatible with either, unlike
+    // FluentButtonStyle/FluentCheckBoxStyle/etc. - see each of their own
+    // comments). rectRadius()/elevation() are real, freely overridable
+    // ViewStyle properties, set to sensible defaults by the constructor;
+    // paint() is still overridden (rather than leaving background/border
+    // painting to the inherited ViewStyle::paint()) purely so the
+    // fill/border colors stay live UIColorManager::colorFor() lookups,
+    // matching every other Fluent* style's own dark/light-mode-reactive
+    // approach - ViewStyle::backgroundFill()/borderFill() only ever hold
+    // a static snapshot color, which would go stale across a live theme
+    // switch the way this codebase's other Fluent styles deliberately
+    // don't.
+    class FluentCardStyle : public ViewStyle {
+    public:
+        FluentCardStyle();
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a native toolbar button (TOOLBAR/TP_BUTTON) -
     // checked is a toggle-button state (e.g. a pressed-in "bold" button
     // in a formatting toolbar), independent of pressed (the transient
@@ -934,6 +1019,24 @@ namespace newui {
             if (highlighted) return TS_HOT;
             return TS_NORMAL;
         }
+    };
+
+    // Fluent-style toolbar/command-bar button - custom-drawn, no border
+    // ever (matching Fluent's own flat command-bar convention - see
+    // ToolbarButton::paint()'s own "a flat toolbar button shows no visible
+    // border/fill at rest either way" comment, controls.cpp), just a
+    // rounded-rect highlight fill that appears for hover/pressed/checked.
+    // Same ThemedToolbarButtonStyle-subclass opt-in shape as
+    // FluentButtonStyle/FluentCheckBoxStyle above (ToolbarButton::
+    // updatePressedVisual() dynamic_casts style() to
+    // ThemedToolbarButtonStyle&, which this still satisfies).
+    class FluentToolbarButtonStyle : public ThemedToolbarButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native toolbar drop-down button (TOOLBAR/
@@ -1217,6 +1320,27 @@ namespace newui {
         }
     };
 
+    // Fluent-style text field chrome - custom-drawn instead of
+    // ThemedEditStyle's native DrawThemeBackground(EP_EDITTEXT), same
+    // ThemedEditStyle-subclass opt-in shape as the other Fluent* styles
+    // above (TextField/TextControl dynamic_cast style() to
+    // ThemedEditStyle* - TextController::handleGotFocus()/
+    // handleLostFocus(), controls.cpp - which this still satisfies).
+    // Rounded border, plus WinUI TextBox's own distinctive visual
+    // signature: a plain 1px border at rest that becomes a thicker,
+    // accent-colored underline along just the bottom edge once focused
+    // (see paint()'s own definition, viewstyle.cpp, for why this stays
+    // additive rather than replacing ViewStyle::postPaint()'s generic
+    // ring - unlike the native EP_EDITTEXT part, ETS_FOCUSED here would
+    // be trivially distinguishable from ETS_NORMAL, but the ring stays on
+    // anyway for consistency with every other Fluent* style, none of
+    // which suppress it either).
+    class FluentEditStyle : public ThemedEditStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override;
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // --- Batch 2 --------------------------------------------------------
     // ThemedViewStyle only ever draws chrome (a rect at a given part/
     // state) - it never handles input or real widget logic (same
@@ -1459,6 +1583,26 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return horizontal ? TRS_NORMAL : TRVS_NORMAL; }
     };
 
+    // Fluent-style slider groove - custom-drawn instead of
+    // ThemedTrackbarTrackStyle's native DrawThemeBackground(TKP_TRACK),
+    // same ThemedTrackbarTrackStyle-subclass opt-in shape as every other
+    // Fluent* style (Slider::setHorizontal(), controls.cpp, dynamic_casts
+    // style() to ThemedTrackbarTrackStyle&, which this still satisfies).
+    // A thin rounded "pill" groove - no filled/unfilled split, same scope
+    // as the native part it replaces (the real *value*-driven fill this
+    // codebase's architecture has no concept of yet - Slider only ever
+    // positions a separate thumb child along an otherwise-uniform groove;
+    // adding a filled portion would need real new plumbing, out of scope
+    // here).
+    class FluentTrackbarTrackStyle : public ThemedTrackbarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a trackbar/slider's draggable thumb (TRACKBAR/
     // TKP_THUMB or TKP_THUMBVERT) - only the plain horizontal/vertical
     // thumb shapes are supported (uxtheme also has THUMBTOP/THUMBBOTTOM/
@@ -1486,6 +1630,27 @@ namespace newui {
             if (highlighted) return TUS_HOT;
             return TUS_NORMAL;
         }
+    };
+
+    // Fluent-style slider thumb - a filled circle (WinUI's own look: a
+    // solid accent-colored disc, not an outlined/donut shape like
+    // FluentRadioButtonStyle's checked glyph - the thumb has no
+    // "unchecked" state to distinguish from). Same ThemedTrackbarThumbStyle-
+    // subclass opt-in shape as FluentTrackbarTrackStyle above. Inherits
+    // partSize() unchanged (ThemedViewStyle, viewstyle.cpp) - Slider::
+    // resolvedThumbSize() (controls.cpp) still queries the *native*
+    // TKP_THUMB/TKP_THUMBVERT part's natural size for layout even when
+    // this style is opted into, which is a perfectly reasonable resting
+    // footprint for a custom-drawn circle too, and keeps this from
+    // needing its own hardcoded size that could drift from real DPI/
+    // theme-driven scaling.
+    class FluentTrackbarThumbStyle : public ThemedTrackbarThumbStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a trackbar/slider's tick marks (TRACKBAR/
@@ -1547,6 +1712,22 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return 0; }
     };
 
+    // Fluent-style progress bar track - custom-drawn instead of
+    // ThemedProgressBarTrackStyle's native DrawThemeBackground(PP_BAR),
+    // same subclass opt-in shape as every other Fluent* style (Progress::
+    // setHorizontal(), controls.cpp, dynamic_casts style() to
+    // ThemedProgressBarTrackStyle&, which this still satisfies). A fully-
+    // rounded "pill" bar (Fluent's own ProgressBar shape), muted so the
+    // FluentProgressBarFillStyle fill (below) reads clearly on top of it.
+    class FluentProgressBarTrackStyle : public ThemedProgressBarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a progress bar's fill (PROGRESS/PP_FILL or
     // PP_FILLVERT). How much of the bar is filled isn't a field here -
     // that's the caller's job via ordinary bounds/Layout (a narrower
@@ -1592,6 +1773,22 @@ namespace newui {
                 case FillState::Normal: default: return PBFVS_NORMAL;
             }
         }
+    };
+
+    // Fluent-style progress bar fill - same rounded "pill" shape as
+    // FluentProgressBarTrackStyle above, colored by `state` (accent for
+    // Normal, matching Fluent's own severe-red/caution-amber for Error/
+    // Paused - there's no UIColorRole for either, unlike Normal's
+    // HighlightBackground, so these two are fixed colors rather than a
+    // theme-reactive lookup, same trim ThemedProgressBarFillStyle's own
+    // class comment already accepts for marquee/PBFS_PARTIAL).
+    class FluentProgressBarFillStyle : public ThemedProgressBarFillStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a scrollbar's draggable thumb (SCROLLBAR/

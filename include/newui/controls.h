@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 
 #include <newui/newui.h>
 #include <newui/action.h>
@@ -365,8 +366,27 @@ namespace newui {
         void setHorizontal(bool value);
 
         // PBFS_NORMAL/ERROR/PAUSED - see ThemedProgressBarFillStyle::FillState.
-        ThemedProgressBarFillStyle::FillState fillState() const { return fillStyle_->state; }
-        void setFillState(ThemedProgressBarFillStyle::FillState state) { fillStyle_->state = state; style().markDirty(); }
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment (controls.cpp) for why:
+        // fill()'s own doc comment above explicitly invites a caller to
+        // fill()->setStyle() a different ThemedProgressBarFillStyle
+        // subclass (e.g. FluentProgressBarFillStyle), which a cached
+        // pointer here would then dangle into.
+        ThemedProgressBarFillStyle::FillState fillState() const {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::fillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            return fillStyle->state;
+        }
+        void setFillState(ThemedProgressBarFillStyle::FillState state) {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::setFillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            fillStyle->state = state;
+            style().markDirty();
+        }
 
         // The child SubView representing the filled portion - exposed
         // read-only in case a caller wants to reach past this class's own
@@ -386,8 +406,6 @@ namespace newui {
         float value_ = 0.0f;
         bool horizontal_ = true;
         SubView* fill_ = nullptr;
-        ThemedProgressBarTrackStyle* trackStyle_ = nullptr;
-        ThemedProgressBarFillStyle* fillStyle_ = nullptr;
     };
 
     // A draggable value control - native trackbar groove
@@ -572,9 +590,6 @@ namespace newui {
         bool showTicks_ = false;
         SubView* thumb_ = nullptr;
         SubView* ticks_ = nullptr;
-        ThemedTrackbarTrackStyle* trackStyle_ = nullptr;
-        ThemedTrackbarThumbStyle* thumbStyle_ = nullptr;
-        ThemedTrackbarTicksStyle* ticksStyle_ = nullptr;
     };
 
     // A real, interactive scrollbar (SCROLLBAR/SBP_ARROWBTN +

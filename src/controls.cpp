@@ -57,15 +57,11 @@ namespace newui {
     Progress::Progress() {
         setVisible(true);
 
-        auto trackStyle = std::make_unique<ThemedProgressBarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedProgressBarTrackStyle>());
 
         fill_ = new SubView();
         fill_->setVisible(true);
-        auto fillStyle = std::make_unique<ThemedProgressBarFillStyle>();
-        fillStyle_ = fillStyle.get();
-        fill_->setStyle(std::move(fillStyle));
+        fill_->setStyle(std::make_unique<ThemedProgressBarFillStyle>());
         addChild(fill_);
 
         onSizeChanged.add(this, &Progress::handleSizeChanged);
@@ -86,8 +82,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        fillStyle_->horizontal = value;
+        // dynamic_cast, not a cached typed pointer - see fillState()'s
+        // own comment (controls.h) for why.
+        dynamic_cast<ThemedProgressBarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedProgressBarFillStyle&>(fill_->style()).horizontal = value;
         updateFillBounds();
     }
 
@@ -506,15 +504,11 @@ namespace newui {
         setVisible(true);
         setAcceptsFocus(true);
 
-        auto trackStyle = std::make_unique<ThemedTrackbarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedTrackbarTrackStyle>());
 
         thumb_ = new SubView();
         thumb_->setVisible(true);
-        auto thumbStyle = std::make_unique<ThemedTrackbarThumbStyle>();
-        thumbStyle_ = thumbStyle.get();
-        thumb_->setStyle(std::move(thumbStyle));
+        thumb_->setStyle(std::make_unique<ThemedTrackbarThumbStyle>());
         addChild(thumb_);
 
         onSizeChanged.add(this, &Slider::handleSizeChanged);
@@ -552,7 +546,7 @@ namespace newui {
     }
 
     void Slider::updateTickCount() {
-        if (ticksStyle_ == nullptr) {
+        if (ticks_ == nullptr) {
             return;
         }
         int count = kDefaultTickIntervals;
@@ -564,7 +558,9 @@ namespace newui {
                 count = kMaxTickIntervals;
             }
         }
-        ticksStyle_->tickCount = count;
+        // dynamic_cast, not a cached typed pointer - see Progress::
+        // fillState()'s own comment (controls.h) for why.
+        dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).tickCount = count;
         style().markDirty();
     }
 
@@ -610,10 +606,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        thumbStyle_->horizontal = value;
-        if (ticksStyle_ != nullptr) {
-            ticksStyle_->horizontal = value;
+        dynamic_cast<ThemedTrackbarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).horizontal = value;
+        if (ticks_ != nullptr) {
+            dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).horizontal = value;
         }
         updateThumbBounds();
         updateTicksBounds();
@@ -628,8 +624,7 @@ namespace newui {
         if (ticks_ == nullptr) {
             ticks_ = new SubView();
             auto ticksStyle = std::make_unique<ThemedTrackbarTicksStyle>();
-            ticksStyle_ = ticksStyle.get();
-            ticksStyle_->horizontal = horizontal_;
+            ticksStyle->horizontal = horizontal_;
             ticks_->setStyle(std::move(ticksStyle));
             addChild(ticks_);
             updateTickCount();
@@ -658,18 +653,19 @@ namespace newui {
         // rendering the fallback-sized thumb while a dragged one, which
         // happened to re-run this after painting, picked up the real,
         // very different theme size).
-        bool wasPressed = thumbStyle_->pressed;
-        bool wasEnabled = thumbStyle_->enabled;
-        thumbStyle_->pressed = false;
-        thumbStyle_->enabled = true;
-        Size resolved = thumbStyle_->partSize(Size(kThumbSize, kThumbSize));
-        thumbStyle_->pressed = wasPressed;
-        thumbStyle_->enabled = wasEnabled;
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        bool wasPressed = thumbStyle.pressed;
+        bool wasEnabled = thumbStyle.enabled;
+        thumbStyle.pressed = false;
+        thumbStyle.enabled = true;
+        Size resolved = thumbStyle.partSize(Size(kThumbSize, kThumbSize));
+        thumbStyle.pressed = wasPressed;
+        thumbStyle.enabled = wasEnabled;
         return resolved;
     }
 
     Size Slider::resolvedTicksSize() const {
-        return ticksStyle_->partSize(Size(kTicksSize, kTicksSize));
+        return dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).partSize(Size(kTicksSize, kTicksSize));
     }
 
     Rect Slider::trackRect() const {
@@ -680,9 +676,9 @@ namespace newui {
         // Reserve however thick the ticks strip's own theme part
         // actually is (see updateTicksBounds()'s own use of the same
         // query) below (horizontal) or to the right (vertical) for it -
-        // see showTicks()'s own doc comment (controls.h). ticksStyle_ is
+        // see showTicks()'s own doc comment (controls.h). ticks_ is
         // always non-null here (only reachable once showTicks_ is true,
-        // which only ever gets set after ticksStyle_ is created - see
+        // which only ever gets set after ticks_ is created - see
         // setShowTicks()).
         Size ticksSize = resolvedTicksSize();
         if (horizontal_) {
@@ -789,7 +785,7 @@ namespace newui {
             return SyncReturn::Ignored;
         }
         dragging_ = true;
-        thumbStyle_->pressed = true;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = true;
         style().markDirty();
         updateValueFromLocalPoint(toLocalSpace(sender, pt));
         return SyncReturn::Handled;
@@ -807,16 +803,17 @@ namespace newui {
     SyncReturn Slider::handleDragEnd(View& /*sender*/, const Point& /*pt*/,
             std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         dragging_ = false;
-        thumbStyle_->pressed = false;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = false;
         style().markDirty();
         return SyncReturn::Handled;
     }
 
     SyncReturn Slider::handleStateChanged(Control& /*sender*/) {
-        thumbStyle_->enabled = isEnabled();
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        thumbStyle.enabled = isEnabled();
         if (!isEnabled()) {
             dragging_ = false;
-            thumbStyle_->pressed = false;
+            thumbStyle.pressed = false;
         }
         style().markDirty();
         return SyncReturn::Handled;

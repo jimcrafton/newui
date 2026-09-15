@@ -366,6 +366,175 @@ TEST(Stepper, ClickOutsideBoundsIsIgnored) {
 }
 
 // ---------------------------------------------------------------------
+// Slider/Progress - style()/thumb()/fill() no longer cache a typed
+// ThemedTrackbarTrackStyle*/ThemedTrackbarThumbStyle*/
+// ThemedProgressBarTrackStyle*/ThemedProgressBarFillStyle* member -
+// each derives it live via dynamic_cast on every use, same "style() can
+// be swapped out from under this Control" reasoning Button/Toggle/
+// ToolbarButton already went through (see the comment block above
+// Button.SwappingToADifferentThemedButtonStyleSubclassStaysSafe).
+// ---------------------------------------------------------------------
+
+TEST(Slider, SwappingToFluentTrackAndThumbStyleStaysSafe) {
+    auto* slider = new Slider();
+    slider->setBounds(Rect(0, 0, 200, 20));
+    slider->setStyle(std::make_unique<FluentTrackbarTrackStyle>());
+    slider->thumb()->setStyle(std::make_unique<FluentTrackbarThumbStyle>());
+
+    EXPECT_NO_THROW(slider->setValue(50.0f));
+    EXPECT_NO_THROW(slider->setHorizontal(false));
+    EXPECT_NO_THROW(slider->setEnabled(false));
+    EXPECT_NO_THROW(slider->setEnabled(true));
+
+    BLImage image(200, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(slider->paint(ctx));
+    ctx.end();
+
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Slider, SwappingToAnIncompatibleTrackStyleFailsLoudNotSilently) {
+    auto* slider = new Slider();
+    slider->setBounds(Rect(0, 0, 200, 20));
+    // A real ViewStyle, but not a ThemedTrackbarTrackStyle at all - no
+    // .horizontal field, same shape as Button's own equivalent test.
+    slider->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(slider->setHorizontal(false), std::bad_cast);
+
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Progress, SwappingToFluentTrackAndFillStyleStaysSafe) {
+    auto* progress = new Progress();
+    progress->setBounds(Rect(0, 0, 200, 12));
+    progress->setStyle(std::make_unique<FluentProgressBarTrackStyle>());
+    progress->fill()->setStyle(std::make_unique<FluentProgressBarFillStyle>());
+
+    EXPECT_NO_THROW(progress->setValue(0.5f));
+    EXPECT_NO_THROW(progress->setHorizontal(false));
+    EXPECT_NO_THROW(progress->setFillState(ThemedProgressBarFillStyle::FillState::Error));
+    EXPECT_EQ(progress->fillState(), ThemedProgressBarFillStyle::FillState::Error);
+
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(progress->paint(ctx));
+    ctx.end();
+
+    progress->destroy();
+    delete progress;
+}
+
+TEST(Progress, FillStateAccessorsThrowWhenFillStyleIsIncompatible) {
+    auto* progress = new Progress();
+    progress->fill()->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(progress->fillState(), std::runtime_error);
+    EXPECT_THROW(progress->setFillState(ThemedProgressBarFillStyle::FillState::Paused), std::runtime_error);
+
+    progress->destroy();
+    delete progress;
+}
+
+TEST(FluentTrackbarTrackStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentTrackbarTrackStyle style;
+    Size size(200.0f, 20.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 200.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 20.0f);
+}
+
+TEST(FluentTrackbarTrackStyle, PaintDoesNotThrowForEitherOrientation) {
+    BLImage image(200, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool horizontal : { true, false }) {
+        FluentTrackbarTrackStyle style;
+        style.horizontal = horizontal;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 20.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+TEST(FluentTrackbarThumbStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool pressed : { true, false }) {
+            for (bool highlighted : { true, false }) {
+                FluentTrackbarThumbStyle style;
+                style.enabled = enabled;
+                style.pressed = pressed;
+                Rect clientBounds;
+                EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentTrackbarThumbStyle, PaintToleratesAZeroOrSubPixelSize) {
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentTrackbarThumbStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(1.0f, 1.0f), false, clientBounds));
+    EXPECT_NO_THROW(style.paint(ctx, Size(0.0f, 0.0f), false, clientBounds));
+
+    ctx.end();
+}
+
+TEST(FluentProgressBarTrackStyle, PaintDoesNotThrowForEitherOrientation) {
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool horizontal : { true, false }) {
+        FluentProgressBarTrackStyle style;
+        style.horizontal = horizontal;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 12.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+TEST(FluentProgressBarFillStyle, PaintDoesNotThrowAcrossEveryFillState) {
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (auto state : { ThemedProgressBarFillStyle::FillState::Normal,
+            ThemedProgressBarFillStyle::FillState::Error,
+            ThemedProgressBarFillStyle::FillState::Paused }) {
+        FluentProgressBarFillStyle style;
+        style.state = state;
+        Rect clientBounds;
+        // Also covers a fill narrower than it is tall (a low value()) -
+        // radius = shortSide/2 has to stay sane even when shortSide is
+        // the *width*, not just the more common height case.
+        EXPECT_NO_THROW(style.paint(ctx, Size(5.0f, 12.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+// ---------------------------------------------------------------------
 // ScrollView - bar visibility/sizing and origin() wiring
 // ---------------------------------------------------------------------
 
@@ -789,6 +958,110 @@ TEST(FluentButtonStyle, PaintDoesNotThrowAcrossEveryState) {
     ctx.end();
 }
 
+TEST(Toggle, SwappingToFluentCheckBoxOrRadioStyleStaysSafe) {
+    for (bool radioStyle : { false, true }) {
+        auto* toggle = new Toggle();
+        toggle->setBounds(Rect(0, 0, 20, 20));
+        toggle->setRadioStyle(radioStyle);
+
+        // rebuildStyle() (Toggle::) always installs the native
+        // ThemedCheckBoxStyle/ThemedRadioButtonStyle pair itself - this
+        // swaps in the Fluent subclass by hand, same opt-in shape as
+        // Button/FluentButtonStyle above.
+        if (radioStyle) {
+            toggle->setStyle(std::make_unique<FluentRadioButtonStyle>());
+        } else {
+            toggle->setStyle(std::make_unique<FluentCheckBoxStyle>());
+        }
+
+        EXPECT_NO_THROW(toggle->setChecked(true));
+        EXPECT_NO_THROW(toggle->setEnabled(false));
+        EXPECT_NO_THROW(toggle->setEnabled(true));
+
+        BLImage image(20, 20, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        EXPECT_NO_THROW(toggle->paint(ctx));
+        ctx.end();
+
+        toggle->destroy();
+        delete toggle;
+    }
+}
+
+TEST(FluentCheckBoxStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentCheckBoxStyle style;
+    Size size(20.0f, 20.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 20.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 20.0f);
+}
+
+TEST(FluentCheckBoxStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentCheckBoxStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentRadioButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentRadioButtonStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentRadioButtonStyle, PaintToleratesAZeroOrSubPixelSize) {
+    // outerR = minDim*0.5f - 1.0f can go negative/zero for a tiny size -
+    // the early-return guard (paint(), viewstyle.cpp) is what this
+    // catches; without it, add_circle() with a negative radius is the
+    // real thing under test here.
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentRadioButtonStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(1.0f, 1.0f), false, clientBounds));
+    EXPECT_NO_THROW(style.paint(ctx, Size(0.0f, 0.0f), false, clientBounds));
+
+    ctx.end();
+}
+
 // ---------------------------------------------------------------------
 // ToolbarButton - same momentary-vs-toggle click gesture as Button,
 // just checked via ThemedToolbarButtonStyle instead
@@ -955,6 +1228,75 @@ TEST(ToolbarButton, PaintWithOnlyAnIconAndNoTextDoesNotCrash) {
 
     button->destroy();
     delete button;
+}
+
+TEST(ToolbarButton, SwappingToFluentToolbarButtonStyleStaysSafe) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 24, 24));
+    button->setStyle(std::make_unique<FluentToolbarButtonStyle>());
+
+    EXPECT_NO_THROW(button->setToggleButton(true));
+    EXPECT_NO_THROW(button->setChecked(true));
+    EXPECT_NO_THROW(button->setEnabled(false));
+    EXPECT_NO_THROW(button->setEnabled(true));
+
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
+}
+
+TEST(FluentToolbarButtonStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentToolbarButtonStyle style;
+    Size size(24.0f, 24.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 24.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 24.0f);
+}
+
+TEST(FluentToolbarButtonStyle, FlatAtRestPaintsNothingButStillDoesNotThrow) {
+    // Matches the native TS_NORMAL "no visible border/fill at rest"
+    // look this style replaces (see class comment, viewstyle.h) - the
+    // real thing under test is paint()'s own early-return when neither
+    // baseAlpha nor overlayAlpha is > 0, not a pixel-level assertion.
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentToolbarButtonStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(24.0f, 24.0f), false, clientBounds));
+
+    ctx.end();
+}
+
+TEST(FluentToolbarButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentToolbarButtonStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(24.0f, 24.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
 }
 
 // ---------------------------------------------------------------------
@@ -1210,6 +1552,70 @@ TEST(TextField, GotAndLostFocusToggleThemedEditStyleFocused) {
 
     field->destroy();
     delete field;
+}
+
+TEST(TextField, SwappingToFluentEditStyleStaysSafe) {
+    auto* field = new TextField();
+    field->setBounds(Rect(0, 0, 120, 24));
+    field->setStyle(std::make_unique<FluentEditStyle>());
+
+    // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+    // dynamic_cast style() to ThemedEditStyle* - FluentEditStyle still
+    // satisfies that, same opt-in shape as every other Fluent* style.
+    field->onGotFocus(*field);
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(field->style());
+    EXPECT_TRUE(editStyle.focused);
+    field->onLostFocus(*field);
+    EXPECT_FALSE(editStyle.focused);
+
+    BLImage image(120, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(field->paint(ctx));
+    ctx.end();
+
+    field->destroy();
+    delete field;
+}
+
+TEST(FluentEditStyle, ComputeClientBoundsDeflatesForBorderAndFocusUnderline) {
+    FluentEditStyle style;
+    Size size(120.0f, 24.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    // Unlike FluentButtonStyle (no native chrome to deflate for at all),
+    // this one reserves real room for its own border/underline - just
+    // asserting it's strictly smaller than the full size, not pinned to
+    // an exact inset, so the test doesn't need updating every time the
+    // padding constants get tuned.
+    EXPECT_LT(clientBounds.size().width, size.width);
+    EXPECT_LT(clientBounds.size().height, size.height);
+    EXPECT_GT(clientBounds.size().width, 0.0f);
+    EXPECT_GT(clientBounds.size().height, 0.0f);
+}
+
+TEST(FluentEditStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(120, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool focused : { true, false }) {
+            for (bool readOnly : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentEditStyle style;
+                    style.enabled = enabled;
+                    style.focused = focused;
+                    style.readOnly = readOnly;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(120.0f, 24.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
 }
 
 TEST(TextControl, GotAndLostFocusToggleThemedEditStyleFocused) {
