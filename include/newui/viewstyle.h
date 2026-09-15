@@ -971,6 +971,33 @@ namespace newui {
         }
     };
 
+    // Fluent-style group box frame - custom-drawn instead of
+    // ThemedGroupBoxStyle's native DrawThemeBackground(BP_GROUPBOX), same
+    // ThemedGroupBoxStyle-subclass opt-in shape as every other Fluent*
+    // style (GroupBox::handleStateChanged(), controls.cpp, dynamic_casts
+    // style() to ThemedGroupBoxStyle&, which this still satisfies). A
+    // plain rounded-rect stroke, no fill - a GroupBox is a grouping frame
+    // around already-laid-out sibling content, not a clickable/elevated
+    // surface, so unlike FluentCardStyle this has no background fill or
+    // shadow of its own. GroupBox::paint()'s own caption backdrop/text
+    // (controls.cpp) draws on top of this identically regardless of
+    // which border style is active - see its own comment.
+    class FluentGroupBoxStyle : public ThemedGroupBoxStyle {
+    public:
+        // Same "1px border is thin enough that content laid out at the
+        // full bounds still looks right" call FluentButtonStyle's own
+        // comment makes - a caller wanting real breathing room between
+        // this frame and its own child content adds that via its own
+        // Layout padding, the same way the bordered focus-scope panel in
+        // examples/uiinputmanager1.cpp already does for an unrelated
+        // bordered SubView.
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // A Fluent-style elevated "Card" surface - a plain rounded-rect panel
     // background/border for grouping in-page content, with a Card-level
     // drop shadow (ElevationLevel::Card above) on by default. Unlike

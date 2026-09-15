@@ -328,6 +328,46 @@ namespace newui {
         LabelStyle* labelStyle_ = nullptr;
     };
 
+    // A bordered frame grouping related sibling content, with an
+    // optional caption in its top-left corner - the same "fieldset/
+    // legend" idea a native Win32 GroupBox (BUTTON/BP_GROUPBOX) uses,
+    // though not pixel-identical to it (see paint()'s own comment,
+    // controls.cpp, for why the caption sits fully inside the frame here
+    // rather than straddling the border line the way a real one does).
+    // Own style() is ThemedGroupBoxStyle (chrome only, no text - same
+    // "chrome vs. content" split Button/ToolbarButton's own class
+    // comments already describe); this Control draws the caption text
+    // itself on top of the border, the same way Button/ToolbarButton
+    // draw their own text on top of their own chrome.
+    //
+    // Purely a container - real content is added as ordinary child
+    // SubViews via addChild(), positioned however the caller likes (a
+    // Layout, or by hand) within getClientBounds() (already deflated for
+    // the frame's own border - see ThemedGroupBoxStyle::computeClientBounds()).
+    // No focus/click handling of its own (acceptsFocus() stays Control's
+    // own default, false) - a GroupBox is a passive grouping frame, not
+    // itself a target, matching a real Win32 GroupBox (which never sets
+    // WS_TABSTOP).
+    class GroupBox : public Control {
+    public:
+        GroupBox();
+        virtual ~GroupBox() {}
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text);
+
+        // Drawn on top of the border - see this class's own comment.
+        void setTextColor(BLRgba32 color);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        SyncReturn handleStateChanged(Control& sender);
+
+        std::string text_;
+        BLVar textColor_;
+    };
+
     // A read-only status Control - not really interactive (still inherits
     // Control's click tracking, same as a real Win32 progress bar just
     // ignores clicks rather than this class specially suppressing them),

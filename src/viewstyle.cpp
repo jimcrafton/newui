@@ -1443,6 +1443,31 @@ namespace newui {
 		ctx.restore();
 	}
 
+	void FluentGroupBoxStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 8.0f;  // matches FluentCardStyle's own "overlay/grouping frame" radius, not an in-page control's 4px
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
+	}
+
 	FluentCardStyle::FluentCardStyle() {
 		setRectRadius(8.0f);  // Fluent's own overlay/card-level corner radius convention - larger than an in-page control's 4px (see FluentButtonStyle's own comment)
 		setElevation(ElevationLevel::Card);

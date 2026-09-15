@@ -497,6 +497,129 @@ namespace newui {
     }
 
     // -----------------------------------------------------------------
+    // GroupBox
+    // -----------------------------------------------------------------
+
+    GroupBox::GroupBox() {
+        setVisible(true);
+
+        // setFont() before setStyle() moves on - a freshly constructed
+        // style otherwise has no font at all, which paint() (below)
+        // treats as unresolved and silently skips drawing the caption
+        // for, exactly the same real, live-caught gap Button::Button()'s
+        // own comment already documents (and this class repeated at
+        // first: the caption never appeared in the live example app
+        // until this was added, confirmed via a temporary debug print
+        // showing style().font().blFont() as null).
+        auto groupBoxStyle = std::make_unique<ThemedGroupBoxStyle>();
+        groupBoxStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        setStyle(std::move(groupBoxStyle));
+
+        // Same UIColorManager::colorFor() reasoning as Button::Button()'s
+        // own comment above (dark-mode-aware, unlike Color::fromSystemColor()) -
+        // WindowText, not ControlText, since a GroupBox's caption sits
+        // directly on the surrounding window background, not on its own
+        // control-colored fill the way Button's label does.
+        textColor_ = UIColorManager::colorFor(UIColorRole::WindowText).toBLRgba32();
+
+        onStateChanged.add(this, &GroupBox::handleStateChanged);
+    }
+
+    void GroupBox::setText(const std::string& text) {
+        if (text_ == text) {
+            return;
+        }
+        text_ = text;
+        style().markDirty();
+    }
+
+    void GroupBox::setTextColor(BLRgba32 color) {
+        textColor_ = color;
+        style().markDirty();
+    }
+
+    SyncReturn GroupBox::handleStateChanged(Control& /*sender*/) {
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment above for why.
+        dynamic_cast<ThemedGroupBoxStyle&>(style()).enabled = isEnabled();
+        style().markDirty();
+        return SyncReturn::Ignored;
+    }
+
+    void GroupBox::paint(BLContext& ctx) {
+        if (text_.empty() || textColor_.is_null()) {
+            return;
+        }
+
+        // style().font() - declared on ViewStyle itself, no cast needed
+        // (same reasoning Button::paint()'s own comment above gives).
+        BLFont* blFont = style().font().blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+
+        Size size = bounds().size();
+        if (size.width <= 0.0f || size.height <= 0.0f) {
+            return;
+        }
+
+        BLGlyphBuffer glyphBuffer;
+        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+        blFont->shape(glyphBuffer);
+
+        BLTextMetrics textMetrics;
+        blFont->get_text_metrics(glyphBuffer, textMetrics);
+
+        const BLFontMetrics& fontMetrics = blFont->metrics();
+        double textWidth = textMetrics.advance.x;
+        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+
+        // A real Win32 GroupBox's caption straddles the top border line
+        // itself (half above the control's own top edge, half below) -
+        // deliberately not replicated here. This paint() call is
+        // View::paint()'s normal, *clipped* phase (View::paintChildren(),
+        // view.cpp - clipped to this GroupBox's own bounds, unlike
+        // prePaint()/postPaint()'s unclipped phases 1/3), so anything
+        // drawn at a negative local y here is silently clipped away
+        // entirely, not just visually cut off - confirmed while building
+        // this, not left as a guess. Achieving a real straddle would mean
+        // moving caption drawing into the *style* (ThemedGroupBoxStyle's
+        // own prePaint() override), which breaks this class's established
+        // "chrome vs. content" split (style draws chrome only, Control
+        // draws its own text - same as Button/ToolbarButton) for a purely
+        // cosmetic gain - not worth it. Kept fully inside instead: a
+        // small top/left inset, still with the background-colored
+        // backdrop faking a gap in the border immediately behind it (same
+        // technique a real comctl32 GroupBox uses, just positioned
+        // differently) - works the same regardless of which border
+        // style() is currently drawing underneath (native or
+        // FluentGroupBoxStyle, below), since both draw their top edge at
+        // this same local y = 0.
+        constexpr double kCaptionLeftInset = 8.0;
+        constexpr double kCaptionTopInset = 2.0;
+        constexpr double kCaptionBackdropPadding = 4.0;
+        double x = kCaptionLeftInset;
+        double topOfCaption = kCaptionTopInset;
+        double y = topOfCaption + fontMetrics.ascent;
+
+        BLRgba32 effectiveTextColor = isEnabled()
+            ? BLRgba32(textColor_.as<BLRgba32>())
+            : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
+        ctx.save();
+        ctx.set_comp_op(toBLCompOp(style().compositingOp()));
+        ctx.set_fill_alpha(style().opacity());
+
+        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+        ctx.fill_rect(BLRect(x - kCaptionBackdropPadding, topOfCaption,
+            textWidth + kCaptionBackdropPadding * 2.0, textHeight));
+
+        ctx.set_fill_style(effectiveTextColor);
+        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
     // Slider
     // -----------------------------------------------------------------
 

@@ -366,6 +366,158 @@ TEST(Stepper, ClickOutsideBoundsIsIgnored) {
 }
 
 // ---------------------------------------------------------------------
+// GroupBox - a bordered frame with a caption straddling the top border,
+// drawn by paint() itself on top of style()'s own chrome (ThemedGroupBoxStyle
+// by default) - same "chrome vs. content" split as Button's own text.
+// ---------------------------------------------------------------------
+
+TEST(GroupBox, DefaultConstructedIsVisibleWithThemedGroupBoxStyle) {
+    auto* box = new GroupBox();
+
+    EXPECT_TRUE(box->isVisible());
+    EXPECT_TRUE(box->text().empty());
+    EXPECT_NE(dynamic_cast<ThemedGroupBoxStyle*>(&box->style()), nullptr);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, DefaultConstructedHasAResolvableFontForItsOwnCaption) {
+    // A real, live-caught bug this guards against: GroupBox::Groupbox()
+    // originally never called setFont() on its own style, the same gap
+    // Button::Button()'s own comment documents - paint() (controls.cpp)
+    // silently skips drawing the caption with an unresolved font, so the
+    // caption never appeared at all despite text()/textColor_ both being
+    // set correctly. Caught live via a temporary debug print, not by any
+    // existing test - this one exists so it can't regress silently again.
+    auto* box = new GroupBox();
+
+    BLFont* blFont = box->style().font().blFont();
+    ASSERT_NE(blFont, nullptr);
+    EXPECT_TRUE(blFont->is_valid());
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SetTextChangesTheStoredValue) {
+    auto* box = new GroupBox();
+
+    box->setText("Options");
+    EXPECT_EQ(box->text(), "Options");
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* box = new GroupBox();
+    auto& groupBoxStyle = dynamic_cast<ThemedGroupBoxStyle&>(box->style());
+    ASSERT_TRUE(groupBoxStyle.enabled);
+
+    box->setEnabled(false);
+    EXPECT_FALSE(groupBoxStyle.enabled);
+
+    box->setEnabled(true);
+    EXPECT_TRUE(groupBoxStyle.enabled);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, PaintDoesNotCrashWithOrWithoutACaption) {
+    auto* box = new GroupBox();
+    box->setBounds(Rect(0, 0, 200, 100));
+
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    // No caption yet - paint()'s own early-return (text_.empty()) is
+    // what this exercises.
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    box->setText("Options");
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    box->setEnabled(false);
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    ctx.end();
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, PaintToleratesAZeroSize) {
+    auto* box = new GroupBox();
+    box->setText("Options");
+    box->setBounds(Rect(0, 0, 0, 0));
+
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(box->paint(ctx));
+    ctx.end();
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SwappingToFluentGroupBoxStyleStaysSafe) {
+    auto* box = new GroupBox();
+    box->setBounds(Rect(0, 0, 200, 100));
+    box->setText("Options");
+    box->setStyle(std::make_unique<FluentGroupBoxStyle>());
+
+    EXPECT_NO_THROW(box->setEnabled(false));
+    EXPECT_NO_THROW(box->setEnabled(true));
+
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(box->paint(ctx));
+    ctx.end();
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SwappingToAnIncompatibleViewStyleFailsLoudNotSilently) {
+    auto* box = new GroupBox();
+    box->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(box->setEnabled(false), std::bad_cast);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(FluentGroupBoxStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentGroupBoxStyle style;
+    Size size(200.0f, 100.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 200.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 100.0f);
+}
+
+TEST(FluentGroupBoxStyle, PaintDoesNotThrowEnabledOrDisabled) {
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        FluentGroupBoxStyle style;
+        style.enabled = enabled;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 100.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+// ---------------------------------------------------------------------
 // Slider/Progress - style()/thumb()/fill() no longer cache a typed
 // ThemedTrackbarTrackStyle*/ThemedTrackbarThumbStyle*/
 // ThemedProgressBarTrackStyle*/ThemedProgressBarFillStyle* member -
