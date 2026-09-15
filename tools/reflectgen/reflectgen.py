@@ -134,12 +134,6 @@ SCOPE_NAMES = {
 }
 
 
-def same_file(cursor_file, path):
-    if cursor_file is None:
-        return False
-    return os.path.normcase(os.path.abspath(cursor_file.name)) == os.path.normcase(os.path.abspath(path))
-
-
 def qualified_name(cursor):
     parts = []
     node = cursor
@@ -1559,11 +1553,25 @@ def collect_enum(cursor):
     return info
 
 
-def find_declarations(tu, path):
-    classes = []
-    enums = []
+# Walks the combined TU exactly once for every input file, instead of once
+# per file - find_declarations() used to take a single `path` and re-run
+# visit(tu.cursor) from scratch for each of main()'s valid_paths, filtering
+# by same_file() at the leaves; that's O(len(valid_paths) x size of the
+# whole combined TU) instead of O(size of the TU), and dominated real
+# reflectgen runs (60+ files -> 60x redundant top-to-bottom walks of every
+# namespace, including everything pulled in by the shared newui.h/STL/
+# Windows.h preamble). One pass here buckets each matched class/enum by
+# its own declaring file up front instead.
+def find_declarations(tu, valid_paths):
+    path_by_key = {os.path.normcase(os.path.abspath(p)): p for p in valid_paths}
+    results = {p: ([], []) for p in valid_paths}
 
-    def collect_nested_enums(class_cursor):
+    def path_for(cursor_file):
+        if cursor_file is None:
+            return None
+        return path_by_key.get(os.path.normcase(os.path.abspath(cursor_file.name)))
+
+    def collect_nested_enums(class_cursor, enums):
         for child in class_cursor.get_children():
             if child.kind == CursorKind.ENUM_DECL and child.is_definition():
                 # A private/protected nested enum's name isn't spellable
@@ -1592,17 +1600,22 @@ def find_declarations(tu, path):
                 if is_reflect_ignored(child):
                     continue
 
-                if child.is_definition() and same_file(child.location.file, path):
-                    classes.append(collect_class(child))
-                    collect_nested_enums(child)
+                if child.is_definition():
+                    path = path_for(child.location.file)
+                    if path is not None:
+                        classes, enums = results[path]
+                        classes.append(collect_class(child))
+                        collect_nested_enums(child, enums)
             elif child.kind == CursorKind.ENUM_DECL:
-                if child.is_definition() and same_file(child.location.file, path):
-                    enums.append(collect_enum(child))
+                if child.is_definition():
+                    path = path_for(child.location.file)
+                    if path is not None:
+                        results[path][1].append(collect_enum(child))
             elif child.kind in (CursorKind.NAMESPACE, CursorKind.TRANSLATION_UNIT):
                 visit(child)
 
     visit(tu.cursor)
-    return classes, enums
+    return results
 
 
 def emit_class_access(info):
@@ -2245,7 +2258,7 @@ def main():
     # being parsed as their own standalone translation unit the way this
     # function used to. Combining everything into one prelude gives every
     # type the same visibility a real translation unit already has -
-    # find_declarations()'s existing same_file() check still correctly
+    # find_declarations()'s own per-declaration file check still correctly
     # attributes each declaration back to its own real source file
     # afterward, so per-file output is unaffected, only *how* parsing gets
     # there. (Also meaningfully faster in practice - libclang parses the
@@ -2292,8 +2305,9 @@ def main():
             )
             sys.exit(1)
 
+        declarations_by_path = find_declarations(tu, valid_paths)
         for path in valid_paths:
-            classes, enums = find_declarations(tu, path)
+            classes, enums = declarations_by_path[path]
             all_classes.extend(classes)
             all_enums.extend(enums)
     finally:
