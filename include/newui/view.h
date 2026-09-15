@@ -198,12 +198,41 @@ namespace newui {
             return highlighted_;
         }
 
-        // Draws background/border/highlight from style() - see ViewStyle.
-        // Called automatically before paint() by whatever's orchestrating
-        // the draw (paintChildren() for children, RootView::repaint() for
-        // itself), so it always runs first without subclasses needing to
-        // remember to call it.
+        // Whether this View is the RootView's current focusedSubView()
+        // (rootview.h) right now - computed live from that, not a stored
+        // flag, so it can never drift out of sync with the real focus
+        // state the way a cached bool toggled from onGotFocus/onLostFocus
+        // could. Needs RootView's full definition, so this can't stay
+        // inline here - same reasoning setName() above is out-of-line
+        // (view.cpp). ViewStyle::postPaint()'s own default implementation
+        // (viewstyle.h) uses this (via its view() back-reference) to
+        // decide whether to draw the focus ring - not the same thing as
+        // Control::StateFlags::Focused (controls.h), which is a separate,
+        // currently-unused bit that can't cover this anyway
+        // (SegmentedControl/TabControl accept focus - view.h's
+        // acceptsFocus() - without being a Control at all).
+        bool isFocused() const;
+
+        // The three-phase style paint sequence - see ViewStyle::
+        // prePaint()/paint()/postPaint() (viewstyle.h) for what each
+        // phase is for. All three are called automatically by whatever's
+        // orchestrating the draw (paintChildren() for children,
+        // RootView::repaint() for itself - the latter only ever calls
+        // paintStyle() directly, since a RootView is never itself
+        // isFocused() and has never needed a pre-paint effect either),
+        // so subclasses never need to remember to call any of them.
+        //
+        // prePaintStyle()/postPaintStyle() are deliberately separate
+        // calls from paintStyle(), not folded into one method that calls
+        // all three ViewStyle phases back to back - paintChildren() needs
+        // to open and close a *different* ctx clip scope around each
+        // (unclipped for pre/post, clipped to this View's own bounds for
+        // the paintStyle()/paint()/paintChildren() run in between), so
+        // the phases have to be genuinely separate calls the caller can
+        // wrap independently.
+        void prePaintStyle(BLContext& ctx);
         void paintStyle(BLContext& ctx);
+        void postPaintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)
         // left over for content/children after style()'s chrome (border,
@@ -292,6 +321,8 @@ namespace newui {
         //typically 0,0 to bounds_.size().width, bounds_.size().height
         //but it could be less than this
         virtual void redraw();
+
+		virtual void computePrePaintBounds(Rect& outDirtyBounds) const;
 
         // How far this view's own children are shifted when painted/hit-
         // tested - a scroll offset, not this view's own position (that's
@@ -458,6 +489,77 @@ namespace newui {
         KeyEventDelegate onKeyDown;
         KeyEventDelegate onKeyUp;
 
+        // Whether this View is even a *candidate* for keyboard focus at
+        // all - checked by canBecomeFocused() below, and what
+        // UIInputManager (uiinputmanager.h) consults to decide which View
+        // a mouse click should actually focus (walking up parent() past
+        // any that answer false - see resolveClickFocusTarget()) and which
+        // Views Tab/Shift+Tab should ever land on (see moveFocus()).
+        // False by default - a plain SubView (a container/decoration) has
+        // nothing to do with a key press or a tab stop. Button/Toggle/
+        // TextField/etc. (controls.h) set this true in their own
+        // constructors; reflectgen pairs this getter with setAcceptsFocus()
+        // below into a real read/write "acceptsFocus" property, so a
+        // .newui file can flip it per-instance with no code change.
+        bool acceptsFocus() const {
+            return acceptsFocus_;
+        }
+
+        void setAcceptsFocus(bool value) {
+            acceptsFocus_ = value;
+        }
+
+        // Traps Tab/Shift+Tab cycling to this View's own subtree - the
+        // "Scoped Geometric Hierarchy" "UIInputManager possible
+        // implementation notes.docx" describes for complex/creative apps
+        // (a properties panel, an inspector, a timeline): pressing Tab
+        // while focus is anywhere inside a View with isFocusScope() true
+        // only ever cycles among *its own* focusable descendants
+        // (UIInputManager::moveFocus(), uiinputmanager.h) - it can never
+        // leak out into unrelated parts of the same window the way plain
+        // geometric ordering otherwise would. Scopes nest: a focus scope
+        // inside another one becomes a single Tab stop from its parent
+        // scope's own cycle (its descendants only become reachable once
+        // something inside it is actually focused - typically by a mouse
+        // click - not by Tabbing "into" it from outside; see moveFocus()'s
+        // own comment for why entering a non-focusable scope purely via
+        // Tab isn't supported). False by default - most Views (and every
+        // plain SubView) aren't scope boundaries at all, same "opt-in,
+        // costs nothing until used" reasoning acceptsFocus() above has.
+        //
+        // Distinct from RootView's own already-existing modal isolation
+        // (a Dialog/PopupFrame is a genuinely separate HWND/RootView, so
+        // Tab already can't cross that boundary regardless of this flag) -
+        // this is for scoping *within* a single RootView's own tree, which
+        // nothing here handled before.
+        bool isFocusScope() const {
+            return isFocusScope_;
+        }
+
+        void setFocusScope(bool value) {
+            isFocusScope_ = value;
+        }
+
+        // Lets this View's own onKeyDown/onKeyPress see a real Tab
+        // keystroke instead of UIInputManager::moveFocus() swallowing it
+        // for navigation (RootView::keyEvent(), rootview.cpp checks this
+        // on whichever View currently has focus before intercepting Tab
+        // at all) - for a future multi-line code/text editor that wants to
+        // insert a literal tab character rather than move focus, the same
+        // "WantsTabKey" escape hatch the docx's own IView sketch has.
+        // False by default, and nothing in this codebase currently sets it
+        // true - TextController (controls.h) has no literal-tab-insertion
+        // path to opt into yet (confirmed: no `case vkTab` anywhere in its
+        // handleKeyDown()), so this is a pure extension point today, not
+        // dead code serving an existing caller.
+        bool wantsTabKey() const {
+            return wantsTabKey_;
+        }
+
+        void setWantsTabKey(bool value) {
+            wantsTabKey_ = value;
+        }
+
         // Asked by RootView::setFocusedSubView() (rootview.h) before
         // taking focus away from this View / handing it to this View,
         // respectively - default true (no veto) so existing overrides
@@ -466,7 +568,7 @@ namespace newui {
         // e.g. a control mid-validation with an invalid value can
         // refuse to give up focus until that's resolved.
         virtual bool canResignFocus() const { return true; }
-        virtual bool canBecomeFocused() const { return !isDesignTime(); }
+        virtual bool canBecomeFocused() const { return acceptsFocus_ && !isDesignTime(); }
 
         // Answers whether this View itself (not its children) can
         // currently carry out cmd - default false, so a View that
@@ -576,6 +678,14 @@ namespace newui {
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;
+
+        // Backs acceptsFocus()/setAcceptsFocus() above.
+        bool acceptsFocus_ = false;
+
+        // Backs isFocusScope()/setFocusScope() and wantsTabKey()/
+        // setWantsTabKey() above.
+        bool isFocusScope_ = false;
+        bool wantsTabKey_ = false;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for

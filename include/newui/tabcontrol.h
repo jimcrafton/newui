@@ -71,6 +71,15 @@ namespace newui {
         // (Left/Right/Middle/Only) from scratch - has to re-run on every
         // addTab() call, since which button is first/last changes.
         void updateTabPositions();
+
+        // Left/Right (Top/Bottom alignment - a horizontal strip) or
+        // Up/Down (Left/Right alignment - a vertical strip) switches the
+        // selected tab, wrapping at either end - matching native Win32
+        // tab control behavior once the strip itself has focus (see the
+        // constructor's own comment on why the whole strip, not each
+        // button, is the one Tab stop). Any other key is ignored, not
+        // consumed.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
     };
 
 }

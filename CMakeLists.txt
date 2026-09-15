@@ -153,6 +153,7 @@ add_library(newui STATIC
     "include/newui/splitter.h" "src/splitter.cpp"
     "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
     "include/newui/svgimage.h" "src/svgimage.cpp"
+    "include/newui/uiinputmanager.h" "src/uiinputmanager.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)

@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 
 #include <newui/newui.h>
 #include <newui/action.h>
@@ -85,6 +86,14 @@ namespace newui {
         }
 
         bool isEnabled() const { return state_.isEnabled(); }
+
+        // A disabled Control is never a valid focus target - by mouse
+        // click (UIInputManager::resolveClickFocusTarget()) or by Tab
+        // (UIInputManager::moveFocus()) - even if acceptsFocus() is true,
+        // matching how a real disabled Win32 control is skipped in tab
+        // order. View::canBecomeFocused() already covers acceptsFocus()/
+        // isDesignTime(); this only adds the isEnabled() gate on top.
+        bool canBecomeFocused() const override { return View::canBecomeFocused() && isEnabled(); }
 
         // Non-owning - see Action's own class comment. Setting this does
         // not by itself wire this Control's onClick to action's
@@ -185,7 +194,6 @@ namespace newui {
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A checkable Control drawn as a native checkbox (BUTTON/BP_CHECKBOX)
@@ -236,8 +244,12 @@ namespace newui {
         // pressing_/isEnabled() over into it - called once from the
         // constructor and again on every setRadioStyle() change.
         void rebuildStyle();
-        // Pushes checked_/pressing_/isEnabled() into whichever of
-        // checkBoxStyle_/radioButtonStyle_ is currently installed.
+        // Pushes checked_/pressing_/isEnabled() into style() - a
+        // dynamic_cast<ThemedRadioButtonStyle*>/<ThemedCheckBoxStyle*> to
+        // whichever one it actually currently is, not a cached typed
+        // pointer (same "style() can be swapped out from under this
+        // Control" reasoning Button::updatePressedVisual()'s own comment,
+        // controls.cpp, gives).
         void updateStyleFields();
 
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -248,10 +260,6 @@ namespace newui {
         bool radioStyle_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        // Only one of these two is ever non-null at a time - whichever
-        // matches the currently-installed style() (see rebuildStyle()).
-        ThemedCheckBoxStyle* checkBoxStyle_ = nullptr;
-        ThemedRadioButtonStyle* radioButtonStyle_ = nullptr;
     };
 
     // A text-only Control - own style() is a LabelStyle (which already
@@ -320,6 +328,46 @@ namespace newui {
         LabelStyle* labelStyle_ = nullptr;
     };
 
+    // A bordered frame grouping related sibling content, with an
+    // optional caption in its top-left corner - the same "fieldset/
+    // legend" idea a native Win32 GroupBox (BUTTON/BP_GROUPBOX) uses,
+    // though not pixel-identical to it (see paint()'s own comment,
+    // controls.cpp, for why the caption sits fully inside the frame here
+    // rather than straddling the border line the way a real one does).
+    // Own style() is ThemedGroupBoxStyle (chrome only, no text - same
+    // "chrome vs. content" split Button/ToolbarButton's own class
+    // comments already describe); this Control draws the caption text
+    // itself on top of the border, the same way Button/ToolbarButton
+    // draw their own text on top of their own chrome.
+    //
+    // Purely a container - real content is added as ordinary child
+    // SubViews via addChild(), positioned however the caller likes (a
+    // Layout, or by hand) within getClientBounds() (already deflated for
+    // the frame's own border - see ThemedGroupBoxStyle::computeClientBounds()).
+    // No focus/click handling of its own (acceptsFocus() stays Control's
+    // own default, false) - a GroupBox is a passive grouping frame, not
+    // itself a target, matching a real Win32 GroupBox (which never sets
+    // WS_TABSTOP).
+    class GroupBox : public Control {
+    public:
+        GroupBox();
+        virtual ~GroupBox() {}
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text);
+
+        // Drawn on top of the border - see this class's own comment.
+        void setTextColor(BLRgba32 color);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        SyncReturn handleStateChanged(Control& sender);
+
+        std::string text_;
+        BLVar textColor_;
+    };
+
     // A read-only status Control - not really interactive (still inherits
     // Control's click tracking, same as a real Win32 progress bar just
     // ignores clicks rather than this class specially suppressing them),
@@ -358,8 +406,27 @@ namespace newui {
         void setHorizontal(bool value);
 
         // PBFS_NORMAL/ERROR/PAUSED - see ThemedProgressBarFillStyle::FillState.
-        ThemedProgressBarFillStyle::FillState fillState() const { return fillStyle_->state; }
-        void setFillState(ThemedProgressBarFillStyle::FillState state) { fillStyle_->state = state; style().markDirty(); }
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment (controls.cpp) for why:
+        // fill()'s own doc comment above explicitly invites a caller to
+        // fill()->setStyle() a different ThemedProgressBarFillStyle
+        // subclass (e.g. FluentProgressBarFillStyle), which a cached
+        // pointer here would then dangle into.
+        ThemedProgressBarFillStyle::FillState fillState() const {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::fillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            return fillStyle->state;
+        }
+        void setFillState(ThemedProgressBarFillStyle::FillState state) {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::setFillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            fillStyle->state = state;
+            style().markDirty();
+        }
 
         // The child SubView representing the filled portion - exposed
         // read-only in case a caller wants to reach past this class's own
@@ -379,8 +446,6 @@ namespace newui {
         float value_ = 0.0f;
         bool horizontal_ = true;
         SubView* fill_ = nullptr;
-        ThemedProgressBarTrackStyle* trackStyle_ = nullptr;
-        ThemedProgressBarFillStyle* fillStyle_ = nullptr;
     };
 
     // A draggable value control - native trackbar groove
@@ -565,9 +630,6 @@ namespace newui {
         bool showTicks_ = false;
         SubView* thumb_ = nullptr;
         SubView* ticks_ = nullptr;
-        ThemedTrackbarTrackStyle* trackStyle_ = nullptr;
-        ThemedTrackbarThumbStyle* thumbStyle_ = nullptr;
-        ThemedTrackbarTicksStyle* ticksStyle_ = nullptr;
     };
 
     // A real, interactive scrollbar (SCROLLBAR/SBP_ARROWBTN +
@@ -1011,6 +1073,24 @@ namespace newui {
         // rely on (see this class's own constructor).
         SyncReturn handleContentChildContentSizeChanged(View& sender);
 
+        // Subscribed to every real content child's own
+        // onRequestScrollIntoView (view.h) in addChild() below - a
+        // content-space rect a caret (TextControl), a selected row
+        // (ListView), or a keyboard-highlighted row/node (ListView/
+        // TreeView, and everything's Ctrl+Arrow preview highlight) wants
+        // scrolled fully into view. Nudges vBar_/hBar_'s own value() just
+        // far enough (never further - already-visible is left alone) via
+        // their normal setValue(), which is what actually moves the
+        // scroll position (see handleVBarValueChanged()/
+        // handleHBarValueChanged() above - the exact same path a real
+        // scrollbar drag already goes through), so this never needs to
+        // touch viewport_'s origin()/the virtualized child's
+        // onScrollOffsetChanged directly itself. A bar that isn't
+        // currently visible() (content fits on that axis already) is
+        // left untouched - there's nothing to scroll there regardless of
+        // what requestedRect says.
+        SyncReturn handleContentRequestScrollIntoView(View& sender, const Rect& requestedRect);
+
         Size contentSize_;
         // False (the default) until setContentSize() is called explicitly
         // at least once - see updateLayout()'s own comment for what that
@@ -1145,7 +1225,6 @@ namespace newui {
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedToolbarButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A toolbar separator (TOOLBAR/TP_SEPARATOR or TP_SEPARATORVERT, via
@@ -1844,6 +1923,16 @@ namespace newui {
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+
+        // What paint() last fired onRequestScrollIntoView() for - same
+        // "only fire on a real change, not every paint()" fix as
+        // ListView/TreeView's own pair (controls.h) - see ListView::
+        // paint()'s own doc comment (controls.cpp) for the real,
+        // confirmed live bug this guards against (scrolling this
+        // TextControl's own hosting ScrollView away from the caret via
+        // its scrollbar got immediately undone by the very next repaint,
+        // which paint() firing unconditionally caused on its own).
+        std::optional<Rect> lastScrolledIntoViewCaretRect_;
     };
 
     // The first real consumer of the Item/Controller foundation (items.h/
@@ -2023,6 +2112,28 @@ namespace newui {
         // !hoverHighlightEnabled(), so nothing to undo when it's turned
         // back on mid-hover.
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down/Home/End move/extend/preview selection the same way
+        // handleMouseDown()'s own Shift/Ctrl handling does, just relative
+        // to whichever row is "current" (keyboardHighlightedIndex_ if a
+        // Ctrl-Arrow preview is in progress, else selectionAnchor_, else
+        // selectedIndex(), else row 0) instead of a clicked row:
+        //  - plain: replaces selectedIndices_ with just the new row
+        //    (setSelectedIndex()) and moves selectionAnchor_ to it - same
+        //    as a plain click.
+        //  - Shift: extends from selectionAnchor_ to the new row
+        //    (selectRange()) - same as Shift+click; repeated presses keep
+        //    extending from the new row (tracked via
+        //    keyboardHighlightedIndex_), not resetting to the anchor.
+        //  - Ctrl: moves keyboardHighlightedIndex_ only - real selection
+        //    is untouched until Ctrl+Space toggles it (see below) - same
+        //    "move a preview highlight, not the real selection" contract
+        //    DropDownList::moveKeyboardHighlight() already established for
+        //    its own popup ListView, just driven by this ListView's own
+        //    real keyboard focus instead of a synthetic one.
+        // Ctrl+Space toggles selection at keyboardHighlightedIndex_ (a
+        // no-op if nothing's currently highlighted) - the other half of
+        // classic Win32 listbox keyboard multi-select.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         // Clears hoveredIndex_ - the cursor has left this control
         // entirely, so no row is hovered regardless of where it last was.
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -2041,6 +2152,13 @@ namespace newui {
         // TextControl::handleModelChanged() already documents for a text
         // edit.
         SyncReturn handleDataChanged(ListController& sender);
+        // Keeps editStyle_->focused (ThemedEditStyle, viewstyle.h) in sync
+        // with real keyboard focus, the same way TextController::
+        // handleGotFocus()/handleLostFocus() (controls.cpp) already does
+        // for TextField/TextControl - this class has no TextController to
+        // share that fix with, so it gets its own pair instead.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         // Common "did this actually change the selection" tail shared by
         // setSelectedIndex()/addToSelection()/removeFromSelection()/
@@ -2049,6 +2167,14 @@ namespace newui {
         // actually change, otherwise marks dirty and fires
         // onSelectionChanged.
         void replaceSelection(std::set<std::size_t> newSelection);
+
+        // The row Up/Down/Home/End in handleKeyDown() treats as "here
+        // right now" before applying a move - keyboardHighlightedIndex_ if
+        // a Ctrl-Arrow preview is already in progress, else
+        // selectionAnchor_, else selectedIndex(), else row 0 (never
+        // itemCount(), by construction - handleKeyDown() already returns
+        // early when itemCount() == 0).
+        std::size_t currentKeyboardLead() const;
 
         std::unique_ptr<ListController> controller_;
         float scrollOffsetY_ = 0.0f;
@@ -2065,6 +2191,27 @@ namespace newui {
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredIndex_;
         std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // What paint() last fired onRequestScrollIntoView() for - a real,
+        // confirmed live bug otherwise: paint() used to fire it every
+        // single call whenever selectedIndex()/keyboardHighlightedIndex_
+        // had a value at all, not just when either one actually *changed*
+        // since the last paint(). Since dragging this ListView's own
+        // hosting ScrollView's scrollbar triggers a repaint itself
+        // (ScrollBar::onValueChanged -> handleScrollOffsetChanged() ->
+        // style().markDirty()), that unconditional firing meant every
+        // drag attempt to scroll the selected row *out* of view
+        // immediately snapped straight back to it on the very next
+        // paint() - the user could never actually scroll away from a
+        // selected row at all. paint() now only fires again when
+        // selectedIndex()/keyboardHighlightedIndex_ no longer matches
+        // what's stored here.
+        std::optional<std::size_t> lastScrolledIntoViewSelectedIndex_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
+
+        // Captured from style() at construction (ListView::ListView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     // The hierarchical counterpart to ListView (above) - same overall
@@ -2113,6 +2260,17 @@ namespace newui {
 
         bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
         void setHoverHighlightEnabled(bool value);
+
+        // A second, independent highlight driven by Ctrl+Arrow (see
+        // handleKeyDown(), controls.cpp) - same "moved but not yet
+        // selected" contract as ListView::keyboardHighlightedIndex(), a
+        // visible-row index (controller_->pathAt()'s own index space, not
+        // a tree path) for the same reason paint() already needs one to
+        // look up itemOffset()/itemHeight(). Clamped to a valid index (or
+        // cleared if visibleCount() is 0) - never left pointing past the
+        // end.
+        std::optional<std::size_t> keyboardHighlightedIndex() const { return keyboardHighlightedIndex_; }
+        void setKeyboardHighlightedIndex(std::optional<std::size_t> index);
 
         float rowHeight() const { return controller_->defaultItemHeight(); }
         void setRowHeight(float height);
@@ -2182,11 +2340,41 @@ namespace newui {
         SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down move/extend/preview selection the same way ListView::
+        // handleKeyDown() does (see its own doc comment, controls.h) -
+        // plain replaces, Shift extends from selectionAnchorPath_, Ctrl
+        // moves keyboardHighlightedIndex_ only (Ctrl+Space toggles it into
+        // the real selection) - all keyed by visible row index, converted
+        // to/from a tree path via controller_->pathAt()/visibleIndexOf().
+        // Left/Right add the classic tree-specific pair on top: collapse
+        // (if expanded) or go to the parent path (if not); expand (if
+        // collapsed and has children) or go to the first child path (if
+        // already expanded) - see TreeController::isExpanded()/
+        // hasChildren().
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         SyncReturn handleQueryContentSize(View& sender, Size& outSize);
         SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
         SyncReturn handleDataChanged(TreeController& sender);
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView's own pair (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         void replaceSelection(std::set<std::vector<std::size_t>> newSelection);
+
+        // The visible row handleKeyDown()'s Up/Down treats as "here right
+        // now" before applying a move - same shape as ListView::
+        // currentKeyboardLead(), just resolving selectionAnchorPath_/
+        // selectedPath() to a visible index via controller_->
+        // visibleIndexOf() first (a path can't be compared/offset
+        // directly the way a flat index can). Falls back to row 0 if
+        // nothing resolves to a currently-visible row (e.g. the anchor
+        // path got collapsed away) - never visibleCount(), by
+        // construction (handleKeyDown() already returns early when
+        // visibleCount() == 0).
+        std::size_t currentKeyboardLead() const;
 
         std::unique_ptr<TreeController> controller_;
         float scrollOffsetY_ = 0.0f;
@@ -2194,6 +2382,18 @@ namespace newui {
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
+        std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // Same "only fire onRequestScrollIntoView() on a real change, not
+        // every paint()" fix as ListView's own pair (controls.h) - see
+        // its own doc comment for the full reasoning (same scrollbar-
+        // fighting-the-user bug, same fix shape).
+        std::optional<std::vector<std::size_t>> lastScrolledIntoViewSelectedPath_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
+
+        // Captured from style() at construction (TreeView::TreeView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     class PopupFrame;
@@ -2291,6 +2491,16 @@ namespace newui {
         // extra focus-handling needed here.
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView/TreeView's own pairs (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror. This is the outer combo box
+        // control itself, not popupListView_ - see moveKeyboardHighlight()'s
+        // own comment above for why popupListView_ never reliably holds
+        // real keyboard focus at all.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
+
         // Moves popupListView_'s keyboardHighlightedIndex() by delta
         // (clamped to a valid row, never wrapping) - starts from
         // selectedIndex_ the first time (seeded in openPopup()), so the
@@ -2310,6 +2520,10 @@ namespace newui {
         ScrollView* popupScroll_ = nullptr;
         ListView* popupListView_ = nullptr;
         std::optional<std::size_t> selectedIndex_;
+
+        // Captured from style() at construction (DropDownList::DropDownList()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
 
         // Guards openPopup()'s own restore of the popup ListView's
         // selection (to match selectedIndex_ on reopen) from being

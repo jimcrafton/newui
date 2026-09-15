@@ -11,11 +11,126 @@
 #include "newui/themedata.h"
 #include "newui/uicolormanager.h"
 
+#include "newui/shapes.h"
+
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <vector>
 
 namespace {
+
+	// Elevation -> shadow blur radius/offset magnitude, for ViewStyle::
+	// prePaint()/computePrePaintBounds()'s elevation-driven drop shadow
+	// below. Adapted from Fluent's own named elevation scale - Layer=1,
+	// Control=2, Card=8, Tooltip=16, Flyout=32, Dialog/Window=128 (see
+	// learn.microsoft.com/windows/apps/design/signature-experiences/
+	// layering) - and its stated principle ("the higher the elevation,
+	// the larger and softer the shadow becomes"), not a literal port:
+	// Fluent's own ThemeShadow computes its actual blur/offset via an
+	// opaque WinUI3 composition effect with no published formula, so
+	// there's nothing to port literally - same "adapt the source
+	// material's real intent to this codebase's own architecture, don't
+	// assume a literal copy is even possible" approach used everywhere
+	// else a docx/design-doc source has driven this codebase's own work.
+	//
+	// log2(elevation+1), not linear - keeps both bounded even at Window/
+	// Dialog's elevation=128, instead of growing unboundedly. A *previous*
+	// version of this formula scaled softness linearly (2*elevation_),
+	// reaching a 256px blur radius there - once shapes::kBlurPadFactor
+	// (3x, shapes.h) pads the mask Shape::paintEffect() (shapes.cpp) has
+	// to allocate and box-blur, that's roughly 768px of padding *per
+	// side* - a multi-million-pixel offscreen mask, box-blurred fresh on
+	// every single paint() call, for one dialog's shadow.
+	constexpr float kElevationBlurBase = 2.0f;
+	constexpr float kElevationBlurScale = 3.0f;
+	constexpr float kElevationOffsetBase = 1.0f;
+	constexpr float kElevationOffsetScale = 1.5f;
+
+	// Shadow *darkness* deliberately does not scale with elevation at
+	// all - a previous version of this formula used 1.0f/elevation_,
+	// making a Dialog's shadow (elevation 128) sixteen times fainter
+	// than a Control's (elevation 2): exactly backwards from the real
+	// visual hierarchy Fluent describes - a more-elevated surface should
+	// read as *more* prominent, not nearly invisible. Real elevation-
+	// shadow systems (Material Design's own published key/ambient shadow
+	// alpha values - the only place either design language actually
+	// publishes a concrete number here) keep shadow alpha roughly
+	// constant across elevation too: it's the shadow's *size*, not its
+	// darkness, that communicates height.
+	constexpr float kElevationShadowAmount = 0.35f;
+
+	float elevationBlurRadius(float elevation) {
+		if (elevation <= 0.0f) {
+			return 0.0f;
+		}
+		return kElevationBlurBase + kElevationBlurScale * std::log2(elevation + 1.0f);
+	}
+
+	float elevationShadowOffsetMagnitude(float elevation) {
+		if (elevation <= 0.0f) {
+			return 0.0f;
+		}
+		return kElevationOffsetBase + kElevationOffsetScale * std::log2(elevation + 1.0f);
+	}
+
+	// How far outside the View's own full edge ViewStyle::postPaint()'s
+	// default focus ring is drawn - shared between postPaint() itself and
+	// computePrePaintBounds() below specifically so the two can never
+	// drift out of sync the way they did briefly: computePrePaintBounds()
+	// used to only account for the elevation-driven drop shadow (gated on
+	// elevation_ > 0.0f), so for any plain, non-elevated View (nearly
+	// everything - a Button/TextField/etc. never calls setElevation() at
+	// all) it left View::redraw()'s own invalidated region at exactly the
+	// view's plain bounds, zero allowance for this ring's own 2px
+	// outward bleed. Whether the ring actually showed up after a Tab
+	// then depended entirely on whether some *other*, unrelated repaint
+	// happened to also cover that extra margin - a real, confirmed live
+	// bug (intermittent: tabbing through several controls in a row would
+	// show the ring on some and not others, seemingly at random).
+	constexpr float kFocusRingOutset = 2.0f;
+
+	// The ring itself is a kFocusRingStrokeWidth-wide *stroke* centered on
+	// the kFocusRingOutset boundary (ctx.set_stroke_width() in postPaint(),
+	// below) - its actual painted pixels reach kFocusRingStrokeWidth/2
+	// *past* that boundary, not right up to it. computePrePaintBoundsRingPad()
+	// (below) is what computePrePaintBounds() actually reserves room with -
+	// kFocusRingOutset alone (the centerline) is what a first fix here
+	// used, and was still too small by exactly that half-stroke-width: a
+	// real, confirmed live artifact (a thin sliver of the ring's own top/
+	// left edge left behind on the previously-focused control after Tab
+	// moved focus elsewhere - only a full, unrelated repaint of the whole
+	// window, e.g. from a mouse move, happened to clear it, since nothing
+	// about the *targeted* invalidation for that one control's own redraw()
+	// covered where those last surviving pixels actually were). Rounded up
+	// to a full extra kFocusRingStrokeWidth, not just the exact half, as a
+	// deliberate safety margin against any further rounding (pixel-
+	// snapping elsewhere in this pipeline - see paintChildren()'s own
+	// snappedOutwardToPixels() call, view.cpp - already establishes that
+	// "round outward, don't cut it close" is the right default here).
+	constexpr float kFocusRingStrokeWidth = 1.0f;
+
+	// Getting the exact half-stroke-width figure above right down to the
+	// sub-pixel is brittle - AA coverage, the pixel-snapping in
+	// paintChildren() (view.cpp), and DPI scaling can all nudge the
+	// ring's true rightmost painted pixel a bit further than the strict
+	// math implies. An extra 1px margin costs nothing (this whole pad is
+	// tiny next to the elevation shadow pad below) and trades that
+	// brittleness for simply always reserving enough room.
+	constexpr float kFocusRingPadSafetyMargin = 1.0f;
+
+	float computePrePaintBoundsRingPad() {
+		return kFocusRingOutset + kFocusRingStrokeWidth + kFocusRingPadSafetyMargin;
+	}
+
+	// Fluent's own "state layer" convention (see FluentButtonStyle::paint()'s
+	// own comment, below) - a translucent WindowText overlay whose alpha
+	// alone signals hover/pressed, shared across every Fluent* style that
+	// needs the same two-level feedback (FluentButtonStyle/
+	// FluentCheckBoxStyle/FluentRadioButtonStyle/FluentToolbarButtonStyle).
+	float fluentStateOverlayAlpha(bool pressed, bool highlighted) {
+		return pressed ? 0.15f : (highlighted ? 0.08f : 0.0f);
+	}
 
 	// Greedy word-wrap for LabelStyle::paint()'s wordWrap() case - breaks
 	// text into as many lines as needed so each line's *shaped* width
@@ -607,6 +722,163 @@ namespace newui {
 		ctx.restore();
 	}
 
+	void ViewStyle::computePrePaintBounds(Rect& outDirtyBounds) const
+	{
+		// postPaint()'s own default focus ring always *potentially* needs
+		// this much room, regardless of elevation - it's gated on
+		// isFocused() only at actual paint time (postPaint() has to run
+		// unconditionally every pass so an override stays free to draw
+		// something else regardless of focus state - see its own doc
+		// comment), so there's no way to know here, ahead of time,
+		// whether a given redraw() is happening because focus is about to
+		// land on (or leave) this particular View. Reserving the room
+		// unconditionally is the only correct option - see this
+		// constant's own comment (above) for the real bug leaving it out
+		// caused. Cheap either way: 2px is negligible next to the
+		// elevation pad below, when there is one.
+		float pad = computePrePaintBoundsRingPad();
+
+		if (elevation_ > 0.0f) {
+			// Mirrors Shape::boundsWithEffects()'s own drop-shadow pad
+			// formula exactly (shapes.cpp: softness * kBlurPadFactor +
+			// offsetMag), using the same shapes::kBlurPadFactor constant
+			// (shapes.h) - so this can never drift out of sync with what
+			// prePaint()'s own shapes::Rectangle actually ends up
+			// painting. Takes the max with the focus-ring pad above, not
+			// a sum - both are measured outward from the same edges, so
+			// what actually matters is the outer-most extent either
+			// effect could reach in a given direction, not their total.
+			float shadowPad = elevationBlurRadius(elevation_) * newui::shapes::kBlurPadFactor
+				+ elevationShadowOffsetMagnitude(elevation_);
+			pad = pad > shadowPad ? pad : shadowPad;
+		}
+
+		outDirtyBounds = outDirtyBounds.inflate(pad);
+	}
+
+	void ViewStyle::prePaint(BLContext& ctx, const Size& size, bool /*highlighted*/) const
+	{
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		if (elevation_ <= 0.0f) {
+			return;
+		}
+
+		// The "elevation" effect is a soft drop shadow behind the view's
+		// own fill - see elevationBlurRadius()/elevationShadowOffsetMagnitude()'s
+		// own comments (above) for where the actual numbers come from.
+		newui::shapes::Rectangle dropShadow(0.0f, 0.0f, size.width, size.height);
+		dropShadow.style().fill().setColor(newui::Color(0.0f, 0.0f, 0.0f));
+		dropShadow.style().fill().setKind(newui::gfx::PaintKind::Color);
+		dropShadow.style().stroke().setKind(newui::gfx::PaintKind::None);
+		// Near-zero, not the shadow's own opacity - deliberate, not a
+		// bug. Shape::render() (shapes.cpp) wraps both the plain fill/
+		// stroke above (only present to trace the mask *shape* from) and
+		// the dropShadow effect below in the same outer
+		// ctx.set_global_alpha(style_.opacity()) call, but
+		// Shape::paintEffect() then makes its own separate
+		// ctx.set_global_alpha(amount) call while blitting the shadow
+		// mask - a flat state overwrite, not a multiply-on-top (confirmed
+		// against Blend2D's own set_global_alpha(), a plain setter -
+		// core/context.h) - restoring back to style_.opacity() only
+		// afterward. So dropShadow().amount() below is genuinely the
+		// shadow's real effective opacity, independent of this - which
+		// exists purely to keep the plain black fill/stroke this Shape
+		// also carries from ever actually appearing on screen as a solid
+		// black box of its own.
+		dropShadow.style().setOpacity(0.001f);
+
+		float offsetMag = elevationShadowOffsetMagnitude(elevation_);
+		dropShadow.style().dropShadow().setEnabled(true);
+		dropShadow.style().dropShadow().setOffset(newui::Point(offsetMag, offsetMag));
+		dropShadow.style().dropShadow().setSoftness(elevationBlurRadius(elevation_));
+		dropShadow.style().dropShadow().setAmount(kElevationShadowAmount);
+
+		dropShadow.render(ctx);
+	}
+
+	void ViewStyle::postPaint(BLContext& ctx, const Size& size, bool /*highlighted*/, const Rect& /*clientBounds*/) const
+	{
+		// This is the default *effect*, not a mandatory part of what
+		// postPaint() itself means - only draw it while the owning View
+		// is actually focused. Checked here, not by the caller (View::
+		// postPaintStyle(), view.cpp) - postPaint() is called
+		// unconditionally every paint pass now (see this method's own
+		// doc comment, viewstyle.h), so a future override drawing some
+		// other unclipped effect stays free to run regardless of focus.
+		if (view() == nullptr || !view()->isFocused()) {
+			return;
+		}
+
+		// kFocusRingOutset (above) pushes the ring outside the View's own
+		// full edge rather than inset within it - matches real Windows 11/
+		// Fluent keyboard focus visuals (the "high-visibility" focus
+		// rectangle's FocusVisualMargin - see learn.microsoft.com/
+		// windows/apps/design/accessibility/keyboard-accessibility),
+		// which draw with a small *outward* gap from the control's own
+		// edge, closer to a CSS outline than an inset box-shadow. This
+		// only actually renders visibly because postPaint() itself now
+		// runs in its own unclipped scope (View::paintChildren()'s phase
+		// 3, view.cpp) *and* View::redraw()'s own invalidated region is
+		// grown to match (ViewStyle::computePrePaintBounds(), above,
+		// reads this same constant) - an earlier attempt at this same
+		// outset, before either of those existed, was invisible or only
+		// intermittently visible for exactly that reason. kCornerRadius
+		// matches Fluent's own 4px standard for in-page controls
+		// (learn.microsoft.com/windows/apps/design/signature-
+		// experiences/geometry).
+		//
+		// Deliberately built from `size` (the View's own full given
+		// bounds), not the `clientBounds` out-parameter - the two look
+		// identical for most styles here (Button/Toggle/ToolbarButton/the
+		// plain ViewStyle default all return the full size unchanged from
+		// computeClientBounds(), nothing native to deflate for), so this
+		// went unnoticed until FluentEditStyle's own real text-padding
+		// deflation (computeClientBounds(), this file) made the gap
+		// large enough to see: with clientBounds here instead, the ring
+		// landed *inside* FluentEditStyle's own visible border rather
+		// than outset past it, a real, confirmed live bug - the deflation
+		// this method never accounted for outweighed kFocusRingOutset's
+		// own 2px compensation in the wrong direction. computePrePaintBounds()
+		// (below) already only ever worked in terms of the View's full
+		// bounds, never clientBounds, so `size` is what actually keeps
+		// the two in agreement.
+		constexpr float kCornerRadius = 4.0f;
+		Rect fullBounds(0.0f, 0.0f, size.width, size.height);
+		Rect ring = fullBounds.inflate(kFocusRingOutset);
+		if (ring.size().width <= 0.0f || ring.size().height <= 0.0f) {
+			return;
+		}
+
+		ctx.save();
+		ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+
+		// A solid rounded-rect outline in the accent color - not the
+		// classic dashed DrawFocusRect() look, a deliberate choice, not a
+		// missing feature: BLContext::set_stroke_dash_array()/
+		// set_stroke_dash_offset() exist and correctly store the dash
+		// pattern into the context's stroke_options (confirmed by reading
+		// raster/rastercontext.cpp's own setter implementations), but
+		// this vendored Blend2D's actual path stroker
+		// (core/pathstroke.cpp) never reads stroke_options.dash_array at
+		// all - dashing is simply unimplemented in this build, tried and
+		// confirmed live (a 6px dash/gap pattern still rendered as one
+		// unbroken line). A solid accent-colored ring is a legitimate,
+		// modern focus style in its own right (the same idea CSS's
+		// :focus-visible/Fluent/Material conventions already use), not a
+		// downgrade - implementing dashing by hand (segmenting the path
+		// into alternating drawn/skipped pieces around the rounded
+		// corners) was considered and deliberately not done.
+		BLPath path;
+		path.add_round_rect(BLRoundRect(ring.left(), ring.top(), ring.size().width, ring.size().height, kCornerRadius));
+		ctx.stroke_path(path);
+		ctx.restore();
+	}
+
 	void LabelStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
 		ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
@@ -909,6 +1181,469 @@ namespace newui {
 		}
 
 		::DeleteDC(targetDC);
+	}
+
+	void FluentButtonStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 4.0f;  // Fluent's own "in-page control" standard - see class comment (viewstyle.h)
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+		ctx.fill_path(path);
+
+		if (enabled) {
+			// Fluent's own "state layer" convention for hover/pressed
+			// feedback - a translucent overlay in the text color, not a
+			// hand-tuned per-mode brightness multiplier. WindowText is
+			// already dark/light-mode-correct (near-black in light mode,
+			// near-white in dark), so a low-alpha overlay of it darkens a
+			// light fill and lightens a dark one automatically, in
+			// whichever direction each mode actually needs - a fixed
+			// brightness multiplier can't do that (it would barely
+			// register against an already-near-black dark-mode fill).
+			float overlayAlpha = fluentStateOverlayAlpha(pressed, highlighted);
+			if (overlayAlpha > 0.0f) {
+				Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+				ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+				ctx.fill_path(path);
+			}
+		}
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
+	}
+
+	void FluentCheckBoxStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// Toggle has no separate label - this glyph fills the View's whole
+		// given size (see class comment, viewstyle.h) - min(width,height)
+		// keeps the corner radius/checkmark proportions sane even if a
+		// caller ever sizes the box non-square.
+		float minDim = size.width < size.height ? size.width : size.height;
+		float cornerRadius = minDim * 0.2f;
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, cornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			// A flat 50% dim over the whole glyph - same "disabled fades,
+			// doesn't recolor" convention ToolbarButton::paint() already
+			// uses for its own icon (0.4 there; a filled/checked glyph
+			// reads better a bit less faded).
+			ctx.set_global_alpha(0.5);
+		}
+
+		if (checked) {
+			ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+			ctx.fill_path(path);
+		} else {
+			ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+			ctx.fill_path(path);
+			ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+			ctx.set_stroke_width(1.0f);
+			ctx.stroke_path(path);
+		}
+
+		if (enabled) {
+			float overlayAlpha = fluentStateOverlayAlpha(pressed, highlighted);
+			if (overlayAlpha > 0.0f) {
+				Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+				ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+				ctx.fill_path(path);
+			}
+		}
+
+		if (checked) {
+			BLPath check;
+			check.move_to(size.width * 0.22f, size.height * 0.52f);
+			check.line_to(size.width * 0.42f, size.height * 0.72f);
+			check.line_to(size.width * 0.78f, size.height * 0.28f);
+
+			ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightText).toBLRgba32());
+			ctx.set_stroke_width(minDim * 0.12f);
+			ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
+			ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
+			ctx.stroke_path(check);
+		}
+
+		ctx.restore();
+	}
+
+	void FluentRadioButtonStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		float minDim = size.width < size.height ? size.width : size.height;
+		float cx = size.width * 0.5f;
+		float cy = size.height * 0.5f;
+		float outerR = minDim * 0.5f - 1.0f;  // -1 so a 1px stroke stays fully inside the given bounds
+		if (outerR <= 0.0f) {
+			return;
+		}
+
+		BLPath path;
+		path.add_circle(BLCircle(cx, cy, outerR));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		if (checked) {
+			ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+			ctx.fill_path(path);
+		} else {
+			ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+			ctx.fill_path(path);
+			ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+			ctx.set_stroke_width(1.0f);
+			ctx.stroke_path(path);
+		}
+
+		if (enabled) {
+			float overlayAlpha = fluentStateOverlayAlpha(pressed, highlighted);
+			if (overlayAlpha > 0.0f) {
+				Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+				ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+				ctx.fill_path(path);
+			}
+		}
+
+		if (checked) {
+			// The classic radio "bullseye" - a smaller solid dot in the
+			// selection-text color, concentric with the outer accent-filled
+			// circle above.
+			BLPath dot;
+			dot.add_circle(BLCircle(cx, cy, outerR * 0.4f));
+			ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightText).toBLRgba32());
+			ctx.fill_path(dot);
+		}
+
+		ctx.restore();
+	}
+
+	void FluentToolbarButtonStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// Fluent command-bar convention: a toggled-on ("checked") command
+		// gets a persistent light accent tint even at rest; hover/pressed
+		// each additionally layer the same WindowText state-overlay every
+		// other Fluent* style uses. Nothing painted at all when neither
+		// applies - matches the native TS_NORMAL "fully flat at rest" look
+		// this style replaces (see class comment).
+		float baseAlpha = checked ? (pressed || highlighted ? 0.20f : 0.15f) : 0.0f;
+		float overlayAlpha = enabled ? fluentStateOverlayAlpha(pressed, highlighted) : 0.0f;
+		if (baseAlpha <= 0.0f && overlayAlpha <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 4.0f;
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		if (baseAlpha > 0.0f) {
+			Color accent = UIColorManager::colorFor(UIColorRole::HighlightBackground);
+			ctx.set_fill_style(Color(accent.r, accent.g, accent.b, baseAlpha).toBLRgba32());
+			ctx.fill_path(path);
+		}
+
+		if (overlayAlpha > 0.0f) {
+			Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+			ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+			ctx.fill_path(path);
+		}
+
+		ctx.restore();
+	}
+
+	Rect FluentEditStyle::computeClientBounds(const Size& size) const {
+		Rect full(0.0f, 0.0f, size.width, size.height);
+		// Horizontal/top padding for the rounded border plus a comfortable
+		// text inset; the extra 2px at the bottom is reserved for the
+		// focused-state underline (paint(), below) so caret/text never
+		// visually collides with it even while focused.
+		return full.deflate(6.0f, 4.0f, 6.0f, 6.0f);
+	}
+
+	void FluentEditStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 4.0f;  // Fluent's own "in-page control" standard - see FluentButtonStyle's own comment
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+		ctx.fill_path(path);
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		if (focused && enabled) {
+			// WinUI TextBox's own distinctive signature - see class
+			// comment. Inset by the corner radius so the underline never
+			// runs past the rounded corners it sits just inside of.
+			constexpr float kUnderlineWidth = 2.0f;
+			ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+			ctx.set_stroke_width(kUnderlineWidth);
+			ctx.set_stroke_caps(BL_STROKE_CAP_BUTT);
+			ctx.stroke_line(kCornerRadius, size.height - kUnderlineWidth * 0.5f,
+				size.width - kCornerRadius, size.height - kUnderlineWidth * 0.5f);
+		}
+
+		ctx.restore();
+	}
+
+	void FluentGroupBoxStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kCornerRadius = 8.0f;  // matches FluentCardStyle's own "overlay/grouping frame" radius, not an in-page control's 4px
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, kCornerRadius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
+	}
+
+	FluentCardStyle::FluentCardStyle() {
+		setRectRadius(8.0f);  // Fluent's own overlay/card-level corner radius convention - larger than an in-page control's 4px (see FluentButtonStyle's own comment)
+		setElevation(ElevationLevel::Card);
+	}
+
+	void FluentCardStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, rectRadius()));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+		ctx.fill_path(path);
+
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
+	}
+
+	void FluentTrackbarTrackStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A thin rounded "pill" groove, centered in whatever cross-axis
+		// room the given size actually has - Slider hands this style the
+		// *full* trackRect() (controls.cpp), typically much taller/wider
+		// than a real groove, same as the native TKP_TRACK part it
+		// replaces draws a thin line within.
+		constexpr float kThickness = 4.0f;
+		BLPath path;
+		if (horizontal) {
+			float t = kThickness < size.height ? kThickness : size.height;
+			float y = (size.height - t) * 0.5f;
+			path.add_round_rect(BLRoundRect(0.0f, y, size.width, t, t * 0.5f));
+		} else {
+			float t = kThickness < size.width ? kThickness : size.width;
+			float x = (size.width - t) * 0.5f;
+			path.add_round_rect(BLRoundRect(x, 0.0f, t, size.height, t * 0.5f));
+		}
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.fill_path(path);
+		ctx.restore();
+	}
+
+	void FluentTrackbarThumbStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		float minDim = size.width < size.height ? size.width : size.height;
+		float cx = size.width * 0.5f;
+		float cy = size.height * 0.5f;
+		float outerR = minDim * 0.5f - 1.0f;
+		if (outerR <= 0.0f) {
+			return;
+		}
+
+		BLPath path;
+		path.add_circle(BLCircle(cx, cy, outerR));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		if (!enabled) {
+			ctx.set_global_alpha(0.5);
+		}
+
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+		ctx.fill_path(path);
+
+		if (enabled) {
+			float overlayAlpha = fluentStateOverlayAlpha(pressed, highlighted);
+			if (overlayAlpha > 0.0f) {
+				Color overlay = UIColorManager::colorFor(UIColorRole::WindowText);
+				ctx.set_fill_style(Color(overlay.r, overlay.g, overlay.b, overlayAlpha).toBLRgba32());
+				ctx.fill_path(path);
+			}
+		}
+
+		// A thin light ring for definition against a same-tone
+		// background - matches WinUI's own slider thumb (a solid disc
+		// with a subtle outline, not a flat edgeless blob). Centered on
+		// outerR's own boundary, same as every other stroked shape in
+		// this file - the 1px margin outerR already reserves keeps the
+		// outer half of this 2px stroke from clipping against size's own
+		// edge.
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+		ctx.set_stroke_width(2.0f);
+		ctx.stroke_path(path);
+
+		ctx.restore();
+	}
+
+	void FluentProgressBarTrackStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		float shortSide = size.width < size.height ? size.width : size.height;
+		float radius = shortSide * 0.5f;
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, radius));
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+		ctx.fill_path(path);
+		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+		ctx.set_stroke_width(1.0f);
+		ctx.stroke_path(path);
+		ctx.restore();
+	}
+
+	void FluentProgressBarFillStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		float shortSide = size.width < size.height ? size.width : size.height;
+		float radius = shortSide * 0.5f;
+
+		BLPath path;
+		path.add_round_rect(BLRoundRect(0.0f, 0.0f, size.width, size.height, radius));
+
+		BLRgba32 fillColor;
+		switch (state) {
+			case FillState::Error:
+				// Fluent's own SystemFillColorCritical (light theme) -
+				// no UIColorRole maps to a semantic error/warning color
+				// (uicolormanager.h), so this is a fixed value rather
+				// than a theme-reactive lookup, same trim this class's
+				// own base (ThemedProgressBarFillStyle, above) already
+				// accepts for marquee/PBFS_PARTIAL.
+				fillColor = BLRgba32(0xC4, 0x2B, 0x1C, 0xFF);
+				break;
+			case FillState::Paused:
+				// Fluent's own SystemFillColorCaution.
+				fillColor = BLRgba32(0xFF, 0xB9, 0x00, 0xFF);
+				break;
+			case FillState::Normal:
+			default:
+				fillColor = UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32();
+				break;
+		}
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		ctx.set_fill_style(fillColor);
+		ctx.fill_path(path);
+		ctx.restore();
 	}
 
 	void ThemedTrackbarTicksStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {

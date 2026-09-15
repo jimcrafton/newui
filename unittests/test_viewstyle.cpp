@@ -1,7 +1,9 @@
 #include "newui/viewstyle.h"
+#include "newui/rootview.h"
 #include "newui/subview.h"
 
 #include <gtest/gtest.h>
+#include <memory>
 
 namespace {
 
@@ -1053,6 +1055,257 @@ TEST(ThemedEditStyle, StateIdPrecedence) {
 
     style.enabled = false;
     EXPECT_EQ(style.stateId(true), ETS_DISABLED);  // disabled beats everything
+}
+
+// ---------------------------------------------------------------------------
+// postPaint() - View::postPaintStyle() (view.cpp) calls this in its own
+// unclipped scope (phase 3 of View::paintChildren()'s 3-phase paint split -
+// see ViewStyle::prePaint()/paint()/postPaint()'s own doc comments,
+// viewstyle.h), unconditionally, every paint pass. The default
+// implementation's own isFocused() gate (moved here from the caller when
+// postPaint() replaced the old, focus-ring-only-named paintFocusRing()) is
+// real logic worth covering directly - these attach a real View to a real
+// RootView specifically to exercise both sides of it, not just call the
+// unattached style in isolation the way every other paint() test in this
+// file does. Still only "doesn't crash / doesn't draw" - nothing here
+// inspects actual pixels, same as every paint() test above.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A minimal real View+RootView pair, focused or not per focusIt - postPaint()'s
+// own isFocused() gate needs a real attached View to mean anything at all
+// (view() is nullptr for a bare stack-local ViewStyle, which the gate
+// already short-circuits on before ever reaching isFocused()).
+struct FocusRingFixture {
+    newui::RootView* root;
+    newui::SubView* child;
+    newui::ViewStyle* style;
+
+    explicit FocusRingFixture(bool focusIt) {
+        root = new newui::RootView(nullptr, newui::Rect(0, 0, 100, 100), "root");
+        child = new newui::SubView();
+        child->setBounds(newui::Rect(0, 0, 64, 64));
+        child->setVisible(true);
+        child->setAcceptsFocus(true);
+        auto ownedStyle = std::make_unique<newui::ViewStyle>();
+        style = ownedStyle.get();
+        child->setStyle(std::move(ownedStyle));
+        root->addChild(child);
+        if (focusIt) {
+            root->setFocusedSubView(child);
+        }
+    }
+
+    ~FocusRingFixture() {
+        root->destroy();
+        delete root;
+    }
+};
+
+}  // namespace
+
+TEST(ViewStyleFocusRing, NoOpWhenStyleIsNotAttachedToAView) {
+    newui::ViewStyle style;  // never setStyle()'d onto a real View - view() is nullptr
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    style.postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+}
+
+TEST(ViewStyleFocusRing, NoOpWhenAttachedButNotFocused) {
+    FocusRingFixture fixture(/*focusIt=*/false);
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    fixture.style->postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+}
+
+TEST(ViewStyleFocusRing, DrawsWithoutCrashingWhenFocused) {
+    FocusRingFixture fixture(/*focusIt=*/true);
+
+    newui::Rect clientBounds(0, 0, 64, 64);
+    fixture.style->postPaint(SharedContext(), newui::Size(64, 64), false, clientBounds);
+}
+
+TEST(ViewStyleFocusRing, ToleratesAZeroSizeClientBoundsWhenFocused) {
+    FocusRingFixture fixture(/*focusIt=*/true);
+
+    newui::Rect clientBounds;  // width/height both 0
+    fixture.style->postPaint(SharedContext(), newui::Size(0, 0), false, clientBounds);
+}
+
+TEST(ThemedEditStyle, PostPaintUsesTheGenericDefault) {
+    // Deliberately does NOT override postPaint() - see the class's own
+    // comment (viewstyle.h) for why an earlier version did (relying on
+    // ETS_FOCUSED's own native border instead) and was confirmed live to
+    // be wrong (that border renders identically to unfocused on at least
+    // one real Windows theme). Nothing to assert beyond "doesn't crash",
+    // same as every other paint() case in this file - the actual visual
+    // is what ViewStyleFocusRing's own tests above already cover.
+    newui::ThemedEditStyle style;
+
+    newui::Rect clientBounds(0, 0, 120, 24);
+    style.postPaint(SharedContext(), newui::Size(120, 24), false, clientBounds);
+}
+
+// ---------------------------------------------------------------------------
+// elevation - ViewStyle::prePaint()'s drop shadow, computePrePaintBounds()'s
+// matching dirty-bounds inflation (both viewstyle.cpp). Fluent names discrete
+// elevation levels (Layer=1, Control=2, Card=8, Tooltip=16, Flyout=32,
+// Dialog/Window=128 - learn.microsoft.com/windows/apps/design/signature-
+// experiences/layering) but publishes no blur/offset formula (ThemeShadow is
+// an opaque WinUI3 composition effect) - these confirm the *properties* the
+// adapted formula here needs, not exact pixel values: bounded even at the
+// highest named level, monotonically non-decreasing as elevation rises, and
+// computePrePaintBounds() never reserving less room than prePaint() actually
+// paints into (the bug a mismatched pair of hand-maintained formulas could
+// silently reintroduce - the fix here deliberately has both read from the
+// same elevationBlurRadius()/elevationShadowOffsetMagnitude() helpers,
+// viewstyle.cpp, specifically to rule that out).
+// ---------------------------------------------------------------------------
+
+// Real, live-reported bug: computePrePaintBounds() used to be a genuine
+// no-op at zero elevation (every non-elevated View - nearly everything,
+// since almost nothing calls setElevation() at all), leaving View::
+// redraw()'s own invalidated region at exactly the plain bounds - zero
+// allowance for postPaint()'s own default focus ring, which always draws
+// 2px *outside* those bounds. Whether the ring actually showed up after
+// tabbing to a control then depended entirely on whether some other,
+// unrelated repaint happened to also cover that extra margin - reported
+// live as tabbing through several controls in a row showing the ring on
+// some and not others, seemingly at random. computePrePaintBounds() must
+// always reserve at least the focus-ring's own room, regardless of
+// elevation - see its own doc comment (viewstyle.cpp) for why that has to
+// be unconditional (postPaint() itself has no way to know in advance
+// whether a given redraw() is happening because focus is about to land on
+// this particular View).
+TEST(ViewStyleElevation, ComputePrePaintBoundsAlwaysReservesRoomForTheFocusRingEvenAtZeroElevation) {
+    newui::ViewStyle style;  // elevation() defaults to 0.0f
+
+    newui::Rect bounds(0, 0, 100, 40);
+    newui::Rect result = bounds;
+    style.computePrePaintBounds(result);
+
+    EXPECT_NE(result, bounds);
+    EXPECT_GT(result.size().width, bounds.size().width);
+    EXPECT_GT(result.size().height, bounds.size().height);
+}
+
+TEST(ViewStyleElevation, ComputePrePaintBoundsAtLowElevationIsNoSmallerThanTheFocusRingAlone) {
+    // A Control-level elevation (Fluent's own named value 2) must never
+    // make the reserved room *smaller* than a plain, non-elevated View
+    // would get - the two pads are combined via max(), not replacement.
+    newui::ViewStyle zeroElevation;
+    newui::Rect zeroResult(0, 0, 100, 40);
+    zeroElevation.computePrePaintBounds(zeroResult);
+
+    newui::ViewStyle lowElevation;
+    lowElevation.setElevation(2.0f);
+    newui::Rect lowResult(0, 0, 100, 40);
+    lowElevation.computePrePaintBounds(lowResult);
+
+    EXPECT_GE(lowResult.size().width, zeroResult.size().width);
+    EXPECT_GE(lowResult.size().height, zeroResult.size().height);
+}
+
+TEST(ViewStyleElevation, PrePaintDirtyBoundsPadStaysBoundedEvenAtDialogElevation) {
+    newui::ViewStyle style;
+    style.setElevation(128.0f);  // Fluent's own named "Dialog"/"Window" level
+
+    newui::Rect bounds(0, 0, 100, 40);
+    newui::Rect result = bounds;
+    style.computePrePaintBounds(result);
+
+    float pad = (result.size().width - bounds.size().width) * 0.5f;
+    EXPECT_GT(pad, 0.0f) << "a real dialog-elevation shadow needs some extra room";
+    // Generous but real upper bound - the log2-based formula this guards
+    // is exactly what keeps a 128-elevation dialog from reserving (and
+    // then box-blurring, Shape::paintEffect(), shapes.cpp) a mask
+    // hundreds of pixels larger per side than its own bounds.
+    EXPECT_LT(pad, 100.0f);
+}
+
+TEST(ViewStyleElevation, PrePaintDirtyBoundsPadGrowsMonotonicallyWithElevation) {
+    auto padFor = [](float elevation) {
+        newui::ViewStyle style;
+        style.setElevation(elevation);
+        newui::Rect bounds(0, 0, 100, 40);
+        newui::Rect result = bounds;
+        style.computePrePaintBounds(result);
+        return (result.size().width - bounds.size().width) * 0.5f;
+    };
+
+    // Fluent's own named levels, low to high.
+    float layer = padFor(1.0f);
+    float control = padFor(2.0f);
+    float card = padFor(8.0f);
+    float tooltip = padFor(16.0f);
+    float flyout = padFor(32.0f);
+    float dialog = padFor(128.0f);
+
+    EXPECT_LE(layer, control);
+    EXPECT_LE(control, card);
+    EXPECT_LE(card, tooltip);
+    EXPECT_LE(tooltip, flyout);
+    EXPECT_LE(flyout, dialog);
+}
+
+TEST(ViewStyleElevation, PrePaintDoesNotThrowAtDialogElevation) {
+    newui::ViewStyle style;
+    style.setElevation(128.0f);
+
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(400, 300), false));
+}
+
+TEST(ViewStyleElevation, PrePaintToleratesAZeroSizeEvenWithElevationSet) {
+    newui::ViewStyle style;
+    style.setElevation(8.0f);
+
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(0, 0), false));
+}
+
+TEST(FluentCardStyle, DefaultsToCardElevationAndAVisibleCornerRadius) {
+    newui::FluentCardStyle style;
+
+    EXPECT_FLOAT_EQ(style.elevation(), newui::ElevationLevel::Card);
+    EXPECT_GT(style.rectRadius(), 0.0f);
+}
+
+TEST(FluentCardStyle, ComputePrePaintBoundsGrowsToCoverItsOwnDefaultShadow) {
+    // The whole point of FluentCardStyle defaulting elevation() on
+    // (class comment, viewstyle.h) is that a caller gets a real shadow
+    // for free - this confirms the inherited ViewStyle::
+    // computePrePaintBounds() actually sees that default and grows the
+    // invalidated region for it, not just that setElevation() was
+    // technically called.
+    newui::FluentCardStyle card;
+    newui::Rect cardResult(0, 0, 200, 120);
+    card.computePrePaintBounds(cardResult);
+
+    newui::ViewStyle plain;
+    newui::Rect plainResult(0, 0, 200, 120);
+    plain.computePrePaintBounds(plainResult);
+
+    EXPECT_GT(cardResult.size().width, plainResult.size().width);
+    EXPECT_GT(cardResult.size().height, plainResult.size().height);
+}
+
+TEST(FluentCardStyle, PaintDoesNotThrowAcrossEveryState) {
+    for (bool highlighted : { true, false }) {
+        newui::FluentCardStyle style;
+        newui::Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(SharedContext(), newui::Size(200, 120), highlighted, clientBounds));
+    }
+}
+
+TEST(FluentCardStyle, PaintToleratesAZeroSize) {
+    newui::FluentCardStyle style;
+    newui::Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(SharedContext(), newui::Size(0, 0), false, clientBounds));
+}
+
+TEST(FluentCardStyle, PrePaintDoesNotThrowAtItsOwnDefaultElevation) {
+    newui::FluentCardStyle style;
+    EXPECT_NO_THROW(style.prePaint(SharedContext(), newui::Size(200, 120), false));
 }
 
 // ---------------------------------------------------------------------------

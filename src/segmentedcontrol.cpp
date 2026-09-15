@@ -24,6 +24,7 @@ namespace {
 
 SegmentedControl::SegmentedControl() {
     setVisible(true);
+    setAcceptsFocus(true);
     onMouseDown.add(this, &SegmentedControl::handleMouseDown);
 }
 

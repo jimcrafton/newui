@@ -74,12 +74,6 @@ namespace {
         boxBlurPass(pixels, width, height, stride, radius);
     }
 
-    // How far past localBounds() a box-blurred mask can still show visible
-    // (> ~1/255 alpha) coverage, in units of softness - matches boxBlur3()
-    // above (3 passes of a radius derived 1:1 from softness), padded a
-    // little further since a box blur's own tail isn't infinitely sharp.
-    constexpr float kBlurPadFactor = 3.0f;
-
     bool rectsIntersect(const newui::Rect& a, const newui::Rect& b) {
         return a.left() < b.right() && a.right() > b.left()
             && a.top() < b.bottom() && a.bottom() > b.top();

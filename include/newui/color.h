@@ -96,8 +96,6 @@ namespace newui {
     class Color {
     public:
 
-        int foo = 0;
-
         Color() = default;
         constexpr Color(float r, float g, float b, float a = 1.0f) noexcept
             : r(r), g(g), b(b), a(a) {}

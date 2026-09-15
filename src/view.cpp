@@ -48,13 +48,34 @@ namespace newui {
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);
-		
+
 		updateLayout();
+		// A brand-new child usually gets drawn anyway (the next unrelated
+		// repaint walks every current child, this one now included) - but
+		// nothing *guarantees* one happens, and updateLayout() above can
+		// also reflow every existing sibling around it. redraw() invalidates
+		// this whole View's own bounds (not just the new child's) for
+		// exactly that reason - see removeChild()'s own comment below,
+		// same fix, same reasoning, just the "child appeared" side of it.
+		redraw();
 	}
 
 	void View::removeChild(SubView* child) {
 		childViews_.erase(std::remove(childViews_.begin(), childViews_.end(), child), childViews_.end());
 		updateLayout();
+		// redraw() (not just updateLayout() above) - a real, confirmed
+		// live bug without this: updateLayout() only repositions the
+		// *remaining* children via the attached Layout, which has no
+		// reason to ever touch the pixels the just-removed child used to
+		// occupy. Nothing else invalidates that region either - the next
+		// full paint() walk simply skips a child that's no longer in
+		// childViews_, it never erases what an earlier frame already
+		// composited there - so the old bitmap content stays on screen
+		// until some *unrelated* later event happens to repaint over it.
+		// Invalidates this whole View's own bounds, not a narrower rect
+		// around just the vacated spot, since updateLayout() may also have
+		// moved surviving siblings into (or out of) that same area.
+		redraw();
 	}
 
 	void View::reorderChild(SubView* child, std::size_t newIndex) {
@@ -68,6 +89,10 @@ namespace newui {
 		}
 		childViews_.insert(childViews_.begin() + newIndex, child);
 		updateLayout();
+		// Same reasoning as removeChild() above - reordering can move
+		// every sibling to a new on-screen position, and nothing else
+		// guarantees a repaint of wherever they used to be.
+		redraw();
 	}
 
 	bool View::setParent(View* newParent) {
@@ -194,6 +219,21 @@ namespace newui {
 			// applied here too until this crash surfaced it.
 			Rect bounds = child->bounds().snappedOutwardToPixels();
 
+			// Phase 1 (pre-paint) - translated but deliberately NOT
+			// clipped, its own separate save()/restore() scope so an
+			// effect that needs to extend outside bounds (a drop shadow,
+			// ...) has real room to do so - see ViewStyle::prePaint()'s
+			// own doc comment (viewstyle.h) for the full reasoning.
+			ctx.save();
+			ctx.restore_clipping();
+			ctx.translate(bounds.left(), bounds.top());
+			child->prePaintStyle(ctx);
+			ctx.restore();
+
+			// Phase 2 (regular paint) - translated AND clipped to this
+			// child's own bounds, unchanged from before this 3-phase
+			// split - the crash-prevention/cross-sibling-paint-corruption
+			// clip below stays exactly as strict as it's always been.
 			ctx.save();
 			ctx.translate(bounds.left(), bounds.top());
 			ctx.clip_to_rect(BLRect(0, 0, bounds.size().width, bounds.size().height));
@@ -202,6 +242,18 @@ namespace newui {
 			child->paint(ctx);
 			child->paintChildren(ctx);
 
+			ctx.restore();
+
+			// Phase 3 (post-paint) - same unclipped shape as phase 1, on
+			// the other side of the clipped phase 2 - see ViewStyle::
+			// postPaint()'s own doc comment (viewstyle.h). This is what
+			// makes the focus ring (postPaint()'s own default effect)
+			// actually able to extend past this child's own bounds
+			// instead of being clipped away by phase 2's clip above.
+			ctx.save();
+			ctx.restore_clipping();
+			ctx.translate(bounds.left(), bounds.top());
+			child->postPaintStyle(ctx);
 			ctx.restore();
 		}
 		ctx.restore();
@@ -239,10 +291,43 @@ namespace newui {
 		return nullptr;
 	}
 
+	bool View::isFocused() const {
+		return rootView_ != nullptr && rootView_->focusedSubView() == dynamic_cast<const SubView*>(this);
+	}
+
+	void View::prePaintStyle(BLContext& ctx) {
+		if (style_) {
+			style_->prePaint(ctx, bounds_.size(), highlighted_);
+		}
+	}
+
 	void View::paintStyle(BLContext& ctx) {
 		if (style_) {
-			Rect unused;
-			style_->paint(ctx, bounds_.size(), highlighted_, unused);
+			Rect clientBounds;
+			style_->paint(ctx, bounds_.size(), highlighted_, clientBounds);
+		}
+	}
+
+	void View::postPaintStyle(BLContext& ctx) {
+		if (style_) {
+			// Recomputed, not carried over from paintStyle()'s own
+			// clientBounds - that local went out of scope with the
+			// clipped ctx save/restore scope paintStyle() ran inside
+			// (see View::paintChildren(), view.cpp), and computeClientBounds()
+			// is cheap/pure (no BLContext needed) precisely so recomputing
+			// it here is the normal, expected way to get it back rather
+			// than something this needs to avoid.
+			Rect clientBounds = style_->computeClientBounds(bounds_.size());
+			style_->postPaint(ctx, bounds_.size(), highlighted_, clientBounds);
+		}
+	}
+
+	void View::computePrePaintBounds(Rect& outDirtyBounds) const
+	{		
+		newui::Rect r(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+		outDirtyBounds = r;
+		if (style_) {
+			style_->computePrePaintBounds(outDirtyBounds);
 		}
 	}
 
@@ -258,6 +343,7 @@ namespace newui {
 			// never gets its "unhover" repaint), visible as leftover
 			// artifacts while hovering across bordered/themed controls.
 			newui::Rect r(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
+			computePrePaintBounds(r);
 			rootView_->markDirty(this, r);
 		}
 	}

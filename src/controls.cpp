@@ -57,15 +57,11 @@ namespace newui {
     Progress::Progress() {
         setVisible(true);
 
-        auto trackStyle = std::make_unique<ThemedProgressBarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedProgressBarTrackStyle>());
 
         fill_ = new SubView();
         fill_->setVisible(true);
-        auto fillStyle = std::make_unique<ThemedProgressBarFillStyle>();
-        fillStyle_ = fillStyle.get();
-        fill_->setStyle(std::move(fillStyle));
+        fill_->setStyle(std::make_unique<ThemedProgressBarFillStyle>());
         addChild(fill_);
 
         onSizeChanged.add(this, &Progress::handleSizeChanged);
@@ -86,8 +82,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        fillStyle_->horizontal = value;
+        // dynamic_cast, not a cached typed pointer - see fillState()'s
+        // own comment (controls.h) for why.
+        dynamic_cast<ThemedProgressBarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedProgressBarFillStyle&>(fill_->style()).horizontal = value;
         updateFillBounds();
     }
 
@@ -131,10 +129,10 @@ namespace newui {
 
     Button::Button() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         // UIColorManager::colorFor(), not Color::fromSystemColor() - the
@@ -182,13 +180,23 @@ namespace newui {
     }
 
     void Button::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedButtonStyle* - see this
+        // class's own doc comment (controls.h) for why: style() can be
+        // swapped out from under a Button (setStyle() is public on View),
+        // and a cached typed pointer would either dangle (if the old
+        // style was destroyed) or silently alias the wrong layout (if
+        // the new one isn't actually a ThemedButtonStyle). Deriving it
+        // live here costs one runtime check per call, in exchange for
+        // failing loud (std::bad_cast) instead of either.
+        auto& buttonStyle = dynamic_cast<ThemedButtonStyle&>(style());
+
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
         bool wantEnabled = isEnabled();
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->enabled == wantEnabled) {
+        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
-        buttonStyle_->enabled = wantEnabled;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
     }
 
@@ -226,13 +234,22 @@ namespace newui {
             return;
         }
 
-        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
-        // cpp_codetools, which already rejects an edit that wouldn't resolve - see its own
-        // fontResolves() comment) - but a font set some other way (loading a saved document on a
-        // machine missing that face, say) can still fail to resolve here. A real, live-reported
-        // crash when this used to throw: skipping the text draw is the graceful degradation; the
-        // rest of this Button (its native chrome) still paints normally either way.
-        BLFont* blFont = buttonStyle_->font().blFont();
+        // style().font() - font()/compositingOp()/opacity() below are all
+        // declared on ViewStyle itself (viewstyle.h), not ThemedButtonStyle
+        // specifically, so no cast is needed to reach them - only
+        // updatePressedVisual()'s own .pressed/.enabled (real
+        // ThemedButtonStyle-only fields) needs dynamic_cast<ThemedButtonStyle&>.
+        //
+        // This is a real, Properties-panel-editable property
+        // (FontPropertyEditor, cpp_codetools, which already rejects an
+        // edit that wouldn't resolve - see its own fontResolves()
+        // comment) - but a font set some other way (loading a saved
+        // document on a machine missing that face, say) can still fail
+        // to resolve here. A real, live-reported crash when this used to
+        // throw: skipping the text draw is the graceful degradation; the
+        // rest of this Button (its native chrome) still paints normally
+        // either way.
+        BLFont* blFont = style().font().blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
             return;
         }
@@ -265,9 +282,9 @@ namespace newui {
             : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
         ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
+        ctx.set_comp_op( toBLCompOp( style().compositingOp()));
         ctx.set_fill_style(effectiveTextColor);
-        ctx.set_fill_alpha(buttonStyle_->opacity());
+        ctx.set_fill_alpha(style().opacity());
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
         ctx.restore();
     }
@@ -278,6 +295,7 @@ namespace newui {
 
     Toggle::Toggle() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         rebuildStyle();
 
@@ -306,28 +324,31 @@ namespace newui {
 
     void Toggle::rebuildStyle() {
         if (radioStyle_) {
-            auto radioButtonStyle = std::make_unique<ThemedRadioButtonStyle>();
-            radioButtonStyle_ = radioButtonStyle.get();
-            checkBoxStyle_ = nullptr;
-            setStyle(std::move(radioButtonStyle));
+            setStyle(std::make_unique<ThemedRadioButtonStyle>());
         } else {
-            auto checkBoxStyle = std::make_unique<ThemedCheckBoxStyle>();
-            checkBoxStyle_ = checkBoxStyle.get();
-            radioButtonStyle_ = nullptr;
-            setStyle(std::move(checkBoxStyle));
+            setStyle(std::make_unique<ThemedCheckBoxStyle>());
         }
         updateStyleFields();
     }
 
     void Toggle::updateStyleFields() {
-        if (radioButtonStyle_ != nullptr) {
-            radioButtonStyle_->checked = checked_;
-            radioButtonStyle_->pressed = pressing_;
-            radioButtonStyle_->enabled = isEnabled();
+        // dynamic_cast, not a cached ThemedCheckBoxStyle*/
+        // ThemedRadioButtonStyle* - see Button::updatePressedVisual()'s
+        // own comment (above) for why. The pointer-form cast (not a
+        // throwing reference-form one) is what actually distinguishes
+        // which of the two style() legitimately is right now, not just a
+        // defensive habit - rebuildStyle() just set it to one or the
+        // other above.
+        if (auto* radio = dynamic_cast<ThemedRadioButtonStyle*>(&style())) {
+            radio->checked = checked_;
+            radio->pressed = pressing_;
+            radio->enabled = isEnabled();
+        } else if (auto* check = dynamic_cast<ThemedCheckBoxStyle*>(&style())) {
+            check->checked = checked_;
+            check->pressed = pressing_;
+            check->enabled = isEnabled();
         } else {
-            checkBoxStyle_->checked = checked_;
-            checkBoxStyle_->pressed = pressing_;
-            checkBoxStyle_->enabled = isEnabled();
+            throw std::runtime_error("Toggle::updateStyleFields: style() is neither ThemedRadioButtonStyle nor ThemedCheckBoxStyle");
         }
         style().markDirty();
     }
@@ -476,21 +497,141 @@ namespace newui {
     }
 
     // -----------------------------------------------------------------
+    // GroupBox
+    // -----------------------------------------------------------------
+
+    GroupBox::GroupBox() {
+        setVisible(true);
+
+        // setFont() before setStyle() moves on - a freshly constructed
+        // style otherwise has no font at all, which paint() (below)
+        // treats as unresolved and silently skips drawing the caption
+        // for, exactly the same real, live-caught gap Button::Button()'s
+        // own comment already documents (and this class repeated at
+        // first: the caption never appeared in the live example app
+        // until this was added, confirmed via a temporary debug print
+        // showing style().font().blFont() as null).
+        auto groupBoxStyle = std::make_unique<ThemedGroupBoxStyle>();
+        groupBoxStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        setStyle(std::move(groupBoxStyle));
+
+        // Same UIColorManager::colorFor() reasoning as Button::Button()'s
+        // own comment above (dark-mode-aware, unlike Color::fromSystemColor()) -
+        // WindowText, not ControlText, since a GroupBox's caption sits
+        // directly on the surrounding window background, not on its own
+        // control-colored fill the way Button's label does.
+        textColor_ = UIColorManager::colorFor(UIColorRole::WindowText).toBLRgba32();
+
+        onStateChanged.add(this, &GroupBox::handleStateChanged);
+    }
+
+    void GroupBox::setText(const std::string& text) {
+        if (text_ == text) {
+            return;
+        }
+        text_ = text;
+        style().markDirty();
+    }
+
+    void GroupBox::setTextColor(BLRgba32 color) {
+        textColor_ = color;
+        style().markDirty();
+    }
+
+    SyncReturn GroupBox::handleStateChanged(Control& /*sender*/) {
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment above for why.
+        dynamic_cast<ThemedGroupBoxStyle&>(style()).enabled = isEnabled();
+        style().markDirty();
+        return SyncReturn::Ignored;
+    }
+
+    void GroupBox::paint(BLContext& ctx) {
+        if (text_.empty() || textColor_.is_null()) {
+            return;
+        }
+
+        // style().font() - declared on ViewStyle itself, no cast needed
+        // (same reasoning Button::paint()'s own comment above gives).
+        BLFont* blFont = style().font().blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+
+        Size size = bounds().size();
+        if (size.width <= 0.0f || size.height <= 0.0f) {
+            return;
+        }
+
+        BLGlyphBuffer glyphBuffer;
+        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+        blFont->shape(glyphBuffer);
+
+        BLTextMetrics textMetrics;
+        blFont->get_text_metrics(glyphBuffer, textMetrics);
+
+        const BLFontMetrics& fontMetrics = blFont->metrics();
+        double textWidth = textMetrics.advance.x;
+        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+
+        // A real Win32 GroupBox's caption straddles the top border line
+        // itself (half above the control's own top edge, half below) -
+        // deliberately not replicated here. This paint() call is
+        // View::paint()'s normal, *clipped* phase (View::paintChildren(),
+        // view.cpp - clipped to this GroupBox's own bounds, unlike
+        // prePaint()/postPaint()'s unclipped phases 1/3), so anything
+        // drawn at a negative local y here is silently clipped away
+        // entirely, not just visually cut off - confirmed while building
+        // this, not left as a guess. Achieving a real straddle would mean
+        // moving caption drawing into the *style* (ThemedGroupBoxStyle's
+        // own prePaint() override), which breaks this class's established
+        // "chrome vs. content" split (style draws chrome only, Control
+        // draws its own text - same as Button/ToolbarButton) for a purely
+        // cosmetic gain - not worth it. Kept fully inside instead: a
+        // small top/left inset, still with the background-colored
+        // backdrop faking a gap in the border immediately behind it (same
+        // technique a real comctl32 GroupBox uses, just positioned
+        // differently) - works the same regardless of which border
+        // style() is currently drawing underneath (native or
+        // FluentGroupBoxStyle, below), since both draw their top edge at
+        // this same local y = 0.
+        constexpr double kCaptionLeftInset = 8.0;
+        constexpr double kCaptionTopInset = 2.0;
+        constexpr double kCaptionBackdropPadding = 4.0;
+        double x = kCaptionLeftInset;
+        double topOfCaption = kCaptionTopInset;
+        double y = topOfCaption + fontMetrics.ascent;
+
+        BLRgba32 effectiveTextColor = isEnabled()
+            ? BLRgba32(textColor_.as<BLRgba32>())
+            : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
+        ctx.save();
+        ctx.set_comp_op(toBLCompOp(style().compositingOp()));
+        ctx.set_fill_alpha(style().opacity());
+
+        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+        ctx.fill_rect(BLRect(x - kCaptionBackdropPadding, topOfCaption,
+            textWidth + kCaptionBackdropPadding * 2.0, textHeight));
+
+        ctx.set_fill_style(effectiveTextColor);
+        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
     // Slider
     // -----------------------------------------------------------------
 
     Slider::Slider() {
         setVisible(true);
+        setAcceptsFocus(true);
 
-        auto trackStyle = std::make_unique<ThemedTrackbarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedTrackbarTrackStyle>());
 
         thumb_ = new SubView();
         thumb_->setVisible(true);
-        auto thumbStyle = std::make_unique<ThemedTrackbarThumbStyle>();
-        thumbStyle_ = thumbStyle.get();
-        thumb_->setStyle(std::move(thumbStyle));
+        thumb_->setStyle(std::make_unique<ThemedTrackbarThumbStyle>());
         addChild(thumb_);
 
         onSizeChanged.add(this, &Slider::handleSizeChanged);
@@ -528,7 +669,7 @@ namespace newui {
     }
 
     void Slider::updateTickCount() {
-        if (ticksStyle_ == nullptr) {
+        if (ticks_ == nullptr) {
             return;
         }
         int count = kDefaultTickIntervals;
@@ -540,7 +681,9 @@ namespace newui {
                 count = kMaxTickIntervals;
             }
         }
-        ticksStyle_->tickCount = count;
+        // dynamic_cast, not a cached typed pointer - see Progress::
+        // fillState()'s own comment (controls.h) for why.
+        dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).tickCount = count;
         style().markDirty();
     }
 
@@ -586,10 +729,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        thumbStyle_->horizontal = value;
-        if (ticksStyle_ != nullptr) {
-            ticksStyle_->horizontal = value;
+        dynamic_cast<ThemedTrackbarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).horizontal = value;
+        if (ticks_ != nullptr) {
+            dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).horizontal = value;
         }
         updateThumbBounds();
         updateTicksBounds();
@@ -604,8 +747,7 @@ namespace newui {
         if (ticks_ == nullptr) {
             ticks_ = new SubView();
             auto ticksStyle = std::make_unique<ThemedTrackbarTicksStyle>();
-            ticksStyle_ = ticksStyle.get();
-            ticksStyle_->horizontal = horizontal_;
+            ticksStyle->horizontal = horizontal_;
             ticks_->setStyle(std::move(ticksStyle));
             addChild(ticks_);
             updateTickCount();
@@ -634,18 +776,19 @@ namespace newui {
         // rendering the fallback-sized thumb while a dragged one, which
         // happened to re-run this after painting, picked up the real,
         // very different theme size).
-        bool wasPressed = thumbStyle_->pressed;
-        bool wasEnabled = thumbStyle_->enabled;
-        thumbStyle_->pressed = false;
-        thumbStyle_->enabled = true;
-        Size resolved = thumbStyle_->partSize(Size(kThumbSize, kThumbSize));
-        thumbStyle_->pressed = wasPressed;
-        thumbStyle_->enabled = wasEnabled;
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        bool wasPressed = thumbStyle.pressed;
+        bool wasEnabled = thumbStyle.enabled;
+        thumbStyle.pressed = false;
+        thumbStyle.enabled = true;
+        Size resolved = thumbStyle.partSize(Size(kThumbSize, kThumbSize));
+        thumbStyle.pressed = wasPressed;
+        thumbStyle.enabled = wasEnabled;
         return resolved;
     }
 
     Size Slider::resolvedTicksSize() const {
-        return ticksStyle_->partSize(Size(kTicksSize, kTicksSize));
+        return dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).partSize(Size(kTicksSize, kTicksSize));
     }
 
     Rect Slider::trackRect() const {
@@ -656,9 +799,9 @@ namespace newui {
         // Reserve however thick the ticks strip's own theme part
         // actually is (see updateTicksBounds()'s own use of the same
         // query) below (horizontal) or to the right (vertical) for it -
-        // see showTicks()'s own doc comment (controls.h). ticksStyle_ is
+        // see showTicks()'s own doc comment (controls.h). ticks_ is
         // always non-null here (only reachable once showTicks_ is true,
-        // which only ever gets set after ticksStyle_ is created - see
+        // which only ever gets set after ticks_ is created - see
         // setShowTicks()).
         Size ticksSize = resolvedTicksSize();
         if (horizontal_) {
@@ -765,7 +908,7 @@ namespace newui {
             return SyncReturn::Ignored;
         }
         dragging_ = true;
-        thumbStyle_->pressed = true;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = true;
         style().markDirty();
         updateValueFromLocalPoint(toLocalSpace(sender, pt));
         return SyncReturn::Handled;
@@ -783,16 +926,17 @@ namespace newui {
     SyncReturn Slider::handleDragEnd(View& /*sender*/, const Point& /*pt*/,
             std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         dragging_ = false;
-        thumbStyle_->pressed = false;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = false;
         style().markDirty();
         return SyncReturn::Handled;
     }
 
     SyncReturn Slider::handleStateChanged(Control& /*sender*/) {
-        thumbStyle_->enabled = isEnabled();
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        thumbStyle.enabled = isEnabled();
         if (!isEnabled()) {
             dragging_ = false;
-            thumbStyle_->pressed = false;
+            thumbStyle.pressed = false;
         }
         style().markDirty();
         return SyncReturn::Handled;
@@ -1427,6 +1571,7 @@ namespace newui {
 
     ScrollView::ScrollView() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         viewport_ = new SubView();
         viewport_->setVisible(true);
@@ -1473,6 +1618,7 @@ namespace newui {
         // without this ScrollView ever finding out, so its bars stay stale until some unrelated
         // event (a resize) happens to call updateLayout() again.
         child->onContentSizeChanged.add(this, &ScrollView::handleContentChildContentSizeChanged);
+        child->onRequestScrollIntoView.add(this, &ScrollView::handleContentRequestScrollIntoView);
         // Picks up child's own contentSize() immediately (see
         // updateLayout()'s own comment) rather than leaving contentSize_
         // at whatever it was (typically the default Size(), showing no
@@ -1604,9 +1750,22 @@ namespace newui {
         // can newly make a horizontal bar necessary, and vice versa) -
         // check both against the full client first, then re-check each
         // against the space actually left after the other is reserved.
+        //
+        // The needH re-check is skipped for a virtualizedChild: its
+        // contentSize_.width was just pinned to the *full* client width
+        // above (see "Pin to the full client width first"), so it's
+        // self-referential - it always equals client.size().width
+        // exactly, never an independent "wants more width" signal. Left
+        // ungated, contentSize_.width > (client.size().width - vBarWidth)
+        // is trivially true any time needV is true at all, spuriously
+        // reserving a horizontal bar for every vertically-scrolling
+        // ListView/TreeView/TextControl regardless of actual content
+        // width. contentSizeOverridden_ isn't checked here since
+        // overriding it doesn't change whether a virtualizedChild's
+        // *natural* answer would have been self-referential.
         bool needV = contentSize_.height > client.size().height;
         bool needH = contentSize_.width > client.size().width;
-        if (needV && !needH && contentSize_.width > (client.size().width - vBarWidth)) {
+        if (needV && !needH && !virtualizedChild && contentSize_.width > (client.size().width - vBarWidth)) {
             needH = true;
         }
         if (needH && !needV && contentSize_.height > (client.size().height - hBarHeight)) {
@@ -1669,13 +1828,13 @@ namespace newui {
     }
 
     SyncReturn ScrollView::handleVBarValueChanged(ScrollBar& /*sender*/) {
-        if (SubView* child = virtualizedContentChild()) {
+        if (SubView* child = virtualizedContentChild()) {            
             child->onScrollOffsetChanged.syncCall(*child, Point(hBar_->isVisible() ? hBar_->value() : 0.0f, vBar_->value()));
             child->redraw();
             return SyncReturn::Handled;
         }
         Point origin = viewport_->origin();
-        origin.y = vBar_->value();
+        origin.y = vBar_->value();        
         viewport_->setOrigin(origin);
         viewport_->redraw();
         return SyncReturn::Handled;
@@ -1691,6 +1850,34 @@ namespace newui {
         origin.x = hBar_->value();
         viewport_->setOrigin(origin);
         viewport_->redraw();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleContentRequestScrollIntoView(View& /*sender*/, const Rect& requestedRect) {
+        // setValue() on each bar, not a direct viewport_->setOrigin()/
+        // onScrollOffsetChanged call - that's what handleVBarValueChanged()/
+        // handleHBarValueChanged() above already do correctly for both the
+        // virtualized and ordinary cases, the exact same path a real
+        // scrollbar drag goes through. Nothing here needs to know which
+        // case applies.
+        if (vBar_->isVisible()) {
+            float viewportHeight = viewport_->bounds().size().height;
+            float currentTop = vBar_->value();
+            if (requestedRect.top() < currentTop) {
+                vBar_->setValue(requestedRect.top());
+            } else if (requestedRect.bottom() > currentTop + viewportHeight) {
+                vBar_->setValue(requestedRect.bottom() - viewportHeight);
+            }
+        }
+        if (hBar_->isVisible()) {
+            float viewportWidth = viewport_->bounds().size().width;
+            float currentLeft = hBar_->value();
+            if (requestedRect.left() < currentLeft) {
+                hBar_->setValue(requestedRect.left());
+            } else if (requestedRect.right() > currentLeft + viewportWidth) {
+                hBar_->setValue(requestedRect.right() - viewportWidth);
+            }
+        }
         return SyncReturn::Handled;
     }
 
@@ -1782,10 +1969,10 @@ namespace newui {
 
     ToolbarButton::ToolbarButton() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
@@ -1827,16 +2014,20 @@ namespace newui {
     }
 
     void ToolbarButton::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedToolbarButtonStyle* - see
+        // Button::updatePressedVisual()'s own comment (above) for why.
+        auto& buttonStyle = dynamic_cast<ThemedToolbarButtonStyle&>(style());
+
         bool wantPressed = pressing_;
         bool wantChecked = isToggleButton_ && checked_;
         bool wantEnabled = isEnabled();
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked
-                && buttonStyle_->enabled == wantEnabled) {
+        if (buttonStyle.pressed == wantPressed && buttonStyle.checked == wantChecked
+                && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
-        buttonStyle_->checked = wantChecked;
-        buttonStyle_->enabled = wantEnabled;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.checked = wantChecked;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
     }
 
@@ -1885,9 +2076,11 @@ namespace newui {
         double textWidth = 0.0;
         double textHeight = 0.0;
         if (hasText) {
-            blFont = buttonStyle_->font().blFont();
+            // style().font() - no cast needed, font() is declared on
+            // ViewStyle itself (see Button::paint()'s own comment).
+            blFont = style().font().blFont();
         }
-        // buttonStyle_->font() is a real, Properties-panel-editable property (FontPropertyEditor,
+        // style().font() is a real, Properties-panel-editable property (FontPropertyEditor,
         // cpp_codetools) - see Button::paint()'s own comment on why an unresolved font must
         // degrade gracefully (skip drawing the text) instead of throwing/crashing here too.
         if (hasText && (blFont == nullptr || !blFont->is_valid())) {
@@ -1915,8 +2108,8 @@ namespace newui {
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
 
         // A flat toolbar button shows no visible border/fill at rest either
-        // way (buttonStyle_->enabled only changes the native TS_DISABLED/
-        // TS_NORMAL background chrome, invisible here) - dimming this
+        // way (the style's own enabled field only changes the native
+        // TS_DISABLED/TS_NORMAL background chrome, invisible here) - dimming this
         // foreground content is the only real visual signal a disabled
         // ToolbarButton has, same UIColorRole::DisabledText convention
         // Label::handleStateChanged() already uses for its own text.
@@ -1938,9 +2131,9 @@ namespace newui {
                 : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
             ctx.save();
-            ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp()));
+            ctx.set_comp_op( toBLCompOp( style().compositingOp()));
             ctx.set_fill_style(effectiveTextColor);
-            ctx.set_fill_alpha(buttonStyle_->opacity());
+            ctx.set_fill_alpha(style().opacity());
             ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
             ctx.restore();
         }
@@ -2033,11 +2226,22 @@ namespace newui {
     }
 
     SyncReturn TextController::handleGotFocus() {
-        
+
         if (RunLoop::current()) {
             caret_.start(RunLoop::current());
         }
-        
+
+        // TextField/TextControl both use ThemedEditStyle (see their own
+        // constructors) - its stateId() only draws the real native
+        // ETS_FOCUSED border when this is true, so this is what actually
+        // keeps that in sync with real keyboard focus (nothing else did -
+        // the field existed, matched a real theme state, and was never
+        // set anywhere, confirmed via ThemedEditStyle's own
+        // StateIdPrecedence test only ever driving it by hand).
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = true;
+        }
+
         // start()/setPosition() below deliberately don't fire
         // onVisibilityChanged themselves (see Caret's own doc comment -
         // "the caller already knows the outcome at the call site") - this
@@ -2052,6 +2256,9 @@ namespace newui {
 
     SyncReturn TextController::handleLostFocus() {
         caret_.stop();
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = false;
+        }
         owner_.style().markDirty();
         return SyncReturn::Handled;
     }
@@ -2443,6 +2650,7 @@ namespace newui {
 
     TextField::TextField() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
@@ -2488,6 +2696,7 @@ namespace newui {
 
     TextControl::TextControl() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
@@ -2519,9 +2728,21 @@ namespace newui {
         }
         controller_->ensureLayoutUpToDate();
 
+        // Only fires when the caret's document-space rect has actually
+        // *changed* since the last paint() that fired it - real, confirmed
+        // live bug otherwise (same class as ListView::paint()'s own fix,
+        // controls.cpp, see its doc comment for the full reasoning):
+        // firing unconditionally every paint() meant scrolling this
+        // TextControl's own hosting ScrollView away from the caret via its
+        // scrollbar - which itself triggers a repaint - snapped straight
+        // back to the caret on the very next paint(), so a user could
+        // never actually scroll away from it to look at other text.
         Rect caretRect = controller_->caretDocumentRect();
-        if (caretRect.height() > 0.0f) {
+        if (caretRect.height() > 0.0f && caretRect != lastScrolledIntoViewCaretRect_) {
             onRequestScrollIntoView(*this, caretRect);
+        }
+        if (caretRect.height() > 0.0f) {
+            lastScrolledIntoViewCaretRect_ = caretRect;
         }
 
         ctx.save();
@@ -2555,14 +2776,37 @@ namespace newui {
 
     ListView::ListView() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &ListView::handleMouseDown);
         onMouseMove.add(this, &ListView::handleMouseMove);
         onMouseLeft.add(this, &ListView::handleMouseLeft);
+        onKeyDown.add(this, &ListView::handleKeyDown);
         onQueryContentSize.add(this, &ListView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
+        onGotFocus.add(this, &ListView::handleGotFocus);
+        onLostFocus.add(this, &ListView::handleLostFocus);
         controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+    }
+
+    SyncReturn ListView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     void ListView::setHoverHighlightEnabled(bool value) {
@@ -2687,6 +2931,46 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below (matching
+        // TextControl::paint()'s own ordering) - not after the row loop.
+        // A hosting ScrollView's handleContentRequestScrollIntoView()
+        // updates scrollOffsetY_ synchronously (setValue() ->
+        // onValueChanged -> handleVBarValueChanged() ->
+        // onScrollOffsetChanged.syncCall() -> handleScrollOffsetChanged()
+        // above), so firing this first lets the very same paint() pass
+        // already draw rows at the corrected offset. Firing it after (the
+        // original ordering) meant this frame's rows were drawn with the
+        // stale pre-adjustment offset, and the corrected scroll position
+        // only became visible on the *next* paint() - a real, confirmed
+        // one-frame display lag on every arrow-key/selection-driven
+        // scroll (e.g. End wouldn't visibly scroll until a second
+        // keypress).
+        //
+        // Only fires when selectedIndex()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - a
+        // real, confirmed live bug otherwise: firing unconditionally
+        // every single paint() (whenever either had a value at all, not
+        // just on a real change) meant dragging this ListView's own
+        // hosting ScrollView's scrollbar - which itself triggers a
+        // repaint via handleScrollOffsetChanged()'s style().markDirty() -
+        // immediately snapped straight back to the still-selected row on
+        // the very next paint(), so a user could never actually scroll a
+        // selected row *out* of view at all.
+        std::optional<std::size_t> primaryForScroll = selectedIndex();
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedIndex_) {
+            Rect selectedRect(0.0f, controller_->itemOffset(*primaryForScroll), clientBounds.width(),
+                controller_->itemHeight(*primaryForScroll));
+            onRequestScrollIntoView(*this, selectedRect);
+        }
+        lastScrolledIntoViewSelectedIndex_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2747,18 +3031,6 @@ namespace newui {
         }
 
         ctx.restore();
-
-        std::optional<std::size_t> primary = selectedIndex();
-        if (primary.has_value()) {
-            Rect selectedRect(0.0f, controller_->itemOffset(*primary), clientBounds.width(),
-                controller_->itemHeight(*primary));
-            onRequestScrollIntoView(*this, selectedRect);
-        }
-        if (keyboardHighlightedIndex_.has_value()) {
-            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
-                controller_->itemHeight(*keyboardHighlightedIndex_));
-            onRequestScrollIntoView(*this, highlightedRect);
-        }
     }
 
     SyncReturn ListView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
@@ -2809,6 +3081,115 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    std::size_t ListView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchor_.has_value()) {
+            return *selectionAnchor_;
+        }
+        if (auto sel = selectedIndex(); sel.has_value()) {
+            return *sel;
+        }
+        return 0;
+    }
+
+    // Intra-control behavior (which row is selected inside this already-
+    // focused ListView), local to this class - same "handled where the
+    // control's own state lives" convention TextController's own vkUpArrow/
+    // vkLeftArrow/etc. handling and DropDownList::handleKeyDown() already
+    // follow, not something UIInputManager (uiinputmanager.h) routes.
+    // UIInputManager owns *inter*-control policy instead (which View gets
+    // focus at all, Tab/Shift+Tab between them) - it would only come back
+    // into play here for a boundary spatial-jump to a different sibling
+    // View, which nothing in this codebase does anywhere yet (deliberately
+    // out of scope - see uiinputmanager.h's own class comment).
+    SyncReturn ListView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->itemCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // The other half of Ctrl+Arrow's "move a preview highlight
+            // without touching real selection" contract - toggles
+            // whatever's currently highlighted into/out of the real
+            // selection. A plain (non-Ctrl) Space is left alone - Control
+            // itself already treats a completed Space press like a click
+            // via its own onClick tracking, which this shouldn't fight.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(*keyboardHighlightedIndex_);
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Already at the first/last row - nothing left to do locally,
+            // so unlike every other case below (which always reports
+            // Handled even when next happens to equal the current
+            // selection already), this specifically reports Ignored -
+            // RootView::keyEvent's arrow-key routing (rootview.cpp) reads
+            // that as "the focused View didn't want this" and falls back
+            // to UIInputManager::routeArrowKeyDown()'s cross-control
+            // spatial jump (uiinputmanager.cpp) instead of silently
+            // re-selecting the same row. Shift/Ctrl-modified Up/Down
+            // deliberately stay Handled even at the boundary below -
+            // those are local selection-extension/preview gestures, not
+            // something that should eject focus out of this control
+            // mid-gesture.
+            return SyncReturn::Ignored;
+        }
+
+        if (ctrl && !shift) {
+            // Move only - see handleKeyDown()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchor_.has_value()) {
+                selectionAnchor_ = currentKeyboardLead();
+            }
+            selectRange(*selectionAnchor_, next);
+            // Tracks the moving edge so a repeated Shift+Arrow keeps
+            // extending from here, not resetting to the anchor every time -
+            // see currentKeyboardLead()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedIndex(next);
+            selectionAnchor_ = next;
+            setKeyboardHighlightedIndex(std::nullopt);
+			this->redraw();
+        }
+        return SyncReturn::Handled;
+    }
+
     SyncReturn ListView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         if (!hoveredIndex_.has_value()) {
             return SyncReturn::Ignored;
@@ -2841,14 +3222,48 @@ namespace newui {
 
     TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &TreeView::handleMouseDown);
         onMouseMove.add(this, &TreeView::handleMouseMove);
         onMouseLeft.add(this, &TreeView::handleMouseLeft);
+        onKeyDown.add(this, &TreeView::handleKeyDown);
         onQueryContentSize.add(this, &TreeView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
+        onGotFocus.add(this, &TreeView::handleGotFocus);
+        onLostFocus.add(this, &TreeView::handleLostFocus);
         controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+    }
+
+    void TreeView::setKeyboardHighlightedIndex(std::optional<std::size_t> index) {
+        if (index.has_value() && *index >= controller_->visibleCount()) {
+            index.reset();
+        }
+        if (index == keyboardHighlightedIndex_) {
+            return;
+        }
+        keyboardHighlightedIndex_ = index;
+        style().markDirty();
+    }
+
+    SyncReturn TreeView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     void TreeView::setController(std::unique_ptr<TreeController> controller) {
@@ -2967,6 +3382,36 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below - see the matching
+        // comment in ListView::paint() for why (same synchronous
+        // scrollOffsetY_ update chain, same one-frame-lag bug otherwise).
+        //
+        // Only fires when selectedPath()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - see
+        // ListView::paint()'s own comment (controls.cpp) for the real,
+        // confirmed live bug this fixes (scrolling the selected row out
+        // of view via this TreeView's own hosting ScrollView's scrollbar
+        // immediately snapped straight back to it on the very next
+        // paint(), since that repaint alone used to be enough to re-fire
+        // this unconditionally).
+        std::optional<std::vector<std::size_t>> primaryForScroll = selectedPath();
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedPath_) {
+            std::optional<std::size_t> primaryIndexForScroll = controller_->visibleIndexOf(*primaryForScroll);
+            if (primaryIndexForScroll.has_value()) {
+                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndexForScroll), clientBounds.width(),
+                    controller_->itemHeight(*primaryIndexForScroll));
+                onRequestScrollIntoView(*this, selectedRect);
+            }
+        }
+        lastScrolledIntoViewSelectedPath_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2981,7 +3426,8 @@ namespace newui {
             item->style().setView(this);
             item->setSelected(isSelected(path));
             item->setEnabled(isEnabled());
-            item->setHighlighted(hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i);
+            bool isKeyboardHighlighted = keyboardHighlightedIndex_.has_value() && *keyboardHighlightedIndex_ == i;
+            item->setHighlighted((hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i) || isKeyboardHighlighted);
 
             float height = controller_->itemHeight(i);
             if (height <= 0.0f) {
@@ -2996,16 +3442,6 @@ namespace newui {
         }
 
         ctx.restore();
-
-        std::optional<std::vector<std::size_t>> primary = selectedPath();
-        if (primary.has_value()) {
-            std::optional<std::size_t> primaryIndex = controller_->visibleIndexOf(*primary);
-            if (primaryIndex.has_value()) {
-                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndex), clientBounds.width(),
-                    controller_->itemHeight(*primaryIndex));
-                onRequestScrollIntoView(*this, selectedRect);
-            }
-        }
     }
 
     std::optional<Rect> TreeView::rectForPath(const std::vector<std::size_t>& path) const {
@@ -3088,6 +3524,140 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    std::size_t TreeView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchorPath_.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*selectionAnchorPath_); idx.has_value()) {
+                return *idx;
+            }
+        }
+        if (auto sel = selectedPath(); sel.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*sel); idx.has_value()) {
+                return *idx;
+            }
+        }
+        return 0;
+    }
+
+    // Same "intra-control, not UIInputManager" reasoning as ListView::
+    // handleKeyDown()'s own doc comment (controls.h).
+    SyncReturn TreeView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->visibleCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // See ListView::handleKeyDown()'s own Ctrl+Space handling
+            // (controls.cpp) - same contract, path-keyed.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(controller_->pathAt(*keyboardHighlightedIndex_));
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkLeftArrow || VKeyCode == vkRightArrow) {
+            std::vector<std::size_t> path = controller_->pathAt(currentKeyboardLead());
+            TreeModel* treeModel = controller_->model();
+            bool hasChildren = treeModel != nullptr && treeModel->hasChildren(path);
+            bool expanded = hasChildren && controller_->isExpanded(path);
+
+            if (VKeyCode == vkLeftArrow) {
+                if (expanded) {
+                    controller_->setExpanded(path, false);
+                    return SyncReturn::Handled;
+                }
+                // Already collapsed (or a leaf) - move to the parent path,
+                // if there is one. An empty path (path.size() == 1, a
+                // top-level node) has no parent - nothing left to do.
+                if (path.size() <= 1) {
+                    return SyncReturn::Ignored;
+                }
+                path.pop_back();
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+                return SyncReturn::Ignored;
+            }
+
+            // vkRightArrow
+            if (hasChildren && !expanded) {
+                controller_->setExpanded(path, true);
+                return SyncReturn::Handled;
+            }
+            if (expanded) {
+                path.push_back(0);
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Same "hand off to UIInputManager's cross-control spatial
+            // jump instead of silently re-selecting the same row" reasoning
+            // as ListView::handleKeyDown()'s own Up/Down boundary case
+            // (controls.cpp) - kept ahead of nextPath's own computation
+            // below since there's nothing to do with it in this case.
+            return SyncReturn::Ignored;
+        }
+
+        std::vector<std::size_t> nextPath = controller_->pathAt(next);
+
+        if (ctrl && !shift) {
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchorPath_.has_value()) {
+                selectionAnchorPath_ = controller_->pathAt(currentKeyboardLead());
+            }
+            selectRange(*selectionAnchorPath_, nextPath);
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedPath(nextPath);
+            selectionAnchorPath_ = nextPath;
+            setKeyboardHighlightedIndex(std::nullopt);
+        }
+        return SyncReturn::Handled;
+    }
+
     SyncReturn TreeView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         if (!hoveredVisibleIndex_.has_value()) {
             return SyncReturn::Ignored;
@@ -3120,10 +3690,32 @@ namespace newui {
 
     DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &DropDownList::handleMouseDown);
         onKeyDown.add(this, &DropDownList::handleKeyDown);
+        onGotFocus.add(this, &DropDownList::handleGotFocus);
+        onLostFocus.add(this, &DropDownList::handleLostFocus);
+    }
+
+    SyncReturn DropDownList::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn DropDownList::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     DropDownList::~DropDownList() {

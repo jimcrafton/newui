@@ -5,6 +5,7 @@
 #include "newui/frame.h"
 #include "newui/mouse_constants.h"
 #include "newui/subview.h"
+#include "newui/uiinputmanager.h"
 #include "newui/utils.h"
 #include "newui/keyboard_constants.h"
 #include "newui/uicolormanager.h"
@@ -363,7 +364,7 @@ namespace newui {
 		// pattern/image fills do. This scoping is what keeps a small
 		// hover-driven repaint from wiping (and needing to redraw) the
 		// *entire* window's background on every call.
-		if (!dirtyRect_.empty()) {
+		if (!dirtyRect_.empty()) {			
 			ctx.save();
 			ctx.clip_to_rect(dirtyRect_);
 			paintStyle(ctx);
@@ -520,6 +521,9 @@ namespace newui {
 
 		visible_ = visible;
 		onVisibilityChanged(*this);
+		// Same fix as SubView::setVisible() (subview.cpp) - see its own
+		// comment for the real bug this guards against.
+		redraw();
 	}
 
 	void RootView::addChild(SubView* child)
@@ -621,10 +625,30 @@ namespace newui {
 		}
 
 		if (target != nullptr) {
-			
+
 			if (!target->canBecomeFocused()) {
 				return;
 			}
+		}
+
+		// markDirty() on both the outgoing and incoming View - same
+		// "whoever's tracking this state is also responsible for
+		// scheduling the repaint it visually depends on" convention
+		// updateHoveredSubView() already established just above for
+		// hoveredSubView_/isHighlighted(). Without this, isFocused()
+		// (view.h) genuinely does flip for both Views the instant this
+		// function returns - Control::canPerformCommand()/keyEvent()
+		// dispatch, TextController's own markDirty() calls, etc. all
+		// already worked correctly - but nothing ever asked for a
+		// repaint, so View::postPaintStyle()'s ViewStyle::postPaint()
+		// call (the generic dashed ring every non-ThemedEditStyle control
+		// relies on - Button, Toggle, Slider, a FocusScope panel, ...)
+		// never actually ran again until some *unrelated* later event
+		// happened to trigger one - a real, confirmed live bug: tabbing
+		// from a Button through several more controls visibly changed
+		// nothing at all, even though focus really was moving underneath.
+		if (focusedSubView_ != nullptr) {
+			focusedSubView_->style().markDirty();
 		}
 
 		if (focusedSubView_ != nullptr) {
@@ -635,6 +659,7 @@ namespace newui {
 
 		if (focusedSubView_ != nullptr) {
 			focusedSubView_->onGotFocus(*focusedSubView_);
+			focusedSubView_->style().markDirty();
 		}
 	}
 
@@ -681,7 +706,40 @@ namespace newui {
 			capturedSubView_ = nullptr;
 		}
 		if (focusedSubView_ != nullptr && isWithinSubtree(focusedSubView_, removedSubtreeRoot)) {
-			focusedSubView_ = nullptr;
+			// Recover to the nearest still-alive ancestor that can hold
+			// focus, rather than just dropping it to nullptr - walk up
+			// from removedSubtreeRoot's own parent (still intact at this
+			// point; only removedSubtreeRoot's own subtree is going away,
+			// same as hoveredSubView_/capturedSubView_ above). Stops
+			// naturally at `this` (a RootView is never itself a focus
+			// target - see moveFocus()'s own candidate gathering,
+			// uiinputmanager.cpp) or wherever the SubView chain runs out.
+			//
+			// Deliberately bypasses setFocusedSubView()'s
+			// canResignFocus() veto and never fires onLostFocus() on the
+			// doomed view - it's being destroyed regardless of what it
+			// wants, same as hoveredSubView_/capturedSubView_ being
+			// silently cleared just above with no onMouseLeft/etc. fired
+			// either. onGotFocus() *is* fired on the recovered target
+			// though (unlike the silent hover/capture clears, which have
+			// no "recovered to" concept at all) - real controls
+			// (ThemedEditStyle-based ones especially, see this class's
+			// own "visual focus indication" follow-up) rely on that hook
+			// actually firing to show real focus feedback, not just
+			// isFocused() flipping.
+			SubView* recovered = nullptr;
+			for (View* v = removedSubtreeRoot->parent(); v != nullptr && v != this; v = v->parent()) {
+				SubView* candidate = dynamic_cast<SubView*>(v);
+				if (candidate != nullptr && candidate->canBecomeFocused()) {
+					recovered = candidate;
+					break;
+				}
+			}
+			focusedSubView_ = recovered;
+			if (focusedSubView_ != nullptr) {
+				focusedSubView_->onGotFocus(*focusedSubView_);
+				focusedSubView_->style().markDirty();
+			}
 		}
 	}
 
@@ -743,7 +801,17 @@ namespace newui {
 		Point localPt;
 		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
-		setFocusedSubView(target);
+
+		// Mouse *capture* (and therefore which View this gesture's own
+		// onMouseDown/onMouseMove/onMouseUp reach) always stays the exact
+		// hit target above - only which View this click hands *keyboard
+		// focus* to goes through UIInputManager's policy: a plain
+		// non-focusable SubView (a container/decoration, or a control
+		// like Stepper/ScrollBar that deliberately shouldn't steal focus -
+		// see View::acceptsFocus(), view.h) walks up to the nearest
+		// focusable ancestor instead of focusing itself, same as clicking
+		// a Button's own drawn label still focuses the Button.
+		setFocusedSubView(UIInputManager::instance().resolveClickFocusTarget(target));
 
 		if (target != nullptr) {
 			if (!target->isDesignTime()) {
@@ -937,7 +1005,8 @@ namespace newui {
 		Point localPt;
 		SubView* target = resolveInteractiveHit(pt, localPt);
 		capturedSubView_ = target;
-		setFocusedSubView(target);
+		// See mouseDown()'s own comment - same capture-vs-focus split.
+		setFocusedSubView(UIInputManager::instance().resolveClickFocusTarget(target));
 
 		if (target != nullptr) {
 			if (!target->isDesignTime()) {
@@ -967,6 +1036,30 @@ namespace newui {
 
 	void RootView::keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode)
 	{
+		// Tab is reserved for UIInputManager's focus navigation, never
+		// forwarded to onKeyDown/onKeyPress/onKeyUp - this RootView's own
+		// or focusedSubView_'s - the same way a real dialog's tab order
+		// swallows Tab rather than letting a control see it as an
+		// ordinary keystroke. keKeyDown is the one that actually
+		// navigates; keKeyPress (WM_CHAR's synthesized '\t', delivered
+		// via handleMessage()'s TranslateMessage() call same as any other
+		// character) and keKeyUp for the same physical keypress are just
+		// as deliberately ignored here, not merely unhandled.
+		//
+		// Unless the currently focused View opts out via wantsTabKey()
+		// (view.h) - e.g. a future code editor that wants a literal tab
+		// character instead of a focus change - in which case Tab isn't
+		// intercepted at all here; it falls straight through to the
+		// ordinary dispatch below, same as any other key.
+		bool focusedViewWantsTabKey = focusedSubView_ != nullptr && focusedSubView_->wantsTabKey();
+		if (VKeyCode == vkTab && !focusedViewWantsTabKey) {
+			if (eventType == keKeyDown) {
+				UIInputManager::instance().moveFocus(*this,
+					(keyMask & kmShift) != 0 ? FocusNavigationDirection::Previous : FocusNavigationDirection::Next);
+			}
+			return;
+		}
+
 		switch (eventType) {
 			case keKeyPress: {
 				onKeyPress(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
@@ -985,6 +1078,26 @@ namespace newui {
 		}
 
 		if (focusedSubView_ == nullptr) {
+			return;
+		}
+
+		// Arrow keys route through UIInputManager instead of the plain
+		// focusedSubView_->onKeyDown() call below, same "detect the key,
+		// hand the whole thing off to UIInputManager" shape the vkTab
+		// block above already uses - routeArrowKeyDown() does its own
+		// dispatch to focusedSubView_ first (a ListView moving its
+		// selection, a Slider changing its value, ...) and only falls
+		// back to a cross-control spatial jump if that dispatch goes
+		// unhandled, so this doesn't *also* need to call
+		// focusedSubView_->onKeyDown() itself - see routeArrowKeyDown()'s
+		// own doc comment (uiinputmanager.h) for the rest. Only
+		// keKeyDown - keKeyPress never fires for a non-character key like
+		// an arrow anyway, and keKeyUp still wants the plain dispatch
+		// below (a View reacting to the key actually being released is
+		// no different for an arrow than for any other key).
+		bool isArrowKey = VKeyCode == vkUpArrow || VKeyCode == vkDownArrow || VKeyCode == vkLeftArrow || VKeyCode == vkRightArrow;
+		if (isArrowKey && eventType == keKeyDown) {
+			UIInputManager::instance().routeArrowKeyDown(*this, keyMask, keyCharVal, repeatCount, VKeyCode);
 			return;
 		}
 
@@ -1318,8 +1431,11 @@ namespace newui {
 					case WM_KEYDOWN: {
 						keyCharVal = keyData.character;
 						eventType = keKeyDown;
-						
+
 						keyData.VKeyCode = translateVirtualKey(wParam,0);
+						printf("DEBUG WM_KEYDOWN wParam=%llu (0x%llx) -> VKeyCode=%u focusedSubView_=%p\n",
+							(unsigned long long)wParam, (unsigned long long)wParam, keyData.VKeyCode, (void*)focusedSubView_);
+						fflush(stdout);
 					}
 					break;
 

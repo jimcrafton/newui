@@ -1,4 +1,5 @@
 #include "newui/tabcontrol.h"
+#include "newui/keyboard_constants.h"
 #include "newui/layout.h"
 #include "newui/fontmanager.h"
 #include "newui/font.h"
@@ -67,6 +68,13 @@ namespace newui {
 TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(alignment) {
     setName("TabControl");
     setVisible(true);
+    // The whole strip is one tab stop, like a real Win32 tab control -
+    // individual TabItemButtonView instances (addTab(), below) stay
+    // non-focusable; switching which tab is selected once this control
+    // has focus is a job for arrow keys, not Tab (see handleKeyDown()
+    // below), matching native tab control behavior.
+    setAcceptsFocus(true);
+    onKeyDown.add(this, &TabControl::handleKeyDown);
     setStyle(std::make_unique<ThemedTabPaneStyle>());
 
     const bool stripHorizontal = IsHorizontalStrip(alignment_);
@@ -173,6 +181,28 @@ void TabControl::selectTab(std::size_t index) {
     }
 
     onTabChanged.syncCall(*this, index);
+}
+
+SyncReturn TabControl::handleKeyDown(View& /*sender*/, std::uint32_t /*keyMask*/, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+    const std::size_t count = tabCount();
+    if (count == 0) {
+        return SyncReturn::Ignored;
+    }
+
+    const bool horizontal = IsHorizontalStrip(alignment_);
+    const bool advance = VKeyCode == (horizontal ? vkRightArrow : vkDownArrow);
+    const bool retreat = VKeyCode == (horizontal ? vkLeftArrow : vkUpArrow);
+    if (!advance && !retreat) {
+        return SyncReturn::Ignored;
+    }
+
+    // Wraps at either end, matching native Win32 tab control behavior
+    // (and moveFocus()'s own Tab-wrap convention, uiinputmanager.cpp) -
+    // +count before the retreat's %count keeps the subtraction from ever
+    // going negative on an unsigned type when selectedIndex_ is 0.
+    std::size_t next = advance ? (selectedIndex_ + 1) % count : (selectedIndex_ + count - 1) % count;
+    selectTab(next);
+    return SyncReturn::Handled;
 }
 
 void TabControl::updateTabPositions() {
