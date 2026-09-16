@@ -24,6 +24,9 @@
 #include "newui/newui.h"
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
+#include "newui/color.h"
+#include "newui/uicolormanager.h"
+#include "newui/viewstyle.h"
 
 #include <any>
 #include <string>
@@ -614,4 +617,105 @@ TEST(ReflectionIO, NonDesignModeReadNewLeavesDesignTimeUnset) {
     ASSERT_NE(fresh, nullptr);
     EXPECT_FALSE(fresh->designTime);
     delete fresh;
+}
+
+// ---------------------------------------------------------------------
+// Class::isStringValue() (ClassBuilder<T>::stringValue(), reflection.h) -
+// Color is the one real class registered with it (see the "@reflect
+// stringvalue" comment directly above `class Color`, color.h), so these
+// exercise the real, generated newui::Color registration directly rather
+// than a test-only stand-in, through ViewStyle::borderFill() - a genuine
+// plain by-value getter/setter Color property (the "neither addressable
+// nor heap" branch of TypedProperty<SourceT,ValueT>::read()/write(),
+// reflection.h) - the exact shape a "borderFill: \"red\"" value in a real
+// .newui file goes through.
+// ---------------------------------------------------------------------
+
+using newui::Color;
+using newui::ViewStyle;
+
+TEST(ColorStringValue, WriteEmitsACompactStringInsteadOfANestedObject) {
+    ViewStyle style;
+    style.setBorderFill(Color(1.0f, 0.0f, 0.0f, 1.0f));  // opaque red
+
+    ObjectWriter writer;
+    writer.write(&style);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("borderFill: \"#ff0000ff\""), std::string::npos) << text;
+    // The old nested-object form ("borderFill":{"type":"Color",...}) must
+    // be gone, not merely coexisting alongside the new string form.
+    EXPECT_EQ(text.find("borderFill: {"), std::string::npos) << text;
+}
+
+TEST(ColorStringValue, ReadAcceptsAHexStringForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"#00ff00ff\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color(0.0f, 1.0f, 0.0f, 1.0f));
+}
+
+TEST(ColorStringValue, ReadAcceptsACssNamedColorForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"red\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color::fromName("red"));
+}
+
+TEST(ColorStringValue, ReadAcceptsAUIColorRoleNameForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"WindowBackground\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    // Live-resolved, same as Color::fromString() itself would - not a
+    // hardcoded expectation, since which actual RGB this is depends on the
+    // test machine's current Light/Dark mode setting (UIColorManager).
+    Color expected;
+    ASSERT_TRUE(Color::fromUIColorRoleName("WindowBackground", expected));
+    EXPECT_EQ(style.borderFill(), expected);
+}
+
+TEST(ColorStringValue, ReadStillAcceptsTheOldNestedObjectFormForBackwardCompatibility) {
+    ObjectReader reader;
+    json5::error err = json5::from_string(
+        "{ borderFill: { type: \"Color\", r: 0, g: 1, b: 0, a: 1 } }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color(0.0f, 1.0f, 0.0f, 1.0f));
+}
+
+TEST(ColorStringValue, WriteThenReadRoundTripsExactly) {
+    ViewStyle written;
+    // Starts from an already hex-quantized string (not an arbitrary float
+    // triple) so the round trip is exact - Color::toString() always
+    // quantizes to 8 bits/channel, so e.g. Color(0.25f, ...) wouldn't
+    // compare == after going through it, purely from that lossy
+    // float<->byte conversion, nothing to do with this test's own subject.
+    written.setBorderFill(Color(std::string("#4080c0ff")));
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle fresh;
+    reader.read(&fresh);
+
+    EXPECT_EQ(fresh.borderFill(), written.borderFill());
 }

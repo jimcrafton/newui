@@ -168,6 +168,22 @@ namespace newui::reflection {
         // nothing definite to compare against.
         virtual const Class* peekElementType() const { return nullptr; }
 
+        // True when the source data at propertyName is a plain string rather
+        // than an object - lets a caller about to read a nested Class-typed
+        // property (TypedProperty<SourceT,ValueT>::read()/TypedMemberField::
+        // read(), below) check, before committing to beginObject()'s object-
+        // shaped protocol, whether the document actually holds the compact
+        // string form a Class::isStringValue() class also accepts (Color's
+        // "#rrggbbaa"/CSS-name/UIColorRole forms being the motivating case -
+        // see ClassBuilder<T>::stringValue()'s own comment). A pure peek,
+        // same non-mutating contract as peekElementType() - doesn't consume/
+        // advance anything, so the caller still has to call readString()/
+        // beginObject() itself afterward to actually consume the value.
+        // Defaults to false (every existing ClassReader implementation that
+        // never overrides this keeps its exact prior behavior: always treat
+        // a nested-Class property as object-shaped).
+        virtual bool valueIsString(const std::string& propertyName) const { return false; }
+
         virtual void readInt(const std::string& propertyName, std::int32_t& val) = 0;
         virtual void readString(const std::string& propertyName, std::string& val) = 0;
         virtual void readFloat(const std::string& propertyName, float& val) = 0;
@@ -562,6 +578,9 @@ namespace newui::reflection {
         void read(void* instancePtr, ClassReader* reader) const override {
             if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
                 void* nestedPtr = address(instancePtr);
+                if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
+                    return;
+                }
                 const Class* resolvedClazz = reader->beginObject(name());
                 if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                     bool onHeap = false;
@@ -1154,6 +1173,13 @@ namespace newui::reflection {
                 // through here instead of silently doing nothing just
                 // because ValueT as a whole can't be copied.
                 if (shouldCreateOnHeap()) {
+                    // No Class::isStringValue() check in this branch - an
+                    // owned-pointer property (View::layout()/style()) is a
+                    // polymorphic-object-ownership shape a plain value type
+                    // like Color never actually uses in this codebase;
+                    // real, doable follow-on work if that ever changes, not
+                    // done here.
+                    //
                     // Peek the saved data's resolved type first (unusable -
                     // null, or not a genuine ValueT subclass - just means
                     // this property can't be processed here; whatever
@@ -1193,6 +1219,9 @@ namespace newui::reflection {
                     reader->endObject(name(), resolvedClazz);
                 } else if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
+                        if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
+                            return;
+                        }
                         const Class* resolvedClazz = reader->beginObject(name());
                         if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                             bool onHeap = false;
@@ -1201,9 +1230,19 @@ namespace newui::reflection {
                         reader->endObject(name(), resolvedClazz);
                     }
                 } else if constexpr (kCopyable && std::is_default_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
+                    // The shape borderFill()/setBorderFill()-style plain
+                    // by-value getter/setter Color properties actually hit -
+                    // see ClassBuilder<T>::property()'s own "addressable"
+                    // constexpr (reflection.h): a getter WITH a real setter
+                    // is never addressable, regardless of what the getter
+                    // itself returns.
+                    ValueT temp{};
+                    if (tryReadStringValue(nestedClazz, &temp, name(), reader)) {
+                        set(instancePtr, std::any(temp));
+                        return;
+                    }
                     const Class* resolvedClazz = reader->beginObject(name());
                     if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
-                        ValueT temp{};
                         void* tempPtr = &temp;
                         bool onHeap = false;
                         reader->readInto(resolvedClazz, tempPtr, onHeap);
@@ -2462,6 +2501,40 @@ namespace newui::reflection {
         const std::string& proxyFor() const { return proxyFor_; }
         void setProxyFor(std::string realClassName) { proxyFor_ = std::move(realClassName); }
 
+        // Set only via ClassBuilder<T>::stringValue() - an explicit, per-
+        // class opt-in (see its own comment) rather than guessed from
+        // whether T merely *has* a toString()/fromString() pair somewhere:
+        // most reflected classes have those for unrelated reasons (logging,
+        // debugging) without meaning "read/write me as a single string
+        // instead of my own properties/fields" - same "shape alone isn't
+        // reliable signal" reasoning Enum::isFlags()/@reflect collection
+        // already use. True only for a genuine value type with its own
+        // total, round-trippable string form - Color's hex/CSS-name/
+        // UIColorRole forms (Color::fromString()/toString()) being the
+        // motivating, but not the only, case: a "borderFill: \"red\"" (or
+        // "WindowBackground") value in a .newui file resolves through this,
+        // instead of the usual nested "{type:\"Color\", r, g, b, a}" object -
+        // see TypedClass<T>::write()'s own write-side check, and
+        // TypedProperty<SourceT,ValueT>::read()/TypedMemberField::read()'s
+        // own read-side checks, both below.
+        bool isStringValue() const { return fromString_ != nullptr && toString_ != nullptr; }
+
+        // Parses str into *instancePtr (which must already point at a live
+        // T) via whatever T::fromString() ClassBuilder<T>::stringValue()
+        // wired in - false (instancePtr left untouched) if isStringValue()
+        // is false, or T's own fromString() itself rejected str (e.g. a
+        // typo'd color name).
+        bool parseFromString(const std::string& str, void* instancePtr) const {
+            return fromString_ != nullptr && fromString_(str, instancePtr);
+        }
+
+        // Formats *instancePtr (a live T) into outStr via whatever
+        // T::toString() ClassBuilder<T>::stringValue() wired in - false
+        // (outStr untouched) if isStringValue() is false.
+        bool formatToString(const void* instancePtr, std::string& outStr) const {
+            return toString_ != nullptr && toString_(instancePtr, outStr);
+        }
+
         // namespaceName() + name(), e.g. "newui::Rect" - namespaceName()
         // already carries its own trailing "::" (see extractNamespace()),
         // so this is a plain concatenation. classinfo()/getClass() accept
@@ -2646,6 +2719,18 @@ namespace newui::reflection {
     private:
         template<typename T> friend class ClassBuilder;
 
+        // See isStringValue()/parseFromString()/formatToString() above -
+        // same plain-function-pointer type erasure Enum::toUInt64_/
+        // fromUInt64_ already use for the identical "only the T-aware
+        // builder that registered this knows the real T" reason. Declared
+        // up front (rather than alongside fromString_/toString_ below,
+        // where Enum's own ToUInt64Fn/FromUInt64Fn sit) since
+        // setStringConversion() just below needs the names already visible -
+        // a member function's own parameter-list types, unlike its body,
+        // aren't a complete-class context.
+        using FromStringFn = bool (*)(const std::string&, void*);
+        using ToStringFn = bool (*)(const void*, std::string&);
+
         void setIsDerived(bool v) {
             flags_ = (v == true) ? flags_ | ClassFlags::Derived : flags_ & ~ClassFlags::Derived;
         }
@@ -2660,6 +2745,16 @@ namespace newui::reflection {
 
         void setIsSingleton(bool v) {
             flags_ = (v == true) ? flags_ | ClassFlags::Singleton : flags_ & ~ClassFlags::Singleton;
+        }
+
+        // Only ClassBuilder<T>::stringValue() ever calls this - both
+        // function pointers are set together (isStringValue() checks both
+        // non-null) since a class either has a genuine, total string form
+        // or it doesn't; there's no real use for one direction without the
+        // other.
+        void setStringConversion(FromStringFn fromStr, ToStringFn toStr) {
+            fromString_ = fromStr;
+            toString_ = toStr;
         }
 
         // Raw, non-owning pointer into the registry's own copy of the base
@@ -2686,6 +2781,8 @@ namespace newui::reflection {
         std::vector<std::string> categories_;
         std::string proxy_;
         std::string proxyFor_;
+        FromStringFn fromString_ = nullptr;
+        ToStringFn toString_ = nullptr;
     };
 
     // Every live pointer already reachable through one of `properties`' own
@@ -2719,6 +2816,30 @@ namespace newui::reflection {
             }
         }
         return reachable;
+    }
+
+    // Shared by every "about to read a nested Class-typed value" call site
+    // that already resolved nestedClazz via classinfo() - TypedMemberField::
+    // read()/TypedProperty<SourceT,ValueT>::read() (above - MSVC resolves
+    // this the same deferred way it already resolves their own classinfo()
+    // calls, textually later in this same header/namespace, see that
+    // function's own precedent). Returns true (value fully handled -
+    // *instancePtr already holds the parsed result) only when nestedClazz is
+    // genuinely a Class::isStringValue() class AND the document's own value
+    // at this key is a plain string rather than an object (ClassReader::
+    // valueIsString()). An ordinary nested object at this key is left
+    // completely untouched (false, nothing read) so the caller's own normal
+    // beginObject()/readInto() path runs exactly as it always has.
+    // instancePtr must already point at a live, default-constructed
+    // instance of nestedClazz's own T - same in-place-fill contract
+    // Class::parseFromString() itself already has.
+    inline bool tryReadStringValue(const Class* nestedClazz, void* instancePtr, const std::string& name, ClassReader* reader) {
+        if (!nestedClazz->isStringValue() || !reader->valueIsString(name)) {
+            return false;
+        }
+        std::string str;
+        reader->readString(name, str);
+        return nestedClazz->parseFromString(str, instancePtr);
     }
 
     // Adds T-aware construction convenience on top of Class's type-erased
@@ -2759,6 +2880,24 @@ namespace newui::reflection {
         }
 
         void write(void* instancePtr, ClassWriter* writer, const std::string& name) const override {
+            // A Class::isStringValue() class (ClassBuilder<T>::stringValue(),
+            // above) writes as its own compact string instead of the usual
+            // nested keyed object - checked first, before enterInstance()'s
+            // cycle tracking even runs, since a plain value type like Color
+            // can't participate in a reference cycle in the first place.
+            // Every call site that recurses into a nested Class (TypedProperty
+            // ::write()/TypedMemberField::write()/a PropertyCollection
+            // element/writeObjects()'s own named roots) ultimately reaches
+            // this same write() - so this one check covers all of them, no
+            // per-call-site duplication needed.
+            if (isStringValue()) {
+                std::string str;
+                if (formatToString(instancePtr, str)) {
+                    writer->writeString(name, str);
+                    return;
+                }
+            }
+
             // See ClassWriter::enterInstance()'s own comment - skips this
             // object (and everything nested under it) entirely when it's
             // already open somewhere up the current write() call chain,
@@ -2920,6 +3059,28 @@ namespace newui::reflection {
         // See Class::proxy()/proxyFor()'s own comments.
         ClassBuilder& proxy(std::string proxyClassName) { class_->setProxy(std::move(proxyClassName)); return *this; }
         ClassBuilder& proxyFor(std::string realClassName) { class_->setProxyFor(std::move(realClassName)); return *this; }
+
+        // See Class::isStringValue()'s own comment - opts T into "string
+        // value" treatment: read/written as a single compact string
+        // (T::fromString()/toString()) wherever an ordinary nested object
+        // of T's own properties/fields would otherwise be expected. T must
+        // have exactly the shape Color already does - a `static bool
+        // fromString(const std::string&, T&)` and a `std::string
+        // toString() const` - for the two lambdas below to compile; nothing
+        // here guesses or falls back if either is missing, same as
+        // TypedConstructor<T,Args...> failing to compile for a T with no
+        // matching real constructor.
+        ClassBuilder& stringValue() {
+            class_->setStringConversion(
+                [](const std::string& str, void* instancePtr) -> bool {
+                    return T::fromString(str, *static_cast<T*>(instancePtr));
+                },
+                [](const void* instancePtr, std::string& outStr) -> bool {
+                    outStr = static_cast<const T*>(instancePtr)->toString();
+                    return true;
+                });
+            return *this;
+        }
 
         // Links this class to its base class BaseT's already-registered
         // Class (Class::parentClass()) and marks this class derived() -

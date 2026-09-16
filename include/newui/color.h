@@ -93,6 +93,14 @@ namespace newui {
     // color can be constructed via the fromHSL()/fromHSV()/fromLab()/
     // fromCMY()/fromCMYK()/fromYUV() factory functions, which all resolve
     // down to this same r/g/b/a storage.
+    //
+    // @reflect stringvalue - fromString()/toString() below give this a
+    // total, round-trippable single-string form, so a Color-typed property
+    // (ViewStyle::borderFill(), highlightFill(), ...) reads/writes as a
+    // plain string ("#ff0000ff", "red", "WindowBackground") in a .newui
+    // file instead of the usual nested "{type:\"Color\", r, g, b, a}"
+    // object - see ClassBuilder<T>::stringValue()'s own comment
+    // (reflection.h) for the general mechanism this opts into.
     class Color {
     public:
 

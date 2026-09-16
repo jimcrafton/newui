@@ -531,6 +531,24 @@ def is_reflect_flags(cursor):
     return reflect_annotations(cursor).get("flags", "").lower() == "true"
 
 
+# "@reflect stringvalue" right above a class/struct opts it into
+# ClassBuilder<T>::stringValue() (reflection.h) - a genuine value type with
+# its own total, round-trippable single-string form (e.g. Color's
+# "#rrggbbaa"/CSS-name/UIColorRole forms - Color::fromString()/toString())
+# reads/writes as that plain string wherever an ordinary nested object of
+# its own properties/fields would otherwise be expected, instead of the
+# usual "{type:...}" object. Same "always explicit, never guessed" reasoning
+# is_reflect_flags() above already uses - merely *having* a toString()/
+# fromString() pair (for unrelated reasons, e.g. logging/debugging) doesn't
+# imply this; T must actually have the exact `static bool fromString(const
+# std::string&, T&)` / `std::string toString() const` shape ClassBuilder<T>::
+# stringValue() requires, or the generated registration simply fails to
+# compile - reflectgen doesn't verify that shape itself, same as it doesn't
+# verify a constructor annotation names a real constructor.
+def is_reflect_string_value(cursor):
+    return reflect_annotations(cursor).get("stringvalue", "").lower() == "true"
+
+
 class Field:
     def __init__(self, name, scope, is_static):
         self.name = name
@@ -661,6 +679,10 @@ class ClassInfo:
         # "absent means empty, not None" convention self.tags already uses.
         self.proxy = ""
         self.proxy_for = ""
+        # From "@reflect stringvalue" directly above the class declaration -
+        # see Class::isStringValue()'s own comment (reflection.h) and
+        # is_reflect_string_value()'s own comment above.
+        self.string_value = False
 
 
 class EnumValue:
@@ -1318,6 +1340,7 @@ def collect_class(cursor):
     info.categories = [c for c in reflect_annotations(cursor).get("category", "").split(",") if c]
     info.proxy = reflect_annotations(cursor).get("proxy", "")
     info.proxy_for = reflect_annotations(cursor).get("proxyfor", "")
+    info.string_value = is_reflect_string_value(cursor)
 
     method_name_counts = {}
     method_cursors = []
@@ -1745,6 +1768,9 @@ def emit_register_function(info,function_listing):
         chain.append(f'.proxy("{info.proxy}")')
     if info.proxy_for:
         chain.append(f'.proxyFor("{info.proxy_for}")')
+
+    if info.string_value:
+        chain.append(".stringValue()")
 
     # A plain member variable with no accessor methods at all - static or
     # not - is a Field, never a Property (see Field's own "raw access,

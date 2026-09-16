@@ -367,6 +367,23 @@ namespace newui::reflection {
             return node.is_object() ? classinfo(std::string(node["type"].get_c_str(""))) : nullptr;
         }
 
+        // See ClassReader::valueIsString()'s own doc comment. Mirrors
+        // beginObject()'s own name-empty-vs-not dispatch (keyed lookup,
+        // current array position, or the current scope itself) but only
+        // ever peeks - propertyName's real consumption still happens
+        // through the caller's own subsequent readString() call.
+        bool valueIsString(const std::string& propertyName) const override {
+            json5::value node;
+            if (!propertyName.empty()) {
+                node = stack.back()[propertyName];
+            } else if (stack.back().is_array()) {
+                node = stack.back()[cursorStack.back()];
+            } else {
+                node = stack.back();
+            }
+            return node.is_string();
+        }
+
         // See ClassReader::hasValue()'s own doc comment for why this
         // exists and who consults it. Only meaningful for a *keyed*
         // scalar/object within the current object scope - not called for

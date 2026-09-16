@@ -784,6 +784,48 @@ class ReflectCategoryAnnotationTest(ClangSnippetTestCase):
         self.assertNotIn(".categories(", source)
 
 
+class ReflectStringValueAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect stringvalue
+        class Coordinate {
+        public:
+            static bool fromString(const std::string& str, Coordinate& out);
+            std::string toString() const;
+
+            float x = 0.0f;
+            float y = 0.0f;
+        };
+
+        // No annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    def test_stringvalue_annotation_is_parsed(self):
+        cursor = self.find("Coordinate")
+        self.assertEqual(rg.reflect_annotations(cursor).get("stringvalue"), "true")
+
+    def test_stringvalue_lands_on_class_info(self):
+        info = rg.collect_class(self.find("Coordinate"))
+        self.assertTrue(info.string_value)
+
+    def test_missing_stringvalue_defaults_false(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertFalse(info.string_value)
+
+    def test_emitted_registration_includes_the_stringvalue_call(self):
+        info = rg.collect_class(self.find("Coordinate"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn(".stringValue()", source)
+
+    def test_no_stringvalue_call_emitted_when_not_annotated(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        source = rg.emit_register_function(info, [])
+        self.assertNotIn(".stringValue(", source)
+
+
 class GeneratedRegisterFunctionIsSelfGuardingTest(unittest.TestCase):
     # Real bug this guards against: two independent call sites in
     # cpp_codetools each called registerReflectionData() directly - the

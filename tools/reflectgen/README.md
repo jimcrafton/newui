@@ -43,6 +43,7 @@ pairs can share one annotation (`@reflect property=title tags=filepath`).
 | `@reflect proxy=ClassName` | a class | Names that class's design-time stand-in (`Class::proxy()`), e.g. `Frame` → `FrameProxy`. |
 | `@reflect proxyfor=ClassName` | a class (the proxy itself) | Inverse of `proxy=` - names the real class this one stands in for (`Class::proxyFor()`). |
 | `@reflect flags` | an `enum`/`enum class` | Opts the enum into array-of-decomposed-flag-names read/write treatment (`Enum::isFlags()`), always explicit, never guessed. |
+| `@reflect stringvalue` | a class/struct | Opts the class into single-compact-string read/write treatment (`Class::isStringValue()`) instead of a nested keyed object of its own properties/fields - requires a matching `fromString()`/`toString()` pair (see below), always explicit, never guessed. |
 
 Each is covered in more detail, with a full example, below.
 
@@ -249,6 +250,42 @@ enum class Anchor : std::uint8_t {
 
 emits the enum's ordinary `EnumBuilder<Anchor>("Anchor")` registration
 plus a trailing `.flags(true)`, so `Enum::isFlags()` reports true.
+
+**`@reflect stringvalue`** directly above a class/struct opts it into
+`ClassBuilder<T>::stringValue()` (`reflection.h`) - read/written as one
+compact string wherever an ordinary nested `{type:"...", ...}` object of
+its own properties/fields would otherwise be expected, instead of the
+usual per-property recursion. Always explicit, same "never guessed"
+reasoning as `@reflect flags` above - most classes that happen to have a
+`toString()` (for logging, debugging, ...) don't mean "read/write me as a
+single string", so this is never inferred from a class merely having one.
+`T` must have exactly the shape `newui::Color` does for the generated
+`.stringValue()` call to compile:
+
+```cpp
+// @reflect stringvalue
+class Coordinate {
+public:
+    static bool fromString(const std::string& str, Coordinate& out);
+    std::string toString() const;
+
+    float x = 0.0f;
+    float y = 0.0f;
+};
+```
+
+emits the class's ordinary field/property/method registration (`x`/`y`
+still get their own `.field(...)` entries, so direct introspection/editing
+still works) plus a leading `.stringValue()` call. A real example already
+in this codebase: `newui::Color` (`color.h`) - a `borderFill`/`textColor`/
+etc. property reads/writes as `"#ff0000ff"`/`"red"`/`"WindowBackground"`
+(hex, a CSS color name, or a live `UIColorRole` name - see
+`Color::fromString()`'s own comment) in a `.newui` file instead of the
+`{type:"Color", r, g, b, a}` object every other reflected value type still
+uses. An old file already written with that nested-object form still reads
+correctly either way - `stringvalue` only adds an *alternate* accepted
+input shape and a more compact write, it doesn't remove support for the
+object shape.
 
 ## Setup
 
