@@ -21,6 +21,31 @@ isn't spellable from the free `register...Enum()` function reflectgen
 emits, so those are skipped). Static methods, templates, and operator
 overloads are explicitly out of scope for now.
 
+## `@reflect` annotations at a glance
+
+Every annotation lives in a `//`/`/* */` comment directly above the
+declaration it applies to (`-fparse-all-comments` is passed to clang
+automatically so a plain `//` comment is seen at all - see the note near
+the bottom of this file), in the form `@reflect key=value` (a bare `key`
+with no `=value` is shorthand for `key=true`), and multiple `key=value`
+pairs can share one annotation (`@reflect property=title tags=filepath`).
+
+| Annotation | Goes above | Effect |
+| --- | --- | --- |
+| `@reflect ignore=true` | a class/struct | Excludes the whole class from generation entirely. |
+| `@reflect ignore=true` | a method (getter, setter, or plain method) | Opts that one method out of automatic getter/setter-property detection, without touching the rest of the class. |
+| `@reflect property` / `@reflect property=name` | a getter | Forces a method the heuristic wouldn't have picked up into a `.property(...)` entry, or renames the derived key. |
+| `@reflect collection` / `@reflect collection=name` | a whole-container-returning getter | Registers a `.propertyCollection(...)` entry (opt-in only - never guessed from shape). |
+| `add=methodName` | same comment as `@reflect collection` | Names the real add method to wire into that collection property. |
+| `remove=methodName` | same comment as `@reflect collection` | Names the real remove method to wire into that collection property. |
+| `@reflect tags=a,b` | a class, a property's getter, or a delegate member | Attaches comma-separated semantic hints (`Class`/`Property`/`Delegate::tags()`) for a consumer like an editor to key off of. |
+| `@reflect category=a,b` | a class | Groups the class for toolbox/browsing UI (`Class::categories()`), comma-separated. |
+| `@reflect proxy=ClassName` | a class | Names that class's design-time stand-in (`Class::proxy()`), e.g. `Frame` → `FrameProxy`. |
+| `@reflect proxyfor=ClassName` | a class (the proxy itself) | Inverse of `proxy=` - names the real class this one stands in for (`Class::proxyFor()`). |
+| `@reflect flags` | an `enum`/`enum class` | Opts the enum into array-of-decomposed-flag-names read/write treatment (`Enum::isFlags()`), always explicit, never guessed. |
+
+Each is covered in more detail, with a full example, below.
+
 **Getter/setter properties (detected automatically):** a public
 getter-shaped method (zero args, non-`void` return) is registered as a
 `.property(...)` entry instead of a `.method(...)` one whenever it matches
