@@ -135,6 +135,96 @@ still reflects the truth. Multiple public bases aren't representable
 (`Class::parentClass()` is a single pointer) - only the first is reflected,
 with a warning on stderr naming the ones that were dropped.
 
+**`@reflect tags=...`** attaches free-form semantic hints - read back via
+`Class::tags()`/`Property::tags()`/`Delegate::tags()` (`reflection.h`) by a
+consumer like cpp_codetools' `PropertyEditorRegistry`, never used by
+reflectgen itself - to a class declaration, a property's getter, or a
+delegate member. Comma-separated, no whitespace around the commas:
+
+```cpp
+// @reflect tags=file,pathlike
+class Document {
+public:
+    // @reflect tags=filepath
+    std::string getPath() const;
+    void setPath(std::string path);
+
+    // @reflect tags=notification
+    Delegate<Document> onChanged;
+};
+```
+
+emits `.tags({"file", "pathlike"})` on `Document`'s own registration,
+`{"filepath"}` as the trailing arg on `.property("path", ...)`, and
+`{"notification"}` as the trailing arg on `.delegate("onChanged", ...)`.
+Empty for the overwhelming majority of properties/delegates/classes - most
+types don't need a hint beyond their own C++ type.
+
+**`@reflect category=...`** groups a class for toolbox/browsing UI (e.g.
+cpp_codetools' `ToolboxRegistry` enumerating `ReflectionRegistry` by
+grouping rather than a hardcoded per-class list) - class-level only, same
+comma-separated shape as `tags`:
+
+```cpp
+// @reflect category=basic
+class Button : public Control { ... };
+
+// @reflect category=basic,input
+class TextBox : public Control { ... };
+```
+
+emits `.categories({"basic"})` / `.categories({"basic", "input"})`.
+`Class::allCategories()`-shaped enumeration (`reflection.h`) lets a
+consumer discover the live set of values actually in use rather than
+hardcoding one.
+
+**`@reflect proxy=<ClassName>`/`@reflect proxyfor=<ClassName>`** name a
+design-time stand-in relationship for a class that can't be nested as an
+ordinary `SubView` child (`Frame`/`RootView` own an `HWND` directly - see
+`FrameProxy`/`RootViewProxy`'s own class comments for why a design-time
+tree needs a substitute):
+
+```cpp
+// @reflect proxy=FrameProxy
+class Frame { ... };
+
+// @reflect proxyfor=Frame
+class FrameProxy { ... };
+```
+
+emits `.proxy("FrameProxy")` on `Frame`'s registration and
+`.proxyFor("Frame")` on `FrameProxy`'s - nothing but a plain class-name
+string either direction, resolved to a real `Class*` only when actually
+needed (`ObjectReader`'s design-mode dynamic-type substitution,
+`ObjectWriter`'s design-mode "write the real class's name, not the
+proxy's" behavior - both `reflectionio.h`). See `Class::proxy()`/
+`proxyFor()`'s own comments in `reflection.h`.
+
+**`@reflect flags`** directly above an `enum`/`enum class` opts it into
+`ObjectWriter`/`ObjectReader`'s "flags" treatment (a JSON5 array of
+decomposed flag names instead of one plain name - `reflectionio.h`) -
+always explicit, never guessed from the enum's own values/name/operators.
+Every shape-based heuristic considered (power-of-two values, an
+`operator|` overload, a `Mask`/`Flags` name suffix) either misses a real
+flags enum in this project's own headers or misclassifies an ordinary
+sequential enum whose small values are individually powers of two by pure
+coincidence (`DialogResult`'s `Ok=1`/`Cancel=2`/`No=4`, where `Abort=5`
+would decompose into the nonsensical `"Ok"|"No"`):
+
+```cpp
+// @reflect flags
+enum class Anchor : std::uint8_t {
+    None    = 0,
+    Left    = 1 << 0,
+    Top     = 1 << 1,
+    Right   = 1 << 2,
+    Bottom  = 1 << 3,
+};
+```
+
+emits the enum's ordinary `EnumBuilder<Anchor>("Anchor")` registration
+plus a trailing `.flags(true)`, so `Enum::isFlags()` reports true.
+
 ## Setup
 
 ```
