@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -215,6 +216,20 @@ namespace newui {
         // to save to.
         bool save(const std::string& path = std::string());
 
+        // Back to a fresh, untitled, unmodified document (no filePath()) - e.g. a "New" that reuses
+        // this same Document. Fires onModifiedChanged() if it was modified. Also forgets which
+        // paths were already backed up (see below). Doesn't touch the document's own content -
+        // clearing that is the subclass's job.
+        void reset();
+
+        // Before save() first overwrites an existing file, the on-disk original is copied to
+        // "<path>.bak" - once per path per Document instance, so the backup keeps the version from
+        // before this app first touched the file (a rolling backup would lose it after two quick
+        // saves). Protects whatever a serializer doesn't round-trip (hand-written comments,
+        // formatting). On by default; best-effort - a failed backup never blocks the save.
+        bool backupBeforeFirstOverwrite() const { return backupBeforeFirstOverwrite_; }
+        void setBackupBeforeFirstOverwrite(bool value) { backupBeforeFirstOverwrite_ = value; }
+
         // Model: chains to Model::setValue() first (still fires
         // onChanged()), then markModified() - a Document counts as
         // "modified" any time its value changes through the normal
@@ -234,8 +249,11 @@ namespace newui {
         virtual bool writeToFile(const std::string& path) = 0;
 
     private:
-        void setModifiedFlag(bool value);        
+        void setModifiedFlag(bool value);
+        void backupIfFirstOverwrite(const std::string& target);
         std::string filePath_;
+        bool backupBeforeFirstOverwrite_ = true;
+        std::set<std::string> backupHandledPaths_;
         bool modified_ = false;
         bool loading_ = false;
     };

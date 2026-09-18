@@ -27,6 +27,7 @@ add_executable(newui_tests
     test_delegateserialization.cpp
     test_enumserialization.cpp
     test_dialogs.cpp
+    test_popuptool.cpp
     test_controllers.cpp
     test_documents.cpp
     test_controls.cpp

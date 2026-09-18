@@ -5,6 +5,7 @@
 
 #include "newui/animation.h"
 #include "newui/application.h"
+#include "newui/dialogs.h"
 #include "newui/items.h"
 #include "newui/reflection.h"
 #include "newui/runloop.h"
@@ -174,6 +175,71 @@ namespace newui
     bool DocumentController::openDocument(Document* document, const std::string& path) {
         addDocument(document);
         return document != nullptr ? document->load(path) : false;
+    }
+
+    namespace {
+        std::string displayNameFor(const Document& document) {
+            if (!document.hasFilePath()) {
+                return "Untitled";
+            }
+            const std::string& path = document.filePath();
+            std::size_t slash = path.find_last_of("\\/");
+            return slash == std::string::npos ? path : path.substr(slash + 1);
+        }
+    }
+
+    bool DocumentController::confirmDiscardChanges(Document& document) {
+        if (!document.isModified()) {
+            return true;
+        }
+
+        UnsavedChangesChoice choice = UnsavedChangesChoice::Cancel;
+        if (unsavedChangesHandler_) {
+            choice = unsavedChangesHandler_(document);
+        } else {
+            DialogResult result = Dialog::showMessageBox(::GetActiveWindow(),
+                "Save changes to " + displayNameFor(document) + "?", "Unsaved changes",
+                MessageBoxButtons::YesNoCancel, MessageBoxIcon::Warning);
+            choice = result == DialogResult::Yes ? UnsavedChangesChoice::Save
+                : result == DialogResult::No ? UnsavedChangesChoice::Discard
+                : UnsavedChangesChoice::Cancel;
+        }
+
+        switch (choice) {
+            case UnsavedChangesChoice::Discard:
+                return true;
+            case UnsavedChangesChoice::Save: {
+                std::string path;
+                if (!document.hasFilePath()) {
+                    if (savePathProvider_) {
+                        path = savePathProvider_(document);
+                    } else {
+                        FileDialogOptions options;
+                        options.title = "Save As";
+                        Dialog::showSaveFile(::GetActiveWindow(), options, path);
+                    }
+                    if (path.empty()) {
+                        return false;  // Save As cancelled
+                    }
+                }
+                return document.save(path);
+            }
+            case UnsavedChangesChoice::Cancel:
+            default:
+                return false;
+        }
+    }
+
+    bool DocumentController::closeDocumentWithPrompt(Document* document) {
+        if (document == nullptr
+                || std::find(documents_.begin(), documents_.end(), document) == documents_.end()) {
+            return true;
+        }
+        if (!confirmDiscardChanges(*document)) {
+            return false;
+        }
+        closeDocument(document);
+        return true;
     }
 
     void DocumentController::closeDocument(Document* document) {

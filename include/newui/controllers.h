@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -205,12 +206,15 @@ namespace newui {
     // itself (`new MyTextDocument()`) and hands it to addDocument()/
     // openDocument().
     //
-    // Deliberately does *not* prompt about unsaved changes itself -
-    // closeDocument() just closes. Checking document->isModified() and
-    // showing whatever confirmation UI is appropriate (a Dialog, a custom
-    // View, ...) is the caller's job, same "give hooks, don't force a
-    // specific UI policy" principle as Model::updateAllViews() not
-    // dictating what "repaint to reflect new data" looks like either.
+    // closeDocument() itself never prompts - it just closes. Unsaved-
+    // changes protection is the separate, opt-in confirmDiscardChanges()/
+    // closeDocumentWithPrompt() below - anything about to throw a modified
+    // Document away (close, New, Open over it) should go through one of
+    // them. The prompt UI is a replaceable policy (setUnsavedChangesHandler()
+    // / setSavePathProvider()), defaulting to a Yes/No/Cancel message box
+    // and a Save As file dialog - same "give hooks, don't force a specific
+    // UI policy" principle as Model::updateAllViews() not dictating what
+    // "repaint to reflect new data" looks like either.
     //
     // Not itself wired to any particular View (e.g. a TabControl showing
     // one tab per document) - subscribe onDocumentAdded()/
@@ -219,9 +223,35 @@ namespace newui {
     // DocumentController ignorant of which widget that is is what lets a
     // single-window (tabbed) app and a future multi-window app share it
     // unchanged.
+    // What the user chose when asked about a modified Document's unsaved changes.
+    enum class UnsavedChangesChoice {
+        Save,
+        Discard,
+        Cancel,
+    };
+
     class DocumentController : public Controller {
     public:
         DocumentController() = default;
+
+        typedef std::function<UnsavedChangesChoice(Document&)> UnsavedChangesHandler;
+        // Returns the path to save an untitled Document to, or "" if the user cancelled.
+        typedef std::function<std::string(Document&)> SavePathProvider;
+
+        // Replace the default UI (message box / Save As dialog) - e.g. a custom in-app View, or a
+        // canned answer for tests. Passing an empty function restores the default.
+        void setUnsavedChangesHandler(UnsavedChangesHandler handler) { unsavedChangesHandler_ = std::move(handler); }
+        void setSavePathProvider(SavePathProvider provider) { savePathProvider_ = std::move(provider); }
+
+        // True if it's fine to proceed with throwing document's current state away: it isn't
+        // modified, or the user chose Discard, or chose Save and the save succeeded. False if the
+        // user cancelled, cancelled the Save As picker, or the save failed (the document is left
+        // untouched, still modified). Never modifies documents() itself.
+        bool confirmDiscardChanges(Document& document);
+
+        // confirmDiscardChanges(*document), then closeDocument(document) if allowed. Returns false
+        // (document left open) if it wasn't. A null/unregistered document is a no-op returning true.
+        bool closeDocumentWithPrompt(Document* document);
 
         // Deletes every still-open Document without notifying anything
         // (no onDocumentWillClose()) - same "quiet, non-virtual cleanup"
@@ -282,6 +312,8 @@ namespace newui {
     private:
         std::vector<Document*> documents_;
         Document* activeDocument_ = nullptr;
+        UnsavedChangesHandler unsavedChangesHandler_;
+        SavePathProvider savePathProvider_;
     };
 
     // Owns/recycles Item instances (items.h) for a widget walking a

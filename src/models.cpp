@@ -1,6 +1,7 @@
 #include "newui/models.h"
 
 #include <algorithm>
+#include <filesystem>
 
 #include "newui/view.h"
 
@@ -91,12 +92,39 @@ namespace newui {
             return false;
         }
 
+        backupIfFirstOverwrite(target);
+
         bool ok = writeToFile(target);
         if (ok) {
             filePath_ = target;
             setModifiedFlag(false);
         }
         return ok;
+    }
+
+    void Document::reset() {
+        filePath_.clear();
+        backupHandledPaths_.clear();
+        setModifiedFlag(false);
+    }
+
+    void Document::backupIfFirstOverwrite(const std::string& target) {
+        if (!backupBeforeFirstOverwrite_ || backupHandledPaths_.count(target) != 0) {
+            return;
+        }
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path source = fs::u8path(target);
+        if (!fs::exists(source, ec)) {
+            backupHandledPaths_.insert(target);  // nothing to preserve; later saves overwrite our own output
+            return;
+        }
+        fs::path backup = source;
+        backup += ".bak";
+        fs::copy_file(source, backup, fs::copy_options::overwrite_existing, ec);
+        if (!ec) {
+            backupHandledPaths_.insert(target);  // on failure, try again next save
+        }
     }
 
     void Document::setValue(const std::any& newValue, const std::any& key) {
