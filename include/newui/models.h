@@ -217,9 +217,10 @@ namespace newui {
         bool save(const std::string& path = std::string());
 
         // Back to a fresh, untitled, unmodified document (no filePath()) - e.g. a "New" that reuses
-        // this same Document. Fires onModifiedChanged() if it was modified. Also forgets which
-        // paths were already backed up (see below). Doesn't touch the document's own content -
-        // clearing that is the subclass's job.
+        // this same Document. Fires onModifiedChanged() if it was modified. Deliberately keeps
+        // which paths were already backed up (see below), so New followed by reopening and saving
+        // the same file doesn't replace the original backup with this app's own output. Doesn't
+        // touch the document's own content - clearing that is the subclass's job.
         void reset();
 
         // Before save() first overwrites an existing file, the on-disk original is copied to

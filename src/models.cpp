@@ -104,7 +104,6 @@ namespace newui {
 
     void Document::reset() {
         filePath_.clear();
-        backupHandledPaths_.clear();
         setModifiedFlag(false);
     }
 

@@ -390,6 +390,19 @@ TEST_F(BackupFixture, LaterSavesDoNotReplaceTheBackupWithOurOwnOutput) {
     EXPECT_EQ(readWholeFile(bak), "original");
 }
 
+TEST_F(BackupFixture, ResetDoesNotForgetAlreadyBackedUpPaths) {
+    seed("original");
+    RealFileDocument doc;
+    doc.content = "v1";
+    ASSERT_TRUE(doc.save(path));
+
+    doc.reset();  // e.g. New, then the same file is opened and saved again
+    doc.content = "v2";
+    ASSERT_TRUE(doc.save(path));
+
+    EXPECT_EQ(readWholeFile(bak), "original");
+}
+
 TEST_F(BackupFixture, SavingANewFileMakesNoBackup) {
     RealFileDocument doc;
     doc.content = "brand new";
