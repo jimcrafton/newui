@@ -45,6 +45,86 @@ namespace newui {
 		onDestroyed(*this);
 	}
 
+	Point View::localToRoot(const Point& localPt) const
+	{
+		Point pt = localPt;
+		for (const View* cur = this; cur != nullptr; ) {
+			const SubView* sv = dynamic_cast<const SubView*>(cur);
+			if (sv == nullptr) {
+				break;  // reached the RootView (or a detached non-SubView top)
+			}
+			pt += sv->bounds().pos();
+			// The parent may have scrolled its children (origin()) - undo that shift, the
+			// exact inverse of paintChildren()'s -origin() translate at each level.
+			const View* parent = sv->parent();
+			if (parent != nullptr) {
+				pt -= parent->origin();
+			}
+			cur = parent;
+		}
+		return pt;
+	}
+
+	Point View::rootToLocal(const Point& rootPt) const
+	{
+		Point origin = localToRoot(Point(0.0f, 0.0f));
+		return Point(rootPt.x - origin.x, rootPt.y - origin.y);
+	}
+
+	Point View::localToScreen(const Point& localPt) const
+	{
+		Point rootPt = localToRoot(localPt);
+		const RootView* root = rootView();
+		HWND hwnd = (root != nullptr) ? root->windowHandle() : nullptr;
+		if (hwnd == nullptr) {
+			return rootPt;
+		}
+		POINT pt = rootPt;
+		::ClientToScreen(hwnd, &pt);
+		return pt;
+	}
+
+	Point View::screenToLocal(const Point& screenPt) const
+	{
+		const RootView* root = rootView();
+		HWND hwnd = (root != nullptr) ? root->windowHandle() : nullptr;
+		Point rootPt = screenPt;
+		if (hwnd != nullptr) {
+			POINT pt = screenPt;
+			::ScreenToClient(hwnd, &pt);
+			rootPt = pt;
+		}
+		return rootToLocal(rootPt);
+	}
+
+	Rect View::localToScreen(const Rect& localRect) const
+	{
+		return Rect(localToScreen(localRect.pos()), localRect.size());
+	}
+
+	Rect View::screenToLocal(const Rect& screenRect) const
+	{
+		return Rect(screenToLocal(screenRect.pos()), screenRect.size());
+	}
+
+	Rect View::screenBounds() const
+	{
+		return localToScreen(Rect(Point(0.0f, 0.0f), bounds().size()));
+	}
+
+	Point View::mapTo(const View& target, const Point& localPt) const
+	{
+		if (rootView() == target.rootView()) {
+			return target.rootToLocal(localToRoot(localPt));
+		}
+		return target.screenToLocal(localToScreen(localPt));
+	}
+
+	Rect View::mapTo(const View& target, const Rect& localRect) const
+	{
+		return Rect(mapTo(target, localRect.pos()), localRect.size());
+	}
+
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);

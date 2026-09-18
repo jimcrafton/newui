@@ -660,6 +660,40 @@ namespace newui {
         // reorderChild() separately afterward if a specific position is actually needed.
         bool setParent(View* newParent);
 
+        // Coordinate mapping. A View's "local" space has its own top-left as (0,0) - the same
+        // space its own bounds().size() and every onMouse*() localPt are in. Root space is the
+        // owning RootView's window-client space; screen space is real desktop coordinates.
+        //
+        // localToRoot()/rootToLocal() walk the parent() chain, undoing each parent's own
+        // origin() (scroll) shift at every level - the exact inverse of paintChildren()'s
+        // per-level translate. They need no live window, and work on a detached subtree too
+        // (relative to its topmost ancestor). localToScreen()/screenToLocal() additionally need
+        // a live rootView()->windowHandle(); without one they degrade to the root-space result.
+        //
+        // @reflect ignore=true
+        Point localToRoot(const Point& localPt) const;
+        // @reflect ignore=true
+        Point rootToLocal(const Point& rootPt) const;
+        // @reflect ignore=true
+        Point localToScreen(const Point& localPt) const;
+        // @reflect ignore=true
+        Point screenToLocal(const Point& screenPt) const;
+        // @reflect ignore=true
+        Rect localToScreen(const Rect& localRect) const;
+        // @reflect ignore=true
+        Rect screenToLocal(const Rect& screenRect) const;
+
+        // This View's own whole bounds (0,0,width,height in local space) in screen coordinates.
+        // @reflect ignore=true
+        Rect screenBounds() const;
+
+        // Maps a point/rect from this View's local space into target's - via root space when
+        // both share a rootView(), via screen space otherwise (e.g. across two windows).
+        // @reflect ignore=true
+        Point mapTo(const View& target, const Point& localPt) const;
+        // @reflect ignore=true
+        Rect mapTo(const View& target, const Rect& localRect) const;
+
         // Sets rootView() on this View and recurses into every descendant
         // already in childViews_ - so attaching/detaching a SubView (sub)
         // tree that was built before (or after) it had a RootView still

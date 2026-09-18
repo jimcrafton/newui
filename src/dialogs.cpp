@@ -364,7 +364,17 @@ bool Dialog::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& 
         // Frame::handleMessage()'s own WM_DESTROY case, since destroying a Dialog must never quit
         // the whole application's message loop. Same fix shape PopupFrame::handleMessage() already
         // established for exactly this problem (a dropdown popup's own Frame).
-        destroy();
+        // Also deliberately not destroy(): that deletes the whole child SubView tree, and a
+        // caller reading a child widget's state after showModal() returns (the obvious way to
+        // get a result out of a dialog) would be reading freed memory. Tear down only the
+        // window here; ~Frame() frees the still-intact tree with the Dialog itself.
+        onDestroyed(*this);
+        if (rootView_ != nullptr) {
+            rootView_->releaseWindow();
+        }
+        // Frame::~Frame() throws over a live frameHandle_ next to a live rootView_, and the
+        // handle is dead now anyway.
+        frameHandle_ = nullptr;
         outLRESULT = 0;
         return true;
     }

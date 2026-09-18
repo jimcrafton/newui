@@ -3527,3 +3527,67 @@ TEST(DropDownList, ArrowKeysAreIgnoredWhileDisabled) {
     dropDown->destroy();
     delete dropDown;
 }
+
+// ---- Label: LabelStyle::textColor manual override ----
+
+namespace {
+newui::LabelStyle& labelStyleOf(newui::Label& label) {
+    return dynamic_cast<newui::LabelStyle&>(label.style());
+}
+}
+
+TEST(Label, StateChangeDrivesTextColorWhenNothingOverridesIt) {
+    auto* label = new newui::Label();
+    newui::Color normal = labelStyleOf(*label).textColor();
+
+    label->setEnabled(false);
+    EXPECT_NE(labelStyleOf(*label).textColor(), normal);  // dimmed to DisabledText
+
+    label->setEnabled(true);
+    EXPECT_EQ(labelStyleOf(*label).textColor(), normal);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ExternallySetStyleTextColorSurvivesLaterStateChanges) {
+    auto* label = new newui::Label();
+    newui::Color custom(1.0f, 0.0f, 0.5f, 1.0f);
+    labelStyleOf(*label).setTextColor(custom);  // e.g. edited through the Properties grid
+
+    label->setEnabled(false);
+    label->setEnabled(true);
+    label->setHotLink(true);
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), custom);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ClearingTheOverrideToNullResumesStateDrivenColor) {
+    auto* label = new newui::Label();
+    newui::Color normal = labelStyleOf(*label).textColor();
+    labelStyleOf(*label).setTextColor(newui::Color(1.0f, 0.0f, 0.5f, 1.0f));
+
+    labelStyleOf(*label).setTextColor(newui::Color::null());
+    label->setEnabled(false);
+    label->setEnabled(true);
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), normal);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ExplicitSetTextColorAlwaysWinsOverAnOverride) {
+    auto* label = new newui::Label();
+    labelStyleOf(*label).setTextColor(newui::Color(1.0f, 0.0f, 0.5f, 1.0f));
+
+    label->setTextColor(BLRgba32(0xFF112233u));
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), newui::Color(BLRgba32(0xFF112233u)));
+
+    label->destroy();
+    delete label;
+}

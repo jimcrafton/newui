@@ -559,35 +559,7 @@ namespace newui {
 	}
 
 	Point RootView::accumulatedOffset(const SubView* view) const {
-		Point offset(0.0f, 0.0f);
-		for (const View* cur = view; cur != nullptr; ) {
-			const SubView* sv = dynamic_cast<const SubView*>(cur);
-			if (sv == nullptr) {
-				break;
-			}
-			offset += sv->bounds().pos();
-			// sv's immediate parent may itself have scrolled its children
-			// (View::origin() - a ScrollView's viewport, say) - undo that
-			// same shift here so this stays the exact inverse of
-			// paintChildren()'s -origin() translate at every level
-			// crossed, not just sv's own bounds().pos(). See origin()'s
-			// own doc comment (view.h).
-			View* parent = sv->parent();
-			if (parent != nullptr) {
-				offset -= parent->origin();
-			}
-			cur = parent;
-		}
-		return offset;
-	}
-
-	Point RootView::localToScreen(const Point& rootLocalPt) const {
-		if (viewHwnd_ == nullptr) {
-			return rootLocalPt;
-		}
-		POINT pt = rootLocalPt;
-		::ClientToScreen(viewHwnd_, &pt);
-		return pt;
+		return (view != nullptr) ? view->localToRoot(Point(0.0f, 0.0f)) : Point(0.0f, 0.0f);
 	}
 
 	void RootView::updateHoveredSubView(SubView* target, const Point& rootPt) {
@@ -1648,7 +1620,10 @@ namespace newui {
 
 	void RootView::destroy() {
 		View::destroy();
+		releaseWindow();
+	}
 
+	void RootView::releaseWindow() {
 		if (nullptr != viewHwnd_) {
 			if (comDropTarget_) {
 				::RevokeDragDrop(viewHwnd_);

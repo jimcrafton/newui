@@ -432,17 +432,17 @@ namespace newui {
 
     void Label::setTextColor(BLRgba32 color) {
         textColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
     void Label::setLinkColor(BLRgba32 color) {
         linkColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
     void Label::setHoveredLinkColor(BLRgba32 color) {
         hoveredLinkColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
     namespace {
@@ -458,14 +458,22 @@ namespace newui {
         }
     }
 
-    void Label::updateTextColor() {
-        if (!isEnabled()) {
-            labelStyle_->setTextColor(UIColorManager::colorFor(UIColorRole::DisabledText));
-        } else if (hotLink_) {
-            labelStyle_->setTextColor(colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_));
-        } else {
-            labelStyle_->setTextColor(colorFromSolidBLVar(textColor_));
+    void Label::updateTextColor(bool force) {
+        const Color& current = labelStyle_->textColor();
+        if (!force && !current.isNull() && current != lastAppliedTextColor_) {
+            return;  // manual override - see the declaration's comment (controls.h)
         }
+
+        Color wanted;
+        if (!isEnabled()) {
+            wanted = UIColorManager::colorFor(UIColorRole::DisabledText);
+        } else if (hotLink_) {
+            wanted = colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_);
+        } else {
+            wanted = colorFromSolidBLVar(textColor_);
+        }
+        labelStyle_->setTextColor(wanted);
+        lastAppliedTextColor_ = wanted;
         style().markDirty();
     }
 

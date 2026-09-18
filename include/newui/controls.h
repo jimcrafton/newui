@@ -313,7 +313,13 @@ namespace newui {
         LinkClickedDelegate onLinkClicked;
 
     private:
-        void updateTextColor();
+        // Applies the state-derived color (disabled/link/hovered-link/normal) to the style's
+        // textColor - unless something else (e.g. the Properties grid) set a non-null
+        // LabelStyle::textColor that Label didn't write itself, which counts as a manual
+        // override and is left alone (set it back to Color::null() to resume state-driven
+        // color). force = true (Label's own setTextColor()/setLinkColor()/... setters) always
+        // applies, clearing any override.
+        void updateTextColor(bool force = false);
         SyncReturn handleMouseEntered(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleStateChanged(Control& sender);
@@ -322,6 +328,7 @@ namespace newui {
         std::string text_;
         bool hotLink_ = false;
         bool hovering_ = false;
+        Color lastAppliedTextColor_ = Color::null();  // what updateTextColor() itself last wrote
         BLVar textColor_;
         BLVar linkColor_;
         BLVar hoveredLinkColor_;

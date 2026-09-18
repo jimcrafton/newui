@@ -112,6 +112,15 @@ add_executable(imagefill1
 
 target_link_libraries(imagefill1 PRIVATE newui)
 
+
+add_executable(swapchain1
+    swapchain1.cpp
+)
+
+target_link_libraries(swapchain1 PRIVATE newui)
+
+
+
 # st-enterprise-nc1701-a.png/robot1.png/robot2.png are source-tree assets
 # (not generated), used via newui::Bundle::loadImage() - Bundle resolves
 # relative to the running .exe's own directory (bundle.h's own class

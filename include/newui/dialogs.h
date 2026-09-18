@@ -92,6 +92,12 @@ namespace newui {
     // the whole application. See handleMessage()'s own override for the
     // fix, same shape as PopupFrame's.
     //
+    // Lifetime of content: closing tears down only the native window - rootView()'s child
+    // SubView tree stays alive (and readable) until the Dialog object itself is destroyed. So
+    // reading a child widget's state after showModal() returns, or from an onClosed handler, is
+    // safe. (Earlier the tree was freed synchronously inside WM_CLOSE -> WM_DESTROY, before
+    // showModal() ever returned - every such read was a use-after-free.)
+    //
     // Single-show: once closed, its native window is torn down for good
     // (Frame itself has no way to recreate a destroyed window) - build a
     // new Dialog to show another one. Add content via rootView() any time

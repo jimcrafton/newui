@@ -139,6 +139,13 @@ namespace newui {
 
         virtual void destroy() override;
 
+        // Tears down only the live-window side - drag-drop registration and the backing
+        // HWND (windowHandle() becomes nullptr) - leaving the child SubView tree fully intact
+        // and readable. Idempotent. destroy() is the tree teardown plus this; Dialog calls
+        // just this on WM_DESTROY so a caller can still read child state after showModal()
+        // returns (see dialogs.h).
+        void releaseWindow();
+
         virtual void addChild(SubView* child) override;
         virtual void removeChild(SubView* child) override;
         //@reflect ignore=true
@@ -261,25 +268,17 @@ namespace newui {
             return viewHwnd_;
         }
 
-        // Sums getBounds().pos() up view's own parent() chain, translating
-        // it into this RootView's own local/window-client space - the same
-        // accumulated-offset math paintChildren()'s ctx.translate() calls
-        // perform incrementally per level, done here in one shot for an
-        // arbitrary SubView (regardless of nesting depth). Used internally
-        // by mouseMove()/mouseUp() to keep targeting capturedSubView_
-        // correctly once the cursor is no longer over its bounds; exposed
-        // publicly so callers can position something (e.g. a popup menu -
-        // see MenuBar/ContextMenu, menus.h) relative to an arbitrary
-        // SubView without duplicating this walk - combine with
-        // localToScreen() below for real screen coordinates.
+        // view's top-left in this RootView's own local/window-client space -
+        // just view->localToRoot(Point(0,0)) (see View::localToRoot(), view.h).
+        // Used internally by mouseMove()/mouseUp() to keep targeting
+        // capturedSubView_ once the cursor is no longer over its bounds. Prefer
+        // View::localToScreen()/mapTo() when positioning something relative to
+        // an arbitrary view.
         Point accumulatedOffset(const SubView* view) const;
 
-        // Converts a point in this RootView's own local/window-client
-        // space (e.g. accumulatedOffset(view) + view's own size) to real
-        // screen coordinates via ::ClientToScreen() against windowHandle() -
-        // needs a live window (returns rootLocalPt unchanged if
-        // windowHandle() is null).
-        Point localToScreen(const Point& rootLocalPt) const;
+        // No RootView::localToScreen() of its own anymore - View::localToScreen()
+        // (view.h) is inherited, and for a RootView root space *is* local space,
+        // so root->localToScreen(pt) still means exactly what it always did.
 
         // Painted last, on top of every child SubView - see Overlay's own
         // class comment (overlay.h). Null (the default) means nothing

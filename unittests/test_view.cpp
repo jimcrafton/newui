@@ -933,3 +933,114 @@ TEST(RectSnappedOutwardToPixels, ResultNeverShrinksTheOriginalRect) {
     EXPECT_GE(snapped.right(), r.right());
     EXPECT_GE(snapped.bottom(), r.bottom());
 }
+
+// ---- View coordinate mapping (localToRoot/rootToLocal/localToScreen/mapTo) ----
+// None of these tests has a live window, so localToScreen()/screenToLocal() degrade to root
+// space (see view.h) - what's checked here is the parent-chain/origin() math itself.
+
+TEST(ViewCoordinateMapping, NestedLocalToRootAccumulatesEveryAncestorOffset) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* outer = new newui::SubView();
+    outer->setBounds(newui::Rect(20, 30, 200, 200));
+    root->addChild(outer);
+    auto* inner = new newui::SubView();
+    inner->setBounds(newui::Rect(5, 7, 50, 50));
+    outer->addChild(inner);
+
+    newui::Point rootPt = inner->localToRoot(newui::Point(1, 2));
+    EXPECT_FLOAT_EQ(rootPt.x, 26.0f);
+    EXPECT_FLOAT_EQ(rootPt.y, 39.0f);
+
+    newui::Point back = inner->rootToLocal(rootPt);
+    EXPECT_FLOAT_EQ(back.x, 1.0f);
+    EXPECT_FLOAT_EQ(back.y, 2.0f);
+
+    // A RootView's local space *is* root space.
+    newui::Point rp = root->localToRoot(newui::Point(9, 8));
+    EXPECT_FLOAT_EQ(rp.x, 9.0f);
+    EXPECT_FLOAT_EQ(rp.y, 8.0f);
+
+    // accumulatedOffset() is now just localToRoot((0,0)).
+    newui::Point off = root->accumulatedOffset(inner);
+    EXPECT_FLOAT_EQ(off.x, 25.0f);
+    EXPECT_FLOAT_EQ(off.y, 37.0f);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, ParentOriginShiftIsUndoneAtThatLevel) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* scroller = new newui::SubView();
+    scroller->setBounds(newui::Rect(10, 10, 100, 100));
+    scroller->setOrigin(newui::Point(0, 40));  // scrolled down 40
+    root->addChild(scroller);
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 50, 20, 20));  // content-space y=50 -> visible at y=10
+    scroller->addChild(child);
+
+    newui::Point rootPt = child->localToRoot(newui::Point(0, 0));
+    EXPECT_FLOAT_EQ(rootPt.x, 10.0f);
+    EXPECT_FLOAT_EQ(rootPt.y, 20.0f);  // 10 + 50 - 40
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, DetachedSubtreeMapsRelativeToItsTopmostAncestor) {
+    auto* top = new newui::SubView();
+    top->setBounds(newui::Rect(100, 100, 50, 50));
+    auto* leaf = new newui::SubView();
+    leaf->setBounds(newui::Rect(3, 4, 10, 10));
+    top->addChild(leaf);
+
+    newui::Point pt = leaf->localToRoot(newui::Point(0, 0));
+    EXPECT_FLOAT_EQ(pt.x, 103.0f);
+    EXPECT_FLOAT_EQ(pt.y, 104.0f);
+
+    top->destroy();
+    delete top;
+}
+
+TEST(ViewCoordinateMapping, MapToConvertsBetweenSiblingsViaSharedRoot) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* a = new newui::SubView();
+    a->setBounds(newui::Rect(10, 10, 50, 50));
+    root->addChild(a);
+    auto* b = new newui::SubView();
+    b->setBounds(newui::Rect(100, 40, 50, 50));
+    root->addChild(b);
+
+    newui::Point inB = a->mapTo(*b, newui::Point(5, 5));
+    EXPECT_FLOAT_EQ(inB.x, -85.0f);
+    EXPECT_FLOAT_EQ(inB.y, -25.0f);
+
+    newui::Rect r = a->mapTo(*b, newui::Rect(0, 0, 20, 30));
+    EXPECT_FLOAT_EQ(r.left(), -90.0f);
+    EXPECT_FLOAT_EQ(r.top(), -30.0f);
+    EXPECT_FLOAT_EQ(r.size().width, 20.0f);
+    EXPECT_FLOAT_EQ(r.size().height, 30.0f);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, ScreenBoundsAndRectOverloadsMatchPointMapping) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* v = new newui::SubView();
+    v->setBounds(newui::Rect(15, 25, 60, 40));
+    root->addChild(v);
+
+    newui::Rect sb = v->screenBounds();  // no window -> root space
+    EXPECT_FLOAT_EQ(sb.left(), 15.0f);
+    EXPECT_FLOAT_EQ(sb.top(), 25.0f);
+    EXPECT_FLOAT_EQ(sb.size().width, 60.0f);
+    EXPECT_FLOAT_EQ(sb.size().height, 40.0f);
+
+    newui::Rect local = v->screenToLocal(v->localToScreen(newui::Rect(2, 3, 4, 5)));
+    EXPECT_FLOAT_EQ(local.left(), 2.0f);
+    EXPECT_FLOAT_EQ(local.top(), 3.0f);
+
+    root->destroy();
+    delete root;
+}
