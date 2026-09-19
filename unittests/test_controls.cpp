@@ -3591,3 +3591,83 @@ TEST(Label, ExplicitSetTextColorAlwaysWinsOverAnOverride) {
     label->destroy();
     delete label;
 }
+
+// ---- Shared controllers (ListView / TreeView / DropDownList) ----
+// One controller can back several views over the same data; a view that dies must not leave the
+// controller holding a dangling onDataChanged subscriber.
+
+TEST(ListView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
+    StubRowModel model;
+    model.rows = { "a", "b" };
+    auto controller = std::make_shared<ListController>();
+    controller->setModel(&model);
+
+    auto* first = new ListView();
+    first->setController(controller);
+    auto* second = new ListView();
+    second->setController(controller);
+    EXPECT_EQ(first->sharedController(), second->sharedController());
+
+    first->destroy();
+    delete first;
+    model.onChanged(model);  // controller fires onDataChanged; only `second` may still hear it
+
+    second->destroy();
+    delete second;
+    model.onChanged(model);  // and nobody at all now
+    SUCCEED();
+}
+
+TEST(ListView, SwappingControllersUnsubscribesFromTheOldOne) {
+    StubRowModel model;
+    model.rows = { "a" };
+    auto oldController = std::make_shared<ListController>();
+    oldController->setModel(&model);
+
+    auto* view = new ListView();
+    view->setController(oldController);
+    view->setController(std::make_shared<ListController>());
+
+    view->destroy();
+    delete view;
+    model.onChanged(model);  // oldController must not call into the deleted view
+    SUCCEED();
+}
+
+TEST(TreeView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
+    StubTreeRowModel model;
+    auto controller = std::make_shared<TreeController>();
+    controller->setModel(&model);
+
+    auto* view = new TreeView();
+    view->setController(controller);
+    EXPECT_EQ(view->sharedController(), controller);
+
+    view->destroy();
+    delete view;
+    model.onChanged(model);
+    SUCCEED();
+}
+
+TEST(DropDownList, SetControllerSharesItAndClampsAnOutOfRangeSelection) {
+    StubRowModel threeRows;
+    threeRows.rows = { "a", "b", "c" };
+    StubRowModel oneRow;
+    oneRow.rows = { "only" };
+
+    auto* dropDown = new DropDownList();
+    dropDown->setModel(&threeRows);
+    dropDown->setSelectedIndex(2);
+
+    auto controller = std::make_shared<ListController>();
+    controller->setModel(&oneRow);
+    dropDown->setController(controller);
+
+    EXPECT_EQ(dropDown->sharedController(), controller);
+    EXPECT_EQ(&dropDown->controller(), controller.get());
+    EXPECT_EQ(dropDown->model(), &oneRow);
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());  // index 2 no longer exists
+
+    dropDown->destroy();
+    delete dropDown;
+}

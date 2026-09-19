@@ -2782,7 +2782,7 @@ namespace newui {
     // ListView
     // -----------------------------------------------------------------
 
-    ListView::ListView() : controller_(std::make_unique<ListController>()) {
+    ListView::ListView() : controller_(std::make_shared<ListController>()) {
         setVisible(true);
         setAcceptsFocus(true);
 
@@ -2798,7 +2798,12 @@ namespace newui {
         onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
         onGotFocus.add(this, &ListView::handleGotFocus);
         onLostFocus.add(this, &ListView::handleLostFocus);
-        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+    }
+
+    ListView::~ListView() {
+        // controller_ may be shared and outlive this view - never leave it a dangling subscriber.
+        controller_->onDataChanged.remove(dataChangedConnection_);
     }
 
     SyncReturn ListView::handleGotFocus(View& /*sender*/) {
@@ -2836,12 +2841,13 @@ namespace newui {
         style().markDirty();
     }
 
-    void ListView::setController(std::unique_ptr<ListController> controller) {
-        if (controller == nullptr) {
+    void ListView::setController(std::shared_ptr<ListController> controller) {
+        if (controller == nullptr || controller == controller_) {
             return;
         }
+        controller_->onDataChanged.remove(dataChangedConnection_);
         controller_ = std::move(controller);
-        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &ListView::handleDataChanged);
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -3228,7 +3234,7 @@ namespace newui {
     // TreeView
     // -----------------------------------------------------------------
 
-    TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
+    TreeView::TreeView() : controller_(std::make_shared<TreeController>()) {
         setVisible(true);
         setAcceptsFocus(true);
 
@@ -3244,7 +3250,12 @@ namespace newui {
         onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
         onGotFocus.add(this, &TreeView::handleGotFocus);
         onLostFocus.add(this, &TreeView::handleLostFocus);
-        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+    }
+
+    TreeView::~TreeView() {
+        // controller_ may be shared and outlive this view - never leave it a dangling subscriber.
+        controller_->onDataChanged.remove(dataChangedConnection_);
     }
 
     void TreeView::setKeyboardHighlightedIndex(std::optional<std::size_t> index) {
@@ -3274,12 +3285,13 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
-    void TreeView::setController(std::unique_ptr<TreeController> controller) {
-        if (controller == nullptr) {
+    void TreeView::setController(std::shared_ptr<TreeController> controller) {
+        if (controller == nullptr || controller == controller_) {
             return;
         }
+        controller_->onDataChanged.remove(dataChangedConnection_);
         controller_ = std::move(controller);
-        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -3696,7 +3708,7 @@ namespace newui {
     // DropDownList
     // -----------------------------------------------------------------
 
-    DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
+    DropDownList::DropDownList() : controller_(std::make_shared<ListController>()) {
         setVisible(true);
         setAcceptsFocus(true);
 
@@ -3734,6 +3746,21 @@ namespace newui {
         if (popup_ != nullptr && popup_->frameHandle() != nullptr) {
             ::DestroyWindow(popup_->frameHandle());
         }
+    }
+
+    void DropDownList::setController(std::shared_ptr<ListController> controller) {
+        if (controller == nullptr || controller == controller_) {
+            return;
+        }
+        controller_ = std::move(controller);
+        ListModel* model = controller_->model();
+        if (selectedIndex_.has_value() && (model == nullptr || *selectedIndex_ >= model->size())) {
+            selectedIndex_.reset();
+        }
+        if (popupListView_ != nullptr) {
+            popupListView_->setController(controller_);
+        }
+        style().markDirty();
     }
 
     void DropDownList::setModel(ListModel* model) {
@@ -3862,6 +3889,9 @@ namespace newui {
 
             popupListView_ = new ListView();
             popupListView_->setVisible(true);
+            // One controller, two views over the same data - so a custom Item class / row height /
+            // subclass set on this control's controller() applies to the popup rows too.
+            popupListView_->setController(controller_);
 
             // Wrapped in a real ScrollView (not added to popup_->rootView() directly) so a popup
             // taller than kMaxPopupHeight's worth of rows below gets a real vertical scrollbar and

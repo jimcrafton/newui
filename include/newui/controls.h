@@ -1982,7 +1982,7 @@ namespace newui {
     class ListView : public Control {
     public:
         ListView();
-        virtual ~ListView() {}
+        virtual ~ListView();
 
         ListController& controller() { return *controller_; }
         const ListController& controller() const { return *controller_; }
@@ -1994,7 +1994,12 @@ namespace newui {
         // subscription only ever pointed at the old instance" reasoning
         // TextControl::setController() already has for its own model()
         // onChanged subscription.
-        void setController(std::unique_ptr<ListController> controller);
+        //
+        // Shared ownership: one controller can back several views over the same data (a
+        // DropDownList and its popup list do exactly that). A std::unique_ptr<Derived> argument
+        // still converts implicitly, so existing call sites are unchanged.
+        void setController(std::shared_ptr<ListController> controller);
+        std::shared_ptr<ListController> sharedController() const { return controller_; }
 
         ListModel* model() const { return controller_->model(); }
 
@@ -2183,7 +2188,8 @@ namespace newui {
         // early when itemCount() == 0).
         std::size_t currentKeyboardLead() const;
 
-        std::unique_ptr<ListController> controller_;
+        std::shared_ptr<ListController> controller_;
+        Connection dataChangedConnection_;  // to controller_->onDataChanged; removed on swap/destroy
         float scrollOffsetY_ = 0.0f;
         std::set<std::size_t> selectedIndices_;
 
@@ -2247,7 +2253,7 @@ namespace newui {
     class TreeView : public Control {
     public:
         TreeView();
-        virtual ~TreeView() {}
+        virtual ~TreeView();
 
         TreeController& controller() { return *controller_; }
         const TreeController& controller() const { return *controller_; }
@@ -2255,8 +2261,10 @@ namespace newui {
         // Swaps in a different TreeController (e.g. a custom subclass
         // overriding createItem() or itemHeight()) - a no-op for nullptr.
         // Re-wires onDataChanged against the new controller, same
-        // reasoning ListView::setController() already has.
-        void setController(std::unique_ptr<TreeController> controller);
+        // reasoning ListView::setController() already has - including its shared ownership
+        // (see there).
+        void setController(std::shared_ptr<TreeController> controller);
+        std::shared_ptr<TreeController> sharedController() const { return controller_; }
 
         TreeModel* model() const { return controller_->model(); }
 
@@ -2383,7 +2391,8 @@ namespace newui {
         // visibleCount() == 0).
         std::size_t currentKeyboardLead() const;
 
-        std::unique_ptr<TreeController> controller_;
+        std::shared_ptr<TreeController> controller_;
+        Connection dataChangedConnection_;  // to controller_->onDataChanged; removed on swap/destroy
         float scrollOffsetY_ = 0.0f;
         std::set<std::vector<std::size_t>> selectedPaths_;
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
@@ -2427,8 +2436,16 @@ namespace newui {
         DropDownList();
         ~DropDownList() override;
 
+        // The same controller the popup list uses (shared, not a copy) - so this is where to
+        // customize the rows: controller().setDefaultItemClassName("MyItem"), a custom subclass via
+        // setController(), row height, ... all apply to the popup too.
         ListController& controller() { return *controller_; }
         const ListController& controller() const { return *controller_; }
+        // Swaps the controller, including in the popup list if it already exists. A no-op for
+        // nullptr or the current one. Clears selectedIndex() if it's no longer valid against the
+        // new controller's model.
+        void setController(std::shared_ptr<ListController> controller);
+        std::shared_ptr<ListController> sharedController() const { return controller_; }
 
         ListModel* model() const { return controller_->model(); }
         // Same non-owning ListModel* contract as ListView::setModel() -
@@ -2446,6 +2463,7 @@ namespace newui {
 
         typedef Delegate<DropDownList> SelectionChangedDelegate;
         SelectionChangedDelegate onSelectionChanged;
+
 
         bool isOpen() const;
 
@@ -2515,7 +2533,7 @@ namespace newui {
         // already-selected row rather than an arbitrary one.
         void moveKeyboardHighlight(int delta);
 
-        std::unique_ptr<ListController> controller_;
+        std::shared_ptr<ListController> controller_;  // shared with popupListView_
         std::unique_ptr<PopupFrame> popup_;
         // popupListView_ is wrapped in popupScroll_ (a real ScrollView, not the plain FlexLayout
         // arrangement this used before) so a popup taller than kMaxPopupHeight's worth of rows
