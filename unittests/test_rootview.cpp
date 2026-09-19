@@ -6,6 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
 // RootView's mouse/keyboard dispatch methods (mouseDown()/mouseMove()/etc.,
 // keyEvent()) are protected, not public - purely for testability, so a
 // test-local subclass can drive them directly without a real HWND/message
@@ -32,6 +36,8 @@ public:
     using newui::RootView::keyEvent;
     using newui::RootView::cursorTargetAt;
     using newui::RootView::dirtyRect;
+    using newui::RootView::repaint;
+    using newui::RootView::repaintNow;
 };
 
 // Delegate::FunctionPtr is a plain function pointer (no capturing lambdas),
@@ -2431,6 +2437,133 @@ TEST(RootViewRepaint, EachRepaintStartsFromAFreshDirtyRect) {
 
     // Not the previous repaint's whole-window region, unioned in forever.
     EXPECT_EQ(root->dirtyRect(), newui::Rect(10, 10, 5, 5));
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// Repainting must be idempotent: a repaint of a narrow dirty region can't change a single pixel
+// anywhere else, and the result must equal what a from-scratch full repaint produces. It wasn't -
+// RootView::repaint() filled the root background only inside dirtyRect_ but redrew every child over
+// the whole window, so anything outside the dirty rect (a transparent Label's anti-aliased glyph
+// edges, most visibly) was re-blended onto its own previous pixels on every unrelated repaint and
+// thickened a little each time.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Every byte of the root's whole pixel buffer (rows packed, no stride padding).
+std::vector<std::uint8_t> bufferBytes(newui::RootView& root) {
+    BLImageData data;
+    root.getImageBuffer().get_data(&data);
+    std::vector<std::uint8_t> bytes;
+    for (int y = 0; y < data.size.h; ++y) {
+        const auto* row = static_cast<const std::uint8_t*>(data.pixel_data) + intptr_t(y) * data.stride;
+        bytes.insert(bytes.end(), row, row + size_t(data.size.w) * 4);
+    }
+    return bytes;
+}
+
+// The same, for one rectangle of it.
+std::vector<std::uint8_t> regionBytes(newui::RootView& root, int x, int y, int w, int h) {
+    BLImageData data;
+    root.getImageBuffer().get_data(&data);
+    std::vector<std::uint8_t> bytes;
+    for (int row = y; row < y + h; ++row) {
+        const auto* p = static_cast<const std::uint8_t*>(data.pixel_data) + intptr_t(row) * data.stride + size_t(x) * 4;
+        bytes.insert(bytes.end(), p, p + size_t(w) * 4);
+    }
+    return bytes;
+}
+
+bool hasMoreThanOnePixelValue(const std::vector<std::uint8_t>& bytes) {
+    for (size_t i = 4; i + 3 < bytes.size(); i += 4) {
+        if (std::memcmp(&bytes[i], &bytes[0], 4) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A root with one plain (transparent-by-default) Label, painted once in full. Sizing the buffer via
+// setBounds() is what triggers the first paint, headlessly.
+struct LabelledRoot {
+    TestableRootView* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "root");
+    newui::Label* label = new newui::Label();
+
+    LabelledRoot() {
+        label->setText("Hello, thickening");
+        label->setBounds(newui::Rect(10, 10, 160, 24));
+        root->addChild(label);
+        root->setBounds(newui::Rect(0, 0, 200, 100));
+    }
+
+    ~LabelledRoot() {
+        root->destroy();
+        delete root;
+    }
+
+    // Repaint only a small region well away from the label.
+    void repaintElsewhere(int times) {
+        for (int i = 0; i < times; ++i) {
+            root->markDirty(root, newui::Rect(180, 80, 10, 10));
+            root->repaint();
+        }
+    }
+};
+
+}
+
+TEST(RootViewRepaintIdempotence, ATransparentLabelDoesNotThickenWhenSomethingElseRepaints) {
+    LabelledRoot fixture;
+    ASSERT_FALSE(fixture.root->getImageBuffer().is_empty());
+    const auto before = regionBytes(*fixture.root, 10, 10, 160, 24);
+    ASSERT_TRUE(hasMoreThanOnePixelValue(before)) << "premise: the label's text was actually drawn";
+
+    fixture.repaintElsewhere(5);
+
+    EXPECT_EQ(regionBytes(*fixture.root, 10, 10, 160, 24), before)
+        << "the label's pixels changed although only a region far away was repainted";
+}
+
+TEST(RootViewRepaintIdempotence, ANarrowRepaintLeavesTheWholeBufferEqualToAFullRepaint) {
+    LabelledRoot fixture;
+    fixture.repaintElsewhere(5);
+    const auto afterNarrowRepaints = bufferBytes(*fixture.root);
+
+    fixture.root->repaintNow();  // from scratch: whole client area
+
+    EXPECT_EQ(bufferBytes(*fixture.root), afterNarrowRepaints);
+}
+
+TEST(RootViewRepaintIdempotence, RepaintingTheLabelsOwnRegionRepeatedlyIsAlsoStable) {
+    LabelledRoot fixture;
+    const auto before = regionBytes(*fixture.root, 10, 10, 160, 24);
+
+    for (int i = 0; i < 5; ++i) {
+        fixture.root->markDirty(fixture.root, newui::Rect(10, 10, 160, 24));
+        fixture.root->repaint();
+    }
+
+    EXPECT_EQ(regionBytes(*fixture.root, 10, 10, 160, 24), before);
+}
+
+TEST(RootViewRepaintIdempotence, ATranslucentRootBackgroundDoesNotAccumulateAcrossRepaints) {
+    // A background with alpha < 1 composites over whatever's already in the buffer - so unless the
+    // buffer starts every repaint blank, each repaint of a region darkens/lightens it further.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "root");
+    root->style().setBackgroundColor(newui::Color(1.0f, 0.0f, 0.0f, 0.5f));
+    root->setBounds(newui::Rect(0, 0, 200, 100));
+    ASSERT_FALSE(root->getImageBuffer().is_empty());
+    const auto before = bufferBytes(*root);
+
+    for (int i = 0; i < 4; ++i) {
+        root->markDirty(root, newui::Rect(150, 50, 40, 40));
+        root->repaint();
+    }
+
+    EXPECT_EQ(bufferBytes(*root), before);
 
     root->destroy();
     delete root;

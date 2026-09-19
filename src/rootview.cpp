@@ -242,66 +242,61 @@ namespace newui {
 		surface_->present(dirtyRect_);
 	}
 
-	// Synchronously renders dirtyRect_ into the surface and hands the result
-	// to the screen: onRedrawNeeded first (for content that draws ahead of
-	// this RootView's own tree - see its doc comment, rootview.h), then the
-	// tree itself, then presentRepaintedBuffer(). Reached from
-	// scheduleRepaint()'s deferred idle task (markDirty()), and directly from
-	// resizeImageBuffer()/repaintNow().
+	// Synchronously renders this RootView's whole tree into the surface, then hands the region that
+	// changed (dirtyRect_) to the screen: a blank buffer first, then onRedrawNeeded (for content that
+	// draws ahead of this RootView's own tree - see its doc comment, rootview.h), then the tree itself,
+	// then presentRepaintedBuffer(). Reached from scheduleRepaint()'s deferred idle task (markDirty()),
+	// and directly from resizeImageBuffer()/repaintNow().
+	//
+	// Every repaint redraws the *entire* tree from a blank buffer, whatever dirtyRect_ says - dirtyRect_
+	// only decides how much of the result gets transferred to the screen (and so how much a small
+	// hover-driven repaint costs in upload/blit terms), not what gets rendered. That's what keeps
+	// repainting idempotent: the buffer is a pure function of the tree's current state, so a repaint
+	// can't change a single pixel of anything that hasn't itself changed. It used to fill this
+	// RootView's own background only inside dirtyRect_ while still redrawing every child over the whole
+	// window - so anything outside the dirty rect (a transparent Label's anti-aliased glyph edges most
+	// visibly, or a translucent background) was composited onto its own previous pixels again on every
+	// unrelated repaint, and thickened/darkened a little more each time. Scoping the background to the
+	// dirty rect never saved real work anyway: paintChildren() has always walked every child
+	// unconditionally (below), so the only thing it skipped was one solid fill.
 	void RootView::repaint() {
+		const bool hasBuffer = surface_->isValid();
+
+		// Blank first, and before onRedrawNeeded so a handler that draws ahead of the tree keeps what it
+		// draws (and, like everything else, redraws it fresh on the next repaint). Transparent black is
+		// exactly what a brand-new buffer holds, so the first frame is unchanged.
+		if (hasBuffer) {
+			BLContext ctx(surface_->image());
+			ctx.clear_all();
+			ctx.end();
+		}
+
 		onRedrawNeeded(*this);
 
-		if (surface_->isValid()) {
+		if (hasBuffer) {
 			BLContext ctx(surface_->image());
 
-			// This RootView's own paintStyle()/paint() are clipped to
-			// dirtyRect_ in a narrow save()/restore() - safe because a
-			// RootView's own background fill is always a plain solid-color
-			// ctx.fill_rect() (ViewStyle::paint()'s base implementation, see
-			// viewstyle.h) - solid fills don't hit the Blend2D JIT bug
-			// pattern/image fills do. This scoping is what keeps a small
-			// hover-driven repaint from wiping (and needing to redraw) the
-			// *entire* window's background on every call.
-			ctx.save();
-			if (!dirtyRect_.empty()) {
-				ctx.clip_to_rect(dirtyRect_);
-			}
 			paintStyle(ctx);
 			paint(ctx);
-			ctx.restore();
 
 			// paintChildren() walks every child unconditionally (no dirty-rect
 			// pruning) - see its own comment (view.h) for why: pruning was
 			// tried and produced real visual corruption, confirmed via a
-			// controlled test to be caused by the pruning itself rather than
-			// this level's own clip above (removing pruning while keeping
-			// this clip fixed it immediately). Each child still only ever
-			// clips to its own full bounds via the unchanged
-			// ctx.clip_to_rect() inside paintChildren() - never intersected
-			// with dirtyRect_ - which is also what keeps themed/pattern-filled
-			// children (uxtheme's DrawThemeBackground - ThemedViewStyle,
-			// viewstyle.h) away from a real Blend2D JIT bug
-			// ('is_rect_fill()' assertion) that a *combined* outer+child clip
-			// hits.
-			//
-			// Consequence worth knowing about: every child gets redrawn on
-			// every repaint anywhere in the tree, whether or not its own area
-			// was part of what actually changed - harmless (self-correcting)
-			// for a child with its own opaque backgroundFill, but NOT
-			// idempotent for one that paints translucent content (anti-
-			// aliased text, a partially-transparent themed part) with nothing
-			// opaque under it - repeated re-blending of the same edge pixels
-			// onto themselves subtly darkens/thickens them further each time
-			// instead of reproducing the same result. See LabelStyle's own
-			// doc comment (viewstyle.h) for the concrete fix (give it an
-			// opaque backgroundFill).
+			// controlled test to be caused by the pruning itself. Each child
+			// clips to its own full bounds via the unchanged ctx.clip_to_rect()
+			// inside paintChildren() - never intersected with a dirty rect,
+			// which is also what keeps themed/pattern-filled children (uxtheme's
+			// DrawThemeBackground - ThemedViewStyle, viewstyle.h) away from a
+			// real Blend2D JIT bug ('is_rect_fill()' assertion) that a *combined*
+			// outer+child clip hits. Redrawing everything is safe precisely
+			// because the buffer was blanked above: each child draws over a
+			// fresh backdrop, so a child with no opaque background of its own
+			// (a plain Label) reproduces the same pixels every time instead of
+			// compounding its own anti-aliased edges.
 			paintChildren(ctx);
 
 			// Last, on top of every child - see Overlay's own class comment
-			// (overlay.h). Unclipped, like paintChildren() above (not confined
-			// to dirtyRect_) for the same reason: this whole function only
-			// narrows to dirtyRect_ for this RootView's own paintStyle()/
-			// paint(), never for anything drawn afterward.
+			// (overlay.h).
 			if (overlay_ && overlay_->visible()) {
 				overlay_->paint(ctx, Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height));
 			}

@@ -58,7 +58,10 @@ namespace newui {
         // Not tied to WM_PAINT: WM_PAINT just blits whatever is currently in
         // the buffer whenever Windows wants it repainted. This is for driving
         // the actual drawing (e.g. from an animation timer) independently of
-        // that.
+        // that. Fires at the start of every repaint(), right after the buffer
+        // has been blanked and before the tree paints - so a handler must
+        // draw what it wants to keep on *every* call; nothing survives from
+        // the previous repaint.
         RedrawNeededDelegate onRedrawNeeded;
 
         void markDirty();
@@ -378,6 +381,13 @@ namespace newui {
         // markDirty() on its own.
         void repaintNow();
 
+        // Renders whatever's in dirtyRect_ and presents it - what
+        // scheduleRepaint()'s deferred idle task and repaintNow() both call.
+        // Protected purely for testability: a test needs to repaint with a
+        // *narrow* dirtyRect_ (markDirty(view, rect) then this), which
+        // repaintNow() can't do since it always marks the whole client area.
+        void repaint();
+
         // Replaces this RootView's PresentSurface with a fresh one of the
         // given kind, overriding defaultPresentBackend() for this instance
         // (PopupTool forces Gdi - a layered window can't present through a
@@ -451,7 +461,6 @@ namespace newui {
         void scheduleRepaint();
 
         void resizeImageBuffer(int width, int height);
-        void repaint();
 
         WNDPROC defaultWndProc_ = nullptr;
         WNDPROC wndProc_ = nullptr;
