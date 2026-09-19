@@ -419,6 +419,25 @@ TEST(Cursor, AnEmptyPathRevertsAFileCursorToTheArrowButLeavesOtherKindsAlone) {
     ::DeleteFileA(path.c_str());
 }
 
+TEST(Cursor, ClearingThePathReturnsToTheKindTheCursorHadBeforeItWentCustom) {
+    const std::string path = "cursor_setpath_fallback.png";
+    WriteTestPNG(path, 16, 16);
+
+    newui::Cursor cursor(newui::CursorKind::Hand);
+    cursor.setPath(path);
+    ASSERT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    cursor.setPath("");
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);  // what an undo of the path edit restores
+
+    // ...and it survives a move.
+    cursor.setPath(path);
+    newui::Cursor moved(std::move(cursor));
+    moved.setPath("");
+    EXPECT_EQ(moved.kind(), newui::CursorKind::Hand);
+
+    ::DeleteFileA(path.c_str());
+}
+
 TEST(Cursor, PathIsASettableReflectedProperty) {
     const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
     ASSERT_NE(clazz, nullptr);

@@ -72,10 +72,12 @@ namespace newui {
             if (this != &other) {
                 releaseOwnedHandle();
                 kind_ = other.kind_;
+                fallbackKind_ = other.fallbackKind_;
                 path_ = std::move(other.path_);
                 handle_ = other.handle_;
 
                 other.kind_ = CursorKind::Arrow;
+                other.fallbackKind_ = CursorKind::Arrow;
                 other.path_.clear();
                 other.handle_ = nullptr;
             }
@@ -107,8 +109,8 @@ namespace newui {
         // file calls. A non-empty path is loaded (a .png, .svg, or any other format Blend2D
         // decodes) exactly as loadPath() does, and on success kind() becomes Custom; if the file
         // can't be loaded the cursor is left unchanged. An empty path on a file-based custom
-        // cursor reverts it to the default arrow (a system kind has no path to clear, so it is
-        // untouched).
+        // cursor reverts it to the system kind it had before becoming Custom (a system kind has no
+        // path to clear, so it is untouched).
         void setPath(const std::string& path);
 
         CursorKind kind() const {
@@ -210,6 +212,10 @@ namespace newui {
 
         CursorKind kind_ = CursorKind::Arrow;
         std::string path_;
+
+        // The system kind this cursor had before it last became Custom - what setPath("") (and
+        // so an undo of setting a path) goes back to, instead of always dropping to Arrow.
+        CursorKind fallbackKind_ = CursorKind::Arrow;
 
         // Doubles as the Custom-owned handle (see ownsHandle()) AND, for a system kind_, a
         // lazily-resolved cache of that shape's HCURSOR - handle() populates it via

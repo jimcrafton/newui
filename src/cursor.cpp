@@ -195,6 +195,9 @@ namespace newui {
         }
 
         releaseOwnedHandle();
+        if (kind_ != CursorKind::Custom) {
+            fallbackKind_ = kind_;
+        }
         kind_ = CursorKind::Custom;
         path_ = path;
         handle_ = loaded;
@@ -203,10 +206,10 @@ namespace newui {
 
     void Cursor::setPath(const std::string& path) {
         if (path.empty()) {
-            // Clearing a file-based custom cursor falls back to the default arrow; a system kind
-            // or an image-built cursor has no path to clear, so it is left alone.
+            // Clearing a file-based custom cursor goes back to the system kind it had before; a
+            // system kind or an image-built cursor has no path to clear, so it is left alone.
             if (kind_ == CursorKind::Custom && !path_.empty()) {
-                setCursorKind(CursorKind::Arrow);
+                setCursorKind(fallbackKind_);
             }
             return;
         }
@@ -220,6 +223,9 @@ namespace newui {
         }
 
         releaseOwnedHandle();
+        if (kind_ != CursorKind::Custom) {
+            fallbackKind_ = kind_;
+        }
         kind_ = CursorKind::Custom;
         path_.clear();
         handle_ = loaded;
