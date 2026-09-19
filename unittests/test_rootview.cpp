@@ -2356,3 +2356,31 @@ TEST(DesignTimeFlagsTest, NotSelectableIsIndependentOfInternal) {
     EXPECT_FALSE(view.isInternal());
     EXPECT_FALSE(view.isSelectableAtDesignTime());
 }
+
+TEST(DesignTimeFlagsTest, ExplicitGetSetPairsEachTouchOnlyTheirOwnBit) {
+    newui::SubView view;
+    EXPECT_FALSE(view.isInternal());
+    EXPECT_FALSE(view.isNotSelectable());
+    EXPECT_FALSE(view.isReadOnly());
+
+    view.setInternal(true);
+    EXPECT_TRUE(view.isInternal());
+    EXPECT_EQ(view.designTimeFlags(), newui::DesignTimeFlags::Internal);
+
+    view.setNotSelectable(true);
+    view.setReadOnly(true);
+    view.setDesignTime(true);
+    EXPECT_EQ(view.designTimeFlags(),
+        newui::DesignTimeFlags::Internal | newui::DesignTimeFlags::NotSelectable
+        | newui::DesignTimeFlags::ReadOnly | newui::DesignTimeFlags::DesignTime);
+
+    view.setNotSelectable(false);
+    EXPECT_FALSE(view.isNotSelectable());
+    EXPECT_TRUE(view.isSelectableAtDesignTime());
+    EXPECT_TRUE(view.isInternal());
+    EXPECT_TRUE(view.isReadOnly());
+
+    view.setInternal(false);
+    view.setReadOnly(false);
+    EXPECT_EQ(view.designTimeFlags(), newui::DesignTimeFlags::DesignTime);
+}

@@ -70,10 +70,25 @@ namespace newui {
         bool isDesignTime() const { return hasDesignTimeFlag(DesignTimeFlags::DesignTime); }
         void setDesignTime(bool designTime) { setDesignTimeFlag(DesignTimeFlags::DesignTime, designTime); }
 
+        // One get/set pair per remaining flag - each touches only its own bit.
         //@reflect ignore=true
         bool isInternal() const { return hasDesignTimeFlag(DesignTimeFlags::Internal); }
         //@reflect ignore=true
-        bool isSelectableAtDesignTime() const { return !hasDesignTimeFlag(DesignTimeFlags::NotSelectable); }
+        void setInternal(bool internal) { setDesignTimeFlag(DesignTimeFlags::Internal, internal); }
+
+        //@reflect ignore=true
+        bool isNotSelectable() const { return hasDesignTimeFlag(DesignTimeFlags::NotSelectable); }
+        //@reflect ignore=true
+        void setNotSelectable(bool notSelectable) { setDesignTimeFlag(DesignTimeFlags::NotSelectable, notSelectable); }
+
+        //@reflect ignore=true
+        bool isReadOnly() const { return hasDesignTimeFlag(DesignTimeFlags::ReadOnly); }
+        //@reflect ignore=true
+        void setReadOnly(bool readOnly) { setDesignTimeFlag(DesignTimeFlags::ReadOnly, readOnly); }
+
+        // Reads better at a hit-test/selection call site than !isNotSelectable().
+        //@reflect ignore=true
+        bool isSelectableAtDesignTime() const { return !isNotSelectable(); }
 
     protected:
         std::string name_;
