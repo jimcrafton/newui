@@ -292,17 +292,19 @@ namespace newui {
 		}
 
 		// Idempotent per HWND, not per call - see kDarkModeEnabledPropName's
-		// own comment for why a window property. SetWindowTheme() below is
-		// documented to send WM_THEMECHANGED to hwnd every time it runs,
-		// which Frame::handleMessage() answers by refreshing every themed
-		// style *and* firing Application::onThemeChanged() - fine once, but
-		// ContextMenu::show() (menus.cpp) calls this on every single
-		// top-level menu-bar click, so onThemeChanged used to fire on every
-		// click too (reported live). Once opted in, Windows keeps a window
-		// following the live system Light/Dark setting on its own from then
-		// on (see refreshNativeMenuDarkModePolicy() for the process-wide
-		// half of that) - a second AllowDarkModeForWindow/SetWindowTheme
-		// call against the same HWND has nothing further to change.
+		// own comment for why a window property. Once opted in, Windows keeps a
+		// window following the live system Light/Dark setting on its own from
+		// then on (see refreshNativeMenuDarkModePolicy() for the process-wide
+		// half of that) - a second AllowDarkModeForWindow call against the
+		// same HWND has nothing further to change.
+		//
+		// Deliberately does NOT SetWindowTheme(hwnd, L"DarkMode_Explorer", ...): that
+		// forces dark variants of every uxtheme part opened against this window
+		// (a Button's face becomes #333333) even while the system is in Light mode
+		// (confirmed with a standalone probe), and only styles that re-open their
+		// theme afterwards pick it up - so it left a window's controls
+		// inconsistently light and dark. A native popup menu doesn't need it: on a
+		// Light system the popup was identical with and without it.
 		if (::GetPropW(hwnd, kDarkModeEnabledPropName) != nullptr) {
 			return;
 		}
@@ -311,7 +313,6 @@ namespace newui {
 			allowDarkModeForWindowFn()(hwnd, TRUE);
 		}
 
-		::SetWindowTheme(hwnd, L"DarkMode_Explorer", nullptr);
 		::SetPropW(hwnd, kDarkModeEnabledPropName, reinterpret_cast<HANDLE>(1));
 	}
 
