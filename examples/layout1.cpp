@@ -168,10 +168,10 @@ int main() {
 
     auto* badge = MakePanel("badge", "white", "darkred", 2.0f);
     auto badgeParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
-    badgeParams->rightMargin = 8.0f;
-    badgeParams->topMargin = 8.0f;
-    badgeParams->width = 24.0f;
-    badgeParams->height = 24.0f;
+    badgeParams->setRightMargin(8.0f);
+    badgeParams->setTopMargin(8.0f);
+    badgeParams->setWidth(24.0f);
+    badgeParams->setHeight(24.0f);
     badge->setLayoutParams(std::move(badgeParams));
     content1->addChild(badge);
 

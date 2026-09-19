@@ -98,24 +98,40 @@ namespace newui {
     class AnchorLayoutParams : public LayoutParams {
     public:
         AnchorLayoutParams() = default;
-        explicit AnchorLayoutParams(Anchor anchors) : anchors(anchors) {}
+        explicit AnchorLayoutParams(Anchor anchors) : anchors_(anchors) {}
 
-        Anchor anchors = Anchor::Left | Anchor::Top;
+        Anchor anchors() const { return anchors_; }
+        void setAnchors(Anchor anchors) { anchors_ = anchors; }
 
         // Gap kept from the corresponding container edge, only meaningful
-        // when that edge's flag is set in anchors.
-        float leftMargin = 0.0f;
-        float topMargin = 0.0f;
-        float rightMargin = 0.0f;
-        float bottomMargin = 0.0f;
+        // when that edge's flag is set in anchors().
+        float leftMargin() const { return leftMargin_; }
+        void setLeftMargin(float value) { leftMargin_ = value; }
+        float topMargin() const { return topMargin_; }
+        void setTopMargin(float value) { topMargin_ = value; }
+        float rightMargin() const { return rightMargin_; }
+        void setRightMargin(float value) { rightMargin_ = value; }
+        float bottomMargin() const { return bottomMargin_; }
+        void setBottomMargin(float value) { bottomMargin_ = value; }
 
         // Size used along an axis that isn't stretched by opposing
         // anchors (Left alone, Right alone, or CenterX - and the same
         // vertically for height). Ignored for a stretched axis (Left +
         // Right, or Top + Bottom), where size comes from the container
         // instead.
-        float width = 0.0f;
-        float height = 0.0f;
+        float width() const { return width_; }
+        void setWidth(float value) { width_ = value; }
+        float height() const { return height_; }
+        void setHeight(float value) { height_ = value; }
+
+    private:
+        Anchor anchors_ = Anchor::Left | Anchor::Top;
+        float leftMargin_ = 0.0f;
+        float topMargin_ = 0.0f;
+        float rightMargin_ = 0.0f;
+        float bottomMargin_ = 0.0f;
+        float width_ = 0.0f;
+        float height_ = 0.0f;
     };
 
     // Pins each child to some combination of its container's edges and
@@ -193,18 +209,23 @@ namespace newui {
     class FlexLayoutParams : public LayoutParams {
     public:
         FlexLayoutParams() = default;
-        explicit FlexLayoutParams(float weight) : weight(weight) {}
+        explicit FlexLayoutParams(float weight) : weight_(weight) {}
 
         // This child's share of leftover main-axis space, proportional
         // to every other weighted sibling's own weight - CSS flex-grow.
         // 0 (the default) means "natural size only", i.e. this child's
         // desiredSize() along the main axis (see View::desiredSize()).
-        float weight = 0.0f;
+        float weight() const { return weight_; }
+        void setWeight(float value) { weight_ = value; }
 
         // Overrides the FlexLayout's own crossAxisAlignment for this
         // child alone; unset (the default) means "use the container's".
-        std::optional<CrossAxisAlignment> crossAxisAlignment;
+        std::optional<CrossAxisAlignment> crossAxisAlignment() const { return crossAxisAlignment_; }
+        void setCrossAxisAlignment(std::optional<CrossAxisAlignment> value) { crossAxisAlignment_ = value; }
 
+    private:
+        float weight_ = 0.0f;
+        std::optional<CrossAxisAlignment> crossAxisAlignment_;
     };
 
     // Arranges children in a single row (Orientation::Horizontal) or
@@ -415,21 +436,34 @@ namespace newui {
     class GridLayoutParams : public LayoutParams {
     public:
         GridLayoutParams() = default;
-        GridLayoutParams(std::size_t row, std::size_t column) : row(row), column(column) {}
+        GridLayoutParams(std::size_t row, std::size_t column) : row_(row), column_(column) {}
 
-        std::size_t row = 0;
-        std::size_t column = 0;
+        std::size_t row() const { return row_; }
+        void setRow(std::size_t value) { row_ = value; }
+        std::size_t column() const { return column_; }
+        void setColumn(std::size_t value) { column_ = value; }
 
         // How many rows/columns (starting at row/column) this child
         // occupies - 1 (the default) means "just its own cell". A
         // spanning child (>1) is ignored when auto-sizing an Auto track -
         // see GridLayout::arrange().
-        std::size_t rowSpan = 1;
-        std::size_t columnSpan = 1;
+        std::size_t rowSpan() const { return rowSpan_; }
+        void setRowSpan(std::size_t value) { rowSpan_ = value; }
+        std::size_t columnSpan() const { return columnSpan_; }
+        void setColumnSpan(std::size_t value) { columnSpan_ = value; }
 
-        CrossAxisAlignment horizontalAlignment = CrossAxisAlignment::Stretch;
-        CrossAxisAlignment verticalAlignment = CrossAxisAlignment::Stretch;
+        CrossAxisAlignment horizontalAlignment() const { return horizontalAlignment_; }
+        void setHorizontalAlignment(CrossAxisAlignment value) { horizontalAlignment_ = value; }
+        CrossAxisAlignment verticalAlignment() const { return verticalAlignment_; }
+        void setVerticalAlignment(CrossAxisAlignment value) { verticalAlignment_ = value; }
 
+    private:
+        std::size_t row_ = 0;
+        std::size_t column_ = 0;
+        std::size_t rowSpan_ = 1;
+        std::size_t columnSpan_ = 1;
+        CrossAxisAlignment horizontalAlignment_ = CrossAxisAlignment::Stretch;
+        CrossAxisAlignment verticalAlignment_ = CrossAxisAlignment::Stretch;
     };
 
     // Row-and-column ("table") layout - WPF/WinForms Grid/TableLayoutPanel-

@@ -88,8 +88,8 @@ public:
     }
 
     // Constructs a ParamsT, configures it via fn(ParamsT&) (e.g.
-    // AnchorLayoutParams::anchors/leftMargin/..., FlexLayoutParams::weight -
-    // both plain public fields, see layout.h), then setLayoutParams()s it.
+    // AnchorLayoutParams::setAnchors()/setLeftMargin()/...,
+    // FlexLayoutParams::setWeight() - see layout.h), then setLayoutParams()s it.
     template<typename ParamsT, typename Fn>
     ViewBuilder& layoutParams(Fn&& fn) {
         static_assert(std::is_base_of_v<SubView, ViewT>,

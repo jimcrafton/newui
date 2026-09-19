@@ -462,10 +462,10 @@ void AddTabControlDemo(newui::SubView* parent) {
     auto* tabs = new newui::TabControl();
     auto tabsParams = std::make_unique<newui::AnchorLayoutParams>(
         newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Right | newui::Anchor::Bottom);
-    tabsParams->leftMargin = 8.0f;
-    tabsParams->topMargin = 8.0f;
-    tabsParams->rightMargin = 8.0f;
-    tabsParams->bottomMargin = 8.0f;
+    tabsParams->setLeftMargin(8.0f);
+    tabsParams->setTopMargin(8.0f);
+    tabsParams->setRightMargin(8.0f);
+    tabsParams->setBottomMargin(8.0f);
     tabs->setLayoutParams(std::move(tabsParams));
     parent->addChild(tabs);
 
@@ -567,7 +567,7 @@ int main() {
     themedButton->setDesiredSize(newui::Size(120.0f, 28.0f));
     themedButton->setCursor(newui::Cursor(newui::CursorKind::Hand));
     auto themedButtonParams = std::make_unique<newui::FlexLayoutParams>();
-    themedButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedButtonParams->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     themedButton->setLayoutParams(std::move(themedButtonParams));
     sidebar->addChild(themedButton);
 
@@ -579,7 +579,7 @@ int main() {
     themedCheckBox->setStyle(std::move(themedCheckBoxStyle));
     themedCheckBox->setDesiredSize(newui::Size(20.0f, 20.0f));
     auto themedCheckBoxParams = std::make_unique<newui::FlexLayoutParams>();
-    themedCheckBoxParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedCheckBoxParams->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     themedCheckBox->setLayoutParams(std::move(themedCheckBoxParams));
     sidebar->addChild(themedCheckBox);
 
@@ -597,7 +597,7 @@ int main() {
     themedRadioButton->setStyle(std::move(themedRadioButtonStyle));
     themedRadioButton->setDesiredSize(newui::Size(20.0f, 20.0f));
     auto themedRadioButtonParams = std::make_unique<newui::FlexLayoutParams>();
-    themedRadioButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedRadioButtonParams->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     themedRadioButton->setLayoutParams(std::move(themedRadioButtonParams));
     sidebar->addChild(themedRadioButton);
 
@@ -608,7 +608,7 @@ int main() {
     themedToolbarButton->setStyle(std::move(themedToolbarButtonStyle));
     themedToolbarButton->setDesiredSize(newui::Size(32.0f, 28.0f));
     auto themedToolbarButtonParams = std::make_unique<newui::FlexLayoutParams>();
-    themedToolbarButtonParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    themedToolbarButtonParams->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     themedToolbarButton->setLayoutParams(std::move(themedToolbarButtonParams));
     sidebar->addChild(themedToolbarButton);
 
@@ -813,8 +813,8 @@ int main() {
     themedTrackbarTrack->setVisible(true);
     themedTrackbarTrack->setStyle(std::make_unique<newui::ThemedTrackbarTrackStyle>());
     auto trackParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Right | newui::Anchor::Top);
-    trackParams->topMargin = 8.0f;
-    trackParams->height = 6.0f;
+    trackParams->setTopMargin(8.0f);
+    trackParams->setHeight(6.0f);
     themedTrackbarTrack->setLayoutParams(std::move(trackParams));
     trackbarRow->addChild(themedTrackbarTrack);
 
@@ -823,9 +823,9 @@ int main() {
     themedTrackbarThumb->setVisible(true);
     themedTrackbarThumb->setStyle(std::make_unique<newui::ThemedTrackbarThumbStyle>());
     auto thumbParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    thumbParams->leftMargin = 70.0f;
-    thumbParams->width = 12.0f;
-    thumbParams->height = 20.0f;
+    thumbParams->setLeftMargin(70.0f);
+    thumbParams->setWidth(12.0f);
+    thumbParams->setHeight(20.0f);
     themedTrackbarThumb->setLayoutParams(std::move(thumbParams));
     trackbarRow->addChild(themedTrackbarThumb);
 
@@ -858,7 +858,7 @@ int main() {
     themedProgressFill1->setStyle(std::make_unique<newui::ThemedProgressBarFillStyle>());
     auto fill1Params = std::make_unique<newui::AnchorLayoutParams>(
         newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Bottom);
-    fill1Params->width = 108.0f;  // ~60% of the 180-wide track
+    fill1Params->setWidth(108.0f);  // ~60% of the 180-wide track
     themedProgressFill1->setLayoutParams(std::move(fill1Params));
     progressRow1->addChild(themedProgressFill1);
 
@@ -885,7 +885,7 @@ int main() {
     themedProgressFill2->setStyle(std::move(progressFill2Style));
     auto fill2Params = std::make_unique<newui::AnchorLayoutParams>(
         newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Bottom);
-    fill2Params->width = 63.0f;  // ~35% of the 180-wide track
+    fill2Params->setWidth(63.0f);  // ~35% of the 180-wide track
     themedProgressFill2->setLayoutParams(std::move(fill2Params));
     progressRow2->addChild(themedProgressFill2);
 
@@ -905,7 +905,7 @@ int main() {
     demoScrollBar->setPageSize(20.0f);
     demoScrollBar->setLineStep(5.0f);
     auto scrollBarParams = std::make_unique<newui::FlexLayoutParams>();
-    scrollBarParams->crossAxisAlignment = newui::CrossAxisAlignment::Start;
+    scrollBarParams->setCrossAxisAlignment(newui::CrossAxisAlignment::Start);
     demoScrollBar->setLayoutParams(std::move(scrollBarParams));
     content2->addChild(demoScrollBar);
 
@@ -963,10 +963,10 @@ int main() {
 
     auto* badge = MakePanel("badge", "white", "darkred", 2.0f);
     auto badgeParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
-    badgeParams->rightMargin = 8.0f;
-    badgeParams->topMargin = 8.0f;
-    badgeParams->width = 24.0f;
-    badgeParams->height = 24.0f;
+    badgeParams->setRightMargin(8.0f);
+    badgeParams->setTopMargin(8.0f);
+    badgeParams->setWidth(24.0f);
+    badgeParams->setHeight(24.0f);
     badge->setLayoutParams(std::move(badgeParams));
     content1->addChild(badge);
 

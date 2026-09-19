@@ -51,8 +51,8 @@ TEST(AnchorLayout, SkipsInvisibleChildren) {
     container->addChild(child);
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->width = 40.0f;
-    params->height = 20.0f;
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -70,10 +70,10 @@ TEST(AnchorLayout, LeftTopPositionsAtMarginWithOwnSize) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->leftMargin = 5.0f;
-    params->topMargin = 8.0f;
-    params->width = 40.0f;
-    params->height = 20.0f;
+    params->setLeftMargin(5.0f);
+    params->setTopMargin(8.0f);
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -91,10 +91,10 @@ TEST(AnchorLayout, RightBottomPositionsFromFarEdge) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Bottom);
-    params->rightMargin = 10.0f;
-    params->bottomMargin = 5.0f;
-    params->width = 30.0f;
-    params->height = 20.0f;
+    params->setRightMargin(10.0f);
+    params->setBottomMargin(5.0f);
+    params->setWidth(30.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -114,10 +114,10 @@ TEST(AnchorLayout, OpposingAnchorsStretchThatAxis) {
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(
         newui::Anchor::Left | newui::Anchor::Right | newui::Anchor::Top);
-    params->leftMargin = 10.0f;
-    params->rightMargin = 20.0f;
-    params->topMargin = 5.0f;
-    params->height = 15.0f;
+    params->setLeftMargin(10.0f);
+    params->setRightMargin(20.0f);
+    params->setTopMargin(5.0f);
+    params->setHeight(15.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -136,8 +136,8 @@ TEST(AnchorLayout, CenterXCenterYCentersChild) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::CenterX | newui::Anchor::CenterY);
-    params->width = 50.0f;
-    params->height = 20.0f;
+    params->setWidth(50.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -159,8 +159,8 @@ TEST(AnchorLayout, ArrangesWithinStyledContainersClientBounds) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->width = 20.0f;
-    params->height = 20.0f;
+    params->setWidth(20.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -708,7 +708,7 @@ TEST(GridLayout, AutoColumnSizesToLargestDesiredSizeIgnoringSpanningChildren) {
     spanning->setDesiredSize(newui::Size(1000.0f, 10.0f));
     spanning->setVisible(true);
     auto spanParams = std::make_unique<newui::GridLayoutParams>(0, 0);
-    spanParams->columnSpan = 2;
+    spanParams->setColumnSpan(2);
     spanning->setLayoutParams(std::move(spanParams));
     container->addChild(spanning);
 
@@ -738,7 +738,7 @@ TEST(GridLayout, ColumnSpanUnionsTrackExtents) {
 
     auto* child = NewChild(container, newui::Rect());
     auto params = std::make_unique<newui::GridLayoutParams>(0, 0);
-    params->columnSpan = 2;
+    params->setColumnSpan(2);
     child->setLayoutParams(std::move(params));
     container->updateLayout();
 
@@ -761,8 +761,8 @@ TEST(GridLayout, NonStretchAlignmentKeepsDesiredSizeAndCentersWithinCell) {
     child->setDesiredSize(newui::Size(40.0f, 20.0f));
     child->setVisible(true);
     auto params = std::make_unique<newui::GridLayoutParams>(0, 0);
-    params->horizontalAlignment = newui::CrossAxisAlignment::Center;
-    params->verticalAlignment = newui::CrossAxisAlignment::Center;
+    params->setHorizontalAlignment(newui::CrossAxisAlignment::Center);
+    params->setVerticalAlignment(newui::CrossAxisAlignment::Center);
     child->setLayoutParams(std::move(params));
     container->addChild(child);
     container->updateLayout();
@@ -935,8 +935,8 @@ TEST(ViewLayout, ResizingContainerReRunsLayout) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
-    params->width = 20.0f;
-    params->height = 20.0f;
+    params->setWidth(20.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());

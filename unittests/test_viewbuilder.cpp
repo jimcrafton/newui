@@ -44,23 +44,23 @@ TEST(ViewBuilder, LayoutParamsAttachesRealLayoutParamsInstance) {
 
     auto* params = dynamic_cast<newui::FlexLayoutParams*>(child->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_FLOAT_EQ(params->weight, 2.0f);
+    EXPECT_FLOAT_EQ(params->weight(), 2.0f);
 
     delete child;
 }
 
-TEST(ViewBuilder, TemplatedLayoutParamsConfiguresPublicFieldsInPlace) {
+TEST(ViewBuilder, TemplatedLayoutParamsConfiguresTheParamsInPlace) {
     auto* child = newui::ViewBuilder<newui::SubView>()
         .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& p) {
-            p.anchors = newui::Anchor::Left | newui::Anchor::Top;
-            p.leftMargin = 4.0f;
+            p.setAnchors(newui::Anchor::Left | newui::Anchor::Top);
+            p.setLeftMargin(4.0f);
         })
         .build();
 
     auto* params = dynamic_cast<newui::AnchorLayoutParams*>(child->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Left));
-    EXPECT_FLOAT_EQ(params->leftMargin, 4.0f);
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Left));
+    EXPECT_FLOAT_EQ(params->leftMargin(), 4.0f);
 
     delete child;
 }
