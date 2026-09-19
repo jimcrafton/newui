@@ -242,6 +242,7 @@ namespace newui {
         // having run - safe to call from Layout::arrange() (see Layout's
         // class comment) or anywhere else that needs it before the first
         // paint.
+        //@reflect ignore=true
         Rect getClientBounds() const {
             return style_ ? style_->computeClientBounds(bounds_.size())
                            : Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
@@ -336,10 +337,12 @@ namespace newui {
         // hosts scrollable content (see controls.h's ScrollView), not on
         // itself, so its own always-visible chrome (scrollbars) stays put
         // regardless of scroll position.
+        //@reflect ignore=true
         const Point& origin() const {
             return origin_;
         }
 
+        //@reflect ignore=true
         void setOrigin(const Point& origin) {
             origin_ = origin;
         }

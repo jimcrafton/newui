@@ -1,9 +1,12 @@
 #include "newui/cursor.h"
+#include "newui/reflection.h"
+#include "newui/view.h"
 
 #include <gtest/gtest.h>
 
 #include <blend2d/blend2d.h>
 
+#include <any>
 #include <utility>
 
 // View's own use of Cursor (cursor()/setCursor(Cursor)/cursorKind()/
@@ -289,4 +292,29 @@ TEST(CursorClass, MoveAssignmentReleasesTheTargetsOwnedHandleFirst) {
 
     ::DeleteFileA(path1.c_str());
     ::DeleteFileA(path2.c_str());
+}
+
+TEST(Cursor, KindIsASettableReflectedPropertyThatIgnoresCustom) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
+    ASSERT_NE(clazz, nullptr);
+    const newui::reflection::Property* kind = clazz->property("kind");
+    ASSERT_NE(kind, nullptr);
+
+    newui::Cursor cursor;
+    kind->set(&cursor, std::any(newui::CursorKind::Hand));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
+
+    // Custom only ever comes from setPath()/setImage() - choosing it here must not leave a
+    // "custom" cursor with no handle behind it.
+    kind->set(&cursor, std::any(newui::CursorKind::Custom));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
+}
+
+TEST(ViewReflection, DerivedAndScrollStateAreNotReflectedProperties) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("View");
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->property("clientBounds"), nullptr);  // computed from style + bounds
+    EXPECT_EQ(clazz->property("origin"), nullptr);        // transient scroll offset
+    EXPECT_NE(clazz->property("childViews"), nullptr);    // still serialized - the tree depends on it
+    EXPECT_NE(clazz->property("bounds"), nullptr);
 }

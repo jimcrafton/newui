@@ -107,6 +107,15 @@ namespace newui {
             return kind_;
         }
 
+        // The setter that pairs with kind() - what makes "kind" a settable reflected property
+        // (a designer's dropdown, a saved file). Custom can't be chosen this way (it only ever
+        // results from setPath()/setImage(), which supply the actual handle), so it is ignored.
+        void setKind(CursorKind kind) {
+            if (kind != CursorKind::Custom) {
+                setCursorKind(kind);
+            }
+        }
+
         // The path setPath() last loaded successfully - empty for every
         // other case (a system kind, or a setImage()-built handle), even
         // though kind() is Custom in the setImage() case too.
