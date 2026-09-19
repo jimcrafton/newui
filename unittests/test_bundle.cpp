@@ -1017,3 +1017,48 @@ TEST(Bundle, AppNameFallsBackToApplicationNameWithoutInfoJson) {
     newui::Application::instance().setName("bundle-test-app-renamed");
     EXPECT_EQ(newui::Bundle::instance().appName(), "bundle-test-app-renamed");
 }
+
+// A TabControl saves its structure (strip + pages) and loads back through childViews, but its
+// tab buttons are rebuilt rather than serialized - each TabPage carries its own title, and the
+// pages area re-creates a button for every page attached to it.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATabControlsTabsAndTitles) {
+    trackFile("BundleTabControlFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleTabControlFrame1");
+
+    auto* tabs = new newui::TabControl();
+    tabs->setName("myTabs");
+    auto* first = new newui::TabPage();
+    first->setName("firstPage");
+    tabs->addTab("Alpha", first);
+    auto* second = new newui::TabPage();
+    second->setName("secondPage");
+    tabs->addTab("Beta", second);
+    frame.rootView().addChild(tabs);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTabControlFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::TabControl*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->name(), "myTabs");
+
+    // Exactly the constructor-built strip and pages area - nothing duplicated.
+    EXPECT_EQ(loaded->childViews().size(), 2u);
+    ASSERT_EQ(loaded->tabCount(), 2u);
+    EXPECT_EQ(loaded->tabButton(0)->name(), "Alpha");
+    EXPECT_EQ(loaded->tabButton(1)->name(), "Beta");
+    EXPECT_EQ(loaded->page(0)->name(), "firstPage");
+    EXPECT_EQ(loaded->page(1)->name(), "secondPage");
+    EXPECT_EQ(loaded->selectedIndex(), 0u);
+    EXPECT_TRUE(loaded->tabButton(0)->isInternal());
+
+    // The reloaded tabs still work.
+    loaded->tabButton(1)->onMouseDown(*loaded->tabButton(1), newui::Point(1, 1), 0, 0);
+    EXPECT_EQ(loaded->selectedIndex(), 1u);
+}

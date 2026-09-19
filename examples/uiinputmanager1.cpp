@@ -32,7 +32,7 @@
 //   5. A TreeView (StringTreeModel) - same as above, plus Left/Right to
 //      collapse/expand or move to the parent/first child.
 //   6. A TabControl - Tab into the strip, then Left/Right switches tabs
-//      (TabControl::handleKeyDown(), tabcontrol.cpp), wrapping at both
+//      (TabControl::handleKeyDown(), controls.cpp), wrapping at both
 //      ends.
 //   7. A 2x2 grid of plain Buttons, none of which hook arrow keys
 //      themselves - Up/Down/Left/Right jumps to whichever neighbor is
@@ -62,7 +62,6 @@
 #include "newui/reflection.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
-#include "newui/tabcontrol.h"
 #include "newui/uicolormanager.h"
 #include "newui/uiinputmanager.h"
 #include "newui/view.h"

@@ -1,4 +1,4 @@
-#include "newui/tabcontrol.h"
+#include "newui/controls.h"
 #include "newui/keyboard_constants.h"
 #include "newui/reflection.h"
 
@@ -6,7 +6,7 @@
 
 // Unlike MenuBar/ContextMenu, TabControl needs no live HWND at all - a
 // tab click just switches which already-built page is visible via
-// CardLayout, entirely in-process (see tabcontrol.cpp's
+// CardLayout, entirely in-process (see controls.cpp's
 // TabItemButtonClicked()) - so everything here, including a simulated
 // click, runs fully headlessly.
 
@@ -211,7 +211,7 @@ TEST(TabControl, LeftRightAlignmentButtonsUseTheRightThemeAlignment) {
 
 // ---------------------------------------------------------------------
 // Arrow-key tab switching - the whole strip is one Tab stop (see
-// TabControl's own constructor comment, tabcontrol.cpp); once it has
+// TabControl's own constructor comment, controls.cpp); once it has
 // focus, arrow keys (not the individual buttons) switch which tab is
 // selected. Driven directly via onKeyDown(), same "no real HWND/message
 // pump needed" pattern SimulatedClickOnTabButtonSelectsIt above uses for
@@ -449,6 +449,97 @@ TEST(TabControl, ItsStripPagesAreaAndButtonsAreInternalButItsPagesAreNot) {
     EXPECT_FALSE(tabs->tabButton(0)->isSelectableAtDesignTime());
     EXPECT_TRUE(page->isSelectableAtDesignTime());
     EXPECT_TRUE(tabs->isSelectableAtDesignTime());
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, IsAControl) {
+    auto* tabs = new newui::TabControl();
+    EXPECT_NE(dynamic_cast<newui::Control*>(tabs), nullptr);
+    tabs->destroy();
+    delete tabs;
+}
+
+// A page attached straight to the pages area - what a file being read or a designer does, as
+// opposed to addTab() - still gets its tab button, labelled from the page's title.
+TEST(TabControl, APageAttachedDirectlyToThePagesAreaGetsItsOwnButton) {
+    auto* tabs = new newui::TabControl();
+    newui::SubView* pagesArea = tabs->childViews()[1];
+
+    auto* page = new newui::TabPage();
+    page->setTitle("Loaded");
+    pagesArea->addChild(page);
+
+    ASSERT_EQ(tabs->tabCount(), 1u);
+    EXPECT_EQ(tabs->tabButton(0)->name(), "Loaded");
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    auto* untitled = new newui::TabPage();
+    pagesArea->addChild(untitled);
+    ASSERT_EQ(tabs->tabCount(), 2u);
+    EXPECT_EQ(tabs->tabButton(1)->name(), "Tab 2");
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, ChangingAPagesTitleRelabelsItsButton) {
+    auto* tabs = new newui::TabControl();
+    auto* page = new newui::TabPage();
+    tabs->addTab("First", page);
+    EXPECT_EQ(page->title(), "First");  // addTab() records its label on a TabPage
+
+    page->setTitle("Renamed");
+    EXPECT_EQ(tabs->tabButton(0)->name(), "Renamed");
+
+    auto* detached = new newui::TabPage();  // not attached: nothing to relabel, and must not crash
+    detached->setTitle("Nowhere");
+    detached->destroy();
+    delete detached;
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RemovingAPageFromThePagesAreaRemovesItsButton) {
+    auto* tabs = new newui::TabControl();
+    newui::SubView* a = tabs->addTab("A", MakePage("a"));
+    tabs->addTab("B", MakePage("b"));
+    newui::SubView* pagesArea = tabs->childViews()[1];
+
+    pagesArea->removeChild(a);  // e.g. a designer deleting a page
+
+    EXPECT_EQ(tabs->tabCount(), 1u);
+    EXPECT_EQ(tabs->tabButton(0)->name(), "B");
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+
+    a->destroy();
+    delete a;
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, ReorderingPagesReordersTheButtonsAndKeepsTheSameTabSelected) {
+    auto* tabs = new newui::TabControl();
+    newui::SubView* a = tabs->addTab("A", MakePage("a"));
+    tabs->addTab("B", MakePage("b"));
+    tabs->addTab("C", MakePage("c"));
+    tabs->selectTab(0);  // A is selected
+    newui::SubView* pagesArea = tabs->childViews()[1];
+
+    pagesArea->reorderChild(a, 2);  // A moves from first to last
+
+    ASSERT_EQ(tabs->tabCount(), 3u);
+    EXPECT_EQ(tabs->tabButton(0)->name(), "B");
+    EXPECT_EQ(tabs->tabButton(2)->name(), "A");
+    EXPECT_EQ(tabs->page(2), a);
+    EXPECT_EQ(tabs->selectedIndex(), 2u);  // A is still the selected tab
+
+    // A click on the moved button selects the right page (its stored index was rebuilt).
+    tabs->tabButton(0)->onMouseDown(*tabs->tabButton(0), newui::Point(1, 1), 0, 0);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+    EXPECT_EQ(tabs->page(0)->name(), "b");
 
     tabs->destroy();
     delete tabs;

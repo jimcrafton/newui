@@ -4,6 +4,9 @@
 #include "newui/color.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
+#include "newui/font.h"
+#include "newui/fontmanager.h"
+#include "newui/layout.h"
 #include "newui/popupframe.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
@@ -4183,3 +4186,383 @@ namespace newui {
     }
 
 }
+
+// Internal to TabControl - not declared in tabcontrol.h, same "keep
+// implementation machinery out of the public header" convention
+// cursor.cpp/menus.cpp already use.
+namespace {
+
+constexpr float kHorizontalStripThickness = 28.0f;  // strip height when the strip is a horizontal row (Top/Bottom)
+constexpr float kVerticalStripThickness = 100.0f;    // strip width when the strip is a vertical column (Left/Right)
+constexpr float kButtonMainAxisPadding = 24.0f;      // extra width/height beyond the raw text extent
+
+class TabItemButtonView : public newui::SubView {
+public:
+    std::string text;
+
+    // Non-owning - points into the owning TabControl's own tree, which
+    // outlives this button (rebuilt/destroyed together in
+    // TabControl::addTab()/its own destroy() cascade).
+    newui::TabControl* owner = nullptr;
+    std::size_t tabIndex = 0;
+
+    void paint(BLContext& ctx) override {
+        newui::Font font = newui::FontManager::getSystemFont(newui::SystemUIFont::Message);
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr) {
+            return;
+        }
+
+        newui::TextMetrics tm = font.measureText(text);
+
+        newui::Rect bounds = getClientBounds();
+        float x = bounds.left() + (bounds.size().width - tm.width) * 0.5f;
+        float textHeight = tm.ascent + tm.descent;
+        float baselineY = bounds.top() + (bounds.size().height - textHeight) * 0.5f + tm.ascent;
+
+        COLORREF textColor = ::GetSysColor(COLOR_WINDOWTEXT);
+        ctx.set_fill_style(BLRgba32(GetRValue(textColor), GetGValue(textColor), GetBValue(textColor), 255));
+        ctx.fill_utf8_text(BLPoint(x, baselineY), *blFont, text.c_str());
+    }
+};
+
+// Needs no live window at all (unlike MenuBar's button click handler) -
+// selecting a tab just switches which already-built page is visible via
+// CardLayout, entirely in-process.
+newui::SyncReturn TabItemButtonClicked(newui::View& sender, const newui::Point&, std::uint32_t, std::uint32_t) {
+    auto& button = static_cast<TabItemButtonView&>(sender);
+    if (button.owner != nullptr) {
+        button.owner->selectTab(button.tabIndex);
+    }
+    return newui::SyncReturn::Handled;
+}
+
+bool IsHorizontalStrip(newui::ThemedTabItemStyle::TabAlignment alignment) {
+    return alignment == newui::ThemedTabItemStyle::TabAlignment::Top
+        || alignment == newui::ThemedTabItemStyle::TabAlignment::Bottom;
+}
+
+// Text, name and desired size all follow the label - used when a button is built and when its
+// page's title changes.
+void ApplyButtonText(TabItemButtonView& button, const std::string& text, bool stripHorizontal) {
+    button.text = text;
+    button.setName(text);
+    newui::Font font = newui::FontManager::getSystemFont(newui::SystemUIFont::Message);
+    newui::TextMetrics tm = font.measureText(text);
+    button.setDesiredSize(stripHorizontal
+        ? newui::Size(tm.width + kButtonMainAxisPadding, kHorizontalStripThickness)
+        : newui::Size(kVerticalStripThickness, tm.ascent + tm.descent + kButtonMainAxisPadding * 0.5f));
+}
+
+}  // namespace
+
+namespace newui {
+
+TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(alignment) {
+    setName("TabControl");
+    setVisible(true);
+    // The whole strip is one tab stop, like a real Win32 tab control -
+    // individual TabItemButtonView instances (addTab(), below) stay
+    // non-focusable; switching which tab is selected once this control
+    // has focus is a job for arrow keys, not Tab (see handleKeyDown()
+    // below), matching native tab control behavior.
+    setAcceptsFocus(true);
+    onKeyDown.add(this, &TabControl::handleKeyDown);
+    setStyle(std::make_unique<ThemedTabPaneStyle>());
+
+    const bool stripHorizontal = IsHorizontalStrip(alignment_);
+
+    // Top/Bottom: strip above/below the pages, stacked vertically.
+    // Left/Right: strip beside the pages, side by side horizontally.
+    setLayout(std::make_unique<FlexLayout>(stripHorizontal ? Orientation::Vertical : Orientation::Horizontal));
+
+    stripRow_ = new SubView();
+    stripRow_->setName("TabControlStrip");
+    stripRow_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+    stripRow_->setVisible(true);
+    stripRow_->setLayout(std::make_unique<FlexLayout>(stripHorizontal ? Orientation::Horizontal : Orientation::Vertical));
+    stripRow_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
+    stripRow_->setDesiredSize(stripHorizontal
+        ? Size(0.0f, kHorizontalStripThickness)
+        : Size(kVerticalStripThickness, 0.0f));
+
+    pagesArea_ = new TabPageContainer();
+    pagesArea_->owner_ = this;
+    pagesArea_->setName("TabControlPages");
+    pagesArea_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);  // its pages are the user's, not flagged
+    pagesArea_->setVisible(true);
+    pagesArea_->setLayout(std::make_unique<CardLayout>());
+    pagesArea_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+
+    // Top/Left: strip comes first (visually above/left of the pages).
+    // Bottom/Right: pages come first.
+    const bool stripFirst = (alignment_ == ThemedTabItemStyle::TabAlignment::Top
+        || alignment_ == ThemedTabItemStyle::TabAlignment::Left);
+    if (stripFirst) {
+        addChild(stripRow_);
+        addChild(pagesArea_);
+    } else {
+        addChild(pagesArea_);
+        addChild(stripRow_);
+    }
+}
+
+SubView* TabControl::addTab(const std::string& text, SubView* page) {
+    if (auto* tabPage = dynamic_cast<TabPage*>(page)) {
+        tabPage->title_ = text;
+    }
+    pendingTabText_ = text;
+    hasPendingTabText_ = true;
+    pagesArea_->addChild(page);  // -> pageAdded() builds the matching button
+    hasPendingTabText_ = false;
+    return page;
+}
+
+void TabControl::pageAdded(SubView* page) {
+    const bool stripHorizontal = IsHorizontalStrip(alignment_);
+    const bool wasEmpty = stripRow_->childViews().empty();
+
+    std::string text;
+    if (hasPendingTabText_) {
+        text = pendingTabText_;
+    } else if (auto* tabPage = dynamic_cast<TabPage*>(page); tabPage != nullptr && !tabPage->title().empty()) {
+        text = tabPage->title();
+    } else {
+        text = "Tab " + std::to_string(stripRow_->childViews().size() + 1);
+    }
+
+    auto* button = new TabItemButtonView();
+    button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+    button->setVisible(true);
+    button->owner = this;
+    button->tabIndex = stripRow_->childViews().size();
+    button->setStyle(std::make_unique<ThemedTabItemStyle>());
+    static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
+    ApplyButtonText(*button, text, stripHorizontal);
+
+    button->onMouseDown.add(&TabItemButtonClicked);
+
+    stripRow_->addChild(button);
+
+    updateTabPositions();
+
+    if (wasEmpty) {
+        selectTab(0);
+    }
+}
+
+void TabControl::pageRemoved(std::size_t index) {
+    const auto& buttons = stripRow_->childViews();
+    if (index >= buttons.size()) {
+        return;
+    }
+
+    SubView* button = buttons[index];
+    stripRow_->removeChild(button);
+    button->destroy();
+    delete button;
+
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        static_cast<TabItemButtonView*>(buttons[i])->tabIndex = i;
+    }
+    updateTabPositions();
+
+    if (buttons.empty()) {
+        selectedIndex_ = 0;
+    } else {
+        std::size_t next = selectedIndex_;
+        if (index < selectedIndex_) {
+            next = selectedIndex_ - 1;
+        } else if (next >= buttons.size()) {
+            next = buttons.size() - 1;
+        }
+        selectTab(next);
+    }
+}
+
+void TabControl::pageMoved(std::size_t from, std::size_t to) {
+    const auto& buttons = stripRow_->childViews();
+    if (from >= buttons.size() || to >= buttons.size()) {
+        return;
+    }
+
+    stripRow_->reorderChild(buttons[from], to);
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        static_cast<TabItemButtonView*>(buttons[i])->tabIndex = i;
+    }
+    updateTabPositions();
+
+    // The same tab stays selected: follow it to its new index.
+    std::size_t selected = selectedIndex_;
+    if (selected == from) {
+        selected = to;
+    } else if (from < selected && selected <= to) {
+        --selected;
+    } else if (to <= selected && selected < from) {
+        ++selected;
+    }
+    selectTab(selected);
+}
+
+void TabControl::refreshTabTitle(const TabPage* page) {
+    const auto& pages = pagesArea_->childViews();
+    const auto& buttons = stripRow_->childViews();
+    for (std::size_t i = 0; i < pages.size() && i < buttons.size(); ++i) {
+        if (pages[i] == page) {
+            ApplyButtonText(*static_cast<TabItemButtonView*>(buttons[i]), page->title(), IsHorizontalStrip(alignment_));
+            stripRow_->updateLayout();
+            buttons[i]->style().markDirty();
+            return;
+        }
+    }
+}
+
+SubView* TabControl::removeTab(std::size_t index) {
+    if (index >= pagesArea_->childViews().size()) {
+        return nullptr;
+    }
+
+    SubView* removedPage = pagesArea_->childViews()[index];
+    pagesArea_->removeChild(removedPage);  // -> pageRemoved() destroys the matching button
+    return removedPage;
+}
+
+TabPage::TabPage() {
+    setVisible(true);
+}
+
+void TabPage::setTitle(const std::string& title) {
+    title_ = title;
+    if (auto* container = dynamic_cast<TabPageContainer*>(parent()); container != nullptr && container->owner_ != nullptr) {
+        container->owner_->refreshTabTitle(this);
+    }
+}
+
+void TabPageContainer::addChild(SubView* child) {
+    SubView::addChild(child);
+    if (owner_ != nullptr) {
+        owner_->pageAdded(child);
+    }
+}
+
+void TabPageContainer::removeChild(SubView* child) {
+    bool found = false;
+    std::size_t index = 0;
+    for (; index < childViews().size(); ++index) {
+        if (childViews()[index] == child) {
+            found = true;
+            break;
+        }
+    }
+    SubView::removeChild(child);
+    if (found && owner_ != nullptr) {
+        owner_->pageRemoved(index);
+    }
+}
+
+void TabPageContainer::reorderChild(SubView* child, std::size_t newIndex) {
+    std::size_t from = childViews().size();
+    for (std::size_t i = 0; i < childViews().size(); ++i) {
+        if (childViews()[i] == child) {
+            from = i;
+            break;
+        }
+    }
+    SubView::reorderChild(child, newIndex);
+    if (owner_ == nullptr || from >= childViews().size()) {
+        return;
+    }
+    for (std::size_t i = 0; i < childViews().size(); ++i) {
+        if (childViews()[i] == child) {
+            if (i != from) {
+                owner_->pageMoved(from, i);
+            }
+            return;
+        }
+    }
+}
+
+std::size_t TabControl::tabCount() const {
+    return stripRow_->childViews().size();
+}
+
+SubView* TabControl::tabButton(std::size_t index) const {
+    const auto& buttons = stripRow_->childViews();
+    return index < buttons.size() ? buttons[index] : nullptr;
+}
+
+SubView* TabControl::page(std::size_t index) const {
+    const auto& pages = pagesArea_->childViews();
+    return index < pages.size() ? pages[index] : nullptr;
+}
+
+void TabControl::selectTab(std::size_t index) {
+    const auto& buttons = stripRow_->childViews();
+    if (index >= buttons.size()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        auto* style = dynamic_cast<ThemedTabItemStyle*>(&buttons[i]->style());
+        if (style == nullptr) {
+            continue;
+        }
+        style->selected = (i == index);
+        buttons[i]->style().markDirty();
+    }
+
+    selectedIndex_ = index;
+
+    auto* cardLayout = dynamic_cast<CardLayout*>(pagesArea_->layout());
+    if (cardLayout != nullptr) {
+        cardLayout->show(index);
+    }
+
+    onTabChanged.syncCall(*this, index);
+}
+
+SyncReturn TabControl::handleKeyDown(View& /*sender*/, std::uint32_t /*keyMask*/, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+    const std::size_t count = tabCount();
+    if (count == 0) {
+        return SyncReturn::Ignored;
+    }
+
+    const bool horizontal = IsHorizontalStrip(alignment_);
+    const bool advance = VKeyCode == (horizontal ? vkRightArrow : vkDownArrow);
+    const bool retreat = VKeyCode == (horizontal ? vkLeftArrow : vkUpArrow);
+    if (!advance && !retreat) {
+        return SyncReturn::Ignored;
+    }
+
+    // Wraps at either end, matching native Win32 tab control behavior
+    // (and moveFocus()'s own Tab-wrap convention, uiinputmanager.cpp) -
+    // +count before the retreat's %count keeps the subtraction from ever
+    // going negative on an unsigned type when selectedIndex_ is 0.
+    std::size_t next = advance ? (selectedIndex_ + 1) % count : (selectedIndex_ + count - 1) % count;
+    selectTab(next);
+    return SyncReturn::Handled;
+}
+
+void TabControl::updateTabPositions() {
+    const auto& buttons = stripRow_->childViews();
+    const std::size_t count = buttons.size();
+
+    for (std::size_t i = 0; i < count; ++i) {
+        auto* style = dynamic_cast<ThemedTabItemStyle*>(&buttons[i]->style());
+        if (style == nullptr) {
+            continue;
+        }
+
+        if (count == 1) {
+            style->position = ThemedTabItemStyle::Position::Only;
+        } else if (i == 0) {
+            style->position = ThemedTabItemStyle::Position::Left;
+        } else if (i == count - 1) {
+            style->position = ThemedTabItemStyle::Position::Right;
+        } else {
+            style->position = ThemedTabItemStyle::Position::Middle;
+        }
+    }
+}
+
+}  // namespace newui

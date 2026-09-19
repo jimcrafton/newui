@@ -123,7 +123,6 @@ add_library(newui STATIC
     "include/newui/cursor.h" "src/cursor.cpp"
     "include/newui/graphics.h" "src/graphics.cpp"
     "include/newui/menus.h" "src/menus.cpp"
-    "include/newui/tabcontrol.h" "src/tabcontrol.cpp"
     "include/newui/dialogs.h" "src/dialogs.cpp"
     "include/newui/popupframe.h" "src/popupframe.cpp"
     "include/newui/uicolormanager.h" "src/uicolormanager.cpp"

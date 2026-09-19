@@ -237,7 +237,7 @@ TEST(ViewStyle, NoBorderLeavesClientBoundsAtFullSize) {
 // assembled before addChild() into a real RootView-rooted tree) -
 // markDirty() used to dereference it unconditionally once view_ itself
 // was set (via setStyle()), crashing. Found via TabControl::selectTab()
-// crashing in a headless test (see tabcontrol.cpp) - every pre-existing
+// crashing in a headless test (see controls.cpp) - every pre-existing
 // caller only ever ran from a live message pump where a RootView was
 // already guaranteed to exist, so this went unnoticed until then.
 TEST(ViewStyle, MarkDirtyDoesNotCrashWithNoLiveRootView) {

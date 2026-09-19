@@ -51,7 +51,6 @@
 #include "newui/color.h"
 #include "newui/cursor.h"
 #include "newui/menus.h"
-#include "newui/tabcontrol.h"
 #include "newui/uicolormanager.h"
 #include "newui/keyboard_constants.h"
 #include "newui/font.h"
@@ -452,7 +451,7 @@ void AddGridDemo(newui::SubView* parent) {
     parent->addChild(input2);
 }
 
-// TabControl demo (tabcontrol.h) - a real, clickable tabbed control (not
+// TabControl demo (controls.h) - a real, clickable tabbed control (not
 // just the loose individual ThemedTabItemStyle/ThemedTabPaneStyle parts
 // already shown in content2's own themed-controls demo above) - 3 tabs,
 // each a plain colored page, switched by clicking. parent's own layout
