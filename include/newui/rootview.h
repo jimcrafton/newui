@@ -63,6 +63,28 @@ namespace newui {
         void markDirty();
         void markDirty(const View* fromView, const newui::Rect& rect);
 
+        // Repaints this RootView's entire tree into getImageBuffer() and
+        // calls presentRepaintedBuffer(), synchronously, right now -
+        // unlike markDirty() (whose actual repaint is deferred to the
+        // next RunLoop idle pass via scheduleRepaint()). Ordinary WM_PAINT-
+        // presented RootViews rarely need this - Windows itself eventually
+        // asks for a repaint (WM_PAINT) regardless of how markDirty()'s
+        // own deferral is timed. Two cases do:
+        //  - A PopupTool (popuptool.h): its own present() only
+        //    composites/pushes whatever's *already* in getImageBuffer(), and
+        //    nothing else ever asks this RootView to actually repaint that
+        //    buffer - addChild() alone doesn't (see PopupTool::addChild()'s
+        //    own override, which calls this after the base call) - so a
+        //    child added after the fact wouldn't show up until some
+        //    unrelated event happened to call markDirty() on its own.
+        //  - Feedback during a modal loop the RunLoop isn't pumping - most
+        //    importantly Windows' own drag-and-drop loop (DoDragDrop, entered
+        //    from a mouse handler): RunLoop idle tasks don't run until it
+        //    ends, so markDirty() from a DropTarget::onTextDragOver handler
+        //    would only repaint after the drag is over. Follow with
+        //    ::UpdateWindow(windowHandle()) to also flush the WM_PAINT.
+        void repaintNow();
+
         // Drops every ThemedViewStyle's cached HTHEME across this
         // RootView's whole tree (itself plus every descendant SubView) -
         // see ThemedViewStyle::closeTheme()'s doc comment on why that's
@@ -349,23 +371,6 @@ namespace newui {
         // real caller, feeding it the live cursor position via
         // GetCursorPos()/ScreenToClient().
         View* cursorTargetAt(const Point& pt);
-
-        // Repaints this RootView's entire tree into getImageBuffer() and
-        // calls presentRepaintedBuffer(), synchronously, right now -
-        // unlike markDirty() (whose actual repaint is deferred to the
-        // next RunLoop idle pass via scheduleRepaint()). Ordinary WM_PAINT-
-        // presented RootViews never need this - Windows itself eventually
-        // asks for a repaint (WM_PAINT) regardless of how markDirty()'s
-        // own deferral is timed. A PopupTool (popuptool.h) does need it:
-        // its own present() only composites/pushes whatever's *already*
-        // in getImageBuffer(), and nothing else ever asks this RootView
-        // to actually repaint that buffer - addChild() alone doesn't (see
-        // PopupTool::addChild()'s own override, which calls this after
-        // the base call) - so without a synchronous repaint somewhere, a
-        // child added after the fact wouldn't show up until some
-        // unrelated event (a mouse hover, say) happened to call
-        // markDirty() on its own.
-        void repaintNow();
 
 
         newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);
