@@ -84,7 +84,9 @@ int main(int argc, char** argv) {
         }
         *lastReported = now;
         const char* name = now == newui::PresentBackend::Dxgi ? "DXGI" : "GDI";
-        printf("presentbackend1: presenting via %s\n", name);
+        printf("presentbackend1: presenting via %s, repaint mode %s%s\n", name,
+            root.repaintMode() == newui::RepaintMode::Dirty ? "dirty" : "full",
+            newui::defaultVerifyRepaint() ? " (verifying)" : "");
         fflush(stdout);
         label->setText(std::string("Presenting via ") + name + " - hover the buttons.");
     };

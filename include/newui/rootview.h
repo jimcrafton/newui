@@ -17,6 +17,37 @@ namespace newui {
 
 	class SubView;
 
+    // How much of the window RootView::repaint() re-renders each time.
+    //  - Full:  the whole tree, from a blank buffer, every time. Always right, and costs ~3 us per on-screen
+    //           view (see the RootViewRepaintBenchmark test); a repaint driven by a tiny change still pays
+    //           for every view.
+    //  - Dirty: only the region that changed (dirtyRect_, whole-pixel snapped) - blanked, then the background
+    //           and just the children that overlap it painted, everything clipped to it. A small hover
+    //           repaint drops to roughly the cost of the views it touches. Correct only if every change to
+    //           a view's appearance invalidates the region it affects; with Full, a missed invalidation is
+    //           hidden by the next repaint anywhere, with Dirty it stays wrong on screen - which is what
+    //           NEWUI_VERIFY_REPAINT exists to catch (see RootView::repaintVerifyMismatches()).
+    // A RootView with onRedrawNeeded listeners always repaints in full (a listener draws straight into the
+    // buffer, unclipped), whatever its mode.
+    //
+    // @reflect ignore=true
+    enum class RepaintMode {
+        Full,
+        Dirty
+    };
+
+    // Case-insensitive "full" / "dirty". False (out untouched) for anything else.
+    bool parseRepaintMode(const std::string& text, RepaintMode& out);
+
+    // What a newly constructed RootView uses: whatever setDefaultRepaintMode() last set, otherwise the
+    // NEWUI_REPAINT environment variable ("full" or "dirty", read once), otherwise Full.
+    RepaintMode defaultRepaintMode();
+    void setDefaultRepaintMode(RepaintMode mode);
+
+    // Whether a newly constructed RootView verifies its pruned repaints (see RepaintMode::Dirty): true if
+    // the NEWUI_VERIFY_REPAINT environment variable is set to anything but "0" (read once).
+    bool defaultVerifyRepaint();
+
     // Heap-only, like View - see View's class comment. Construct with
     // new RootView(...), not on the stack - see Frame::rootView_ for
     // the only place this is currently done.
@@ -154,9 +185,13 @@ namespace newui {
 		}
 
         // Backing buffer for this RootView's HWND, drawn to with blend2d
-        // (e.g. BLContext ctx(view.getImageBuffer());) and blitted to the
-        // window's HDC on WM_PAINT. Call invalidate() after drawing to it
-        // to schedule that repaint.
+        // (e.g. BLContext ctx(view.getImageBuffer());) and shown on screen by
+        // this RootView's PresentSurface (WM_PAINT/BitBlt for GDI, an
+        // upload + Present for DXGI). Note that anything drawn straight into
+        // it is wiped by the next repaint() (the whole buffer is redrawn from
+        // the View tree each time) - draw from onRedrawNeeded, or a View's
+        // paint(), for anything that has to persist. Call invalidate() after
+        // drawing to it to put the result on the screen now.
         BLImage& getImageBuffer() {
             return surface_->image();
         }
@@ -167,6 +202,27 @@ namespace newui {
         //@reflect ignore=true
         PresentBackend presentBackend() const;
 
+        // How much repaint() re-renders - see RepaintMode.
+        //@reflect ignore=true
+        RepaintMode repaintMode() const {
+            return repaintMode_;
+        }
+
+        // Verification for RepaintMode::Dirty (on by default only if NEWUI_VERIFY_REPAINT is set): after each
+        // pruned repaint, a full frame is rendered into a scratch buffer and compared with what the pruned
+        // repaint left; any difference means some change wasn't invalidated properly, and is reported (stderr
+        // and the debugger's output) with where. This counts those reports.
+        //@reflect ignore=true
+        std::size_t repaintVerifyMismatches() const {
+            return verifyMismatches_;
+        }
+
+        // Shows a region of the buffer's *current* contents on the screen -
+        // whole buffer for the no-argument/null forms - through whichever
+        // PresentSurface this RootView uses, so it works the same under GDI
+        // and DXGI. It does NOT re-run painting (use markDirty() to have the
+        // View tree redrawn) and it does not touch the region a pending
+        // markDirty() repaint still has to present.
         void invalidate();
 
         void invalidate(const newui::Rect* invalidArea);
@@ -388,6 +444,10 @@ namespace newui {
         // repaintNow() can't do since it always marks the whole client area.
         void repaint();
 
+        // Protected for the same reason: a test flips these per instance.
+        void setRepaintMode(RepaintMode mode);
+        void setVerifyRepaint(bool verify);
+
         // Replaces this RootView's PresentSurface with a fresh one of the
         // given kind, overriding defaultPresentBackend() for this instance
         // (PopupTool forces Gdi - a layered window can't present through a
@@ -430,6 +490,19 @@ namespace newui {
         std::unique_ptr<PresentSurface> surface_;
 
         newui::Rect dirtyRect_;
+
+        RepaintMode repaintMode_ = defaultRepaintMode();
+        bool verifyRepaint_ = defaultVerifyRepaint();
+        std::size_t verifyMismatches_ = 0;
+
+        // Paints this RootView's tree into image, on top of whatever's already there: the background, the
+        // children (those overlapping `region` - View::paintChildren() culls the rest), then the overlay.
+        // With `clip`, every draw is confined to `region`, so nothing outside it is modified.
+        void paintTree(BLImage& image, const newui::Rect& region, bool clip);
+
+        // Renders a full frame into a scratch buffer and compares it with what the pruned repaint of `region`
+        // just left in the surface's buffer, reporting (and counting) any difference.
+        void verifyPrunedRepaint(const newui::Rect& region);
 
         // markDirty()/markDirty(fromView, rect) don't call repaint() (the
         // actual, expensive Blend2D repaint) directly - they union into

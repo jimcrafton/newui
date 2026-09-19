@@ -528,3 +528,67 @@ TEST(PresentBackendSelection, APopupToolStaysOnGdiWhateverTheDefaultIs) {
     popup->destroy();
     delete popup;
 }
+
+// ---- RootView::invalidate() under DXGI -------------------------------------------------------
+// invalidate() used to be a bare ::InvalidateRect(), which does nothing under DXGI (WM_PAINT is
+// passive there), so content drawn straight into getImageBuffer() and then "invalidated" never showed.
+
+TEST(RootViewInvalidateOnScreen, DrawingIntoTheBufferThenInvalidatingShowsItUnderDxgi) {
+    DefaultBackendGuard guard;
+    newui::setDefaultPresentBackend(newui::PresentBackend::Dxgi);
+    ScopedVisibleWindow parent;
+    ASSERT_NE(parent.hwnd, nullptr);
+    auto* root = new newui::RootView(parent.hwnd, ::GetModuleHandleW(nullptr),
+        newui::Rect(0, 0, ScopedVisibleWindow::kSize, ScopedVisibleWindow::kSize), "root");
+    ASSERT_TRUE(root->initialize());
+    if (root->presentBackend() != newui::PresentBackend::Dxgi) {
+        root->destroy();
+        delete root;
+        GTEST_SKIP() << "no usable D3D11 hardware adapter here - fell back to GDI";
+    }
+
+    {
+        BLContext ctx(root->getImageBuffer());
+        ctx.set_fill_style(BLRgba32(0xFFFF0000));
+        ctx.fill_rect(BLRect(10, 10, 30, 30));
+        ctx.end();
+    }
+    root->invalidate();
+
+    EXPECT_EQ(composedPixelEventually(parent.hwnd, 20, 20, RGB(255, 0, 0)), RGB(255, 0, 0));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewInvalidateOnScreen, InvalidatingJustARegionShowsJustThatRegionUnderDxgi) {
+    DefaultBackendGuard guard;
+    newui::setDefaultPresentBackend(newui::PresentBackend::Dxgi);
+    ScopedVisibleWindow parent;
+    ASSERT_NE(parent.hwnd, nullptr);
+    auto* root = new newui::RootView(parent.hwnd, ::GetModuleHandleW(nullptr),
+        newui::Rect(0, 0, ScopedVisibleWindow::kSize, ScopedVisibleWindow::kSize), "root");
+    ASSERT_TRUE(root->initialize());
+    if (root->presentBackend() != newui::PresentBackend::Dxgi) {
+        root->destroy();
+        delete root;
+        GTEST_SKIP() << "no usable D3D11 hardware adapter here - fell back to GDI";
+    }
+
+    {
+        BLContext ctx(root->getImageBuffer());
+        ctx.set_fill_style(BLRgba32(0xFFFF0000));
+        ctx.fill_rect(BLRect(0, 0, 20, 20));    // inside the region invalidated below
+        ctx.set_fill_style(BLRgba32(0xFF0000FF));
+        ctx.fill_rect(BLRect(40, 40, 20, 20));  // outside it: drawn into the buffer but never presented
+        ctx.end();
+    }
+    newui::Rect region(0, 0, 20, 20);
+    root->invalidate(&region);
+
+    EXPECT_EQ(composedPixelEventually(parent.hwnd, 10, 10, RGB(255, 0, 0)), RGB(255, 0, 0)) << "the invalidated region";
+    EXPECT_NE(composedPixel(parent.hwnd, 50, 50), RGB(0, 0, 255)) << "outside the region: not presented yet";
+
+    root->destroy();
+    delete root;
+}

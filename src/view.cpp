@@ -178,16 +178,25 @@ namespace newui {
 	}
 
 	void View::paintChildren(BLContext& ctx) {
-		// Deliberately no dirty-rect pruning here (tried and reverted -
-		// see HANDOFF.md): skipping a child whose bounds don't intersect
-		// the region being repainted looked correct on paper (the
-		// translate/intersect math checks out) but produced real visual
-		// corruption live - wrong colors and stale content on siblings
-		// that should have been left untouched. Confirmed via a controlled
-		// test: removing pruning while keeping everything else (including
-		// RootView's own narrow top-level clip) fixed it immediately, so
-		// every visible child is always walked unconditionally - the
-		// original, safe behavior.
+		// Children are skipped only when their whole drawn extent lies outside
+		// the part of this view that can currently be seen (visibleRegion_,
+		// below). For a full repaint that's the window; for a pruned one
+		// (RepaintMode::Dirty, rootview.h) it's just the dirty region - which is
+		// how dirty-rect pruning works here.
+		//
+		// An earlier attempt at pruning, done as a separate dirty-rect test on top
+		// of a repaint that only blanked the dirty region's *background*, produced
+		// visual corruption live (wrong colours, stale content on siblings) and
+		// was reverted. The likeliest cause, now that it's understood: with the
+		// whole tree redrawn on every repaint, a control that changed without
+		// invalidating itself was quietly fixed by the next repaint anywhere, so
+		// pruning exposed every such missing invalidation at once (SubView::
+		// setBounds() was one - it invalidated nothing). Pruning is safe to use
+		// now because it's built the other way round: blank the region, redraw
+		// exactly what shows in it, clip everything to it - and NEWUI_VERIFY_REPAINT
+		// (RootView::verifyPrunedRepaint()) renders a full frame after each pruned
+		// repaint and reports any difference, so a missed invalidation is a report
+		// naming the region and pixels, not a mystery.
 		//
 		// origin_ shifts all children uniformly (a scroll offset - see its
 		// own doc comment, view.h) via one translate before the loop,
@@ -197,6 +206,14 @@ namespace newui {
 		// effect through the translate, so scrolled content is still
 		// correctly clipped to this view's own bounds without needing a
 		// second, redundant clip here.
+		// Where, in this view's content space (the space its children's bounds are in), anything can
+		// currently be seen: the visible part of this view's own space, shifted by the scroll offset the
+		// same way the children are.
+		Rect visibleContent;
+		if (hasVisibleRegion_) {
+			visibleContent = Rect(visibleRegion_.pos() + origin_, visibleRegion_.size());
+		}
+
 		ctx.save();
 		ctx.translate(-origin_.x, -origin_.y);
 		for (SubView* child : childViews_) {
@@ -218,6 +235,30 @@ namespace newui {
 			// snappedToPixels() already documented once, just never
 			// applied here too until this crash surfaced it.
 			Rect bounds = child->bounds().snappedOutwardToPixels();
+
+			// Skip a child whose *whole* drawn extent lies outside what can be seen. Not just its bounds:
+			// its focus ring and drop shadow are painted unclipped (phases 1 and 3 below), so the extent is
+			// its bounds plus computePrePaintBounds()'s padding - the same extent redraw() invalidates.
+			// Anything it draws lands outside the visible region, so skipping it changes no pixel. (This
+			// culls on visibility only; dirty-rect pruning is a different, riskier thing - see above.)
+			if (hasVisibleRegion_) {
+				Rect extent;
+				child->computePrePaintBounds(extent);
+				extent.setPos(extent.pos() + bounds.pos());
+				if (!extent.intersects(visibleContent)) {
+					continue;
+				}
+
+				// What this child's own children can see: the part of its bounds that's visible, in its
+				// own local space.
+				Rect shown = bounds.intersected(visibleContent);
+				shown.setPos(shown.pos() - bounds.pos());
+				child->visibleRegion_ = shown;
+				child->hasVisibleRegion_ = true;
+			}
+			else {
+				child->hasVisibleRegion_ = false;  // unknown here, so unknown below - never a stale region
+			}
 
 			// Phase 1 (pre-paint) - translated but deliberately NOT
 			// clipped, its own separate save()/restore() scope so an

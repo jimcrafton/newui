@@ -1,6 +1,5 @@
 #include "newui/gdipresentsurface.h"
 
-#include <cstdio>
 #include <cstring>
 
 namespace newui {
@@ -99,7 +98,9 @@ namespace newui {
 
 	void GdiPresentSurface::present(const newui::Rect& dirty) {
 		if (window() != nullptr) {
-			RECT r = dirty;
+			// Snapped outward to whole pixels: converting a fractional Rect to a RECT truncates every
+			// edge, which would leave up to a pixel of the region's right/bottom edge un-invalidated.
+			RECT r = dirty.snappedOutwardToPixels();
 			::InvalidateRect(window(), &r, FALSE);
 		}
 	}
@@ -109,32 +110,33 @@ namespace newui {
 			return;
 		}
 
-		BLImageData data;
-		image_.get_data(&data);
+		const float width = float(image_.size().w);
+		const float height = float(image_.size().h);
 
-		auto pt = paintRect.pos();
-		auto sz = paintRect.size();
-
-		if ((pt.x >= data.size.w) || (pt.y >= data.size.h)) {
-			printf("rect pos outside of bounds, %d, %d\n", (int)pt.x, (int)pt.y);
-			return;
-		}
-
-		if (((pt.x + sz.width) > data.size.w) || ((pt.y + sz.height) > data.size.h)) {
-			printf("rect outside of bounds, %d, %d\n", (int)pt.x, (int)pt.y);
-			return;
+		// Outward to whole pixels (a fractional edge otherwise loses the pixel it partly covers), then
+		// clipped to the buffer. A rect that isn't entirely inside the buffer still gets its overlap
+		// repainted - the window and the buffer are resized in two separate steps, so for a moment WM_PAINT
+		// can ask for more than the buffer holds, and dropping the whole rect left that part of the window
+		// showing stale pixels. Clamped as floats first so an absurdly large rect can't overflow the int
+		// conversion.
+		const newui::Rect snapped = paintRect.snappedOutwardToPixels();
+		const auto clampTo = [](float value, float limit) { return value < 0.0f ? 0.0f : (value > limit ? limit : value); };
+		const int left = int(clampTo(snapped.left(), width));
+		const int top = int(clampTo(snapped.top(), height));
+		const int right = int(clampTo(snapped.right(), width));
+		const int bottom = int(clampTo(snapped.bottom(), height));
+		if (right <= left || bottom <= top) {
+			return;  // nothing of it overlaps the buffer
 		}
 
 		// BitBlt from memDC_ (the DIB section Blend2D renders directly
 		// into - see resize()), not StretchDIBits from a raw pointer -
-		// dest == src (both paintRect) is still an unscaled 1:1 blit of
-		// just that sub-region, same as before, just via the faster
-		// GDI-to-GDI path (StretchDIBits re-validates a fresh BITMAPINFO
-		// header and negotiates pixel format on every call, even for a 1:1
-		// blit between two already-realized bitmap objects BitBlt doesn't
-		// need to).
-		::BitBlt(hdc, (int)pt.x, (int)pt.y, (int)sz.width, (int)sz.height,
-			memDC_, (int)pt.x, (int)pt.y, SRCCOPY);
+		// dest == src is an unscaled 1:1 blit of just that sub-region, via
+		// the faster GDI-to-GDI path (StretchDIBits re-validates a fresh
+		// BITMAPINFO header and negotiates pixel format on every call, even
+		// for a 1:1 blit between two already-realized bitmap objects BitBlt
+		// doesn't need to).
+		::BitBlt(hdc, left, top, right - left, bottom - top, memDC_, left, top, SRCCOPY);
 	}
 
 }

@@ -1006,3 +1006,54 @@ TEST(RectUnited, DoesNotModifyEitherOperand) {
     EXPECT_EQ(a, newui::Rect(0.0f, 0.0f, 10.0f, 10.0f));
     EXPECT_EQ(b, newui::Rect(50.0f, 50.0f, 10.0f, 10.0f));
 }
+
+// Rect::intersects() / Rect::intersected() - see their comments (geometry.h).
+
+TEST(RectIntersects, OverlappingRectsIntersect) {
+    EXPECT_TRUE(newui::Rect(0, 0, 50, 50).intersects(newui::Rect(30, 30, 50, 50)));
+}
+
+TEST(RectIntersects, ContainedRectIntersects) {
+    EXPECT_TRUE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 5, 5)));
+    EXPECT_TRUE(newui::Rect(10, 10, 5, 5).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, DisjointRectsDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(50, 50, 10, 10)));
+}
+
+TEST(RectIntersects, RectsThatOnlyTouchAnEdgeDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(10, 0, 10, 10)));  // share the x=10 edge
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(0, 10, 10, 10)));  // share the y=10 edge
+}
+
+TEST(RectIntersects, ARectWithNoAreaOverlapsNothing) {
+    EXPECT_FALSE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 0, 20)));
+    EXPECT_FALSE(newui::Rect(10, 10, 20, 0).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, IsSymmetric) {
+    newui::Rect a(-20, 5, 30, 10);
+    newui::Rect b(0, 8, 40, 60);
+    EXPECT_EQ(a.intersects(b), b.intersects(a));
+}
+
+TEST(RectIntersected, GivesTheSharedArea) {
+    EXPECT_EQ(newui::Rect(0, 0, 50, 50).intersected(newui::Rect(30, 20, 50, 50)), newui::Rect(30, 20, 20, 30));
+}
+
+TEST(RectIntersected, ContainedRectIsItsOwnIntersection) {
+    newui::Rect inner(10, 10, 5, 5);
+    EXPECT_EQ(newui::Rect(0, 0, 100, 100).intersected(inner), inner);
+    EXPECT_EQ(inner.intersected(newui::Rect(0, 0, 100, 100)), inner);
+}
+
+TEST(RectIntersected, DisjointRectsGiveAZeroSizedRect) {
+    newui::Rect none = newui::Rect(0, 0, 10, 10).intersected(newui::Rect(50, 50, 10, 10));
+    EXPECT_FLOAT_EQ(none.width(), 0.0f);
+    EXPECT_FLOAT_EQ(none.height(), 0.0f);
+}
+
+TEST(RectIntersected, HandlesNegativeCoordinates) {
+    EXPECT_EQ(newui::Rect(-30, -30, 40, 40).intersected(newui::Rect(-10, -10, 40, 40)), newui::Rect(-10, -10, 20, 20));
+}

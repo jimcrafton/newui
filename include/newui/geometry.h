@@ -328,6 +328,28 @@ public:
         return Rect(l, t, r - l, b - t);
     }
 
+    // True if the two rects share some area - touching edges don't count, and a rect with no area
+    // (zero or negative width/height) overlaps nothing.
+    bool intersects(const Rect& other) const {
+        if (width() <= 0.0f || height() <= 0.0f || other.width() <= 0.0f || other.height() <= 0.0f) {
+            return false;
+        }
+        return right() > other.left() && left() < other.right() && bottom() > other.top() && top() < other.bottom();
+    }
+
+    // The area both rects cover; when they don't overlap, a zero-sized Rect at the overlap's would-be
+    // top-left corner (so check intersects() first if "no overlap" needs telling apart from a real one).
+    Rect intersected(const Rect& other) const {
+        const float l = left() > other.left() ? left() : other.left();
+        const float t = top() > other.top() ? top() : other.top();
+        const float r = right() < other.right() ? right() : other.right();
+        const float b = bottom() < other.bottom() ? bottom() : other.bottom();
+        if (r <= l || b <= t) {
+            return Rect(l, t, 0.0f, 0.0f);
+        }
+        return Rect(l, t, r - l, b - t);
+    }
+
     bool operator==(const Rect& other) const {
         return pos_ == other.pos_ && size_ == other.size_;
     }
