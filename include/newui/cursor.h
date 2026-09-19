@@ -58,7 +58,7 @@ namespace newui {
         }
 
         explicit Cursor(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32) {
-            setPath(path, hotspotX, hotspotY, maxSize);
+            loadPath(path, hotspotX, hotspotY, maxSize);
         }
 
         Cursor(const Cursor&) = delete;
@@ -101,7 +101,15 @@ namespace newui {
         // path() becomes path on success. Returns false, leaving this
         // Cursor completely unchanged, if the file can't be loaded
         // (missing/unreadable file, undecodable format, oversized image).
-        bool setPath(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32);
+        bool loadPath(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32);
+
+        // The reflected setter that pairs with path() - what a designer's file picker or a saved
+        // file calls. A non-empty path is loaded (a .png, .svg, or any other format Blend2D
+        // decodes) exactly as loadPath() does, and on success kind() becomes Custom; if the file
+        // can't be loaded the cursor is left unchanged. An empty path on a file-based custom
+        // cursor reverts it to the default arrow (a system kind has no path to clear, so it is
+        // untouched).
+        void setPath(const std::string& path);
 
         CursorKind kind() const {
             return kind_;
@@ -109,7 +117,7 @@ namespace newui {
 
         // The setter that pairs with kind() - what makes "kind" a settable reflected property
         // (a designer's dropdown, a saved file). Custom can't be chosen this way (it only ever
-        // results from setPath()/setImage(), which supply the actual handle), so it is ignored.
+        // results from loadPath()/setPath()/setImage(), which supply the actual handle), so it is ignored.
         void setKind(CursorKind kind) {
             if (kind != CursorKind::Custom) {
                 setCursorKind(kind);
@@ -119,6 +127,7 @@ namespace newui {
         // The path setPath() last loaded successfully - empty for every
         // other case (a system kind, or a setImage()-built handle), even
         // though kind() is Custom in the setImage() case too.
+        //@reflect tags=filepath,image
         const std::string& path() const {
             return path_;
         }

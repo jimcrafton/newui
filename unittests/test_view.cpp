@@ -239,7 +239,7 @@ TEST(ViewCursor, SettingCursorKindAfterCustomClearsTheCustomHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// cursor().setPath() - the PNG-loading path plumbed through View via its
+// cursor().loadPath() - the PNG-loading path plumbed through View via its
 // Cursor member, including Cursor owning (and releasing, via its own
 // destructor - see cursor.h) whatever it loads. Writes a real, tiny PNG
 // to disk via BLImage::write_to_file() for each case - same "create the
@@ -265,7 +265,7 @@ TEST(ViewCursor, SetPathAdoptsTheLoadedCursorAsCustom) {
     WriteTestCursorPNG(path, 16, 16);
 
     auto* view = new newui::SubView();
-    EXPECT_TRUE(view->cursor().setPath(path));
+    EXPECT_TRUE(view->cursor().loadPath(path));
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Custom);
     EXPECT_EQ(view->cursor().path(), path);
     EXPECT_NE(view->resolvedCursor(), nullptr);
@@ -278,7 +278,7 @@ TEST(ViewCursor, SetPathFailureLeavesTheExistingCursorUnchanged) {
     auto* view = new newui::SubView();
     view->cursor().setCursorKind(newui::CursorKind::Wait);
 
-    EXPECT_FALSE(view->cursor().setPath("NoSuchCursorFile.png"));
+    EXPECT_FALSE(view->cursor().loadPath("NoSuchCursorFile.png"));
 
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Wait);
     EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_WAIT));
@@ -291,7 +291,7 @@ TEST(ViewCursor, SetPathFailsWhenThePNGExceedsMaxSize) {
     WriteTestCursorPNG(path, 40, 40);
 
     auto* view = new newui::SubView();
-    EXPECT_FALSE(view->cursor().setPath(path));
+    EXPECT_FALSE(view->cursor().loadPath(path));
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Arrow);  // untouched default
 
     delete view;
@@ -303,7 +303,7 @@ TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
     WriteTestCursorPNG(path, 16, 16);
 
     auto* view = new newui::SubView();
-    ASSERT_TRUE(view->cursor().setPath(path));
+    ASSERT_TRUE(view->cursor().loadPath(path));
 
     // Should ::DestroyCursor() the previously-owned handle rather than
     // leaking it - no direct observable side effect here beyond "doesn't

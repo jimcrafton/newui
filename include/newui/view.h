@@ -389,7 +389,7 @@ namespace newui {
         // actually calls ::SetCursor(resolvedCursor()) once per hovered/
         // captured View. Mutate cursor() in place for anything Cursor
         // supports (view->cursor().setCursorKind(CursorKind::Hand),
-        // view->cursor().setPath("hand.png"), view->cursor().setImage(img)),
+        // view->cursor().loadPath("hand.png"), view->cursor().setImage(img)),
         // or replace it wholesale via setCursor(Cursor) below.
         Cursor& cursor() {
             return cursor_;
@@ -403,7 +403,7 @@ namespace newui {
         // view->setCursor(newui::Cursor(newui::CursorKind::Hand)); or
         // view->setCursor(newui::Cursor("hand.png")). For a load that
         // might fail and needs checking, mutate in place instead:
-        // if (!view->cursor().setPath("hand.png")) { ... }
+        // if (!view->cursor().loadPath("hand.png")) { ... }
         void setCursor(Cursor cursor) {
             cursor_ = std::move(cursor);
         }
