@@ -8,6 +8,9 @@ namespace newui {
 
     PopupTool::PopupTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
         : RootView(ownerHwnd, instanceHandle, bounds, name) {
+        // A layered popup is presented via UpdateLayeredWindow() (present()), which a flip-model
+        // swap chain can't do - so whatever the process-wide default is, this stays GDI.
+        setPresentBackend(PresentBackend::Gdi);
     }
 
     PopupTool::~PopupTool() {

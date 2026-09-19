@@ -261,7 +261,7 @@ int main() {
     // Every step calls Progress::setValue(), which now correctly
     // style().markDirty()s - and RootView::markDirty() always repaints
     // the *entire* window buffer (there's no dirty-rect scoping in this
-    // paint architecture; see RootView::notifyRedrawNeeded()), so this
+    // paint architecture; see RootView::repaint()), so this
     // rate directly sets how often the whole demo window gets
     // re-rasterized. 30fps is plenty smooth for a progress bar and roughly
     // halves that repaint cost versus 60fps.

@@ -2317,3 +2317,121 @@ TEST(RootViewStandaloneConstruction, InitializeFailsWithNoParentAtAll) {
     EXPECT_FALSE(root.initialize());
     EXPECT_EQ(root.windowHandle(), nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// RootView::markDirty(fromView, rect) accumulates into dirtyRect_ via
+// Rect::united() (geometry.h), and repaint() - not the overridable
+// presentRepaintedBuffer() hook - is what consumes it afterward.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewMarkDirty, SeparateRegionsAccumulateIntoTheirBoundingBox) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->invalidate();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    root->markDirty(root, newui::Rect(0, 0, 10, 10));
+    root->markDirty(root, newui::Rect(100, 120, 20, 10));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(0, 0, 120, 130));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, FirstRegionIsTakenAsIs) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->invalidate();
+
+    root->markDirty(root, newui::Rect(40, 50, 20, 30));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, FractionalRegionsAreSnappedOutwardToWholePixels) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->invalidate();
+
+    root->markDirty(root, newui::Rect(10.25f, 20.75f, 30.5f, 40.5f));  // right 40.75, bottom 61.25
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(10, 20, 31, 42));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, AnEmptyRegionDoesNotStretchTheDirtyRectToTheOrigin) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->invalidate();
+    root->markDirty(root, newui::Rect(50, 50, 10, 10));
+
+    root->markDirty(root, newui::Rect(0, 0, 0, 0));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(50, 50, 10, 10));
+
+    root->destroy();
+    delete root;
+}
+
+namespace {
+
+// Overrides presentRepaintedBuffer() the way PopupTool does - replaces it outright, never
+// calling the base - and records what dirtyRect_ held while it ran.
+class PresentOverridingRootView : public newui::RootView {
+public:
+    using newui::RootView::RootView;
+    using newui::RootView::repaintNow;
+    using newui::RootView::dirtyRect;
+
+    int presentCalls = 0;
+    newui::Rect dirtyDuringPresent;
+
+    void presentRepaintedBuffer() override {
+        ++presentCalls;
+        dirtyDuringPresent = dirtyRect();
+    }
+};
+
+}
+
+TEST(RootViewRepaint, ConsumesDirtyRectEvenWhenASubclassReplacesThePresentHook) {
+    // Regression: dirtyRect_ used to be cleared inside RootView's own presentRepaintedBuffer(),
+    // so a subclass that overrode it (PopupTool) never cleared it - its dirtyRect_ just kept
+    // growing for the life of the window.
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    root->repaintNow();
+
+    EXPECT_EQ(root->presentCalls, 1);
+    EXPECT_TRUE(root->dirtyRect().empty());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewRepaint, PresentHookStillSeesTheRegionThatWasJustRepainted) {
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    root->repaintNow();
+
+    // repaintNow() marks the whole client area dirty first.
+    EXPECT_EQ(root->dirtyDuringPresent, newui::Rect(0, 0, 200, 200));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewRepaint, EachRepaintStartsFromAFreshDirtyRect) {
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaintNow();
+
+    root->markDirty(root, newui::Rect(10, 10, 5, 5));
+
+    // Not the previous repaint's whole-window region, unioned in forever.
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(10, 10, 5, 5));
+
+    root->destroy();
+    delete root;
+}

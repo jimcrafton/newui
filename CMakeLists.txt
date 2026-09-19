@@ -94,6 +94,10 @@ add_library(newui STATIC
     src/application.cpp
     src/frame.cpp
     "src/rootview.cpp"
+    "include/newui/presentsurface.h"
+    "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
+    "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
+    "src/presentsurface.cpp"
     src/subview.cpp
     src/fontmanager.cpp
     "src/runloop.cpp" 
@@ -190,7 +194,7 @@ target_include_directories(newui PRIVATE
 # used by UIColorManager::colorFor() for the real Windows accent color.
 # Shlwapi: SHCreateMemStream, used by VirtualFileDataObject (dragndrop.cpp)
 # to hand Explorer an in-memory CFSTR_FILECONTENTS IStream per virtual file.
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib)
+target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib d3d11.lib dxgi.lib dxguid.lib)
 
 # Precompiled header
 # ===================

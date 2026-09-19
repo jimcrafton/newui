@@ -933,3 +933,76 @@ TEST(RectSnappedOutwardToPixels, ResultNeverShrinksTheOriginalRect) {
     EXPECT_GE(snapped.right(), r.right());
     EXPECT_GE(snapped.bottom(), r.bottom());
 }
+
+// Rect::united() - see its own comment (geometry.h). RootView::markDirty()'s
+// running dirtyRect_ union, previously hand-rolled inline there.
+
+TEST(RectUnited, OverlappingRectsGiveTheirBoundingBox) {
+    newui::Rect a(0.0f, 0.0f, 50.0f, 50.0f);
+    newui::Rect b(30.0f, 20.0f, 50.0f, 50.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 80.0f, 70.0f));
+}
+
+TEST(RectUnited, DisjointRectsSpanTheGapBetweenThem) {
+    // Rects that don't share a top-left corner - taking max of the *sizes*
+    // independently (the mistake geometry.h's own comment warns about) would
+    // give (0,0,10,10) here, which covers neither the second rect nor the gap.
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 60.0f, 60.0f));
+}
+
+TEST(RectUnited, ContainedRectLeavesTheOuterOneUnchanged) {
+    newui::Rect outer(10.0f, 10.0f, 100.0f, 100.0f);
+    newui::Rect inner(20.0f, 30.0f, 5.0f, 5.0f);
+
+    EXPECT_EQ(outer.united(inner), outer);
+    EXPECT_EQ(inner.united(outer), outer);
+}
+
+TEST(RectUnited, IsCommutative) {
+    newui::Rect a(-20.0f, 5.0f, 30.0f, 10.0f);
+    newui::Rect b(40.0f, -15.0f, 5.0f, 60.0f);
+
+    EXPECT_EQ(a.united(b), b.united(a));
+}
+
+TEST(RectUnited, HandlesNegativeCoordinates) {
+    newui::Rect a(-30.0f, -40.0f, 10.0f, 10.0f);  // right = -20, bottom = -30
+    newui::Rect b(-5.0f, -5.0f, 10.0f, 10.0f);    // right = 5, bottom = 5
+
+    EXPECT_EQ(a.united(b), newui::Rect(-30.0f, -40.0f, 35.0f, 45.0f));
+}
+
+TEST(RectUnited, EmptyRectIsTheIdentityOnEitherSide) {
+    newui::Rect r(10.0f, 20.0f, 30.0f, 40.0f);
+    newui::Rect none;  // default: empty()
+
+    EXPECT_EQ(none.united(r), r);
+    EXPECT_EQ(r.united(none), r);
+}
+
+TEST(RectUnited, EmptyRectDoesNotDragTheResultOutToTheOrigin) {
+    // The old inline union in RootView::markDirty() always folded in the incoming
+    // rect's corner even when it was the cleared/default rect - which silently
+    // stretched the dirty region back out to (0,0).
+    newui::Rect r(100.0f, 100.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(r.united(newui::Rect()), r);
+}
+
+TEST(RectUnited, TwoEmptyRectsStayEmpty) {
+    EXPECT_TRUE(newui::Rect().united(newui::Rect()).empty());
+}
+
+TEST(RectUnited, DoesNotModifyEitherOperand) {
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    (void)a.united(b);
+
+    EXPECT_EQ(a, newui::Rect(0.0f, 0.0f, 10.0f, 10.0f));
+    EXPECT_EQ(b, newui::Rect(50.0f, 50.0f, 10.0f, 10.0f));
+}

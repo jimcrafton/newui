@@ -10,6 +10,7 @@
 #include <newui/geometry.h>
 #include <newui/namemanager.h>
 #include <newui/overlay.h>
+#include <newui/presentsurface.h>
 
 namespace newui {
     class Frame;
@@ -124,14 +125,17 @@ namespace newui {
         // background rather than presenting it directly.
         virtual BLFormat imageBufferFormat() const;
 
-        // Called at the very end of notifyRedrawNeeded(), once repaint()
+        // Called at the very end of repaint(), once this RootView's tree
         // has actually finished writing this frame into getImageBuffer() -
-        // unlike onRedrawNeeded (fired *before* repaint(), for content
-        // that wants to draw into the buffer ahead of this RootView's own
-        // tree paint - see its own doc comment above), this is the right
-        // hook for something that needs the *final*, fully composited
-        // buffer. Base implementation calls invalidate(&dirtyRect_), same
-        // as always. PopupTool (popuptool.h) overrides this instead of
+        // unlike onRedrawNeeded (fired at the *start* of repaint(), for
+        // content that wants to draw into the buffer ahead of this
+        // RootView's own tree paint - see its own doc comment above), this
+        // is the right hook for something that needs the *final*, fully
+        // composited buffer. dirtyRect_ still holds the region just
+        // repainted while this runs (repaint() clears it right afterward,
+        // so an override never has to). Base implementation hands it to
+        // the PresentSurface (see presentsurface.h). PopupTool
+        // (popuptool.h) overrides this instead of
         // subscribing onRedrawNeeded, precisely so its own present()
         // reads getImageBuffer() after this RootView's own children have
         // actually painted into it, not one frame stale.
@@ -151,8 +155,14 @@ namespace newui {
         // window's HDC on WM_PAINT. Call invalidate() after drawing to it
         // to schedule that repaint.
         BLImage& getImageBuffer() {
-            return imageBuffer_;
+            return surface_->image();
         }
+
+        // How this RootView is actually presenting right now - what
+        // defaultPresentBackend() asked for (presentsurface.h), or Gdi if
+        // that was Dxgi and this machine couldn't do it.
+        //@reflect ignore=true
+        PresentBackend presentBackend() const;
 
         void invalidate();
 
@@ -368,6 +378,13 @@ namespace newui {
         // markDirty() on its own.
         void repaintNow();
 
+        // Replaces this RootView's PresentSurface with a fresh one of the
+        // given kind, overriding defaultPresentBackend() for this instance
+        // (PopupTool forces Gdi - a layered window can't present through a
+        // swap chain). Drops the current buffer, so call it before the first
+        // sizing/initialize(), i.e. from a subclass constructor.
+        void setPresentBackend(PresentBackend backend);
+
 
         newui::Rect fromViewToLocal(const View* fromView, const newui::Rect& rect);
 
@@ -396,31 +413,17 @@ namespace newui {
 		HWND externalParentHwnd_ = nullptr;
 		HINSTANCE externalInstanceHandle_ = nullptr;
 
-        // imageBuffer_ wraps a CreateDIBSection()-allocated buffer directly
-        // (via BLImage::create_from_data(), not BLImage::create() - blend2d
-        // pads its own allocations to a 16-byte stride for SIMD, which
-        // wouldn't match the stride a DIB section infers from biWidth) -
-        // memDC_/dibSection_ below, not a plain heap buffer, so
-        // paintImageBufferToWindow() can BitBlt() from an already-realized
-        // GDI bitmap object instead of re-describing a raw pointer via
-        // StretchDIBits() on every WM_PAINT. Owning the buffer this way
-        // keeps the stride at exactly width * 4 so Blend2D and GDI agree on
-        // layout (guaranteed DWORD-aligned for 32bpp regardless of width,
-        // so no padding to account for).
-        BLImage imageBuffer_;
-        HDC memDC_ = nullptr;
-        HBITMAP dibSection_ = nullptr;
-        // Whatever memDC_ had selected before dibSection_ - re-selected
-        // before deleting dibSection_ (see releaseImageBuffer()), since
-        // deleting a bitmap while it's still selected into a DC is
-        // undefined behavior.
-        HBITMAP dibSectionOldBitmap_ = nullptr;
+        // Owns getImageBuffer()'s pixels and the final transfer of them to
+        // the window - see PresentSurface (presentsurface.h). Always
+        // non-null; GdiPresentSurface (the original BitBlt-on-WM_PAINT
+        // path) today.
+        std::unique_ptr<PresentSurface> surface_;
 
         newui::Rect dirtyRect_;
 
-        // markDirty()/markDirty(fromView, rect) no longer call
-        // notifyRedrawNeeded() (the actual, expensive Blend2D repaint())
-        // directly - they union into dirtyRect_ as before, then call
+        // markDirty()/markDirty(fromView, rect) don't call repaint() (the
+        // actual, expensive Blend2D repaint) directly - they union into
+        // dirtyRect_, then call
         // scheduleRepaint(), which posts a single one-shot RunLoop idle
         // task (does nothing if one is already pending) instead. Idle
         // tasks only run once the message queue is fully drained (see
@@ -448,14 +451,6 @@ namespace newui {
         void scheduleRepaint();
 
         void resizeImageBuffer(int width, int height);
-        // Frees memDC_/dibSection_ (and resets imageBuffer_, which points
-        // into dibSection_'s memory) - called at the start of
-        // resizeImageBuffer() before allocating the new size, and from
-        // the destructor for final cleanup. Safe to call when already
-        // released (both members already null).
-        void releaseImageBuffer();
-        void paintImageBufferToWindow(HDC hdc, const newui::Rect& paintRect );
-        void notifyRedrawNeeded();
         void repaint();
 
         WNDPROC defaultWndProc_ = nullptr;

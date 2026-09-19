@@ -307,6 +307,27 @@ public:
         return Rect(snappedLeft, snappedTop, snappedRight - snappedLeft, snappedBottom - snappedTop);
     }
 
+    // The smallest Rect containing both this one and other - min of the
+    // near corners, max of the *far* corners (not max of the sizes
+    // independently, which only happens to be right when both rects share a
+    // top-left corner). empty() - the cleared/default Rect, all four
+    // components zero, not merely "zero area" - is the identity: uniting
+    // with it returns the other operand unchanged, so a running union
+    // (RootView's dirtyRect_) can start from a cleared Rect.
+    Rect united(const Rect& other) const {
+        if (empty()) {
+            return other;
+        }
+        if (other.empty()) {
+            return *this;
+        }
+        float l = left() < other.left() ? left() : other.left();
+        float t = top() < other.top() ? top() : other.top();
+        float r = right() > other.right() ? right() : other.right();
+        float b = bottom() > other.bottom() ? bottom() : other.bottom();
+        return Rect(l, t, r - l, b - t);
+    }
+
     bool operator==(const Rect& other) const {
         return pos_ == other.pos_ && size_ == other.size_;
     }
