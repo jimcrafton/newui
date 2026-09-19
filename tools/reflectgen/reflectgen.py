@@ -310,6 +310,13 @@ def invoke_arg_type_unsupported(t):
     return not is_copy_constructible(t)
 
 
+# Whether a PARM_DECL cursor has a default argument - libclang's python binding exposes no
+# direct flag for it, but a default always shows up as a `=` token inside the parameter's own
+# extent (a parameter declaration has no other use for one).
+def has_default_argument(param_cursor):
+    return any(token.spelling == "=" for token in param_cursor.get_tokens())
+
+
 def has_unsupported_invoke_arg(cursor):
     return any(invoke_arg_type_unsupported(arg.type) for arg in cursor.get_arguments())
 
@@ -1517,8 +1524,19 @@ def collect_class(cursor):
                     "isn't copy-constructible); not registered.\n"
                 )
                 continue
-            arg_types = [qualify_type_spelling(a.type) for a in child.get_arguments()]
-            info.ctors.append(Ctor(arg_types))
+            args = list(child.get_arguments())
+            arg_types = [qualify_type_spelling(a.type) for a in args]
+            # A constructor with defaulted trailing parameters is callable with fewer
+            # arguments too - `explicit TabControl(TabAlignment = Top)` is also a default
+            # constructor - so register every arity from the required count up to the full list.
+            # Without this, Class::createInstance() with no arguments (the Toolbox, the .newui
+            # Reader, ...) finds nothing to call for such a class. Prefixes of a supported
+            # signature are always supported themselves, and duplicates (an explicit T() beside a
+            # defaulted one) collapse to one entry.
+            required = sum(1 for a in args if not has_default_argument(a))
+            for arity in range(required, len(arg_types) + 1):
+                if not any(existing.arg_types == arg_types[:arity] for existing in info.ctors):
+                    info.ctors.append(Ctor(arg_types[:arity]))
 
         elif kind == CursorKind.CXX_BASE_SPECIFIER:
             # child.type is the base *as named in the specifier* (e.g. could

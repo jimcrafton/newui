@@ -1,5 +1,6 @@
 #include "newui/tabcontrol.h"
 #include "newui/keyboard_constants.h"
+#include "newui/reflection.h"
 
 #include <gtest/gtest.h>
 
@@ -301,4 +302,23 @@ TEST(TabControl, ArrowKeyOnAnEmptyTabControlIsIgnoredNotACrash) {
 
     tabs->destroy();
     delete tabs;
+}
+
+// Real bug: TabControl's only constructor is `explicit TabControl(TabAlignment = Top)`, and
+// reflectgen registered just the one-argument form - so createInstance() with no arguments (what
+// the Toolbox, the .newui Reader and anything else constructing by name does) had nothing to call
+// and produced nothing. A constructor whose remaining parameters all have defaults is callable with
+// fewer arguments, so every arity down to the required count has to be registered.
+TEST(TabControlReflection, IsConstructibleByNameWithNoArguments) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("TabControl");
+    ASSERT_NE(clazz, nullptr);
+
+    void* raw = nullptr;
+    clazz->createInstance(&raw);
+    ASSERT_NE(raw, nullptr);
+
+    auto* tabControl = static_cast<newui::TabControl*>(raw);
+    EXPECT_EQ(tabControl->alignment(), newui::ThemedTabItemStyle::TabAlignment::Top);  // the default
+    tabControl->destroy();
+    delete tabControl;
 }

@@ -826,6 +826,64 @@ class ReflectStringValueAnnotationTest(ClangSnippetTestCase):
         self.assertNotIn(".stringValue(", source)
 
 
+class ConstructorArityTest(ClangSnippetTestCase):
+    """A constructor with defaulted trailing parameters is callable with fewer arguments, so
+    every arity from the required count up to the full list must be registered - otherwise
+    Class::createInstance() with no arguments (the Toolbox, the .newui Reader, ...) finds nothing to
+    call for a class like `explicit TabControl(TabAlignment = Top)`."""
+
+    SOURCE = """
+    namespace newui {
+        enum class Align { Top, Bottom };
+
+        class AllDefaulted {
+        public:
+            explicit AllDefaulted(Align a = Align::Top);
+        };
+
+        class Mixed {
+        public:
+            Mixed(int required, float a = 1.0f, bool b = false);
+        };
+
+        // An explicit default constructor plus a one-argument one: no duplicates.
+        class PlainDefault {
+        public:
+            PlainDefault();
+            PlainDefault(int x);
+        };
+
+        class NoDefaults {
+        public:
+            NoDefaults(int a, int b);
+        };
+    }
+    """
+
+    def ctor_signatures(self, class_name):
+        info = rg.collect_class(self.find(class_name))
+        return [list(c.arg_types) for c in info.ctors]
+
+    def test_all_defaulted_constructor_also_registers_the_no_argument_form(self):
+        self.assertEqual(self.ctor_signatures("AllDefaulted"), [[], ["newui::Align"]])
+
+    def test_every_arity_from_the_required_count_up_is_registered(self):
+        self.assertEqual(self.ctor_signatures("Mixed"),
+                         [["int"], ["int", "float"], ["int", "float", "bool"]])
+
+    def test_explicit_default_constructor_is_not_registered_twice(self):
+        self.assertEqual(self.ctor_signatures("PlainDefault"), [[], ["int"]])
+
+    def test_constructor_without_defaults_registers_only_itself(self):
+        self.assertEqual(self.ctor_signatures("NoDefaults"), [["int", "int"]])
+
+    def test_emitted_registration_includes_the_no_argument_constructor(self):
+        info = rg.collect_class(self.find("AllDefaulted"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn(".constructor<>()", source)
+        self.assertIn(".constructor<newui::Align>()", source)
+
+
 class GeneratedRegisterFunctionIsSelfGuardingTest(unittest.TestCase):
     # Real bug this guards against: two independent call sites in
     # cpp_codetools each called registerReflectionData() directly - the
