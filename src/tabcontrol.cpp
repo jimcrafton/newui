@@ -85,6 +85,7 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
 
     stripRow_ = new SubView();
     stripRow_->setName("TabControlStrip");
+    stripRow_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
     stripRow_->setVisible(true);
     stripRow_->setLayout(std::make_unique<FlexLayout>(stripHorizontal ? Orientation::Horizontal : Orientation::Vertical));
     stripRow_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
@@ -94,6 +95,7 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
 
     pagesArea_ = new SubView();
     pagesArea_->setName("TabControlPages");
+    pagesArea_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);  // its pages are the user's, not flagged
     pagesArea_->setVisible(true);
     pagesArea_->setLayout(std::make_unique<CardLayout>());
     pagesArea_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
@@ -117,6 +119,7 @@ SubView* TabControl::addTab(const std::string& text, SubView* page) {
 
     auto* button = new TabItemButtonView();
     button->setName(text);
+    button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
     button->setVisible(true);
     button->text = text;
     button->owner = this;

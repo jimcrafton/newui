@@ -387,3 +387,19 @@ TEST(MenuBar, SetMenuItemsCalledAgainReplacesButtons) {
     bar->destroy();
     delete bar;
 }
+
+TEST(MenuBar, ItsGeneratedButtonsAreInternalNonSelectableParts) {
+    std::vector<std::unique_ptr<newui::MenuItem>> items;
+    items.push_back(std::make_unique<newui::MenuItem>("File"));
+
+    auto* bar = new newui::MenuBar();
+    bar->setMenuItems(std::move(items));
+
+    ASSERT_EQ(bar->childViews().size(), 1u);
+    EXPECT_TRUE(bar->childViews()[0]->isInternal());
+    EXPECT_FALSE(bar->childViews()[0]->isSelectableAtDesignTime());
+    EXPECT_FALSE(bar->isInternal());
+
+    bar->destroy();
+    delete bar;
+}

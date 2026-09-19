@@ -427,3 +427,29 @@ TEST(TabControl, ClickingATabAfterAnEarlierOneWasRemovedSelectsTheRightPage) {
     tabs->destroy();
     delete tabs;
 }
+
+TEST(TabControl, ItsStripPagesAreaAndButtonsAreInternalButItsPagesAreNot) {
+    auto* tabs = new newui::TabControl();
+    newui::SubView* page = MakePage("page1");
+    tabs->addTab("First", page);
+
+    newui::View* strip = tabs->tabButton(0)->parent();
+    newui::View* pagesArea = page->parent();
+    ASSERT_NE(strip, nullptr);
+    ASSERT_NE(pagesArea, nullptr);
+
+    EXPECT_TRUE(strip->isInternal());
+    EXPECT_TRUE(pagesArea->isInternal());
+    EXPECT_TRUE(tabs->tabButton(0)->isInternal());
+    EXPECT_FALSE(page->isInternal());
+    EXPECT_FALSE(tabs->isInternal());
+
+    EXPECT_FALSE(strip->isSelectableAtDesignTime());
+    EXPECT_FALSE(pagesArea->isSelectableAtDesignTime());
+    EXPECT_FALSE(tabs->tabButton(0)->isSelectableAtDesignTime());
+    EXPECT_TRUE(page->isSelectableAtDesignTime());
+    EXPECT_TRUE(tabs->isSelectableAtDesignTime());
+
+    tabs->destroy();
+    delete tabs;
+}

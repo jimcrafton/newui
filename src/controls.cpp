@@ -61,6 +61,7 @@ namespace newui {
 
         fill_ = new SubView();
         fill_->setVisible(true);
+        fill_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         fill_->setStyle(std::make_unique<ThemedProgressBarFillStyle>());
         addChild(fill_);
 
@@ -639,6 +640,7 @@ namespace newui {
 
         thumb_ = new SubView();
         thumb_->setVisible(true);
+        thumb_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         thumb_->setStyle(std::make_unique<ThemedTrackbarThumbStyle>());
         addChild(thumb_);
 
@@ -754,6 +756,7 @@ namespace newui {
 
         if (ticks_ == nullptr) {
             ticks_ = new SubView();
+            ticks_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
             auto ticksStyle = std::make_unique<ThemedTrackbarTicksStyle>();
             ticksStyle->horizontal = horizontal_;
             ticks_->setStyle(std::move(ticksStyle));
@@ -1600,12 +1603,14 @@ namespace newui {
 
         vBar_ = new ScrollBar();
         vBar_->setVisible(true);
+        vBar_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         vBar_->setHorizontal(false);
         vBar_->onValueChanged.add(this, &ScrollView::handleVBarValueChanged);
         SubView::addChild(vBar_);
 
         hBar_ = new ScrollBar();
         hBar_->setVisible(true);
+        hBar_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         hBar_->setHorizontal(true);
         hBar_->onValueChanged.add(this, &ScrollView::handleHBarValueChanged);
         SubView::addChild(hBar_);

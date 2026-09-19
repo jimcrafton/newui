@@ -2317,3 +2317,42 @@ TEST(RootViewStandaloneConstruction, InitializeFailsWithNoParentAtAll) {
     EXPECT_FALSE(root.initialize());
     EXPECT_EQ(root.windowHandle(), nullptr);
 }
+
+TEST(DesignTimeFlagsTest, DefaultToNoneAndCombineIndependently) {
+    newui::SubView view;
+    EXPECT_EQ(view.designTimeFlags(), newui::DesignTimeFlags::None);
+    EXPECT_FALSE(view.isDesignTime());
+    EXPECT_FALSE(view.isInternal());
+
+    view.setDesignTimeFlag(newui::DesignTimeFlags::Internal);
+    EXPECT_TRUE(view.isInternal());
+    EXPECT_FALSE(view.isDesignTime());  // a different bit
+
+    view.setDesignTime(true);
+    EXPECT_TRUE(view.isDesignTime());
+    EXPECT_TRUE(view.isInternal());  // setDesignTime() only touches its own bit
+    EXPECT_TRUE(view.hasDesignTimeFlag(newui::DesignTimeFlags::DesignTime | newui::DesignTimeFlags::Internal));
+    EXPECT_FALSE(view.hasDesignTimeFlag(newui::DesignTimeFlags::DesignTime | newui::DesignTimeFlags::ReadOnly));
+
+    view.setDesignTime(false);
+    EXPECT_FALSE(view.isDesignTime());
+    EXPECT_TRUE(view.isInternal());
+
+    view.setDesignTimeFlag(newui::DesignTimeFlags::Internal, false);
+    EXPECT_EQ(view.designTimeFlags(), newui::DesignTimeFlags::None);
+}
+
+TEST(DesignTimeFlagsTest, NotSelectableIsIndependentOfInternal) {
+    newui::SubView view;
+    EXPECT_TRUE(view.isSelectableAtDesignTime());
+
+    view.setDesignTimeFlag(newui::DesignTimeFlags::Internal);
+    EXPECT_TRUE(view.isSelectableAtDesignTime());  // internal parts can still be selectable
+
+    view.setDesignTimeFlag(newui::DesignTimeFlags::NotSelectable);
+    EXPECT_FALSE(view.isSelectableAtDesignTime());
+
+    view.setDesignTimeFlag(newui::DesignTimeFlags::Internal, false);
+    EXPECT_FALSE(view.isInternal());
+    EXPECT_FALSE(view.isSelectableAtDesignTime());
+}

@@ -439,6 +439,7 @@ void MenuBar::setMenuItems(std::vector<std::unique_ptr<MenuItem>> items) {
 
         auto* button = new MenuBarButtonView();
         button->setName(topLevel->text);
+        button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         button->setVisible(true);
         button->menuItem = topLevel;
         button->setStyle(std::make_unique<ThemedMenuBarItemStyle>());

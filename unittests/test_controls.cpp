@@ -3671,3 +3671,46 @@ TEST(DropDownList, SetControllerSharesItAndClampsAnOutOfRangeSelection) {
     dropDown->destroy();
     delete dropDown;
 }
+
+TEST(Slider, ItsThumbIsAnInternalNonSelectablePart) {
+    auto* slider = new Slider();
+    ASSERT_NE(slider->thumb(), nullptr);
+    EXPECT_TRUE(slider->thumb()->isInternal());
+    EXPECT_FALSE(slider->thumb()->isSelectableAtDesignTime());
+    EXPECT_FALSE(slider->isInternal());
+    EXPECT_TRUE(slider->isSelectableAtDesignTime());
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Progress, ItsFillIsAnInternalNonSelectablePart) {
+    auto* progress = new Progress();
+    ASSERT_NE(progress->fill(), nullptr);
+    EXPECT_TRUE(progress->fill()->isInternal());
+    EXPECT_FALSE(progress->fill()->isSelectableAtDesignTime());
+    progress->destroy();
+    delete progress;
+}
+
+TEST(Slider, ItsTickMarksViewIsAnInternalNonSelectablePart) {
+    auto* slider = new Slider();
+    slider->setShowTicks(true);
+    ASSERT_NE(slider->ticks(), nullptr);
+    EXPECT_TRUE(slider->ticks()->isInternal());
+    EXPECT_FALSE(slider->ticks()->isSelectableAtDesignTime());
+    slider->destroy();
+    delete slider;
+}
+
+TEST(ScrollView, ItsScrollBarsAreInternalNonSelectableButItsViewportIsNot) {
+    auto* scroll = new ScrollView();
+    ASSERT_NE(scroll->vBar(), nullptr);
+    ASSERT_NE(scroll->hBar(), nullptr);
+    EXPECT_TRUE(scroll->vBar()->isInternal());
+    EXPECT_TRUE(scroll->hBar()->isInternal());
+    EXPECT_FALSE(scroll->vBar()->isSelectableAtDesignTime());
+    EXPECT_FALSE(scroll->hBar()->isSelectableAtDesignTime());
+    EXPECT_FALSE(scroll->isInternal());
+    scroll->destroy();
+    delete scroll;
+}
