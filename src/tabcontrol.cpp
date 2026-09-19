@@ -144,6 +144,40 @@ SubView* TabControl::addTab(const std::string& text, SubView* page) {
     return page;
 }
 
+SubView* TabControl::removeTab(std::size_t index) {
+    if (index >= stripRow_->childViews().size()) {
+        return nullptr;
+    }
+
+    SubView* button = stripRow_->childViews()[index];
+    SubView* removedPage = pagesArea_->childViews()[index];
+
+    stripRow_->removeChild(button);
+    button->destroy();
+    delete button;
+    pagesArea_->removeChild(removedPage);
+
+    const auto& buttons = stripRow_->childViews();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        static_cast<TabItemButtonView*>(buttons[i])->tabIndex = i;
+    }
+    updateTabPositions();
+
+    if (buttons.empty()) {
+        selectedIndex_ = 0;
+    } else {
+        std::size_t next = selectedIndex_;
+        if (index < selectedIndex_) {
+            next = selectedIndex_ - 1;
+        } else if (next >= buttons.size()) {
+            next = buttons.size() - 1;
+        }
+        selectTab(next);
+    }
+
+    return removedPage;
+}
+
 std::size_t TabControl::tabCount() const {
     return stripRow_->childViews().size();
 }

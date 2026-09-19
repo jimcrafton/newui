@@ -322,3 +322,108 @@ TEST(TabControlReflection, IsConstructibleByNameWithNoArguments) {
     tabControl->destroy();
     delete tabControl;
 }
+
+TEST(TabControl, RemoveTabDetachesItsPageAndDestroysItsButton) {
+    auto* tabs = new newui::TabControl();
+    newui::SubView* page1 = MakePage("page1");
+    newui::SubView* page2 = MakePage("page2");
+    tabs->addTab("First", page1);
+    tabs->addTab("Second", page2);
+
+    newui::SubView* removed = tabs->removeTab(0);
+
+    EXPECT_EQ(removed, page1);
+    EXPECT_EQ(removed->parent(), nullptr);  // detached, still alive - the caller owns it now
+    EXPECT_EQ(tabs->tabCount(), 1u);
+    EXPECT_EQ(tabs->page(0), page2);
+
+    removed->destroy();
+    delete removed;
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RemoveTabOutOfRangeChangesNothing) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("First", MakePage("page1"));
+
+    EXPECT_EQ(tabs->removeTab(1), nullptr);
+    EXPECT_EQ(tabs->tabCount(), 1u);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RemoveTabBeforeTheSelectedOneKeepsTheSameTabSelected) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("A", MakePage("a"));
+    tabs->addTab("B", MakePage("b"));
+    tabs->addTab("C", MakePage("c"));
+    tabs->selectTab(2);
+    newui::SubView* pageC = tabs->page(2);
+
+    newui::SubView* removed = tabs->removeTab(0);
+
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+    EXPECT_EQ(tabs->page(tabs->selectedIndex()), pageC);
+
+    removed->destroy();
+    delete removed;
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RemovingTheSelectedLastTabSelectsTheNewLastTab) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("A", MakePage("a"));
+    tabs->addTab("B", MakePage("b"));
+    tabs->selectTab(1);
+
+    newui::SubView* removed = tabs->removeTab(1);
+
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+    auto* style = dynamic_cast<newui::ThemedTabItemStyle*>(&tabs->tabButton(0)->style());
+    ASSERT_NE(style, nullptr);
+    EXPECT_TRUE(style->selected);
+    EXPECT_EQ(style->position, newui::ThemedTabItemStyle::Position::Only);
+
+    removed->destroy();
+    delete removed;
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, RemovingTheOnlyTabLeavesAnEmptyControlThatCanTakeANewTab) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("A", MakePage("a"));
+
+    newui::SubView* removed = tabs->removeTab(0);
+    EXPECT_EQ(tabs->tabCount(), 0u);
+
+    // Re-adding the very same page (what an undo/redo pair does) restores a working tab.
+    tabs->addTab("A", removed);
+    EXPECT_EQ(tabs->tabCount(), 1u);
+    EXPECT_EQ(tabs->selectedIndex(), 0u);
+    EXPECT_EQ(tabs->page(0), removed);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+TEST(TabControl, ClickingATabAfterAnEarlierOneWasRemovedSelectsTheRightPage) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("A", MakePage("a"));
+    tabs->addTab("B", MakePage("b"));
+    tabs->addTab("C", MakePage("c"));
+    newui::SubView* removed = tabs->removeTab(0);
+
+    // C's button was index 2 before the removal - its click handler must now select index 1.
+    tabs->tabButton(1)->onMouseDown(*tabs->tabButton(1), newui::Point(1, 1), 0, 0);
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+    EXPECT_EQ(tabs->page(1)->name(), "c");
+
+    removed->destroy();
+    delete removed;
+    tabs->destroy();
+    delete tabs;
+}

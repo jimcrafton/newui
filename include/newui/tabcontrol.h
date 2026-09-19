@@ -37,6 +37,15 @@ namespace newui {
         // nothing). Returns page.
         SubView* addTab(const std::string& text, SubView* page);
 
+        // Inverse of addTab(): destroys the Nth tab's button and detaches
+        // (does not destroy) its page, returning it - the caller now owns
+        // it (destroy()+delete it, or hand it back to addTab() to
+        // restore the tab). nullptr, changing nothing, if index is out of
+        // range. Selection follows the tabs: removing a tab before the
+        // selected one keeps the same tab selected, removing the selected
+        // one selects its successor (or the new last tab).
+        SubView* removeTab(std::size_t index);
+
         std::size_t tabCount() const;
 
         // The Nth tab's own button/page SubView (addTab() order),
