@@ -310,6 +310,13 @@ TEST(Cursor, KindIsASettableReflectedPropertyThatIgnoresCustom) {
     EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
 }
 
+TEST(Cursor, DerivedIsNullIsNotAReflectedProperty) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->property("null"), nullptr);  // a computed predicate, not state
+    EXPECT_NE(clazz->property("kind"), nullptr);
+}
+
 TEST(ViewReflection, DerivedAndScrollStateAreNotReflectedProperties) {
     const newui::reflection::Class* clazz = newui::reflection::classinfo("View");
     ASSERT_NE(clazz, nullptr);

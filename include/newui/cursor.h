@@ -168,6 +168,7 @@ namespace newui {
         // always reports true here; use kind()/handle() to ask "what
         // would actually be shown", this is specifically about the
         // Custom-cursor payload).
+        //@reflect ignore=true
         bool isNull() const {
             return path_.empty() && handle_ == nullptr;
         }
