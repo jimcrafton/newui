@@ -2252,6 +2252,13 @@ def main():
         # system libclang is 19.1.0. See reflectgen's README for the
         # LLVM-upgrade alternative to this bypass.
         clang_args = clang_args + ["-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH"]
+    if not any("_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION" in a for a in clang_args):
+        # Newer MSVC STLs (14.51+, __msvc_doom_core.hpp) define their
+        # "doom function" as __builtin_verbose_trap whenever __clang__ is
+        # set - a libclang too old to know that builtin (e.g. the PyPI
+        # fallback) then fails to parse <xmemory>/<xcall_once.h>. We only
+        # parse, never compile, so route it through abort() instead.
+        clang_args = clang_args + ["-D_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION"]
     if "-fparse-all-comments" not in clang_args:
         # Without this, libclang only attaches a "doxygen-style" comment
         # (///, /** */, //!) to a cursor's raw_comment - a plain "//"
