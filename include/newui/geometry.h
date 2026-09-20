@@ -307,6 +307,49 @@ public:
         return Rect(snappedLeft, snappedTop, snappedRight - snappedLeft, snappedBottom - snappedTop);
     }
 
+    // The smallest Rect containing both this one and other - min of the
+    // near corners, max of the *far* corners (not max of the sizes
+    // independently, which only happens to be right when both rects share a
+    // top-left corner). empty() - the cleared/default Rect, all four
+    // components zero, not merely "zero area" - is the identity: uniting
+    // with it returns the other operand unchanged, so a running union
+    // (RootView's dirtyRect_) can start from a cleared Rect.
+    Rect united(const Rect& other) const {
+        if (empty()) {
+            return other;
+        }
+        if (other.empty()) {
+            return *this;
+        }
+        float l = left() < other.left() ? left() : other.left();
+        float t = top() < other.top() ? top() : other.top();
+        float r = right() > other.right() ? right() : other.right();
+        float b = bottom() > other.bottom() ? bottom() : other.bottom();
+        return Rect(l, t, r - l, b - t);
+    }
+
+    // True if the two rects share some area - touching edges don't count, and a rect with no area
+    // (zero or negative width/height) overlaps nothing.
+    bool intersects(const Rect& other) const {
+        if (width() <= 0.0f || height() <= 0.0f || other.width() <= 0.0f || other.height() <= 0.0f) {
+            return false;
+        }
+        return right() > other.left() && left() < other.right() && bottom() > other.top() && top() < other.bottom();
+    }
+
+    // The area both rects cover; when they don't overlap, a zero-sized Rect at the overlap's would-be
+    // top-left corner (so check intersects() first if "no overlap" needs telling apart from a real one).
+    Rect intersected(const Rect& other) const {
+        const float l = left() > other.left() ? left() : other.left();
+        const float t = top() > other.top() ? top() : other.top();
+        const float r = right() < other.right() ? right() : other.right();
+        const float b = bottom() < other.bottom() ? bottom() : other.bottom();
+        if (r <= l || b <= t) {
+            return Rect(l, t, 0.0f, 0.0f);
+        }
+        return Rect(l, t, r - l, b - t);
+    }
+
     bool operator==(const Rect& other) const {
         return pos_ == other.pos_ && size_ == other.size_;
     }

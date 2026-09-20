@@ -170,23 +170,14 @@ namespace newui {
             std::uint32_t VKeyCode);
         SyncReturn onRootLostFocus(View& sender);
 
-        // Clears getImageBuffer() to fully transparent - onRedrawNeeded
-        // fires here (rootview.h's own doc comment) *before* repaint()
-        // draws this RootView's own paintStyle()/paint()/paintChildren()
-        // into it, which is exactly the on-label use this delegate
-        // documents: something that needs to touch the buffer ahead of
-        // that tree paint. Needed because paintChildren() (view.h) redraws
-        // every child unconditionally on every single repaint, regardless
-        // of dirty rect - fine for an opaque window (each pass fully
-        // overwrites the last), but this RootView's own background is
-        // deliberately left transparent (see this class's own comment),
-        // so without this, a child with no opaque background of its own
-        // (a plain Label's anti-aliased text, say) would have its edges
-        // re-blended onto themselves on every repaint instead of drawn
-        // fresh - real, reproduced bug: repeatedly darkened/thickened
-        // label text once postCreate()'s deferred repaintNow() (and any
-        // later markDirty()-driven repaint - a hover, say) ran more than
-        // once without this.
+        // Clears getImageBuffer() to fully transparent. This is now redundant:
+        // RootView::repaint() itself blanks the buffer at the start of every
+        // repaint, just before onRedrawNeeded fires (which is what this hooks) -
+        // it exists from when a transparent-background RootView's children
+        // re-blended their anti-aliased text onto themselves on every repaint
+        // (real, reproduced bug: repeatedly thickened label text). Harmless, and
+        // left in place for now only to keep that fix's diff separate from this
+        // popup-specific cleanup.
         SyncReturn onRootRedrawNeeded(RootView& sender);
 
         // The actual teardown - fires onDismissed(*this), then destroy()s

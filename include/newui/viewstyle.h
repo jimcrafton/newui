@@ -518,26 +518,16 @@ namespace newui {
     // textColor is null (nothing drawn) by default, like the other
     // optional fills in this file - set it to actually see text.
     //
-    // Strongly consider also setting backgroundFill to an opaque color
-    // matching whatever's actually behind this view (see ViewStyle::paint()'s
-    // own base implementation, which this delegates to first). This
-    // codebase's paint pipeline doesn't (currently) skip redrawing a view
-    // whose own area wasn't part of what actually changed - RootView's own
-    // background fill is scoped to the dirty region on each repaint, but
-    // View::paintChildren() still walks and redraws every descendant
-    // unconditionally regardless of whether *its* area was included (see
-    // RootView::repaint()'s comment) - so a text view with no
-    // backgroundFill of its own gets its anti-aliased glyph edges
-    // alpha-blended directly onto whatever was already there on every
-    // unrelated repaint anywhere in the tree, not just onto a fresh
-    // backdrop. That's not idempotent: repeated re-blending of the same
-    // translucent edge pixels darkens/thickens them a little further each
-    // time instead of reproducing the same result, which reads as subtly
-    // "fuzzy" or "bolder than it should be" text after enough unrelated
-    // repaints have happened - confirmed live, not just reasoned about
-    // (see HANDOFF.md). An opaque backgroundFill makes every redraw
-    // self-correcting again, the same way every themed control's own
-    // track/fill chrome already is.
+    // No backgroundFill is needed for the text to render cleanly: every
+    // RootView::repaint() starts from a blank buffer and redraws the whole
+    // tree, so this view's anti-aliased glyph edges always land on a fresh
+    // backdrop and reproduce the same pixels each time. (That wasn't always
+    // so - repaint() used to fill the root background only inside the dirty
+    // rect while still redrawing every child over the whole window, so a
+    // transparent text view had its glyph edges re-blended onto themselves
+    // on every unrelated repaint and thickened visibly - which is why this
+    // comment used to recommend an opaque backgroundFill as a workaround.
+    // Set one only if you actually want that look.)
     class LabelStyle : public ViewStyle {
     public:
         const std::string& text() const { return text_; }

@@ -738,6 +738,15 @@ namespace newui {
 
         Point origin_;
 
+        // The part of this view's own local space (0,0 to its size) that can currently be seen - i.e. that
+        // isn't clipped away by this view's own bounds or by any ancestor's. Set by the parent's
+        // paintChildren() (RootView::repaint() for the root) right before it paints this view, so that
+        // this view's own paintChildren() can skip a child that lies entirely outside it. Meaningful only
+        // while hasVisibleRegion_ is true; when it's false (never set - a view painted some other way)
+        // everything counts as visible, so such a view is never culled by mistake.
+        Rect visibleRegion_;
+        bool hasVisibleRegion_ = false;
+
         View* parent_ = nullptr;
 
         RootView* rootView_ = nullptr;

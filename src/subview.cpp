@@ -15,7 +15,14 @@ void SubView::setBounds(const Rect& bounds) {
         return;
     }
 
+    // Both the area this view leaves and the area it moves into need repainting - redraw() invalidates
+    // wherever bounds_ says the view currently is, so once before the change and once after. Without this
+    // a moved/resized view was only ever shown in its new place (and its old place only cleaned up) when
+    // something *else* happened to repaint; RepaintMode::Full masked that by redrawing everything each time,
+    // RepaintMode::Dirty would leave it stale (see RootView::repaintVerifyMismatches()).
+    redraw();
     bounds_ = bounds;
+    redraw();
     onSizeChanged(*this, bounds_.size());
     updateLayout();
 }
