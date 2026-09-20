@@ -40,7 +40,7 @@ namespace newui {
     bool parseRepaintMode(const std::string& text, RepaintMode& out);
 
     // What a newly constructed RootView uses: whatever setDefaultRepaintMode() last set, otherwise the
-    // NEWUI_REPAINT environment variable ("full" or "dirty", read once), otherwise Full.
+    // NEWUI_REPAINT environment variable ("full" or "dirty", read once), otherwise Dirty.
     RepaintMode defaultRepaintMode();
     void setDefaultRepaintMode(RepaintMode mode);
 
