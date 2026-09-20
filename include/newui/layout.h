@@ -531,7 +531,19 @@ namespace newui {
             return rows_;
         }
 
+        // The mutable overloads are what make the track lists round-trip: reflection restores a
+        // container property by reaching the live container through a non-const reference getter
+        // (the same shape Gradient::stops() has). With only the const getter - even paired with a
+        // setter - the tracks were written to a file but never read back.
+        std::vector<GridTrack>& rows() {
+            return rows_;
+        }
+
         const std::vector<GridTrack>& columns() const {
+            return columns_;
+        }
+
+        std::vector<GridTrack>& columns() {
             return columns_;
         }
 

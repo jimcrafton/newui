@@ -935,6 +935,45 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
     delete reloaded;
 }
 
+// A GridLayout's row/column tracks were written to the file but never read back (rows()/columns()
+// had no setters, so the reader had nothing to assign through) - a saved grid reloaded with no
+// tracks at all and every child lost its cell.
+TEST_F(NewuiFileFixture, WriteViewRoundTripsAGridLayoutsTracksAndSpacing) {
+    trackFile("BundleWriteGridTracks");
+
+    newui::SubView panel;
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedRow(40.0f);
+    grid->addStarRow(2.0f);
+    grid->addAutoRow();
+    grid->addAutoColumn();
+    grid->addStarColumn(1.0f);
+    grid->setRowSpacing(3.0f);
+    grid->setColumnSpacing(5.0f);
+    panel.setLayout(std::move(grid));
+
+    ASSERT_TRUE(newui::Bundle::instance().writeView(panel, "BundleWriteGridTracks"));
+    newui::View* reloaded = newui::Bundle::instance().loadView("BundleWriteGridTracks");
+    ASSERT_NE(reloaded, nullptr);
+
+    auto* layout = dynamic_cast<newui::GridLayout*>(reloaded->layout());
+    ASSERT_NE(layout, nullptr);
+    ASSERT_EQ(layout->rows().size(), 3u);
+    EXPECT_EQ(layout->rows()[0].kind, newui::GridTrackKind::Fixed);
+    EXPECT_FLOAT_EQ(layout->rows()[0].value, 40.0f);
+    EXPECT_EQ(layout->rows()[1].kind, newui::GridTrackKind::Star);
+    EXPECT_FLOAT_EQ(layout->rows()[1].value, 2.0f);
+    EXPECT_EQ(layout->rows()[2].kind, newui::GridTrackKind::Auto);
+    ASSERT_EQ(layout->columns().size(), 2u);
+    EXPECT_EQ(layout->columns()[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_EQ(layout->columns()[1].kind, newui::GridTrackKind::Star);
+    EXPECT_FLOAT_EQ(layout->rowSpacing(), 3.0f);
+    EXPECT_FLOAT_EQ(layout->columnSpacing(), 5.0f);
+
+    reloaded->destroy();
+    delete reloaded;
+}
+
 // ---------------------------------------------------------------------
 // Animation persistence - see HANDOFF.md's own entry on this pass. Round-
 // trips a real Animation targeting a real View-tree property (Slider::
