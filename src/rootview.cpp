@@ -79,7 +79,7 @@ namespace {
 	newui::RepaintMode readEnvironmentRepaintMode() {
 		char buffer[32] = {};
 		const DWORD length = ::GetEnvironmentVariableA("NEWUI_REPAINT", buffer, DWORD(sizeof(buffer)));
-		newui::RepaintMode mode = newui::RepaintMode::Full;
+		newui::RepaintMode mode = newui::RepaintMode::Dirty;
 		if (length > 0 && length < sizeof(buffer)) {
 			newui::parseRepaintMode(buffer, mode);
 		}
