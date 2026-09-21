@@ -8,6 +8,12 @@ namespace newui {
 
     PopupTool::PopupTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
         : RootView(ownerHwnd, instanceHandle, bounds, name) {
+        // A layered popup is presented via UpdateLayeredWindow() (present()), which a flip-model
+        // swap chain can't do - so whatever the process-wide default is, this stays GDI.
+        setPresentBackend(PresentBackend::Gdi);
+        // And it wipes and re-presents the whole buffer itself every repaint (its onRedrawNeeded hook), which
+        // a pruned repaint would leave half-blank - so it always repaints in full, whatever the default.
+        setRepaintMode(RepaintMode::Full);
     }
 
     PopupTool::~PopupTool() {

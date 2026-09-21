@@ -12,7 +12,9 @@
 #include "newui/viewstyle.h"
 #include "newui/reflection.h"
 
+#include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <cmath>
 #include <cstring>
 
@@ -69,9 +71,86 @@ namespace {
 
 }
 
+namespace {
+
+	// -1 = never set; otherwise a RepaintMode value.
+	std::atomic<int> g_repaintModeOverride{ -1 };
+
+	// -1 = never set; otherwise 0/1.
+	std::atomic<int> g_verifyRepaintOverride{ -1 };
+
+	newui::RepaintMode readEnvironmentRepaintMode() {
+		char buffer[32] = {};
+		const DWORD length = ::GetEnvironmentVariableA("NEWUI_REPAINT", buffer, DWORD(sizeof(buffer)));
+		newui::RepaintMode mode = newui::RepaintMode::Dirty;
+		if (length > 0 && length < sizeof(buffer)) {
+			newui::parseRepaintMode(buffer, mode);
+		}
+		return mode;
+	}
+
+	bool readEnvironmentVerifyRepaint() {
+		char buffer[8] = {};
+		const DWORD length = ::GetEnvironmentVariableA("NEWUI_VERIFY_REPAINT", buffer, DWORD(sizeof(buffer)));
+		return length > 0 && !(length == 1 && buffer[0] == '0');
+	}
+
+}
+
 namespace newui {
 
+	bool parseRepaintMode(const std::string& text, RepaintMode& out) {
+		std::string lower;
+		for (char c : text) {
+			lower += char(std::tolower(static_cast<unsigned char>(c)));
+		}
+		if (lower == "full") {
+			out = RepaintMode::Full;
+			return true;
+		}
+		if (lower == "dirty") {
+			out = RepaintMode::Dirty;
+			return true;
+		}
+		return false;
+	}
+
+	RepaintMode defaultRepaintMode() {
+		const int override = g_repaintModeOverride.load();
+		if (override >= 0) {
+			return static_cast<RepaintMode>(override);
+		}
+		static const RepaintMode fromEnvironment = readEnvironmentRepaintMode();
+		return fromEnvironment;
+	}
+
+	void setDefaultRepaintMode(RepaintMode mode) {
+		g_repaintModeOverride.store(static_cast<int>(mode));
+	}
+
+	bool defaultVerifyRepaint() {
+		const int override = g_verifyRepaintOverride.load();
+		if (override >= 0) {
+			return override != 0;
+		}
+		static const bool fromEnvironment = readEnvironmentVerifyRepaint();
+		return fromEnvironment;
+	}
+
+	void setDefaultVerifyRepaint(bool verify) {
+		g_verifyRepaintOverride.store(verify ? 1 : 0);
+	}
+
+	void RootView::setRepaintMode(RepaintMode mode) {
+		repaintMode_ = mode;
+	}
+
+	void RootView::setVerifyRepaint(bool verify) {
+		verifyRepaint_ = verify;
+	}
+
 	RootView::RootView(Frame* frame, const newui::Rect& bounds, const std::string& name) : parentFrame_(frame) {
+		surface_ = createPresentSurface(defaultPresentBackend());
 		bounds_ = bounds;
 		name_ = name;
 
@@ -85,6 +164,7 @@ namespace newui {
 
 	RootView::RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
 		: externalParentHwnd_(externalParentHwnd), externalInstanceHandle_(instanceHandle) {
+		surface_ = createPresentSurface(defaultPresentBackend());
 		bounds_ = bounds;
 		name_ = name;
 
@@ -118,7 +198,6 @@ namespace newui {
 		// idle queue after this point; this is what tells it to no-op
 		// instead of touching a destroyed RootView.
 		*aliveFlag_ = false;
-		releaseImageBuffer();
 	}
 
 	void RootView::setBounds(const Rect& bounds) {
@@ -130,7 +209,7 @@ namespace newui {
 
 		// Before onSizeChanged()/updateLayout()/resizeImageBuffer() below -
 		// none of those trigger the actual repaint synchronously except
-		// resizeImageBuffer() (via notifyRedrawNeeded()), but viewSized()
+		// resizeImageBuffer() (via repaint()), but viewSized()
 		// is for updating overlay_'s own extra state, not for painting, so
 		// it just needs to run before that eventual repaint, same as
 		// updateLayout() needing to run before it for childViews_.
@@ -139,7 +218,7 @@ namespace newui {
 		}
 
 		// updateLayout() before resizeImageBuffer(): the latter is what
-		// triggers the actual repaint (via notifyRedrawNeeded()), so
+		// triggers the actual repaint (via repaint()), so
 		// children need their new bounds in place first - otherwise
 		// that repaint would still walk childViews_ at their pre-resize
 		// positions/sizes.
@@ -156,93 +235,24 @@ namespace newui {
 			SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
 	}
 
-	void RootView::releaseImageBuffer() {
-		// Release the Blend2D wrapper before the DIB section it points
-		// into goes away.
-		imageBuffer_.reset();
+	void RootView::resizeImageBuffer(int width, int height) {
+		// The surface owns the pixel buffer and its zero-fill - see
+		// PresentSurface::resize()/GdiPresentSurface::resize().
+		if (!surface_->resize(width, height, imageBufferFormat())) {
+			return;
+		}
 
-		if (dibSection_ != nullptr) {
-			// Re-select whatever the memory DC originally had (a 1x1 mono
-			// stock bitmap) before deleting our own bitmap - deleting a
-			// bitmap while it's still selected into a DC is undefined
-			// behavior (GDI leaves the DC referencing a half-destroyed
-			// object), same reasoning as any other GDI select/delete pair.
-			::SelectObject(memDC_, dibSectionOldBitmap_);
-			::DeleteObject(dibSection_);
-			dibSection_ = nullptr;
-			dibSectionOldBitmap_ = nullptr;
-		}
-		if (memDC_ != nullptr) {
-			::DeleteDC(memDC_);
-			memDC_ = nullptr;
-		}
+		dirtyRect_ = newui::Rect( 0,0, width, height);
+		repaint();
 	}
 
-	void RootView::resizeImageBuffer(int width, int height) {
-		releaseImageBuffer();
+	PresentBackend RootView::presentBackend() const {
+		return surface_->backend();
+	}
 
-		if (width <= 0 || height <= 0) {
-			return;
-		}
-
-		// CreateDIBSection(), not a plain heap buffer wrapped by
-		// BLImage::create_from_data() (the original approach) - gives
-		// back memory GDI itself already recognizes as a real bitmap
-		// object, so paintImageBufferToWindow() can BitBlt() from it
-		// directly instead of re-describing a raw pointer via
-		// StretchDIBits() on every single WM_PAINT. BitBlt() between two
-		// already-realized GDI objects is the faster, more idiomatic
-		// Win32 path for a CPU-rendered-then-blitted buffer like this one
-		// (StretchDIBits() re-validates the BITMAPINFO header and
-		// negotiates pixel format on every call, even for a 1:1 unscaled
-		// blit). Blend2D still writes into this memory exactly as before
-		// - CreateDIBSection()'s ppvBits is plain, directly-writable
-		// pixel memory, just GDI-backed instead of a std::vector.
-		BITMAPINFO bmi = {};
-		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bmi.bmiHeader.biWidth = width;
-		bmi.bmiHeader.biHeight = -height; // negative = top-down, matching Blend2D's row order (see paintImageBufferToWindow())
-		bmi.bmiHeader.biPlanes = 1;
-		bmi.bmiHeader.biBitCount = 32;
-		bmi.bmiHeader.biCompression = BI_RGB;
-
-		void* bits = nullptr;
-		memDC_ = ::CreateCompatibleDC(nullptr);
-		if (memDC_ == nullptr) {
-			return;
-		}
-
-		dibSection_ = ::CreateDIBSection(memDC_, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-		if (dibSection_ == nullptr || bits == nullptr) {
-			::DeleteDC(memDC_);
-			memDC_ = nullptr;
-			dibSection_ = nullptr;
-			return;
-		}
-		dibSectionOldBitmap_ = static_cast<HBITMAP>(::SelectObject(memDC_, dibSection_));
-
-		// 32bpp is always DWORD-aligned regardless of width, so the DIB
-		// section's own row stride is exactly width * 4 - no padding to
-		// account for, same guarantee the original std::vector-backed
-		// buffer's comment already relied on.
-		const size_t stride = size_t(width) * 4;
-
-		// CreateDIBSection()'s returned bits are NOT guaranteed zeroed
-		// (same fact gfx::Image::createDibBackedImage()'s own comment
-		// notes, graphics.cpp) - harmless for the default opaque
-		// BL_FORMAT_XRGB32 case (dirtyRect_ below always covers the whole
-		// buffer on this first paint, and paintStyle()'s background fill
-		// is normally fully opaque anyway), but load-bearing for a
-		// BL_FORMAT_PRGB32 override (imageBufferFormat()) whose
-		// background is deliberately left transparent (e.g. PopupTool,
-		// popuptool.h) - without this, whatever pixels this DIB section
-		// happened to come back with would show through as opaque
-		// garbage instead of transparency wherever nothing paints.
-		std::memset(bits, 0, stride * size_t(height));
-
-		imageBuffer_.create_from_data(width, height, imageBufferFormat(), bits, intptr_t(stride));
-		dirtyRect_ = newui::Rect( 0,0, width, height);
-		notifyRedrawNeeded();
+	void RootView::setPresentBackend(PresentBackend backend) {
+		surface_ = createPresentSurface(backend);
+		surface_->setWindow(viewHwnd_);
 	}
 
 	BLFormat RootView::imageBufferFormat() const {
@@ -256,44 +266,20 @@ namespace newui {
 
 	void RootView::repaintNow() {
 		dirtyRect_ = snappedToPixels(this->getClientBounds());
-		notifyRedrawNeeded();
+		repaint();
 	}
 
 
 	void RootView::markDirty(const View* fromView, const newui::Rect& rect)
 	{
-
-		auto adjustedR = snappedToPixels(fromViewToLocal(fromView, rect));
-
-		if (dirtyRect_.empty()) {
-			dirtyRect_ = adjustedR;
-		}
-		else {
-			// Union of the two rects' bounding box - min of the near
-			// corners, max of the *far* corners (not max of the sizes
-			// independently, which only happens to give the right answer
-			// when both rects already share a top-left corner; two rects
-			// that don't - e.g. two different controls going dirty before
-			// the next flush - previously produced a box too small to
-			// actually cover both). Both inputs are already pixel-snapped
-			// (adjustedR just above, dirtyRect_ by this same function or
-			// by markDirty()/resizeImageBuffer()), so the result is too -
-			// min/max of already-integer values stays integer. This union
-			// is also the whole reason scheduleRepaint() below is useful,
-			// not just a performance nicety: without it, this branch was
-			// dead code (dirtyRect_ always got cleared by invalidate()
-			// before the next markDirty() call could ever see it non-
-			// empty - see HANDOFF.md) - now that repaint is genuinely
-			// deferred, several markDirty() calls really do accumulate
-			// here before the next actual repaint() consumes them.
-			float left = std::min(adjustedR.left(), dirtyRect_.left());
-			float top = std::min(adjustedR.top(), dirtyRect_.top());
-			float right = std::max(adjustedR.right(), dirtyRect_.right());
-			float bottom = std::max(adjustedR.bottom(), dirtyRect_.bottom());
-
-			dirtyRect_.setPos(Point(left, top));
-			dirtyRect_.setSize(Size(right - left, bottom - top));
-		}
+		// Union, not assignment: several markDirty() calls can land before the
+		// next repaint() consumes dirtyRect_ (scheduleRepaint() defers it to
+		// an idle pass), and each one's region has to survive - that
+		// accumulation is the whole reason the deferral coalesces a burst into
+		// one repaint. The incoming rect is snapped to whole pixels first (see
+		// snappedToPixels()), and dirtyRect_ already is, so the union stays
+		// integer.
+		dirtyRect_ = dirtyRect_.united(snappedToPixels(fromViewToLocal(fromView, rect)));
 		scheduleRepaint();
 	}
 
@@ -303,110 +289,126 @@ namespace newui {
 	}
 
 	void RootView::scheduleRepaint() {
-		if (repaintScheduled_) {
+		// repaintScheduled_ only flips true once a postIdle() task is
+		// genuinely queued to reset it, hence the RunLoop::current() check
+		// first - real, confirmed bug otherwise: a markDirty() before
+		// RunLoop::run() has started on this thread (e.g. building a
+		// Splitter/ScrollView/TreeView tree via addChild() before app.run())
+		// used to set the flag with no task ever queued to clear it, silently
+		// dropping every later scheduleRepaint() for the rest of the process's
+		// life (the window then only repainted via a real OS resize, which
+		// reaches repaint() through resizeImageBuffer() instead, bypassing
+		// this flag entirely).
+		if (repaintScheduled_ || !RunLoop::current()) {
 			return;
 		}
+		repaintScheduled_ = true;
 
-		// Captured by value - keeps the flag (and therefore the safety
-		// check below) alive independently of *this*, which this queued
-		// task may outlive - see aliveFlag_'s own doc comment (rootview.h).
+		// Captured by value - this queued task may outlive *this*, see
+		// aliveFlag_'s own doc comment (rootview.h).
 		std::shared_ptr<bool> alive = aliveFlag_;
-
-		// repaintScheduled_ only actually flips true once a postIdle() task
-		// is genuinely queued to reset it - real, confirmed bug otherwise:
-		// a caller that triggers markDirty() before RunLoop::run() has
-		// started on this thread (e.g. building a Splitter/ScrollView/
-		// TreeView tree via addChild() before app.run(), which cascades
-		// into ScrollView::handleSizeChanged() -> markDirty() while
-		// RunLoop::current() still reports "not started") used to set this
-		// flag regardless, permanently - with no postIdle task ever queued
-		// to flip it back, every later scheduleRepaint() call for the rest
-		// of the process's life hit the early-return above and did
-		// nothing, silently dropping every future repaint request (the
-		// window would then only ever repaint via a real OS resize, which
-		// reaches notifyRedrawNeeded() through resizeImageBuffer() instead,
-		// bypassing this flag entirely).
-		if (RunLoop::current()) {
-			repaintScheduled_ = true;
-			RunLoop::current().postIdle([this, alive]() {
-				if (*alive) {
-					repaintScheduled_ = false;
-					notifyRedrawNeeded();
+		RunLoop::current().postIdle([this, alive]() {
+			if (*alive) {
+				repaintScheduled_ = false;
+				// Nothing pending means whatever asked for this repaint was already covered by one that
+				// ran in the meantime (a resize repaints in full straight away) - don't do a second.
+				if (!dirtyRect_.empty()) {
+					repaint();
 				}
-				return true; // one-shot - done after running once
-			});
-		}
-	}
-
-	void RootView::notifyRedrawNeeded() {
-		onRedrawNeeded(*this);
-		repaint();
-
-		presentRepaintedBuffer();
+			}
+			return true; // one-shot - done after running once
+		});
 	}
 
 	void RootView::presentRepaintedBuffer() {
-		invalidate(&dirtyRect_);
+		surface_->present(dirtyRect_);
 	}
 
+	// Synchronously renders this RootView's tree into the surface, then hands the region that changed
+	// (dirtyRect_) to the screen: a blank buffer first, then onRedrawNeeded (for content that draws ahead of
+	// this RootView's own tree - see its doc comment, rootview.h), then the tree itself, then
+	// presentRepaintedBuffer(). Reached from scheduleRepaint()'s deferred idle task (markDirty()), and
+	// directly from resizeImageBuffer()/repaintNow().
+	//
+	// Either the whole window is re-rendered from a blank buffer (RepaintMode::Full) or just dirtyRect_ is
+	// (RepaintMode::Dirty) - in both cases blank first, then everything that shows there drawn fresh, so the
+	// result is a pure function of the tree's current state and repainting is idempotent: a repaint can't
+	// change a pixel of anything that hasn't itself changed. (It used to fill the root background only
+	// inside dirtyRect_ while still redrawing every child over the whole window, so anything outside the
+	// dirty rect - a transparent Label's anti-aliased glyph edges most visibly - was composited onto its own
+	// previous pixels on every unrelated repaint and thickened a little each time.) In Dirty mode the region
+	// is also all that's *touched*: every draw is clipped to it and children that miss it are skipped, which
+	// is what makes a small hover repaint cheap.
 	void RootView::repaint() {
-		if (memDC_ == nullptr) {
-			return;
+		const bool hasBuffer = surface_->isValid();
+		const newui::Rect whole = hasBuffer
+			? newui::Rect(0.0f, 0.0f, float(surface_->image().size().w), float(surface_->image().size().h))
+			: newui::Rect();
+
+		// A listener draws straight into the buffer, unclipped, ahead of the tree - it can't be confined to a
+		// region, so a RootView with one always repaints in full.
+		const bool prune = hasBuffer && repaintMode_ == RepaintMode::Dirty && onRedrawNeeded.empty();
+		const newui::Rect region = prune ? dirtyRect_.intersected(whole) : whole;
+		// Nothing to do when pruning and nothing is dirty (or it's all outside the buffer).
+		const bool render = hasBuffer && (!prune || (region.width() > 0.0f && region.height() > 0.0f));
+
+		// Blank first, and before onRedrawNeeded so a handler that draws ahead of the tree keeps what it
+		// draws (and, like everything else, redraws it fresh on the next repaint). Transparent black is exactly
+		// what a brand-new buffer holds, so the first frame is unchanged.
+		if (render) {
+			BLContext ctx(surface_->image());
+			if (prune) {
+				ctx.clip_to_rect(region);
+			}
+			ctx.clear_all();
+			ctx.end();
 		}
 
-		BLContext ctx(imageBuffer_);
+		onRedrawNeeded(*this);
 
-		// This RootView's own paintStyle()/paint() are clipped to
-		// dirtyRect_ in a narrow save()/restore() - safe because a
-		// RootView's own background fill is always a plain solid-color
-		// ctx.fill_rect() (ViewStyle::paint()'s base implementation, see
-		// viewstyle.h) - solid fills don't hit the Blend2D JIT bug
-		// pattern/image fills do. This scoping is what keeps a small
-		// hover-driven repaint from wiping (and needing to redraw) the
-		// *entire* window's background on every call.
-		if (!dirtyRect_.empty()) {			
-			ctx.save();
-			ctx.clip_to_rect(dirtyRect_);
-			paintStyle(ctx);
-			paint(ctx);
-			ctx.restore();
-		} else {
-			paintStyle(ctx);
-			paint(ctx);
+		if (render) {
+			paintTree(surface_->image(), region, prune);
+			if (prune && verifyRepaint_) {
+				verifyPrunedRepaint(region);
+			}
 		}
 
-		// paintChildren() walks every child unconditionally (no dirty-rect
-		// pruning) - see its own comment (view.h) for why: pruning was
-		// tried and produced real visual corruption, confirmed via a
-		// controlled test to be caused by the pruning itself rather than
-		// this level's own clip above (removing pruning while keeping
-		// this clip fixed it immediately). Each child still only ever
-		// clips to its own full bounds via the unchanged
-		// ctx.clip_to_rect() inside paintChildren() - never intersected
-		// with dirtyRect_ - which is also what keeps themed/pattern-filled
-		// children (uxtheme's DrawThemeBackground - ThemedViewStyle,
-		// viewstyle.h) away from a real Blend2D JIT bug
-		// ('is_rect_fill()' assertion) that a *combined* outer+child clip
-		// hits.
-		//
-		// Consequence worth knowing about: every child gets redrawn on
-		// every repaint anywhere in the tree, whether or not its own area
-		// was part of what actually changed - harmless (self-correcting)
-		// for a child with its own opaque backgroundFill, but NOT
-		// idempotent for one that paints translucent content (anti-
-		// aliased text, a partially-transparent themed part) with nothing
-		// opaque under it - repeated re-blending of the same edge pixels
-		// onto themselves subtly darkens/thickens them further each time
-		// instead of reproducing the same result. See LabelStyle's own
-		// doc comment (viewstyle.h) for the concrete fix (give it an
-		// opaque backgroundFill).
+		presentRepaintedBuffer();
+
+		// Here, not inside presentRepaintedBuffer(): that's an overridable
+		// hook (PopupTool replaces it outright), and whether dirtyRect_ gets
+		// consumed must not depend on what a subclass's version remembers to do.
+		dirtyRect_.clear();
+	}
+
+	void RootView::paintTree(BLImage& image, const newui::Rect& region, bool clip) {
+		BLContext ctx(image);
+
+		// The clip is set once, here, and every phase below stays inside it: View::paintChildren()'s
+		// pre/post-paint phases (focus ring, drop shadow) call restore_clipping(), but that only restores to
+		// the state saved just before - i.e. it drops the *child's own* clip, never an ancestor's.
+		if (clip) {
+			ctx.clip_to_rect(region);
+		}
+
+		paintStyle(ctx);
+		paint(ctx);
+
+		// paintChildren() walks every child (no dirty-rect pruning by the old whole-window walk - see its own
+		// comment (view.h) for why that was tried and reverted) but skips any whose whole drawn extent lies
+		// outside the part of this window that can be seen: here that's `region` - the whole window for a full
+		// repaint, just the dirty region when pruning. Each child still only ever clips to its own full bounds
+		// via the unchanged ctx.clip_to_rect() inside paintChildren(), which stays intersected with the region
+		// clip above - both whole-pixel rects, which is what keeps themed/pattern-filled children (uxtheme's
+		// DrawThemeBackground - ThemedViewStyle, viewstyle.h) away from a real Blend2D JIT bug
+		// ('is_rect_fill()' assertion) that a *combined* clip with fractional edges hits. Redrawing is safe
+		// because the region was blanked first: each child draws over a fresh backdrop, so one with no opaque
+		// background of its own (a plain Label) reproduces the same pixels every time.
+		visibleRegion_ = region;
+		hasVisibleRegion_ = true;
 		paintChildren(ctx);
 
-		// Last, on top of every child - see Overlay's own class comment
-		// (overlay.h). Unclipped, like paintChildren() above (not confined
-		// to dirtyRect_) for the same reason: this whole function only
-		// narrows to dirtyRect_ for this RootView's own paintStyle()/
-		// paint(), never for anything drawn afterward.
+		// Last, on top of every child - see Overlay's own class comment (overlay.h). Inside the same clip.
 		if (overlay_ && overlay_->visible()) {
 			overlay_->paint(ctx, Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height));
 		}
@@ -414,44 +416,85 @@ namespace newui {
 		ctx.end();
 	}
 
+	namespace {
+
+		// How far (per channel, out of 255) a pruned repaint's pixel may be from a full repaint's and still
+		// count as the same. Not zero on purpose: Blend2D's rasterizer clips vector edges (a glyph's
+		// outline, say) at the clip box with fixed-point rounding, so the pixels right along a clip edge can
+		// land a level off from an unclipped render of the same thing - measured at exactly 1 across 486
+		// clip regions cutting through text, buttons and sliders (RootViewPruning's edge test). That's
+		// invisible and can't accumulate (each repaint restarts from a blank region), whereas a change that
+		// wasn't invalidated shows up as a large difference.
+		constexpr int kVerifyTolerance = 2;
+
+		bool pixelsDiffer(const std::uint8_t* a, const std::uint8_t* b) {
+			for (int channel = 0; channel < 4; ++channel) {
+				const int delta = int(a[channel]) - int(b[channel]);
+				if (delta > kVerifyTolerance || delta < -kVerifyTolerance) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+	}
+
+	void RootView::verifyPrunedRepaint(const newui::Rect& region) {
+		BLImage& actual = surface_->image();
+		const int width = actual.size().w;
+		const int height = actual.size().h;
+
+		BLImage expected;
+		if (expected.create(width, height, actual.format()) != BL_SUCCESS) {
+			return;
+		}
+		{
+			BLContext ctx(expected);
+			ctx.clear_all();
+			ctx.end();
+		}
+		paintTree(expected, newui::Rect(0.0f, 0.0f, float(width), float(height)), false);
+
+		BLImageData a, e;
+		actual.get_data(&a);
+		expected.get_data(&e);
+		int differing = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+		for (int y = 0; y < height; ++y) {
+			const auto* rowA = static_cast<const std::uint8_t*>(a.pixel_data) + intptr_t(y) * a.stride;
+			const auto* rowE = static_cast<const std::uint8_t*>(e.pixel_data) + intptr_t(y) * e.stride;
+			if (std::memcmp(rowA, rowE, size_t(width) * 4) == 0) {
+				continue;
+			}
+			for (int x = 0; x < width; ++x) {
+				if (pixelsDiffer(rowA + size_t(x) * 4, rowE + size_t(x) * 4)) {
+					++differing;
+					minX = x < minX ? x : minX;
+					minY = y < minY ? y : minY;
+					maxX = x > maxX ? x : maxX;
+					maxY = y > maxY ? y : maxY;
+				}
+			}
+		}
+		if (differing == 0) {
+			return;
+		}
+
+		++verifyMismatches_;
+		char message[320];
+		std::snprintf(message, sizeof(message),
+			"newui: RootView '%s': the pruned repaint of (%d,%d %dx%d) left %d px that differ from a full repaint, within (%d,%d)-(%d,%d) - "
+			"something changed there without invalidating it\n",
+			name_.c_str(), int(region.left()), int(region.top()), int(region.width()), int(region.height()),
+			differing, minX, minY, maxX, maxY);
+		std::fputs(message, stderr);
+		::OutputDebugStringA(message);
+	}
+
 	void RootView::setOverlay(std::unique_ptr<Overlay> overlay) {
 		overlay_ = std::move(overlay);
 		if (overlay_) {
 			overlay_->viewSized(bounds_);
 		}
-	}
-
-	void RootView::paintImageBufferToWindow(HDC hdc, const newui::Rect& paintRect) {
-		if (memDC_ == nullptr) {
-			return;
-		}
-
-		BLImageData data;
-		imageBuffer_.get_data(&data);
-
-		auto pt = paintRect.pos();
-		auto sz = paintRect.size();
-
-		if ((pt.x >= data.size.w) || (pt.y >= data.size.h)) {
-			printf("rect pos outside of bounds, %d, %d\n", (int)pt.x, (int)pt.y);
-			return;
-		}
-
-		if (((pt.x + sz.width) > data.size.w) || ((pt.y + sz.height) > data.size.h)) {
-			printf("rect outside of bounds, %d, %d\n", (int)pt.x, (int)pt.y);
-			return;
-		}
-
-		// BitBlt from memDC_ (the DIB section Blend2D renders directly
-		// into - see resizeImageBuffer()), not StretchDIBits from a raw
-		// pointer - dest == src (both paintRect) is still an unscaled 1:1
-		// blit of just that sub-region, same as before, just via the
-		// faster GDI-to-GDI path (StretchDIBits re-validates a fresh
-		// BITMAPINFO header and negotiates pixel format on every call,
-		// even for a 1:1 blit between two already-realized bitmap
-		// objects BitBlt doesn't need to).
-		::BitBlt(hdc, (int)pt.x, (int)pt.y, (int)sz.width, (int)sz.height,
-			memDC_, (int)pt.x, (int)pt.y, SRCCOPY);
 	}
 
 	newui::Rect RootView::fromViewToLocal(const View* fromView, const newui::Rect& rect)
@@ -495,18 +538,17 @@ namespace newui {
 
 	void RootView::invalidate(const newui::Rect* invalidArea)
 	{
-		if (nullptr != viewHwnd_) {
-			RECT* paintRect = nullptr;
-			RECT r = {};
-			if (nullptr != invalidArea) {
-				r = *invalidArea;
-				paintRect = &r;
-			}
-
-::InvalidateRect(viewHwnd_, paintRect, FALSE);
-		}
-
-		dirtyRect_.clear();
+		// Through the surface, not a bare ::InvalidateRect(): that only asks Windows for a WM_PAINT,
+		// which does nothing at all under DXGI (paint() is passive there) - so anything that drew
+		// straight into getImageBuffer() and then called this was never shown. present() is the one
+		// backend-neutral "put this region of the buffer on the screen" (GDI: InvalidateRect; DXGI:
+		// upload the region and Present).
+		//
+		// And it deliberately leaves dirtyRect_ alone. That's a *different* thing - the region still
+		// waiting for the deferred repaint() (see markDirty()) - and it used to be cleared here too,
+		// so calling this while a repaint was pending made that repaint present an empty region and
+		// the pending update was never shown.
+		surface_->present(invalidArea != nullptr ? *invalidArea : newui::Rect(newui::Point(0.0f, 0.0f), bounds_.size()));
 	}
 
 	void RootView::invalidate() {
@@ -1161,15 +1203,15 @@ namespace newui {
 
 				newui::Rect paintRect = ps.rcPaint;
 
-				paintImageBufferToWindow(hdc, paintRect);
+				surface_->paint(hdc, paintRect);
 				::EndPaint(viewHwnd_, &ps);
 				result = true;
 			}
 			break;
 
 			case WM_ERASEBKGND: {
-				// paintImageBufferToWindow() (WM_PAINT above) always covers
-				// the whole client area from imageBuffer_ - a separate erase
+				// surface_->paint() (WM_PAINT above) always covers
+				// the whole client area from the surface's buffer - a separate erase
 				// first just flashes the window class's own background brush
 				// before that real paint overwrites it, causing visible
 				// flicker on every resize/redraw.
@@ -1482,6 +1524,7 @@ namespace newui {
 
 			// Save the handle inside the object
 			thisPtr->viewHwnd_ = hWnd;
+			thisPtr->surface_->setWindow(hWnd);
 		}
 		else {
 			thisPtr = reinterpret_cast<RootView*>(::GetWindowLongPtr(hWnd, GWLP_USERDATA));
@@ -1632,6 +1675,7 @@ namespace newui {
 			}
 			DestroyWindow(viewHwnd_);
 			viewHwnd_ = nullptr;
+			surface_->setWindow(nullptr);
 		}
 	}
 

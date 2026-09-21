@@ -6,6 +6,13 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
 // RootView's mouse/keyboard dispatch methods (mouseDown()/mouseMove()/etc.,
 // keyEvent()) are protected, not public - purely for testability, so a
 // test-local subclass can drive them directly without a real HWND/message
@@ -32,6 +39,10 @@ public:
     using newui::RootView::keyEvent;
     using newui::RootView::cursorTargetAt;
     using newui::RootView::dirtyRect;
+    using newui::RootView::repaint;
+    using newui::RootView::repaintNow;
+    using newui::RootView::setRepaintMode;
+    using newui::RootView::setVerifyRepaint;
 };
 
 // Delegate::FunctionPtr is a plain function pointer (no capturing lambdas),
@@ -1814,7 +1825,7 @@ TEST(RootViewSubViewRemoval, RemovingNestedGrandchildClearsHoverCaptureFocus) {
 
 TEST(RootViewChildListChanges, AddingAChildInvalidatesTheParent) {
     auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     auto* child = new newui::SubView();
@@ -1836,7 +1847,7 @@ TEST(RootViewChildListChanges, RemovingAChildInvalidatesTheVacatedArea) {
     child->setVisible(true);
     root->addChild(child);
 
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     root->removeChild(child);
@@ -1862,7 +1873,7 @@ TEST(RootViewChildListChanges, ReorderingAChildInvalidatesTheParent) {
     second->setVisible(true);
     root->addChild(second);
 
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     root->reorderChild(first, 1);
@@ -1888,13 +1899,13 @@ TEST(RootViewChildListChanges, TogglingAChildsVisibilityInvalidatesTheParent) {
     child->setVisible(true);
     root->addChild(child);
 
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     child->setVisible(false);
     EXPECT_FALSE(root->dirtyRect().empty()) << "hiding a child must invalidate where it used to be drawn";
 
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     child->setVisible(true);
@@ -1926,7 +1937,7 @@ TEST(RootViewChildListChanges, FocusingAChildInvalidatesEnoughRoomForTheDefaultF
     child->setAcceptsFocus(true);
     root->addChild(child);
 
-    root->invalidate();
+    root->repaint();
     ASSERT_TRUE(root->dirtyRect().empty());
 
     root->setFocusedSubView(child);
@@ -2383,4 +2394,864 @@ TEST(DesignTimeFlagsTest, ExplicitGetSetPairsEachTouchOnlyTheirOwnBit) {
     view.setInternal(false);
     view.setReadOnly(false);
     EXPECT_EQ(view.designTimeFlags(), newui::DesignTimeFlags::DesignTime);
+}
+
+// ---------------------------------------------------------------------------
+// RootView::markDirty(fromView, rect) accumulates into dirtyRect_ via
+// Rect::united() (geometry.h), and repaint() - not the overridable
+// presentRepaintedBuffer() hook - is what consumes it afterward.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewMarkDirty, SeparateRegionsAccumulateIntoTheirBoundingBox) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();
+    ASSERT_TRUE(root->dirtyRect().empty());
+
+    root->markDirty(root, newui::Rect(0, 0, 10, 10));
+    root->markDirty(root, newui::Rect(100, 120, 20, 10));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(0, 0, 120, 130));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, FirstRegionIsTakenAsIs) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();
+
+    root->markDirty(root, newui::Rect(40, 50, 20, 30));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, FractionalRegionsAreSnappedOutwardToWholePixels) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();
+
+    root->markDirty(root, newui::Rect(10.25f, 20.75f, 30.5f, 40.5f));  // right 40.75, bottom 61.25
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(10, 20, 31, 42));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewMarkDirty, AnEmptyRegionDoesNotStretchTheDirtyRectToTheOrigin) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();
+    root->markDirty(root, newui::Rect(50, 50, 10, 10));
+
+    root->markDirty(root, newui::Rect(0, 0, 0, 0));
+
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(50, 50, 10, 10));
+
+    root->destroy();
+    delete root;
+}
+
+namespace {
+
+// Overrides presentRepaintedBuffer() the way PopupTool does - replaces it outright, never
+// calling the base - and records what dirtyRect_ held while it ran.
+class PresentOverridingRootView : public newui::RootView {
+public:
+    using newui::RootView::RootView;
+    using newui::RootView::repaintNow;
+    using newui::RootView::repaint;
+    using newui::RootView::dirtyRect;
+
+    int presentCalls = 0;
+    newui::Rect dirtyDuringPresent;
+
+    void presentRepaintedBuffer() override {
+        ++presentCalls;
+        dirtyDuringPresent = dirtyRect();
+    }
+};
+
+}
+
+TEST(RootViewRepaint, ConsumesDirtyRectEvenWhenASubclassReplacesThePresentHook) {
+    // Regression: dirtyRect_ used to be cleared inside RootView's own presentRepaintedBuffer(),
+    // so a subclass that overrode it (PopupTool) never cleared it - its dirtyRect_ just kept
+    // growing for the life of the window.
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    root->repaintNow();
+
+    EXPECT_EQ(root->presentCalls, 1);
+    EXPECT_TRUE(root->dirtyRect().empty());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewRepaint, PresentHookStillSeesTheRegionThatWasJustRepainted) {
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    root->repaintNow();
+
+    // repaintNow() marks the whole client area dirty first.
+    EXPECT_EQ(root->dirtyDuringPresent, newui::Rect(0, 0, 200, 200));
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewRepaint, EachRepaintStartsFromAFreshDirtyRect) {
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaintNow();
+
+    root->markDirty(root, newui::Rect(10, 10, 5, 5));
+
+    // Not the previous repaint's whole-window region, unioned in forever.
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(10, 10, 5, 5));
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// Repainting must be idempotent: a repaint of a narrow dirty region can't change a single pixel
+// anywhere else, and the result must equal what a from-scratch full repaint produces. It wasn't -
+// RootView::repaint() filled the root background only inside dirtyRect_ but redrew every child over
+// the whole window, so anything outside the dirty rect (a transparent Label's anti-aliased glyph
+// edges, most visibly) was re-blended onto its own previous pixels on every unrelated repaint and
+// thickened a little each time.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Every byte of the root's whole pixel buffer (rows packed, no stride padding).
+std::vector<std::uint8_t> bufferBytes(newui::RootView& root) {
+    BLImageData data;
+    root.getImageBuffer().get_data(&data);
+    std::vector<std::uint8_t> bytes;
+    for (int y = 0; y < data.size.h; ++y) {
+        const auto* row = static_cast<const std::uint8_t*>(data.pixel_data) + intptr_t(y) * data.stride;
+        bytes.insert(bytes.end(), row, row + size_t(data.size.w) * 4);
+    }
+    return bytes;
+}
+
+// The same, for one rectangle of it.
+std::vector<std::uint8_t> regionBytes(newui::RootView& root, int x, int y, int w, int h) {
+    BLImageData data;
+    root.getImageBuffer().get_data(&data);
+    std::vector<std::uint8_t> bytes;
+    for (int row = y; row < y + h; ++row) {
+        const auto* p = static_cast<const std::uint8_t*>(data.pixel_data) + intptr_t(row) * data.stride + size_t(x) * 4;
+        bytes.insert(bytes.end(), p, p + size_t(w) * 4);
+    }
+    return bytes;
+}
+
+// The largest per-channel difference between two buffers (INT_MAX if they aren't the same size).
+int maxChannelDelta(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) {
+    if (a.size() != b.size()) {
+        return 1 << 30;
+    }
+    int largest = 0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        const int delta = std::abs(int(a[i]) - int(b[i]));
+        largest = delta > largest ? delta : largest;
+    }
+    return largest;
+}
+
+// Pruned and full repaints agree to within this per channel - see RootView::verifyPrunedRepaint()'s
+// tolerance for why it isn't zero (a clip edge through an anti-aliased outline can be a level off).
+constexpr int kPruneTolerance = 2;
+
+bool hasMoreThanOnePixelValue(const std::vector<std::uint8_t>& bytes) {
+    for (size_t i = 4; i + 3 < bytes.size(); i += 4) {
+        if (std::memcmp(&bytes[i], &bytes[0], 4) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A root with one plain (transparent-by-default) Label, painted once in full. Sizing the buffer via
+// setBounds() is what triggers the first paint, headlessly.
+struct LabelledRoot {
+    TestableRootView* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "root");
+    newui::Label* label = new newui::Label();
+
+    LabelledRoot() {
+        label->setText("Hello, thickening");
+        label->setBounds(newui::Rect(10, 10, 160, 24));
+        root->addChild(label);
+        root->setBounds(newui::Rect(0, 0, 200, 100));
+    }
+
+    ~LabelledRoot() {
+        root->destroy();
+        delete root;
+    }
+
+    // Repaint only a small region well away from the label.
+    void repaintElsewhere(int times) {
+        for (int i = 0; i < times; ++i) {
+            root->markDirty(root, newui::Rect(180, 80, 10, 10));
+            root->repaint();
+        }
+    }
+};
+
+}
+
+TEST(RootViewRepaintIdempotence, ATransparentLabelDoesNotThickenWhenSomethingElseRepaints) {
+    LabelledRoot fixture;
+    ASSERT_FALSE(fixture.root->getImageBuffer().is_empty());
+    const auto before = regionBytes(*fixture.root, 10, 10, 160, 24);
+    ASSERT_TRUE(hasMoreThanOnePixelValue(before)) << "premise: the label's text was actually drawn";
+
+    fixture.repaintElsewhere(5);
+
+    EXPECT_EQ(regionBytes(*fixture.root, 10, 10, 160, 24), before)
+        << "the label's pixels changed although only a region far away was repainted";
+}
+
+TEST(RootViewRepaintIdempotence, ANarrowRepaintLeavesTheWholeBufferEqualToAFullRepaint) {
+    LabelledRoot fixture;
+    fixture.repaintElsewhere(5);
+    const auto afterNarrowRepaints = bufferBytes(*fixture.root);
+
+    fixture.root->repaintNow();  // from scratch: whole client area
+
+    EXPECT_EQ(bufferBytes(*fixture.root), afterNarrowRepaints);
+}
+
+TEST(RootViewRepaintIdempotence, RepaintingTheLabelsOwnRegionRepeatedlyIsAlsoStable) {
+    LabelledRoot fixture;
+    const auto before = regionBytes(*fixture.root, 10, 10, 160, 24);
+
+    for (int i = 0; i < 5; ++i) {
+        fixture.root->markDirty(fixture.root, newui::Rect(10, 10, 160, 24));
+        fixture.root->repaint();
+    }
+
+    EXPECT_EQ(regionBytes(*fixture.root, 10, 10, 160, 24), before);
+}
+
+TEST(RootViewRepaintIdempotence, ATranslucentRootBackgroundDoesNotAccumulateAcrossRepaints) {
+    // A background with alpha < 1 composites over whatever's already in the buffer - so unless the
+    // buffer starts every repaint blank, each repaint of a region darkens/lightens it further.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "root");
+    root->style().setBackgroundColor(newui::Color(1.0f, 0.0f, 0.0f, 0.5f));
+    root->setBounds(newui::Rect(0, 0, 200, 100));
+    ASSERT_FALSE(root->getImageBuffer().is_empty());
+    const auto before = bufferBytes(*root);
+
+    for (int i = 0; i < 4; ++i) {
+        root->markDirty(root, newui::Rect(150, 50, 40, 40));
+        root->repaint();
+    }
+
+    EXPECT_EQ(bufferBytes(*root), before);
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// RootView::invalidate() shows a region of the buffer; it is not a repaint request and must not
+// disturb the region a pending markDirty() repaint still owes the screen.
+// ---------------------------------------------------------------------------
+
+TEST(RootViewInvalidate, DoesNotDropARegionThatIsStillWaitingToBeRepainted) {
+    // Regression: invalidate() used to clear dirtyRect_, so the deferred repaint that markDirty() had
+    // scheduled then presented an empty region and the update was never shown.
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();  // start from a clean dirtyRect_
+    root->markDirty(root, newui::Rect(40, 50, 20, 30));
+    ASSERT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30));
+
+    root->invalidate();
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30)) << "invalidate() with no argument";
+
+    newui::Rect region(0, 0, 10, 10);
+    root->invalidate(&region);
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30)) << "invalidate(rect)";
+
+    root->invalidate(root, &region);
+    EXPECT_EQ(root->dirtyRect(), newui::Rect(40, 50, 20, 30)) << "invalidate(fromView, rect)";
+
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewInvalidate, ThePendingRepaintStillPresentsItsRegionAfterAnInvalidate) {
+    auto* root = new PresentOverridingRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    root->repaint();
+    root->markDirty(root, newui::Rect(40, 50, 20, 30));
+
+    root->invalidate();
+    root->repaint();  // what the scheduled idle task runs
+
+    EXPECT_EQ(root->dirtyDuringPresent, newui::Rect(40, 50, 20, 30));
+
+    root->destroy();
+    delete root;
+}
+
+// ---------------------------------------------------------------------------
+// Opt-in benchmark - DISABLED_ so it never runs in the normal suite. Run it in a *Release* build:
+//   newui_tests.exe --gtest_also_run_disabled_tests --gtest_filter="RootViewRepaintBenchmark*"
+// Blend2D under Debug is many times slower and says nothing about real cost.
+//
+// It answers "is redrawing views that don't need redrawing actually expensive?": RootView::repaint()
+// redraws the whole tree every time (see its comment), so this times a repaint triggered by a tiny
+// dirty region - what a hover produces - against trees of different sizes, with everything inside the
+// window and with lots of views entirely outside it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// `onScreen` views laid out in a grid inside a 500x720 window, then `offScreen` more far below it.
+// A mix of the cheap-and-common controls (Label, Button, Progress, Slider).
+struct BenchTree {
+    TestableRootView* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "bench");
+
+    BenchTree(int onScreen, int offScreen) {
+        const int cols = 8;
+        for (int i = 0; i < onScreen + offScreen; ++i) {
+            newui::SubView* view = nullptr;
+            switch (i % 4) {
+            case 0: { auto* l = new newui::Label(); l->setText("Label " + std::to_string(i)); view = l; break; }
+            case 1: { auto* b = new newui::Button(); b->setText("Button"); view = b; break; }
+            case 2: { auto* p = new newui::Progress(); p->setValue(0.4); view = p; break; }
+            default: { view = new newui::Slider(); break; }
+            }
+            const int row = i / cols;
+            const float y = i < onScreen ? float(row * 18) : 800.0f + float((i - onScreen) / cols) * 18.0f;
+            view->setBounds(newui::Rect(float((i % cols) * 60), y, 58.0f, 16.0f));
+            view->setVisible(true);
+            root->addChild(view);
+        }
+        root->setBounds(newui::Rect(0, 0, 500, 720));
+    }
+
+    ~BenchTree() {
+        root->destroy();
+        delete root;
+    }
+
+    // Average milliseconds for a repaint driven by a small (button-sized) dirty region, in the given mode.
+    double smallRepaintMs(newui::RepaintMode mode, int iterations) {
+        root->setRepaintMode(mode);
+        root->setVerifyRepaint(false);
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iterations; ++i) {
+            root->markDirty(root, newui::Rect(10, 10, 60, 18));
+            root->repaint();
+        }
+        const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
+        return elapsed.count() / iterations;
+    }
+};
+
+}
+
+TEST(RootViewRepaintBenchmark, DISABLED_CostOfASmallRepaintByTreeSize) {
+    std::printf("\n  %-34s %14s %14s\n", "tree", "full (ms)", "dirty (ms)");
+    auto row = [](const std::string& name, BenchTree& tree, int iterations) {
+        std::printf("  %-34s %14.3f %14.3f\n", name.c_str(),
+            tree.smallRepaintMs(newui::RepaintMode::Full, iterations), tree.smallRepaintMs(newui::RepaintMode::Dirty, iterations));
+    };
+    for (int onScreen : { 0, 20, 80, 320 }) {
+        BenchTree tree(onScreen, 0);
+        row(std::to_string(onScreen) + " views, all on screen", tree, 200);
+    }
+    for (int offScreen : { 500, 2000 }) {
+        BenchTree tree(80, offScreen);
+        row("80 on screen + " + std::to_string(offScreen) + " far outside", tree, 100);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// View::paintChildren() skips a child whose whole drawn extent (its bounds plus the room its focus ring/
+// drop shadow need - computePrePaintBounds()) lies outside the part of its parent that can currently be
+// seen. Nothing visible may change: a child that's culled was going to be clipped away entirely anyway.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Counts how many times it actually gets painted.
+class PaintCounter : public newui::SubView {
+public:
+    int paints = 0;
+    void paint(BLContext&) override { ++paints; }
+};
+
+// A visible PaintCounter with a plain ViewStyle (so it has a focus-ring pad, like any real control).
+PaintCounter* addCounter(newui::View& parent, const newui::Rect& bounds, float elevation = 0.0f) {
+    auto* view = new PaintCounter();
+    auto style = std::make_unique<newui::ViewStyle>();
+    style->setElevation(elevation);
+    view->setStyle(std::move(style));
+    view->setBounds(bounds);
+    view->setVisible(true);
+    parent.addChild(view);
+    return view;
+}
+
+// A 200x100 root, laid out and painted once.
+struct CullFixture {
+    TestableRootView* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "cull");
+
+    void show() { root->setBounds(newui::Rect(0, 0, 200, 100)); }
+
+    ~CullFixture() {
+        root->destroy();
+        delete root;
+    }
+};
+
+}
+
+TEST(RootViewChildCulling, AChildEntirelyOutsideTheWindowIsNotPainted) {
+    CullFixture f;
+    auto* inside = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    auto* right = addCounter(*f.root, newui::Rect(300, 10, 20, 20));
+    auto* below = addCounter(*f.root, newui::Rect(10, 300, 20, 20));
+    auto* left = addCounter(*f.root, newui::Rect(-100, 10, 20, 20));
+    auto* above = addCounter(*f.root, newui::Rect(10, -100, 20, 20));
+    f.show();
+
+    EXPECT_GE(inside->paints, 1) << "the visible child must still be painted";
+    EXPECT_EQ(right->paints, 0);
+    EXPECT_EQ(below->paints, 0);
+    EXPECT_EQ(left->paints, 0);
+    EXPECT_EQ(above->paints, 0);
+}
+
+TEST(RootViewChildCulling, AChildPartlyInsideTheWindowIsStillPainted) {
+    CullFixture f;
+    auto* overRight = addCounter(*f.root, newui::Rect(190, 10, 30, 20));
+    auto* overBottom = addCounter(*f.root, newui::Rect(10, 90, 20, 30));
+    auto* overTopLeft = addCounter(*f.root, newui::Rect(-10, -10, 30, 30));
+    f.show();
+
+    EXPECT_GE(overRight->paints, 1);
+    EXPECT_GE(overBottom->paints, 1);
+    EXPECT_GE(overTopLeft->paints, 1);
+}
+
+TEST(RootViewChildCulling, ARectJustPastTheEdgeIsCulledButItsFocusRingPadKeepsANearMissPainted) {
+    CullFixture f;
+    // Every ViewStyle reserves a few pixels for a focus ring, drawn outside the view's bounds and NOT
+    // clipped to them - so a child a pixel outside the window can still put ring pixels inside it.
+    auto* nearMiss = addCounter(*f.root, newui::Rect(201, 10, 20, 20));
+    auto* farMiss = addCounter(*f.root, newui::Rect(230, 10, 20, 20));
+    f.show();
+
+    EXPECT_GE(nearMiss->paints, 1) << "its ring pad reaches into the window";
+    EXPECT_EQ(farMiss->paints, 0);
+}
+
+TEST(RootViewChildCulling, ADropShadowThatReachesIntoTheWindowKeepsItsChildPainted) {
+    CullFixture f;
+    // Same position, only the elevation differs: the shadow's larger pad reaches back into the window.
+    auto* flat = addCounter(*f.root, newui::Rect(212, 10, 20, 20), 0.0f);
+    auto* raised = addCounter(*f.root, newui::Rect(212, 40, 20, 20), 16.0f);
+    f.show();
+
+    EXPECT_EQ(flat->paints, 0);
+    EXPECT_GE(raised->paints, 1) << "a large elevation's drop shadow extends well past the child's bounds";
+}
+
+TEST(RootViewChildCulling, ScrollingTheContentChangesWhichChildrenArePainted) {
+    CullFixture f;
+    auto* content = addCounter(*f.root, newui::Rect(0, 0, 200, 100));
+    auto* top = addCounter(*content, newui::Rect(10, 10, 20, 20));
+    auto* farDown = addCounter(*content, newui::Rect(10, 500, 20, 20));
+    f.show();
+    ASSERT_GE(top->paints, 1);
+    ASSERT_EQ(farDown->paints, 0) << "premise: not scrolled into view yet";
+
+    content->setOrigin(newui::Point(0, 450));  // scroll: content y=450..550 is now what's shown
+    top->paints = farDown->paints = 0;
+    f.root->repaintNow();
+
+    EXPECT_GE(farDown->paints, 1) << "scrolled into view";
+    EXPECT_EQ(top->paints, 0) << "scrolled out of view";
+}
+
+TEST(RootViewChildCulling, AGrandchildOutsideItsParentsBoundsIsCulledEvenInsideTheWindow) {
+    CullFixture f;
+    auto* container = addCounter(*f.root, newui::Rect(10, 10, 100, 50));
+    auto* inside = addCounter(*container, newui::Rect(5, 5, 20, 20));
+    // x=150 is inside the 200-wide *window* but outside the 100-wide *container*, whose own clip hides it.
+    auto* outsideParent = addCounter(*container, newui::Rect(150, 5, 20, 20));
+    f.show();
+
+    EXPECT_GE(inside->paints, 1);
+    EXPECT_EQ(outsideParent->paints, 0);
+}
+
+TEST(RootViewChildCulling, ATreeWithManyOffscreenChildrenRendersExactlyLikeOneWithout) {
+    // The real guarantee: culling can't change a single pixel. Same on-screen content, one tree also
+    // carrying children scattered outside the window (labels, so there's real text to draw).
+    auto build = [](bool withOffscreen) {
+        auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "eq");
+        auto addLabel = [root](const char* text, float x, float y) {
+            auto* label = new newui::Label();
+            label->setText(text);
+            label->setBounds(newui::Rect(x, y, 90, 22));
+            root->addChild(label);
+        };
+        addLabel("First", 10, 10);
+        addLabel("Second", 10, 40);
+        addLabel("Third", 100, 70);
+        if (withOffscreen) {
+            for (int i = 0; i < 20; ++i) {
+                addLabel("Offscreen", 300.0f + float(i) * 10, 10);
+                addLabel("Below", 10, 200.0f + float(i) * 25);
+                addLabel("Left", -400.0f, float(i) * 25);
+            }
+        }
+        root->setBounds(newui::Rect(0, 0, 200, 100));
+        return root;
+    };
+
+    TestableRootView* plain = build(false);
+    TestableRootView* crowded = build(true);
+
+    EXPECT_EQ(bufferBytes(*crowded), bufferBytes(*plain));
+
+    plain->destroy();
+    delete plain;
+    crowded->destroy();
+    delete crowded;
+}
+
+// ---------------------------------------------------------------------------
+// RepaintMode::Dirty - repaint() re-renders only dirtyRect_: blank it, paint the background and just the
+// children that overlap it, everything clipped to it. The one thing that must never happen is a pruned
+// repaint leaving the screen different from what a full repaint would.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class ColorView : public newui::SubView {
+public:
+    BLRgba32 color = BLRgba32(0xFFFF0000);
+    void paint(BLContext& ctx) override {
+        ctx.set_fill_style(color);
+        ctx.fill_rect(BLRect(0, 0, bounds().size().width, bounds().size().height));
+    }
+};
+
+newui::SyncReturn NoopRedrawNeeded(newui::RootView&) {
+    return newui::SyncReturn::Handled;
+}
+
+struct PruneFixture {
+    TestableRootView* root = new TestableRootView(nullptr, newui::Rect(0, 0, 10, 10), "prune");
+
+    PruneFixture() {
+        // Independent of NEWUI_REPAINT / NEWUI_VERIFY_REPAINT in the environment: verification renders a full
+        // frame after each pruned repaint, which would inflate the paint counts these tests read.
+        root->setRepaintMode(newui::RepaintMode::Dirty);
+        root->setVerifyRepaint(false);
+    }
+
+    ~PruneFixture() {
+        root->destroy();
+        delete root;
+    }
+
+    void show() { root->setBounds(newui::Rect(0, 0, 200, 100)); }
+
+    // Every byte of the buffer as a *full* repaint leaves it; the mode is put back afterwards.
+    std::vector<std::uint8_t> fullRenderBytes() {
+        const newui::RepaintMode mode = root->repaintMode();
+        root->setRepaintMode(newui::RepaintMode::Full);
+        root->repaintNow();
+        auto bytes = bufferBytes(*root);
+        root->setRepaintMode(mode);
+        return bytes;
+    }
+};
+
+// A tree with text, a coloured view, an elevated view (drop shadow) and containers - enough variety
+// for the pruned-equals-full checks below.
+struct PruneTree : PruneFixture {
+    newui::Label* label = new newui::Label();
+    ColorView* colored = new ColorView();
+    newui::SubView* content = new newui::SubView();
+    ColorView* scrolled = new ColorView();
+
+    PruneTree() {
+        label->setText("Hello, pruning");
+        label->setBounds(newui::Rect(10, 10, 100, 22));
+        root->addChild(label);
+
+        colored->setBounds(newui::Rect(120, 10, 40, 30));
+        colored->setVisible(true);
+        root->addChild(colored);
+
+        content->setBounds(newui::Rect(10, 45, 120, 50));
+        content->setVisible(true);
+        root->addChild(content);
+        scrolled->setBounds(newui::Rect(5, 5, 30, 20));
+        scrolled->color = BLRgba32(0xFF00AA00);
+        scrolled->setVisible(true);
+        content->addChild(scrolled);
+
+        show();
+        root->repaintNow();  // a known-good, fully painted starting point
+    }
+
+    // Repaint what the last change invalidated, and check the result is exactly what a full repaint gives.
+    void expectPrunedEqualsFull(const char* what) {
+        root->repaint();
+        const auto pruned = bufferBytes(*root);
+        EXPECT_LE(maxChannelDelta(pruned, fullRenderBytes()), kPruneTolerance) << "after: " << what;
+    }
+};
+
+}
+
+TEST(RootViewPruning, ADirtyRepaintOnlyPaintsTheChildrenThatOverlapTheDirtyRegion) {
+    PruneFixture f;
+    auto* a = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    auto* b = addCounter(*f.root, newui::Rect(100, 10, 20, 20));
+    auto* c = addCounter(*f.root, newui::Rect(10, 60, 20, 20));
+    f.show();
+    a->paints = b->paints = c->paints = 0;
+
+    f.root->markDirty(f.root, newui::Rect(5, 5, 30, 30));  // covers only `a`
+    f.root->repaint();
+
+    EXPECT_GE(a->paints, 1);
+    EXPECT_EQ(b->paints, 0);
+    EXPECT_EQ(c->paints, 0);
+}
+
+TEST(RootViewPruning, FullModeStillPaintsEverythingWhateverTheDirtyRegion) {
+    PruneFixture f;
+    f.root->setRepaintMode(newui::RepaintMode::Full);
+    auto* a = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    auto* b = addCounter(*f.root, newui::Rect(100, 10, 20, 20));
+    f.show();
+    a->paints = b->paints = 0;
+
+    f.root->markDirty(f.root, newui::Rect(5, 5, 30, 30));
+    f.root->repaint();
+
+    EXPECT_GE(a->paints, 1);
+    EXPECT_GE(b->paints, 1);
+}
+
+TEST(RootViewPruning, NothingIsPaintedWhenNothingIsDirty) {
+    PruneFixture f;
+    auto* a = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    f.show();
+    f.root->repaint();  // consumes whatever was pending
+    a->paints = 0;
+
+    f.root->repaint();
+
+    EXPECT_EQ(a->paints, 0);
+}
+
+TEST(RootViewPruning, AnOnRedrawNeededListenerForcesAFullRepaint) {
+    // A listener draws straight into the buffer, unclipped - it can't be limited to a region.
+    PruneFixture f;
+    f.root->onRedrawNeeded += NoopRedrawNeeded;
+    auto* a = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    auto* b = addCounter(*f.root, newui::Rect(100, 10, 20, 20));
+    f.show();
+    a->paints = b->paints = 0;
+
+    f.root->markDirty(f.root, newui::Rect(5, 5, 30, 30));
+    f.root->repaint();
+
+    EXPECT_GE(b->paints, 1) << "with a listener the whole tree repaints";
+}
+
+TEST(RootViewPruning, PixelsOutsideTheDirtyRegionAreNeverTouchedNotEvenByFocusRingsOrShadows) {
+    PruneFixture f;
+    auto* raised = addCounter(*f.root, newui::Rect(90, 30, 40, 40), 16.0f);  // drop shadow reaches far past its bounds
+    auto* focused = addCounter(*f.root, newui::Rect(55, 60, 30, 20));        // focus ring draws outside its bounds
+    auto* label = new newui::Label();
+    label->setText("Hello");
+    label->setBounds(newui::Rect(10, 10, 90, 22));
+    f.root->addChild(label);
+    (void)raised;
+    f.show();
+    f.root->setFocusedSubView(focused);
+    f.root->repaintNow();
+    const auto before = bufferBytes(*f.root);
+
+    // Scribble a sentinel colour everywhere OUTSIDE the region that will be repainted.
+    const int regionLeft = 60, regionTop = 20, regionRight = 130, regionBottom = 80;
+    {
+        BLImageData data;
+        f.root->getImageBuffer().get_data(&data);
+        for (int y = 0; y < data.size.h; ++y) {
+            auto* row = reinterpret_cast<std::uint32_t*>(static_cast<std::uint8_t*>(data.pixel_data) + intptr_t(y) * data.stride);
+            for (int x = 0; x < data.size.w; ++x) {
+                const bool inside = x >= regionLeft && x < regionRight && y >= regionTop && y < regionBottom;
+                if (!inside) {
+                    row[x] = 0xFFFF00FFu;
+                }
+            }
+        }
+    }
+
+    f.root->markDirty(f.root, newui::Rect(float(regionLeft), float(regionTop), float(regionRight - regionLeft), float(regionBottom - regionTop)));
+    f.root->repaint();
+
+    BLImageData after;
+    f.root->getImageBuffer().get_data(&after);
+    int touchedOutside = 0, wrongInside = 0;
+    for (int y = 0; y < after.size.h; ++y) {
+        const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(after.pixel_data) + intptr_t(y) * after.stride);
+        for (int x = 0; x < after.size.w; ++x) {
+            const bool inside = x >= regionLeft && x < regionRight && y >= regionTop && y < regionBottom;
+            if (!inside && row[x] != 0xFFFF00FFu) {
+                ++touchedOutside;
+            }
+            if (inside) {
+                const auto* was = &before[(size_t(y) * size_t(after.size.w) + size_t(x)) * 4];
+                const auto* now = reinterpret_cast<const std::uint8_t*>(&row[x]);
+                for (int c = 0; c < 4; ++c) {
+                    if (std::abs(int(now[c]) - int(was[c])) > kPruneTolerance) {
+                        ++wrongInside;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(touchedOutside, 0) << "pixels outside the dirty region were modified";
+    EXPECT_EQ(wrongInside, 0) << "inside the region must match a full repaint of the same state";
+}
+
+TEST(RootViewPruning, ChangingATextLabelPrunesToTheSameResultAsAFullRepaint) {
+    PruneTree t;
+    t.label->setText("A different, longer piece of text");
+    t.expectPrunedEqualsFull("Label::setText");
+}
+
+TEST(RootViewPruning, ChangingAViewsColorAndRedrawingPrunesToTheSameResult) {
+    PruneTree t;
+    t.colored->color = BLRgba32(0xFF0000FF);
+    t.colored->redraw();
+    t.expectPrunedEqualsFull("colour change + redraw()");
+}
+
+TEST(RootViewPruning, MovingAViewWithSetBoundsPrunesToTheSameResult) {
+    PruneTree t;
+    t.colored->setBounds(newui::Rect(60, 55, 40, 30));
+    t.expectPrunedEqualsFull("SubView::setBounds (no explicit redraw)");
+}
+
+TEST(RootViewPruning, HidingAndShowingAViewPrunesToTheSameResult) {
+    PruneTree t;
+    t.colored->setVisible(false);
+    t.expectPrunedEqualsFull("setVisible(false)");
+    t.colored->setVisible(true);
+    t.expectPrunedEqualsFull("setVisible(true)");
+}
+
+TEST(RootViewPruning, ScrollingAContainerPrunesToTheSameResult) {
+    PruneTree t;
+    t.content->setOrigin(newui::Point(0, 10));
+    t.content->redraw();
+    t.expectPrunedEqualsFull("scroll origin change + redraw()");
+}
+
+TEST(RootViewPruning, ASetBoundsInvalidatesBothTheOldAndTheNewArea) {
+    PruneFixture f;
+    auto* child = addCounter(*f.root, newui::Rect(10, 10, 20, 20));
+    f.show();
+    f.root->repaint();
+    ASSERT_TRUE(f.root->dirtyRect().empty()) << "premise: nothing pending";
+
+    child->setBounds(newui::Rect(100, 50, 20, 20));
+
+    const newui::Rect dirty = f.root->dirtyRect();
+    EXPECT_LE(dirty.left(), 10.0f) << "the area it left must be repainted";
+    EXPECT_LE(dirty.top(), 10.0f);
+    EXPECT_GE(dirty.right(), 120.0f) << "and the area it moved to";
+    EXPECT_GE(dirty.bottom(), 70.0f);
+}
+
+TEST(RootViewPruning, VerifyModeStaysQuietWhenEveryChangeWasInvalidated) {
+    PruneTree t;
+    t.root->setVerifyRepaint(true);
+
+    t.label->setText("Properly invalidated");
+    t.root->repaint();
+
+    EXPECT_EQ(t.root->repaintVerifyMismatches(), 0u);
+}
+
+TEST(RootViewPruning, VerifyModeCatchesAChangeThatWasNeverInvalidated) {
+    // The whole point of verification: full repaints hide a missing markDirty() (the next repaint anywhere
+    // redraws everything); pruning doesn't, and this is how that shows up before it reaches a user.
+    PruneTree t;
+    t.root->setVerifyRepaint(true);
+
+    t.colored->color = BLRgba32(0xFF00FFFF);  // changes how it draws, but nothing says so...
+    t.root->markDirty(t.root, newui::Rect(10, 80, 20, 10));  // ...and something unrelated repaints
+    t.root->repaint();
+
+    EXPECT_GE(t.root->repaintVerifyMismatches(), 1u);
+}
+
+TEST(RootViewPruning, RepaintingARegionWhoseEdgesCutThroughTextAndControlsMatchesAFullRepaint) {
+    // Clip edges landing in the middle of anti-aliased glyphs and themed control chrome. Every pruned region
+    // must come out the same as a full repaint - to within the rasterizer's clip-edge rounding (a level or
+    // so), never more: a bigger difference would be a real bug.
+    PruneFixture f;
+    auto* label = new newui::Label();
+    label->setText("Hello, edge cases");
+    label->setBounds(newui::Rect(10, 8, 120, 22));
+    f.root->addChild(label);
+    auto* button = new newui::Button();
+    button->setText("Toggle me");
+    button->setBounds(newui::Rect(10, 36, 110, 28));
+    f.root->addChild(button);
+    auto* slider = new newui::Slider();
+    slider->setBounds(newui::Rect(10, 70, 150, 22));
+    f.root->addChild(slider);
+    f.show();
+    f.root->repaintNow();
+    const auto full = bufferBytes(*f.root);
+
+    int checked = 0, failed = 0, largest = 0;
+    std::string firstFailure;
+    for (int x = 5; x <= 130; x += 7) {
+        for (int y = 3; y <= 80; y += 9) {
+            for (int w : { 13, 31, 64 }) {
+                const newui::Rect region(float(x), float(y), float(w), 17.0f);
+                f.root->markDirty(f.root, region);
+                f.root->repaint();
+                ++checked;
+                const int delta = maxChannelDelta(bufferBytes(*f.root), full);
+                largest = delta > largest ? delta : largest;
+                if (delta > kPruneTolerance) {
+                    ++failed;
+                    if (firstFailure.empty()) {
+                        firstFailure = "region (" + std::to_string(x) + "," + std::to_string(y) + " " + std::to_string(w) + "x17), delta " + std::to_string(delta);
+                    }
+                }
+                f.root->repaintNow();  // back to a known-good buffer for the next region
+            }
+        }
+    }
+
+    EXPECT_EQ(failed, 0) << failed << " of " << checked << " pruned regions differ from a full repaint by more than "
+        << kPruneTolerance << " levels; first: " << firstFailure;
+    EXPECT_LE(largest, kPruneTolerance);
 }

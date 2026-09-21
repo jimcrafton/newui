@@ -3885,8 +3885,14 @@ namespace newui {
         // RootView's own WS_CHILD HWND - same reasoning
         // MenuBarButtonClicked() (menus.cpp) already documents for
         // TrackPopupMenu's owner.
-        Frame* frame = root->getFrame();
-        if (frame == nullptr || frame->frameHandle() == nullptr) {
+        // A Frame-owned RootView's owner is its Frame. A standalone RootView (no Application/Frame, e.g. one hosted
+        // in another process's window - see RootView's HWND-parent constructor) has no Frame, so fall back to the
+        // top-level window its own HWND lives under; returning here instead meant the popup silently never opened.
+        HWND ownerHwnd = root->getFrame() != nullptr ? root->getFrame()->frameHandle() : nullptr;
+        if (ownerHwnd == nullptr) {
+            ownerHwnd = ::GetAncestor(root->windowHandle(), GA_ROOT);
+        }
+        if (ownerHwnd == nullptr) {
             return;
         }
 
@@ -3980,7 +3986,7 @@ namespace newui {
         // doesn't actually fit in *either* direction, falls back to the
         // plain below placement rather than adding further clamping logic
         // nothing has asked for.
-        HMONITOR monitor = ::MonitorFromWindow(frame->frameHandle(), MONITOR_DEFAULTTONEAREST);
+        HMONITOR monitor = ::MonitorFromWindow(ownerHwnd, MONITOR_DEFAULTTONEAREST);
         MONITORINFO monitorInfo = {};
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (monitor != nullptr && ::GetMonitorInfo(monitor, &monitorInfo)) {
@@ -3995,7 +4001,7 @@ namespace newui {
 
         if (firstOpen) {
             popup_->setBounds(popupBounds);
-            if (!popup_->initialize(frame->frameHandle())) {
+            if (!popup_->initialize(ownerHwnd)) {
                 popup_.reset();
                 popupScroll_ = nullptr;
                 popupListView_ = nullptr;

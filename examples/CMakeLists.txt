@@ -113,13 +113,6 @@ add_executable(imagefill1
 target_link_libraries(imagefill1 PRIVATE newui)
 
 
-add_executable(swapchain1
-    swapchain1.cpp
-)
-
-target_link_libraries(swapchain1 PRIVATE newui)
-
-
 
 # st-enterprise-nc1701-a.png/robot1.png/robot2.png are source-tree assets
 # (not generated), used via newui::Bundle::loadImage() - Bundle resolves
@@ -181,6 +174,39 @@ add_executable(popuptool1
 )
 
 target_link_libraries(popuptool1 PRIVATE newui)
+
+# Phase 1b feasibility spike for swapchain-plan.md (DXGI flip-model swap
+# chain presenting Blend2D pixels). d3d11/dxgi/dxguid are linked via
+# #pragma comment(lib) in the source, not here - throwaway spike.
+add_executable(swapchain1
+    swapchain1.cpp
+)
+
+target_link_libraries(swapchain1 PRIVATE newui)
+
+# Phase 1c: the same swap chain on a WS_CHILD whose parent is on another
+# thread (the VSIX-host shape). Plain Win32, no newui View classes.
+add_executable(swapchain2
+    swapchain2.cpp
+)
+
+target_link_libraries(swapchain2 PRIVATE newui)
+
+# Which PresentSurface (GDI / DXGI) a real RootView ended up with - see
+# presentsurface.h. Toggle with a "gdi"/"dxgi" argument or NEWUI_PRESENT.
+add_executable(presentbackend1
+    presentbackend1.cpp
+)
+
+target_link_libraries(presentbackend1 PRIVATE newui)
+
+# A standalone RootView (any PresentSurface) on a worker-thread RunLoop, as a
+# WS_CHILD of a main-thread window - the cpp_codetools VSIX-host shape.
+add_executable(crossthread1
+    crossthread1.cpp
+)
+
+target_link_libraries(crossthread1 PRIVATE newui)
 
 add_executable(loaddialog1
     loaddialog1.cpp

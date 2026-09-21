@@ -63,17 +63,11 @@ newui::SubView* MakeLabel(const std::string& text) {
     // concretely, hardcoded black text landing on an unexpectedly
     // dark-inverted native control face.
     style->setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowText));
-    // Without an opaque fill of its own, this label's glyphs would get
-    // alpha-blended directly onto whatever was already there on every
-    // repaint (root's own background fill is scoped to dirtyRect_, but
-    // paintChildren() still redraws every child unconditionally
-    // regardless of whether its own area was actually included - see
-    // RootView::repaint()'s comment), which isn't idempotent for
-    // translucent AA glyph edges - repeated re-blending darkens/thickens
-    // them instead of reproducing the same pixels. An opaque
-    // backgroundFill re-establishes a clean backdrop before each redraw,
-    // same as every other control in this demo already has via its own
-    // track/fill chrome.
+    // An opaque fill matching the window, so these labels look the same as
+    // the rest of the demo's chrome. (It used to also be what kept the text
+    // from thickening on repeated repaints - no longer needed for that,
+    // RootView::repaint() now starts every repaint from a blank buffer; the
+    // plain newui::Label controls further down have no such fill.)
     style->setBackgroundColor( newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground) );
     label->setStyle(std::move(style));
     label->setDesiredSize(newui::Size(150.0f, 24.0f));
@@ -261,7 +255,7 @@ int main() {
     // Every step calls Progress::setValue(), which now correctly
     // style().markDirty()s - and RootView::markDirty() always repaints
     // the *entire* window buffer (there's no dirty-rect scoping in this
-    // paint architecture; see RootView::notifyRedrawNeeded()), so this
+    // paint architecture; see RootView::repaint()), so this
     // rate directly sets how often the whole demo window gets
     // re-rasterized. 30fps is plenty smooth for a progress bar and roughly
     // halves that repaint cost versus 60fps.

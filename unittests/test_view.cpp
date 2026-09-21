@@ -1044,3 +1044,127 @@ TEST(ViewCoordinateMapping, ScreenBoundsAndRectOverloadsMatchPointMapping) {
     root->destroy();
     delete root;
 }
+
+// Rect::united() - see its own comment (geometry.h). RootView::markDirty()'s
+// running dirtyRect_ union, previously hand-rolled inline there.
+
+TEST(RectUnited, OverlappingRectsGiveTheirBoundingBox) {
+    newui::Rect a(0.0f, 0.0f, 50.0f, 50.0f);
+    newui::Rect b(30.0f, 20.0f, 50.0f, 50.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 80.0f, 70.0f));
+}
+
+TEST(RectUnited, DisjointRectsSpanTheGapBetweenThem) {
+    // Rects that don't share a top-left corner - taking max of the *sizes*
+    // independently (the mistake geometry.h's own comment warns about) would
+    // give (0,0,10,10) here, which covers neither the second rect nor the gap.
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 60.0f, 60.0f));
+}
+
+TEST(RectUnited, ContainedRectLeavesTheOuterOneUnchanged) {
+    newui::Rect outer(10.0f, 10.0f, 100.0f, 100.0f);
+    newui::Rect inner(20.0f, 30.0f, 5.0f, 5.0f);
+
+    EXPECT_EQ(outer.united(inner), outer);
+    EXPECT_EQ(inner.united(outer), outer);
+}
+
+TEST(RectUnited, IsCommutative) {
+    newui::Rect a(-20.0f, 5.0f, 30.0f, 10.0f);
+    newui::Rect b(40.0f, -15.0f, 5.0f, 60.0f);
+
+    EXPECT_EQ(a.united(b), b.united(a));
+}
+
+TEST(RectUnited, HandlesNegativeCoordinates) {
+    newui::Rect a(-30.0f, -40.0f, 10.0f, 10.0f);  // right = -20, bottom = -30
+    newui::Rect b(-5.0f, -5.0f, 10.0f, 10.0f);    // right = 5, bottom = 5
+
+    EXPECT_EQ(a.united(b), newui::Rect(-30.0f, -40.0f, 35.0f, 45.0f));
+}
+
+TEST(RectUnited, EmptyRectIsTheIdentityOnEitherSide) {
+    newui::Rect r(10.0f, 20.0f, 30.0f, 40.0f);
+    newui::Rect none;  // default: empty()
+
+    EXPECT_EQ(none.united(r), r);
+    EXPECT_EQ(r.united(none), r);
+}
+
+TEST(RectUnited, EmptyRectDoesNotDragTheResultOutToTheOrigin) {
+    // The old inline union in RootView::markDirty() always folded in the incoming
+    // rect's corner even when it was the cleared/default rect - which silently
+    // stretched the dirty region back out to (0,0).
+    newui::Rect r(100.0f, 100.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(r.united(newui::Rect()), r);
+}
+
+TEST(RectUnited, TwoEmptyRectsStayEmpty) {
+    EXPECT_TRUE(newui::Rect().united(newui::Rect()).empty());
+}
+
+TEST(RectUnited, DoesNotModifyEitherOperand) {
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    (void)a.united(b);
+
+    EXPECT_EQ(a, newui::Rect(0.0f, 0.0f, 10.0f, 10.0f));
+    EXPECT_EQ(b, newui::Rect(50.0f, 50.0f, 10.0f, 10.0f));
+}
+
+// Rect::intersects() / Rect::intersected() - see their comments (geometry.h).
+
+TEST(RectIntersects, OverlappingRectsIntersect) {
+    EXPECT_TRUE(newui::Rect(0, 0, 50, 50).intersects(newui::Rect(30, 30, 50, 50)));
+}
+
+TEST(RectIntersects, ContainedRectIntersects) {
+    EXPECT_TRUE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 5, 5)));
+    EXPECT_TRUE(newui::Rect(10, 10, 5, 5).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, DisjointRectsDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(50, 50, 10, 10)));
+}
+
+TEST(RectIntersects, RectsThatOnlyTouchAnEdgeDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(10, 0, 10, 10)));  // share the x=10 edge
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(0, 10, 10, 10)));  // share the y=10 edge
+}
+
+TEST(RectIntersects, ARectWithNoAreaOverlapsNothing) {
+    EXPECT_FALSE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 0, 20)));
+    EXPECT_FALSE(newui::Rect(10, 10, 20, 0).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, IsSymmetric) {
+    newui::Rect a(-20, 5, 30, 10);
+    newui::Rect b(0, 8, 40, 60);
+    EXPECT_EQ(a.intersects(b), b.intersects(a));
+}
+
+TEST(RectIntersected, GivesTheSharedArea) {
+    EXPECT_EQ(newui::Rect(0, 0, 50, 50).intersected(newui::Rect(30, 20, 50, 50)), newui::Rect(30, 20, 20, 30));
+}
+
+TEST(RectIntersected, ContainedRectIsItsOwnIntersection) {
+    newui::Rect inner(10, 10, 5, 5);
+    EXPECT_EQ(newui::Rect(0, 0, 100, 100).intersected(inner), inner);
+    EXPECT_EQ(inner.intersected(newui::Rect(0, 0, 100, 100)), inner);
+}
+
+TEST(RectIntersected, DisjointRectsGiveAZeroSizedRect) {
+    newui::Rect none = newui::Rect(0, 0, 10, 10).intersected(newui::Rect(50, 50, 10, 10));
+    EXPECT_FLOAT_EQ(none.width(), 0.0f);
+    EXPECT_FLOAT_EQ(none.height(), 0.0f);
+}
+
+TEST(RectIntersected, HandlesNegativeCoordinates) {
+    EXPECT_EQ(newui::Rect(-30, -30, 40, 40).intersected(newui::Rect(-10, -10, 40, 40)), newui::Rect(-10, -10, 20, 20));
+}
