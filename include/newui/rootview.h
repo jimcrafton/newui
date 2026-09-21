@@ -44,9 +44,11 @@ namespace newui {
     RepaintMode defaultRepaintMode();
     void setDefaultRepaintMode(RepaintMode mode);
 
-    // Whether a newly constructed RootView verifies its pruned repaints (see RepaintMode::Dirty): true if
-    // the NEWUI_VERIFY_REPAINT environment variable is set to anything but "0" (read once).
+    // Whether a newly constructed RootView verifies its pruned repaints (see RepaintMode::Dirty): whatever
+    // setDefaultVerifyRepaint() last set, otherwise true if the NEWUI_VERIFY_REPAINT environment variable is set
+    // to anything but "0" (read once).
     bool defaultVerifyRepaint();
+    void setDefaultVerifyRepaint(bool verify);
 
     // Heap-only, like View - see View's class comment. Construct with
     // new RootView(...), not on the stack - see Frame::rootView_ for

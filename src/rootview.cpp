@@ -76,6 +76,9 @@ namespace {
 	// -1 = never set; otherwise a RepaintMode value.
 	std::atomic<int> g_repaintModeOverride{ -1 };
 
+	// -1 = never set; otherwise 0/1.
+	std::atomic<int> g_verifyRepaintOverride{ -1 };
+
 	newui::RepaintMode readEnvironmentRepaintMode() {
 		char buffer[32] = {};
 		const DWORD length = ::GetEnvironmentVariableA("NEWUI_REPAINT", buffer, DWORD(sizeof(buffer)));
@@ -126,8 +129,16 @@ namespace newui {
 	}
 
 	bool defaultVerifyRepaint() {
+		const int override = g_verifyRepaintOverride.load();
+		if (override >= 0) {
+			return override != 0;
+		}
 		static const bool fromEnvironment = readEnvironmentVerifyRepaint();
 		return fromEnvironment;
+	}
+
+	void setDefaultVerifyRepaint(bool verify) {
+		g_verifyRepaintOverride.store(verify ? 1 : 0);
 	}
 
 	void RootView::setRepaintMode(RepaintMode mode) {
