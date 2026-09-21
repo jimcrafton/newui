@@ -42,6 +42,7 @@ namespace newui {
 // identically either way - only setBounds()-driven resizes differ.
 enum class SplitterFixedPane { First, Second };
 
+// @reflect category=containers
 class Splitter : public SubView {
 public:
     explicit Splitter(Orientation orientation = Orientation::Horizontal);
