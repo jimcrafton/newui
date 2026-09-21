@@ -21,6 +21,7 @@
 #include "newui/newui.h"
 #include "newui/controls.h"
 #include "newui/layout.h"
+#include "newui/models.h"
 #include "newui/presentsurface.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
@@ -33,7 +34,29 @@
 #include <optional>
 #include <string>
 
+extern void registerReflectionData();
+
 namespace {
+
+    // A DropDownList's popup is a PopupFrame (a Frame) owned by the top-level window; a standalone RootView has no
+    // Frame of its own, so this is the check that it still opens in the VSIX-host shape.
+    class ColorListModel : public newui::ListModel {
+    public:
+        std::vector<std::string> rows = { "Red", "Orange", "Yellow", "Green", "Blue", "Indigo", "Violet" };
+
+        std::any value(const std::any& key) override {
+            if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
+                if (*index < rows.size()) {
+                    return rows[*index];
+                }
+            }
+            return std::any();
+        }
+
+        std::size_t size() const override {
+            return rows.size();
+        }
+    };
 
     constexpr UINT WM_APP_CHILD_READY = WM_APP + 1;  // worker -> parent
     constexpr UINT WM_APP_CHILD_GONE = WM_APP + 2;   // worker -> parent: the child window is destroyed
@@ -71,6 +94,13 @@ namespace {
             button->setDesiredSize(newui::Size(0.0f, 28.0f));
             root.addChild(button);
         }
+
+        static ColorListModel colors;  // the drop-down keeps a pointer to it, so it must outlive the RootView
+        auto* dropDown = new newui::DropDownList();
+        dropDown->setVisible(true);
+        dropDown->setModel(&colors);
+        dropDown->setDesiredSize(newui::Size(0.0f, 28.0f));
+        root.addChild(dropDown);
 
         // Report which backend the child really ended up with, on the first frame and after every resize (a
         // minimize/restore rebuilds the swap chain) - printing only on a change.
@@ -187,6 +217,7 @@ namespace {
 
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    registerReflectionData();  // the VSIX host does this too - DropDownList's items are created via reflection
 
     for (int i = 1; i < argc; ++i) {
         newui::PresentBackend requested;
