@@ -29,7 +29,7 @@ diagnosed *the* bug - that needs a real repro before it's fixable with confidenc
 already-latent candidate mechanisms turned up while reading the current code, worth checking
 against whatever the user actually sees, not proposed as instead-of a real repro:
 
-1. **`RootView::invalidate(const newui::Rect*)` (`rootview.cpp`) unconditionally clears
+1. **[RESOLVED 2026-09-18 - see HANDOFF.md Part 99, "invalidate() / dirty-rect divergence"; only the `invalidate()` API itself was actually broken]** Was: `RootView::invalidate(const newui::Rect*)` (`rootview.cpp`) unconditionally clears
    `dirtyRect_` the moment it calls `::InvalidateRect()`** - but `InvalidateRect()` only *marks* a
    region for a future `WM_PAINT`; it doesn't paint synchronously, and Windows accumulates its own
    independent "update region" (queryable via `GetUpdateRect()`, delivered as `ps.rcPaint` at the
@@ -37,11 +37,11 @@ against whatever the user actually sees, not proposed as instead-of a real repro
    from a source that never went through `markDirty()`/`invalidate()` at all (e.g. another window
    briefly covering this one). `dirtyRect_` and the OS's own pending update region can genuinely
    diverge - `repaint()` only re-renders *into* `imageBuffer_` for whatever `dirtyRect_` was at
-   each individual `notifyRedrawNeeded()` call, while `paintImageBufferToWindow()` later `BitBlt`s
+   each individual `repaint()` call, while `paintImageBufferToWindow()` later `BitBlt`s
    from `imageBuffer_` for whatever `ps.rcPaint` Windows itself accumulated, which isn't
    guaranteed to be the same region. Worth instrumenting/logging both regions side by side against
    a real repro before concluding this is (or isn't) the actual cause.
-2. **Already documented in `rootview.cpp`'s own comment** (`paintChildren()`, called
+2. **[FIXED 2026-09-18 - see HANDOFF.md Part 99, "Label thickening"]** Was: already documented in `rootview.cpp`'s own comment (`paintChildren()`, called
    unconditionally with no dirty-rect pruning): a child painting translucent/anti-aliased content
    with no opaque background under it re-blends the same edge pixels onto themselves on every
    repaint anywhere in the tree, visibly darkening/thickening over repeated repaints rather than
@@ -139,6 +139,38 @@ windows (or for `PopupTool`, which stays on GDI/`UpdateLayeredWindow` permanentl
   instance the way `cpp_codetools`' VSIX host actually would. This is the one result that could
   redirect the rest of the plan (Frame-owned-only vs. also-standalone).
 
+### Spike results (2026-09-18) - `examples/swapchain1.cpp`, `examples/swapchain2.cpp`
+
+Correction to the framing above: a Frame-owned `RootView`'s HWND is **already** a `WS_CHILD` of the
+`Frame` HWND, so a swap chain on it is a child-HWND swap chain by definition - the only genuinely
+untested variant was a *parent on a different thread*.
+
+- **1a/1b - done, works** (`swapchain1`, Frame-owned `RootView` HWND, i.e. same-thread child): D3D11
+  device + `FLIP_DISCARD` swap chain created in `onCreated`; per frame `Map(WRITE_DISCARD)` -> Blend2D
+  renders straight into the mapped texture memory via `BLImage::create_from_data(..., RowPitch)` (no
+  intermediate buffer/memcpy) -> `Unmap` -> `CopyResource` into back buffer -> `Present1`. Live-verified:
+  correct content, and `ResizeBuffers` + staging-texture recreate follow window resizes (820x420 ->
+  1100x650 -> 500x300) with no stretching. `PrintWindow(..., PW_RENDERFULLCONTENT)` captures the flip-model
+  surface correctly. Links via `#pragma comment(lib)`; builds through the normal MSBuild/vcvars path.
+  **Not yet tested**: a `RootView` with real children (this spike never let `RootView` paint anything, so
+  it doesn't yet show whether `RootView`'s own WM_PAINT `BitBlt` fights the swap chain - Phase 3's
+  "make WM_PAINT passive" step is still needed regardless).
+- **1c - cross-thread parent, done, works** (`swapchain2`, plain Win32): parent top-level window + GDI
+  header band on thread A, swap-chain `WS_CHILD` created and pumped on thread B, parented across threads.
+  Composes correctly with the parent's GDI content; layout follows parent resizes; animates at ~40 fps.
+  Rules the spike follows, which any real host must too:
+  - Parent -> child is **`PostMessage` only** (never `SendMessage`, and no `SetWindowPos`/`MoveWindow`/
+    `ShowWindow` on the child from the parent thread - they send internally). The child thread does its own
+    `SetWindowPos` on receipt of a posted layout message.
+  - The parent thread must **never block waiting on the child thread**: cross-thread
+    `CreateWindowEx`/`DestroyWindow` `SendMessage` `WM_PARENTNOTIFY` to the parent. Shutdown is a posted
+    handshake (parent posts quit -> child destroys window, posts "gone" -> parent destroys itself).
+  - `--stall` (parent thread `Sleep(1500)` in every `WM_SIZE`): child kept presenting ~40 fps straight
+    through both stalls, and shutdown still completed in ~60 ms. 4/4 normal + 3/3 stall runs clean.
+  - **Not yet tested**: inside a real VS instance (parent isn't necessarily DXGI-composited there), a
+    minimize/restore cycle, device-lost, and the Blend2D render itself running on a non-UI thread
+    alongside a `RootView` tree.
+
 ## Phase 2: Build a real front/back-buffer swap-chain-shaped abstraction (still GDI, real behavior
 change - this is where the "polish off what's already close" work actually happens)
 
@@ -172,6 +204,47 @@ structural fix, on the existing GDI backend, before DXGI is added on top of it:
   (`EnumWindows`-by-PID + screenshot, this project's established pattern) specifically exercising
   resize/rapid-repaint scenarios, since that's where the current glitch is reported and where a
   real front/back-buffer fix would show its effect.
+
+### Phase 2 status and revisions (2026-09-18)
+
+**Done - the extraction (no behavior change):** `PresentSurface` (`presentsurface.h`, abstract:
+`setWindow`/`resize`/`release`/`isValid`/`image`/`present`/`paint`) + `GdiPresentSurface`
+(`gdipresentsurface.h/.cpp`, the old `CreateDIBSection`/`memDC_`/`BitBlt` code moved over verbatim).
+`RootView` now owns a `std::unique_ptr<PresentSurface> surface_` (created in both constructors) and its
+old `memDC_`/`dibSection_`/`imageBuffer_`/`releaseImageBuffer()`/`paintImageBufferToWindow()` are gone;
+`resizeImageBuffer()`/`repaint()`/`presentRepaintedBuffer()`/`WM_PAINT` delegate to it, and the surface's
+HWND is set in `WM_NCCREATE` and cleared in `destroy()` alongside `viewHwnd_`. `PopupTool` is untouched
+(still overrides `presentRepaintedBuffer()`/`imageBufferFormat()`, still reads `getImageBuffer()`).
+14 new tests (`test_gdipresentsurface.cpp`: real `BitBlt` readback, zero-fill, stride, out-of-bounds
+guard, `present()` really invalidating a live window); full suite 1276/1276 twice; `loaddialog1` and
+`popuptool1`'s main window live-verified via `PrintWindow`.
+
+**Revised - "real double-buffering" is dropped.** The plan claimed a half-painted back buffer could be
+visible to `WM_PAINT`. It can't: `repaint()` runs to completion synchronously on the UI thread inside
+`repaint()`, so `WM_PAINT` never interleaves with it. A second CPU buffer would add a copy for no
+correctness gain. The other half of Phase 2's motivation - `dirtyRect_` vs the OS update region diverging
+(candidate #1 in "Motivation") - is still unaddressed and still needs a real repro before fixing.
+
+**Revised - Phase 3's "render straight into the mapped texture" is dropped.** `RootView` repaints only
+`dirtyRect_` into a *persistent* buffer and relies on the rest staying intact; `D3D11_MAP_WRITE_DISCARD`
+(and `FLIP_DISCARD`'s back buffer) give undefined contents each frame, so that only works if every frame is
+a full repaint (which is all the spikes did). The DXGI surface should instead keep a normal CPU `image()`
+(Blend2D unchanged), upload only the dirty box into a `D3D11_USAGE_DEFAULT` texture (`UpdateSubresource`),
+`CopyResource` to the back buffer, `Present1`. Same rendering, same behavior in both backends.
+
+### Phase 3 status (2026-09-18): built - see HANDOFF.md Part 99
+
+`DxgiPresentSurface` + the `PresentBackend { Gdi, Dxgi }` startup switch (`NEWUI_PRESENT` env var /
+`setDefaultPresentBackend()`, default Gdi) are implemented and live-verified, as revised above (CPU render
+target, dirty-box upload, full-texture `CopyResource`, passive `WM_PAINT`). Deviations from the text below:
+no "Auto" mode (Dxgi already falls back, so it'd be identical); a *software* adapter counts as "no DXGI" and
+WARP is deliberately not used (slower than GDI); `Present1` gets no dirty rects (it returned
+`DXGI_ERROR_INVALID_CALL` on partial-present frames); `PopupTool` forces Gdi. Phase 4's device-lost recovery is
+in (one rebuild + full re-upload, then GDI) but not exercised against a real device loss.
+
+Minimize/restore and the cross-thread (VSIX-host) shape are verified live and by tests - see HANDOFF.md Part 99
+("Minimize/restore + cross-thread"). One host-side caveat from that work: a cross-thread parent/child share input
+state, so input to the child stalls while the parent's thread isn't pumping messages (paint/present do not).
 
 ## Phase 3: Real DXGI backend, wired in as an opt-in alternative strategy
 

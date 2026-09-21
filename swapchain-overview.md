@@ -43,6 +43,80 @@ off.
 
 ## 3. The presentation backends
 
+### The foundation: one root, one window handle, one surface
+
+Everything in this document rests on one structural fact about newui: **a whole view tree is rooted
+at a single `RootView`, and a `RootView` owns exactly one window handle (`HWND`).**
+
+```
+  Frame  (a top-level window)                      PopupFrame / Dialog (separate windows)
+   └─ RootView  ── one child HWND ──┐                └─ RootView ── its own HWND
+        ├─ SubView  (Panel)         │  no window                 (own buffer, own surface)
+        │    ├─ SubView (Button)    │  handles below
+        │    └─ SubView (Label)     │  this line:
+        └─ SubView  (ListView)      │  every one of these is
+             └─ SubView (row) ...   ┘  just an object in the tree
+```
+
+- **`View`** is the base. **`SubView`** is any ordinary child (a control, a container, a list row).
+  **`RootView`** is the root of a tree. Only the `RootView` has a window handle; a `SubView` has none,
+  and nothing about a button or a label is a Win32 window.
+- **A `Frame`** (a top-level window) owns exactly one `RootView`, whose handle is a child window of the
+  frame's. A **standalone** `RootView` (no `Frame`) can instead be parented to any window handle, which
+  is how the Visual Studio editor hosts newui (section 6).
+- **Popups and dialogs are separate windows,** each with its own `Frame` and its own `RootView`. A popup
+  is never a native child window inside another `RootView`'s tree. Only four places in the code create
+  windows at all: `Frame`, `RootView`, `PopupFrame` and `Dialog`.
+
+**What the single handle means in practice.** newui draws the entire tree itself, back to front, into
+the one CPU buffer that the window's `PresentSurface` owns. Input comes the other way: every mouse and
+keyboard message arrives at the `RootView`'s one handle, and the `RootView` hit-tests to find which
+`SubView` should receive it. Keyboard focus, mouse capture, the cursor, drag-and-drop registration
+(one OLE drop target per `RootView`) and invalidation all live at the `RootView`, in one coordinate
+space. A `SubView` asking to be repainted just marks a rectangle dirty on its way up to the root.
+
+**Why this greatly simplifies the presentation work.**
+
+- **One window = one buffer = one present.** Presentation is a per-window concern, so
+  `PresentSurface` maps one-to-one onto `RootView`. Microsoft's guidance for flip-model swap chains is
+  exactly this shape: one swap chain per `HWND`, with nothing else drawing on that `HWND`. We satisfy
+  it by construction, with no extra logic to enforce it.
+- **One paint pass, in a known order.** The blank-then-paint-everything repaint, dirty-rect clipping
+  and child culling all work because the whole tree is drawn by one pass into one buffer. Effects that
+  paint *outside* a view's bounds (focus rings, drop shadows, the designer's selection overlay, drag
+  overlays) need only be invalidated with some padding; they draw into the same buffer, on top.
+- **One thread.** A window handle belongs to the thread that created it, so the *entire* tree lives and
+  is only ever touched on that thread. That is why hosting on a dedicated worker thread (section 6) is
+  tractable at all: one handle to create, size, present to and destroy on that thread, and no locking
+  inside the tree.
+- **One device, one swap chain, one thing to fall back from.** The backend choice, the device, the
+  fallback to GDI and the settings in section 5 all apply per window with no coordination between
+  windows.
+
+**What multiple handles per tree would probably do.** This is reasoning about the design, not something
+we built or tested, but each of these follows from how the machinery above works:
+
+- **Painting and invalidation would split.** Each handle paints on its own schedule and clips to its
+  own rectangle. There would be no single back-to-front pass, so overlap, translucency, and overhanging
+  effects (focus rings, shadows, overlays) can't cross a handle boundary, and the dirty-rect,
+  idempotent-repaint and culling logic would need coordinating between windows.
+- **Presentation would multiply.** Each handle with its own flip swap chain means a device and swap
+  chain per window (Microsoft: one per `HWND`), and mixing GDI-painted or other-API child windows with a
+  flip-model window is exactly what Microsoft's guidance warns against; how DWM composes a native child
+  over a swap-chain window is not something we've tested or found documented.
+- **Input would need brokering.** Only one window can hold mouse capture and one can hold keyboard
+  focus at a time; today that is always the `RootView`'s handle, and moving between controls is just a
+  focus change inside the tree.
+- **Threading would get harder.** A tree spanning handles could span threads, bringing back the
+  cross-thread hazards in section 6 (shared input queues, the parent-must-only-post rule, blocked
+  `SendMessage`s) *inside* one tree instead of only at its edge.
+- **Hosting and teardown would multiply too:** several handles to size, parent, show and destroy in
+  the right order, instead of one.
+
+Whether it would outright *break* things depends on the specifics, which is exactly why it's a risk
+to avoid: the design's guarantees hold because there is no such case. See the pitfall in section 9
+about adding native child windows.
+
 ### The big idea: separate *drawing* from *presenting*
 
 ```
@@ -320,10 +394,13 @@ that:
 - **Destroying and recreating a swap chain has a documented trap.** Direct3D 11 defers object
   destruction, so freeing a flip swap chain's references doesn't destroy it immediately, and creating a
   new one on the same `HWND` can then fail. Microsoft's remedy is to release everything, call
-  `ClearState()`, then `Flush()`, before creating the new swap chain. Our rebuild paths (a resize that
-  can't resize in place, a device-loss rebuild) release the whole device and create a new one and
-  don't call `ClearState`/`Flush`. That is probably fine because the old device is fully released, but it
-  is unverified; adding the two calls is cheap insurance.
+  `ClearState()`, then `Flush()`, before creating the new swap chain. Both of our rebuild paths (a
+  resize that can't be done in place, and a device-loss rebuild) go through `releaseGpu()`, which now
+  releases the swap chain and texture, calls `ClearState()` and `Flush()`, and only then drops the
+  device. In normal use neither path runs: `ResizeBuffers` succeeded on every resize and
+  minimize/restore in the DXGI tests, and a device loss can't be triggered on demand. So this is
+  insurance for rare events (a driver reset or update, a GPU removal), and it has only been
+  regression-tested, not exercised by a real trigger.
 - **Layered windows:** `PopupTool` is pinned to GDI (section 5) on our own earlier conclusion, not on
   documentation. Don't loosen that without testing.
 - **Untested:** recovery *after* a swap chain has been live and the device is really lost (only

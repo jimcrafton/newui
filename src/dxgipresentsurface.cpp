@@ -91,6 +91,19 @@ namespace newui {
 	}
 
 	void DxgiPresentSurface::releaseGpu() {
+		if (gpu_) {
+			// Direct3D 11 defers destroying objects, and only one flip-model swap chain can be associated with an
+			// HWND at a time, so merely dropping our references isn't enough before a new swap chain is created
+			// for the same window (a failed in-place resize, a device-loss rebuild): release them, then
+			// ClearState() and Flush() to force the destruction (ID3D11DeviceContext::Flush's "Deferred
+			// Destruction Issues with Flip Presentation Swap Chains"). Harmless on an already-removed device.
+			gpu_->texture.Reset();
+			gpu_->swapChain.Reset();
+			if (gpu_->context) {
+				gpu_->context->ClearState();
+				gpu_->context->Flush();
+			}
+		}
 		gpu_.reset();
 	}
 
