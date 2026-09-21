@@ -117,7 +117,7 @@ namespace newui {
 		if (override >= 0) {
 			return static_cast<RepaintMode>(override);
 		}
-		static const RepaintMode fromEnvironment = readEnvironmentRepaintMode();
+		static const RepaintMode fromEnvironment = RepaintMode::Dirty; // readEnvironmentRepaintMode();
 		return fromEnvironment;
 	}
 

@@ -46,7 +46,7 @@ namespace newui {
 		if (override >= 0) {
 			return static_cast<PresentBackend>(override);
 		}
-		static const PresentBackend fromEnvironment = readEnvironmentBackend();
+		static const PresentBackend fromEnvironment = PresentBackend::Dxgi; //  readEnvironmentBackend();
 		return fromEnvironment;
 	}
 
@@ -58,6 +58,8 @@ namespace newui {
 		if (backend == PresentBackend::Dxgi) {
 			return std::make_unique<DxgiPresentSurface>();
 		}
+
+		//return std::make_unique<DxgiPresentSurface>();
 		return std::make_unique<GdiPresentSurface>();
 	}
 
