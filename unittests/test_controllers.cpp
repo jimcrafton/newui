@@ -200,9 +200,10 @@ TEST(TreeModel, ChildCountAndHasChildrenAreOverridableByASubclass) {
 
 TEST(Controller, SetModelWiresModelChanged) {
     RecordingController controller;
-    Model model;
+    auto modelOwner = std::make_unique<Model>();
+    Model& model = *modelOwner;
 
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     EXPECT_EQ(controller.modelChangedCount, 0);
 
     model.setValue(std::any(42));
@@ -212,19 +213,54 @@ TEST(Controller, SetModelWiresModelChanged) {
     EXPECT_EQ(controller.modelChangedCount, 2);
 }
 
-TEST(Controller, ReplacingModelUnsubscribesFromThePrevious) {
+namespace {
+
+// Reports its own destruction, to check who owns a Model.
+class DestructionFlagModel : public Model {
+public:
+    explicit DestructionFlagModel(bool& destroyed) : destroyed_(destroyed) {}
+    ~DestructionFlagModel() override { destroyed_ = true; }
+
+private:
+    bool& destroyed_;
+};
+
+}  // namespace
+
+TEST(Controller, ReplacingModelDestroysThePreviousAndOnlyTheNewOneNotifies) {
     RecordingController controller;
-    Model modelA;
-    Model modelB;
+    bool previousDestroyed = false;
+    controller.setModel(std::make_unique<DestructionFlagModel>(previousDestroyed));
+    auto replacementOwner = std::make_unique<Model>();
+    Model& replacement = *replacementOwner;
 
-    controller.setModel(&modelA);
-    controller.setModel(&modelB);
+    controller.setModel(std::move(replacementOwner));
 
-    modelA.setValue(std::any(1));
-    EXPECT_EQ(controller.modelChangedCount, 0);
-
-    modelB.setValue(std::any(1));
+    EXPECT_TRUE(previousDestroyed);
+    EXPECT_EQ(controller.model(), &replacement);
+    replacement.setValue(std::any(1));
     EXPECT_EQ(controller.modelChangedCount, 1);
+}
+
+TEST(Controller, SettingNullDetachesAndDestroysTheModel) {
+    RecordingController controller;
+    bool destroyed = false;
+    controller.setModel(std::make_unique<DestructionFlagModel>(destroyed));
+
+    controller.setModel(nullptr);
+
+    EXPECT_TRUE(destroyed);
+    EXPECT_EQ(controller.model(), nullptr);
+}
+
+TEST(Controller, DestroyingTheControllerDestroysItsModel) {
+    bool destroyed = false;
+    {
+        RecordingController controller;
+        controller.setModel(std::make_unique<DestructionFlagModel>(destroyed));
+        EXPECT_FALSE(destroyed);
+    }
+    EXPECT_TRUE(destroyed);
 }
 
 // ---------------------------------------------------------------------

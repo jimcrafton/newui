@@ -208,7 +208,8 @@ int main() {
     // something to scroll. Declared here in main() (not static) - stays
     // alive for app.run()'s whole duration, same as every other local in
     // this function.
-    StringListModel model;
+    auto modelOwner = std::make_unique<StringListModel>();
+    StringListModel& model = *modelOwner;
     for (int i = 0; i < 40; ++i) {
         model.rows.push_back("Row " + std::to_string(i));
     }
@@ -223,7 +224,7 @@ int main() {
     root.addChild(listViewScrollView);
 
     auto* listView = new newui::ListView();
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     listViewScrollView->addChild(listView);
 
     // A plain Label listing every currently selected row - a real,
@@ -264,7 +265,8 @@ int main() {
     // pattern as listView above - a small folder/file StringTreeModel to
     // exercise expand/collapse (click a node's own glyph), indentation,
     // and multi-selection over tree paths (TreeView::selectedPaths()).
-    StringTreeModel treeModel;
+    auto treeModelOwner = std::make_unique<StringTreeModel>();
+    StringTreeModel& treeModel = *treeModelOwner;
     treeModel.childrenByParent[{}] = { "Documents", "Pictures", "Downloads" };
     treeModel.childrenByParent[{ 0u }] = { "Resume.docx", "Notes.txt", "Projects" };
     treeModel.childrenByParent[{ 0u, 2u }] = { "newui", "old-project" };
@@ -277,7 +279,7 @@ int main() {
     root.addChild(treeViewScrollView);
 
     auto* treeView = new newui::TreeView();
-    treeView->setModel(&treeModel);
+    treeView->setModel(std::move(treeModelOwner));
     treeViewScrollView->addChild(treeView);
 
     auto* treeSelectionLabel = new newui::Label();
@@ -314,11 +316,12 @@ int main() {
     // arrow button on the right to drop the list down; click a row to
     // select it and close the popup; click the button again (or anywhere
     // outside the popup) to dismiss it without changing the selection.
-    StringListModel colorModel;
+    auto colorModelOwner = std::make_unique<StringListModel>();
+    StringListModel& colorModel = *colorModelOwner;
     colorModel.rows = { "Red", "Orange", "Yellow", "Green", "Blue", "Indigo", "Violet" };
 
     auto* dropDown = new newui::DropDownList();
-    dropDown->setModel(&colorModel);
+    dropDown->setModel(std::move(colorModelOwner));
     dropDown->setDesiredSize(newui::Size(0.0f, 24.0f));
     root.addChild(dropDown);
 
@@ -346,7 +349,8 @@ int main() {
     // in this window" browser, not a synthetic example). rootView's own
     // node starts expanded (setExpanded()) so its direct children are
     // immediately visible without an extra click.
-    ViewTreeModel viewTreeModel;
+    auto viewTreeModelOwner = std::make_unique<ViewTreeModel>();
+    ViewTreeModel& viewTreeModel = *viewTreeModelOwner;
     viewTreeModel.rootView = &root;
 
     auto* viewTreeScrollView = new newui::ScrollView();
@@ -354,7 +358,7 @@ int main() {
     root.addChild(viewTreeScrollView);
 
     auto* viewTreeView = new newui::TreeView();
-    viewTreeView->setModel(&viewTreeModel);
+    viewTreeView->setModel(std::move(viewTreeModelOwner));
     viewTreeView->controller().setExpanded(std::vector<std::size_t>{ 0u }, true);
     viewTreeScrollView->addChild(viewTreeView);
 

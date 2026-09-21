@@ -136,6 +136,35 @@ namespace newui {
         void setValueAt(std::size_t index, const std::any& newValue) { setValue(newValue, index); }
     };
 
+    // A ready-made ListModel of plain strings. items() is a reflected collection, so a design
+    // holding one saves and reloads its rows like any other property; addItem()/removeItem()/
+    // setValue()/clear() also fire onChanged so an attached view repaints.
+    class StringListModel : public ListModel {
+    public:
+        // Declared (not implicit) so reflectgen registers it - a design reload builds one through it.
+        StringListModel() = default;
+
+        // What reflection reads and restores the rows through - it bypasses onChanged, so use the
+        // members below to change a live model.
+        std::vector<std::string>& items() { return items_; }
+        const std::vector<std::string>& items() const { return items_; }
+
+        void addItem(const std::string& text);
+        // A no-op for an index past the end.
+        void removeItem(std::size_t index);
+
+        void clear() override;
+        bool empty() const override { return items_.empty(); }
+        std::size_t size() const override { return items_.size(); }
+
+        // key is a std::size_t row index; the value is a std::string. An unknown key gives an empty any.
+        std::any value(const std::any& key = std::any()) override;
+        void setValue(const std::any& newValue, const std::any& key = std::any()) override;
+
+    private:
+        std::vector<std::string> items_;
+    };
+
     // A Model that's hierarchical, addressed by path - the sequence of
     // child indices from the root down to a given node (an empty path is
     // the root itself) - the shape TreeController/TreeItem (controllers.h/

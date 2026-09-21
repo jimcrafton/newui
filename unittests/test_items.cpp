@@ -176,9 +176,10 @@ TEST(TreeController, CreateItemPoolsAndReuses) {
 // ---------------------------------------------------------------------
 
 TEST(TreeController, VisibleCountIsRootChildCountByDefaultAllCollapsed) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     ASSERT_EQ(controller.visibleCount(), 2u);
     EXPECT_EQ(controller.pathAt(0), (std::vector<std::size_t>{ 0u }));
@@ -186,9 +187,10 @@ TEST(TreeController, VisibleCountIsRootChildCountByDefaultAllCollapsed) {
 }
 
 TEST(TreeController, ExpandingANodeRevealsItsChildrenInPlace) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     controller.setExpanded({ 0u }, true);
 
@@ -200,9 +202,10 @@ TEST(TreeController, ExpandingANodeRevealsItsChildrenInPlace) {
 }
 
 TEST(TreeController, CollapsingHidesChildrenAgain) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     controller.toggleExpanded({ 0u });
     ASSERT_EQ(controller.visibleCount(), 4u);
@@ -212,9 +215,10 @@ TEST(TreeController, CollapsingHidesChildrenAgain) {
 }
 
 TEST(TreeController, VisibleIndexOfFindsAVisiblePathAndNulloptForAHiddenOne) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     EXPECT_EQ(controller.visibleIndexOf({ 0u, 0u }), std::nullopt) << "0/0 is hidden while 0 is collapsed";
 
@@ -224,9 +228,10 @@ TEST(TreeController, VisibleIndexOfFindsAVisiblePathAndNulloptForAHiddenOne) {
 }
 
 TEST(TreeController, OnDataChangedFiresWhenExpandStateActuallyChanges) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     int dataChangedCount = 0;
     controller.onDataChanged.add([&](TreeController&) {
@@ -245,9 +250,10 @@ TEST(TreeController, OnDataChangedFiresWhenExpandStateActuallyChanges) {
 }
 
 TEST(TreeController, TotalHeightItemOffsetAndIndexAtOverVisibleRows) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
     controller.setExpanded({ 0u }, true);  // 4 visible rows now
 
@@ -263,17 +269,19 @@ TEST(ListController, ItemCountIsZeroWithNoModel) {
 }
 
 TEST(ListController, ItemCountForwardsToModelSize) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     EXPECT_EQ(controller.itemCount(), model.rows.size());
 }
 
 TEST(ListController, OnDataChangedFiresWhenModelChanges) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     int dataChangedCount = 0;
     controller.onDataChanged.add([&](ListController&) {
@@ -301,9 +309,10 @@ TEST(ListController, ItemHeightDefaultsToDefaultItemHeightForEveryIndex) {
 }
 
 TEST(ListController, TotalHeightItemOffsetAndIndexAtAgreeForAUniformHeightList) {
-    StubListModel model;  // 3 rows
+    auto modelOwner = std::make_unique<StubListModel>();  // 3 rows
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
 
     EXPECT_FLOAT_EQ(controller.totalHeight(), 60.0f);
@@ -333,9 +342,10 @@ public:
 }  // namespace
 
 TEST(ListController, CustomizedItemHeightChangesTotalHeightItemOffsetAndIndexAt) {
-    StubListModel model;  // 3 rows: 0, 1, 2
+    auto modelOwner = std::make_unique<StubListModel>();  // 3 rows: 0, 1, 2
+    StubListModel& model = *modelOwner;
     DoubleHeightSecondRowController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
 
     // Row 0: [0, 20), row 1 (doubled): [20, 60), row 2: [60, 80).
@@ -361,9 +371,10 @@ TEST(ListItem, PaintWithNoModelDoesNotCrash) {
 }
 
 TEST(ListItem, PaintWithStubModelDoesNotCrash) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     ListItem* item = controller.createItem(1);
     ASSERT_NE(item, nullptr);
@@ -460,9 +471,10 @@ TEST(TreeItem, PaintWithNoModelDoesNotCrash) {
 }
 
 TEST(TreeItem, PaintForALeafAndAnExpandableNodeBothDoNotCrash) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     // Path {0} has children (expandable, draws a glyph); path {1} is a
     // leaf (no glyph, same reserved indent space).
@@ -478,9 +490,10 @@ TEST(TreeItem, PaintForALeafAndAnExpandableNodeBothDoNotCrash) {
 }
 
 TEST(TreeItem, PaintAtADeeperPathDoesNotCrash) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setExpanded({ 0u }, true);
 
     TreeItem* item = controller.createItem({ 0u, 1u });

@@ -40,12 +40,14 @@ namespace newui {
         Controller() = default;
         virtual ~Controller();
 
-        // Non-owning - same convention Model::views_ already uses for the
-        // reverse relationship (a View doesn't own its Model either).
-        void setModel(Model* val);
+        // The controller owns its model: it is destroyed when replaced (or nullptr is passed) or
+        // when the controller goes away. A caller that needs to keep using the model afterwards
+        // holds a plain observing pointer (keep model() or take raw() before handing it over).
+        // Subclasses narrow this to their own model type but hold nothing of their own.
+        void setModel(std::unique_ptr<Model> val);
 
-        const Model* model() const { return model_; }
-        Model* model() { return model_; }
+        const Model* model() const { return model_.get(); }
+        Model* model() { return model_.get(); }
 
         // Fired whenever model()'s onChanged fires, once a Model is set
         // (see setModel()). Override to react; returning
@@ -56,7 +58,7 @@ namespace newui {
         virtual SyncReturn modelChanged(Model&) { return SyncReturn::Ignored; }
 
     private:
-        Model* model_ = nullptr;
+        std::unique_ptr<Model> model_;
         Connection modelChangedConnection_;
     };
 
@@ -423,24 +425,22 @@ namespace newui {
         // (items.cpp) is the only thing that calls this.
         virtual std::optional<std::string> iconFor(std::size_t index) const { return std::nullopt; }
 
-        // Narrows Controller's own model()/setModel(Model*) (a moment
-        // above, in Controller) to ListModel* specifically - hides (not
-        // overrides; no covariant relationship between a plain Model*
-        // and a ListModel*) Controller::model()/setModel() for any caller
-        // holding this as a ListController, giving a compile-time
-        // guarantee that whatever's attached is genuinely list-shaped
-        // (models.h - ListModel's own class comment) for any caller going
-        // through *this* pair. Controller::model()/Controller::setModel()
-        // are non-virtual, though, so they're still reachable - and the
-        // compile-time guarantee bypassable - via a Controller&/Controller*
-        // to this same object (e.g. Controller::setModel() called on a
-        // ListController through a plain Controller reference). model()
-        // below uses dynamic_cast (not static_cast) specifically to catch
-        // that: a real, non-null Model that isn't actually a ListModel
-        // throws rather than silently handing back a pointer that isn't
-        // really of the type it claims - the same "fail loud on a
-        // genuinely broken invariant" convention Button::paint()'s own
-        // font check already uses (throw std::runtime_error, controls.cpp).
+        // Narrows Controller's own model()/setModel() to ListModel
+        // specifically - hides (not overrides; no covariant relationship
+        // between a plain Model* and a ListModel*) Controller::model()/
+        // setModel() for any caller holding this as a ListController,
+        // giving a compile-time guarantee that whatever's attached is
+        // genuinely list-shaped (models.h - ListModel's own class comment)
+        // for any caller going through *this* pair. Controller::model()/
+        // Controller::setModel() are non-virtual, though, so they're still
+        // reachable - and the compile-time guarantee bypassable - via a
+        // Controller&/Controller* to this same object. model() below uses
+        // dynamic_cast (not static_cast) specifically to catch that: a
+        // real, non-null Model that isn't actually a ListModel throws
+        // rather than silently handing back a pointer that isn't really of
+        // the type it claims - the same "fail loud on a genuinely broken
+        // invariant" convention Button::paint()'s own font check already
+        // uses (throw std::runtime_error, controls.cpp).
         ListModel* model() {
             Model* base = Controller::model();
             if (base == nullptr) {
@@ -465,18 +465,11 @@ namespace newui {
             return asListModel;
         }
 
-        // Belt-and-suspenders alongside model()'s own dynamic_cast above:
-        // model already being ListModel* at the call site means this can
-        // only fail via memory corruption or similar undefined behavior
-        // elsewhere - real protection against the actual reachable bypass
-        // (Controller::setModel(Model*) called through a Controller&) is
-        // model()'s own check, above, which runs on every read regardless
-        // of which path the Model was originally attached through.
-        void setModel(ListModel* model) {
-            if (model != nullptr && dynamic_cast<ListModel*>(model) == nullptr) {
-                throw std::runtime_error("ListController::setModel: model is not a ListModel");
-            }
-            Controller::setModel(model);
+        // Takes ownership (Controller::setModel()'s contract, narrowed to a ListModel). This is
+        // also the setter reflection uses, so a saved design's model is rebuilt and attached on
+        // load.
+        void setModel(std::unique_ptr<ListModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
         }
 
         // "How many rows" - a plain forwarder to Model::size() (models.h),
@@ -563,7 +556,7 @@ namespace newui {
         // just keyed by path instead of a flat index.
         virtual std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const { return std::nullopt; }
 
-        // Narrows Controller's own model()/setModel(Model*) to TreeModel*
+        // Narrows Controller's own model()/setModel() to TreeModel
         // specifically - same dynamic_cast+throw pattern
         // ListController::model()/setModel() already use (their own doc
         // comment explains the non-virtual-Controller::setModel()-bypass
@@ -592,11 +585,9 @@ namespace newui {
             return asTreeModel;
         }
 
-        void setModel(TreeModel* model) {
-            if (model != nullptr && dynamic_cast<TreeModel*>(model) == nullptr) {
-                throw std::runtime_error("TreeController::setModel: model is not a TreeModel");
-            }
-            Controller::setModel(model);
+        // Takes ownership (Controller::setModel()'s contract, narrowed to a TreeModel).
+        void setModel(std::unique_ptr<TreeModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
             invalidateVisibleList();
         }
 

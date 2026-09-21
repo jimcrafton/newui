@@ -2078,6 +2078,28 @@ public:
 
 }  // namespace
 
+TEST(ListView, SetModelHandsOwnershipToTheControllerSoItOutlivesTheCallersPointer) {
+    auto* listView = new ListView();
+    auto model = std::make_unique<StringListModel>();
+    model->items() = { "a", "b", "c" };
+    StringListModel* raw = model.get();
+
+    listView->setModel(std::move(model));
+
+    EXPECT_EQ(listView->model(), raw);
+    EXPECT_EQ(listView->controller().itemCount(), 3u);
+
+    raw->addItem("d");   // a change through the model reaches the view's controller
+    EXPECT_EQ(listView->controller().itemCount(), 4u);
+
+    listView->setModel(nullptr);   // detaches and destroys it
+    EXPECT_EQ(listView->model(), nullptr);
+    EXPECT_EQ(listView->controller().itemCount(), 0u);
+
+    listView->destroy();
+    delete listView;
+}
+
 TEST(ListView, DefaultConstructedHasZeroItemCountAndNoSelection) {
     auto* listView = new ListView();
 
@@ -2088,13 +2110,37 @@ TEST(ListView, DefaultConstructedHasZeroItemCountAndNoSelection) {
     delete listView;
 }
 
+TEST(StringListModelTest, ItemsChangeThroughTheModelAndFireOnChanged) {
+    StringListModel model;
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.addItem("one");
+    model.addItem("two");
+    EXPECT_EQ(model.size(), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.valueAt(1)), "two");
+
+    model.setValueAt(0, std::string("uno"));
+    EXPECT_EQ(std::any_cast<std::string>(model.valueAt(0)), "uno");
+
+    model.removeItem(0);
+    model.removeItem(99);   // out of range: no-op, no notification
+    EXPECT_EQ(model.size(), 1u);
+    EXPECT_EQ(changes, 4);
+
+    EXPECT_FALSE(model.valueAt(5).has_value());
+    model.clear();
+    EXPECT_TRUE(model.empty());
+}
+
 TEST(ListView, ContentSizeIsItemCountTimesRowHeight) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     Size reported = listView->contentSize();
 
@@ -2124,9 +2170,10 @@ TEST(ListView, RespectsACustomizedControllersPerRowItemHeight) {
     listView->setBounds(Rect(0, 0, 100, 200));
     listView->setController(std::make_unique<VariableHeightController>());
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "short", "tall", "short again" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     // 20 (row 0) + 50 (row 1) + 20 (row 2) = 90, not 3 * rowHeight().
     Size reported = listView->contentSize();
@@ -2175,9 +2222,10 @@ TEST(ListView, MouseDownSelectsTheRowUnderThePoint) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     int selectionChangedCount = 0;
     listView->onSelectionChanged.add([&](ListView&) {
@@ -2203,9 +2251,10 @@ TEST(ListView, MouseDownPastTheLastRowDoesNotSelectAnything) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float clickY = listView->getClientBounds().top() + 10.0f * listView->rowHeight();
     listView->onMouseDown(*listView, Point(10.0f, clickY), 0, 0);
@@ -2235,9 +2284,10 @@ void ClickRow(ListView* listView, std::size_t index, std::uint32_t keyMask) {
 TEST(ListView, PlainClickReplacesTheWholeSelection) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, 0);
@@ -2252,9 +2302,10 @@ TEST(ListView, PlainClickReplacesTheWholeSelection) {
 TEST(ListView, CtrlClickTogglesARowWithoutDisturbingTheRest) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, kmCtrl);
@@ -2272,9 +2323,10 @@ TEST(ListView, CtrlClickTogglesARowWithoutDisturbingTheRest) {
 TEST(ListView, ShiftClickSelectsARangeFromTheLastPlainClick) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, kmShift);
@@ -2293,9 +2345,10 @@ TEST(ListView, ShiftClickSelectsARangeFromTheLastPlainClick) {
 TEST(ListView, SelectRangeAddToSelectionAndClearSelectionWorkDirectly) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->selectRange(1u, 3u);
     EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
@@ -2317,9 +2370,10 @@ TEST(ListView, SelectRangeAddToSelectionAndClearSelectionWorkDirectly) {
 TEST(ListView, MultiSelectionPaintsAllSelectedRowsWithoutCrashing) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     listView->selectRange(1u, 3u);
 
     BLImage image(100, 200, BL_FORMAT_PRGB32);
@@ -2344,9 +2398,10 @@ TEST(ListView, HoverHighlightIsEnabledByDefault) {
 TEST(ListView, MouseMoveTracksTheHoveredRowAndMouseLeftClearsIt) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
     listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
@@ -2365,9 +2420,10 @@ TEST(ListView, MouseMoveTracksTheHoveredRowAndMouseLeftClearsIt) {
 TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
     listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
@@ -2389,9 +2445,10 @@ TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
 TEST(ListView, SetKeyboardHighlightedIndexClampsAndIsIndependentOfHover) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setKeyboardHighlightedIndex(2u);
     ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
@@ -2437,9 +2494,10 @@ void PressKey(ListView* listView, std::uint32_t VKeyCode, std::uint32_t keyMask)
 TEST(ListView, PlainArrowMovesAndReplacesSelection) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setSelectedIndex(1u);
     PressKey(listView, vkDownArrow, 0);
@@ -2457,9 +2515,10 @@ TEST(ListView, PlainArrowMovesAndReplacesSelection) {
 TEST(ListView, DownArrowClampsAtTheLastRow) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setSelectedIndex(2u);
     PressKey(listView, vkDownArrow, 0);
@@ -2472,9 +2531,10 @@ TEST(ListView, DownArrowClampsAtTheLastRow) {
 TEST(ListView, HomeAndEndJumpToTheFirstAndLastRow) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setSelectedIndex(2u);
     PressKey(listView, vkEnd, 0);
@@ -2490,9 +2550,10 @@ TEST(ListView, HomeAndEndJumpToTheFirstAndLastRow) {
 TEST(ListView, ShiftArrowExtendsFromTheAnchorAndKeepsExtending) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);  // sets selectionAnchor_ to row 1, like a plain click
 
@@ -2511,9 +2572,10 @@ TEST(ListView, ShiftArrowExtendsFromTheAnchorAndKeepsExtending) {
 TEST(ListView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setSelectedIndex(1u);
     PressKey(listView, vkDownArrow, kmCtrl);
@@ -2530,9 +2592,10 @@ TEST(ListView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
 TEST(ListView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setSelectedIndex(1u);
     PressKey(listView, vkDownArrow, kmCtrl);  // highlight -> row 2, selection still just {1}
@@ -2564,9 +2627,10 @@ TEST(ListView, PaintDoesNotCrashAndReusesASinglePooledItemAcrossRowsAndCalls) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     listView->setSelectedIndex(1u);
 
     ListItem* before = listView->controller().createItem(0);
@@ -2589,11 +2653,12 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     // No scrollbar of its own, and pinned to the (much smaller) viewport
@@ -2630,11 +2695,12 @@ TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2681,11 +2747,12 @@ TEST(ListView, ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNext
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2722,11 +2789,12 @@ TEST(ListView, SelectingARowBelowTheViewportRepaintsItInTheSamePaintCall) {
     auto* listView = new ListView();
     auto* spyController = new SpyListController();
     listView->setController(std::unique_ptr<ListController>(spyController));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2757,11 +2825,12 @@ TEST(ListView, SelectingARowAboveTheViewportScrollsUpToRevealIt) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2795,11 +2864,12 @@ TEST(ListView, HomeAndEndKeysScrollTheHostingScrollViewToo) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2839,11 +2909,12 @@ TEST(ListView, HomeAfterRepeatedDownArrowsScrollsAllTheWayBackToTheTop) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
@@ -2926,8 +2997,9 @@ TEST(TreeView, DefaultConstructedHasZeroVisibleRowsAndNoSelection) {
 TEST(TreeView, ContentSizeReflectsOnlyCurrentlyVisibleRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     // Collapsed: just the 2 root children.
     Size collapsedSize = treeView->contentSize();
@@ -2944,8 +3016,9 @@ TEST(TreeView, ContentSizeReflectsOnlyCurrentlyVisibleRows) {
 TEST(TreeView, ClickingTheGlyphTogglesExpandWithoutSelecting) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     EXPECT_FALSE(treeView->controller().isExpanded({ 0u }));
 
@@ -2963,8 +3036,9 @@ TEST(TreeView, ClickingTheGlyphTogglesExpandWithoutSelecting) {
 TEST(TreeView, ClickingTheLabelSelectsWithoutTogglingExpand) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     // Well to the right of the glyph - the row's own label text.
     ClickTreeRow(treeView, 0, 50.0f, 0);
@@ -2980,8 +3054,9 @@ TEST(TreeView, ClickingTheLabelSelectsWithoutTogglingExpand) {
 TEST(TreeView, CtrlClickTogglesSelectionAcrossRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     ClickTreeRow(treeView, 0, 50.0f, 0);        // select {0}
     ClickTreeRow(treeView, 1, 50.0f, kmCtrl);   // add {1}
@@ -2995,8 +3070,9 @@ TEST(TreeView, CtrlClickTogglesSelectionAcrossRows) {
 TEST(TreeView, ShiftClickSelectsARangeAcrossExpandedRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
 
     ClickTreeRow(treeView, 0, 50.0f, 0);         // anchor at visible row 0 ({0})
@@ -3028,8 +3104,9 @@ void PressTreeKey(TreeView* treeView, std::uint32_t VKeyCode, std::uint32_t keyM
 TEST(TreeView, PlainArrowMovesAndReplacesSelectionAcrossVisibleRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);  // collapsed: visible {0}, {1}
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));  // collapsed: visible {0}, {1}
 
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
     PressTreeKey(treeView, vkDownArrow, 0);
@@ -3047,8 +3124,9 @@ TEST(TreeView, PlainArrowMovesAndReplacesSelectionAcrossVisibleRows) {
 TEST(TreeView, RightArrowExpandsFirstThenMovesToTheFirstChildOnASecondPress) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
 
@@ -3067,8 +3145,9 @@ TEST(TreeView, RightArrowExpandsFirstThenMovesToTheFirstChildOnASecondPress) {
 TEST(TreeView, LeftArrowCollapsesFirstThenMovesToTheParentOnASecondPress) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);
 
     // A leaf (path {0,0} has no children of its own) - Left goes straight
@@ -3095,8 +3174,9 @@ TEST(TreeView, LeftArrowCollapsesFirstThenMovesToTheParentOnASecondPress) {
 TEST(TreeView, ShiftArrowExtendsSelectionAcrossVisibleRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
 
     ClickTreeRow(treeView, 0, 50.0f, 0);  // anchor at visible row 0 ({0})
@@ -3114,8 +3194,9 @@ TEST(TreeView, ShiftArrowExtendsSelectionAcrossVisibleRows) {
 TEST(TreeView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);  // collapsed: visible {0}, {1}
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));  // collapsed: visible {0}, {1}
 
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
     PressTreeKey(treeView, vkDownArrow, kmCtrl);
@@ -3132,8 +3213,9 @@ TEST(TreeView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
 TEST(TreeView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
     PressTreeKey(treeView, vkDownArrow, kmCtrl);  // highlight -> {1}, selection still just {0}
@@ -3162,8 +3244,9 @@ TEST(TreeView, HoverHighlightIsEnabledByDefaultAndTracksMouseMove) {
     treeView->setBounds(Rect(0, 0, 100, 200));
     EXPECT_TRUE(treeView->hoverHighlightEnabled());
 
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     float row1Y = treeView->getClientBounds().top() + 1.5f * treeView->rowHeight();
     treeView->onMouseMove(*treeView, Point(50.0f, row1Y), 0, 0);
@@ -3182,8 +3265,9 @@ TEST(TreeView, HoverHighlightIsEnabledByDefaultAndTracksMouseMove) {
 TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u, 1u });
 
@@ -3205,8 +3289,9 @@ TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
 TEST(TreeView, RectForPathIsNulloptWhenNotCurrentlyVisible) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     // {0}'s own children are collapsed away by default.
     EXPECT_FALSE(treeView->rectForPath({ 0u, 0u }).has_value());
@@ -3220,8 +3305,9 @@ TEST(TreeView, RectForPathIsNulloptWhenNotCurrentlyVisible) {
 TEST(TreeView, RectForPathMatchesTheOnScreenRowWithNoScroll) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     std::optional<Rect> rect = treeView->rectForPath({ 1u });
     ASSERT_TRUE(rect.has_value());
@@ -3238,8 +3324,9 @@ TEST(TreeView, RectForPathMatchesTheOnScreenRowWithNoScroll) {
 TEST(TreeView, RectForPathAccountsForTheCurrentScrollOffset) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
 
     treeView->onScrollOffsetChanged(*treeView, Point(0.0f, treeView->rowHeight()));
@@ -3259,8 +3346,9 @@ TEST(TreeView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* treeView = new TreeView();
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);
     scrollView->addChild(treeView);
 
@@ -3308,9 +3396,10 @@ TEST(DropDownList, DefaultConstructedHasNoSelectionAndIsNotOpen) {
 TEST(DropDownList, SetModelWiresTheControllerAndClearsAnOutOfRangeSelection) {
     auto* dropDown = new DropDownList();
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     EXPECT_EQ(dropDown->model(), &model);
 
     dropDown->setSelectedIndex(2u);
@@ -3320,9 +3409,10 @@ TEST(DropDownList, SetModelWiresTheControllerAndClearsAnOutOfRangeSelection) {
     // clears the now-invalid selection - same reasoning
     // TreeController::setModel() already has for expandedPaths_ referring
     // to a path that no longer exists.
-    StubRowModel smallerModel;
+    auto smallerModelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& smallerModel = *smallerModelOwner;
     smallerModel.rows = { "only one" };
-    dropDown->setModel(&smallerModel);
+    dropDown->setModel(std::move(smallerModelOwner));
     EXPECT_FALSE(dropDown->selectedIndex().has_value());
 
     dropDown->destroy();
@@ -3373,9 +3463,10 @@ TEST(DropDownList, ClickingTheButtonWithNoLiveWindowIsASafeNoOp) {
     auto* dropDown = new TestableDropDownList();
     dropDown->setBounds(Rect(0, 0, 200, 24));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
@@ -3392,9 +3483,10 @@ TEST(DropDownList, ClickingOutsideTheButtonDoesNotOpenIt) {
     auto* dropDown = new DropDownList();
     dropDown->setBounds(Rect(0, 0, 200, 24));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point outsideButton(4.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, outsideButton, 0, 0);
@@ -3410,9 +3502,10 @@ TEST(DropDownList, DisabledDropDownIgnoresButtonClicks) {
     dropDown->setBounds(Rect(0, 0, 200, 24));
     dropDown->setEnabled(false);
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
@@ -3434,9 +3527,10 @@ TEST(DropDownList, PaintDoesNotCrashWithOrWithoutASelection) {
     // glyph without crashing.
     dropDown->paint(ctx);
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
     dropDown->paint(ctx);
 
@@ -3451,9 +3545,10 @@ TEST(DropDownList, PaintDoesNotCrashWithOrWithoutASelection) {
 
 TEST(DropDownList, DownArrowWithNoSelectionSelectsTheFirstItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
 
@@ -3466,9 +3561,10 @@ TEST(DropDownList, DownArrowWithNoSelectionSelectsTheFirstItem) {
 
 TEST(DropDownList, DownArrowAdvancesAndClampsAtTheLastItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
@@ -3486,9 +3582,10 @@ TEST(DropDownList, DownArrowAdvancesAndClampsAtTheLastItem) {
 
 TEST(DropDownList, UpArrowRetreatsAndClampsAtTheFirstItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkUpArrow);
@@ -3516,9 +3613,10 @@ TEST(DropDownList, ArrowKeysAreIgnoredWithNoModel) {
 
 TEST(DropDownList, ArrowKeysAreIgnoredWhileDisabled) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setEnabled(false);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
@@ -3597,10 +3695,11 @@ TEST(Label, ExplicitSetTextColorAlwaysWinsOverAnOverride) {
 // controller holding a dangling onDataChanged subscriber.
 
 TEST(ListView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b" };
     auto controller = std::make_shared<ListController>();
-    controller->setModel(&model);
+    controller->setModel(std::move(modelOwner));
 
     auto* first = new ListView();
     first->setController(controller);
@@ -3619,10 +3718,11 @@ TEST(ListView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
 }
 
 TEST(ListView, SwappingControllersUnsubscribesFromTheOldOne) {
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a" };
     auto oldController = std::make_shared<ListController>();
-    oldController->setModel(&model);
+    oldController->setModel(std::move(modelOwner));
 
     auto* view = new ListView();
     view->setController(oldController);
@@ -3635,9 +3735,10 @@ TEST(ListView, SwappingControllersUnsubscribesFromTheOldOne) {
 }
 
 TEST(TreeView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
-    StubTreeRowModel model;
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
     auto controller = std::make_shared<TreeController>();
-    controller->setModel(&model);
+    controller->setModel(std::move(modelOwner));
 
     auto* view = new TreeView();
     view->setController(controller);
@@ -3650,17 +3751,19 @@ TEST(TreeView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
 }
 
 TEST(DropDownList, SetControllerSharesItAndClampsAnOutOfRangeSelection) {
-    StubRowModel threeRows;
+    auto threeRowsOwner = std::make_unique<StubRowModel>();
+    StubRowModel& threeRows = *threeRowsOwner;
     threeRows.rows = { "a", "b", "c" };
-    StubRowModel oneRow;
+    auto oneRowOwner = std::make_unique<StubRowModel>();
+    StubRowModel& oneRow = *oneRowOwner;
     oneRow.rows = { "only" };
 
     auto* dropDown = new DropDownList();
-    dropDown->setModel(&threeRows);
+    dropDown->setModel(std::move(threeRowsOwner));
     dropDown->setSelectedIndex(2);
 
     auto controller = std::make_shared<ListController>();
-    controller->setModel(&oneRow);
+    controller->setModel(std::move(oneRowOwner));
     dropDown->setController(controller);
 
     EXPECT_EQ(dropDown->sharedController(), controller);

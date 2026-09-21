@@ -11,6 +11,43 @@ namespace newui {
         onChanged(*this);
     }
 
+    void StringListModel::addItem(const std::string& text) {
+        items_.push_back(text);
+        onChanged(*this);
+    }
+
+    void StringListModel::removeItem(std::size_t index) {
+        if (index >= items_.size()) {
+            return;
+        }
+        items_.erase(items_.begin() + static_cast<std::ptrdiff_t>(index));
+        onChanged(*this);
+    }
+
+    void StringListModel::clear() {
+        items_.clear();
+        Model::clear();
+        onChanged(*this);
+    }
+
+    std::any StringListModel::value(const std::any& key) {
+        if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
+            if (*index < items_.size()) {
+                return items_[*index];
+            }
+        }
+        return std::any();
+    }
+
+    void StringListModel::setValue(const std::any& newValue, const std::any& key) {
+        const std::size_t* index = std::any_cast<std::size_t>(&key);
+        const std::string* text = std::any_cast<std::string>(&newValue);
+        if (index != nullptr && text != nullptr && *index < items_.size()) {
+            items_[*index] = *text;
+        }
+        Model::setValue(newValue, key);
+    }
+
     void Model::addView(View* view) {
         if (view == nullptr) {
             return;

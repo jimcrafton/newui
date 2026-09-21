@@ -95,10 +95,9 @@ namespace {
             root.addChild(button);
         }
 
-        static ColorListModel colors;  // the drop-down keeps a pointer to it, so it must outlive the RootView
         auto* dropDown = new newui::DropDownList();
         dropDown->setVisible(true);
-        dropDown->setModel(&colors);
+        dropDown->setModel(std::make_unique<ColorListModel>());  // the drop-down's controller owns it
         dropDown->setDesiredSize(newui::Size(0.0f, 28.0f));
         root.addChild(dropDown);
 

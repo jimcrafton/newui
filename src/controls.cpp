@@ -2225,14 +2225,9 @@ namespace newui {
     }
 
     TextController::~TextController() {
-        // Must run before ownedModel_ (and every other member) is
-        // destroyed - see this destructor's own doc comment (controls.h)
-        // for the real use-after-free this avoids. Controller::setModel(nullptr)
-        // clears model_ to null too, so ~Controller()'s own cleanup
-        // (controllers.cpp) becomes a safe no-op once it runs afterward.
+        // The model is destroyed later, by ~Controller() - unregister owner_ while both are alive.
         if (Controller::model() != nullptr) {
             model().removeView(&owner_);
-            Controller::setModel(nullptr);
         }
     }
 
@@ -2860,8 +2855,8 @@ namespace newui {
         style().markDirty();
     }
 
-    void ListView::setModel(ListModel* model) {
-        controller_->setModel(model);
+    void ListView::setModel(std::unique_ptr<ListModel> model) {
+        controller_->setModel(std::move(model));
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -3304,8 +3299,8 @@ namespace newui {
         style().markDirty();
     }
 
-    void TreeView::setModel(TreeModel* model) {
-        controller_->setModel(model);
+    void TreeView::setModel(std::unique_ptr<TreeModel> model) {
+        controller_->setModel(std::move(model));
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -3771,13 +3766,17 @@ namespace newui {
         style().markDirty();
     }
 
-    void DropDownList::setModel(ListModel* model) {
-        controller_->setModel(model);
-        if (selectedIndex_.has_value() && (model == nullptr || *selectedIndex_ >= model->size())) {
+    void DropDownList::setModel(std::unique_ptr<ListModel> model) {
+        ListModel* attached = model.get();
+        controller_->setModel(std::move(model));
+        if (selectedIndex_.has_value() && (attached == nullptr || *selectedIndex_ >= attached->size())) {
             selectedIndex_.reset();
         }
+        // The popup list shares controller_, so it already sees the new model - it only needs a
+        // content-size refresh and a repaint.
         if (popupListView_ != nullptr) {
-            popupListView_->setModel(model);
+            popupListView_->onContentSizeChanged(*popupListView_);
+            popupListView_->style().markDirty();
         }
         style().markDirty();
     }
@@ -3944,7 +3943,10 @@ namespace newui {
                 UIColorManager::colorFor(UIColorRole::WindowBackground));
         }
 
-        popupListView_->setModel(controller_->model());
+        // popupListView_ shares controller_ (see setController() above), so it already has the
+        // model - just refresh its content size for the current row count.
+        popupListView_->onContentSizeChanged(*popupListView_);
+        popupListView_->style().markDirty();
 
         // Restore this control's own current selection into the popup's
         // ListView before wiring/re-triggering its own onSelectionChanged -

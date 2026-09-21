@@ -1101,3 +1101,39 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATabControlsTabsAndTit
     loaded->tabButton(1)->onMouseDown(*loaded->tabButton(1), newui::Point(1, 1), 0, 0);
     EXPECT_EQ(loaded->selectedIndex(), 1u);
 }
+
+// A ListView's model is a reflected property whose setter takes ownership (the controller owns
+// it), so a StringListModel and its rows save with the design and are rebuilt - and attached -
+// when it loads.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAListViewsStringListModel) {
+    trackFile("BundleListModelFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleListModelFrame1");
+
+    auto* list = new newui::ListView();
+    list->setName("myList");
+    auto model = std::make_unique<newui::StringListModel>();
+    model->items() = { "alpha", "beta", "gamma" };
+    list->setModel(std::move(model));
+    frame.rootView().addChild(list);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleListModelFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::ListView*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* loadedModel = dynamic_cast<newui::StringListModel*>(loaded->model());
+    ASSERT_NE(loadedModel, nullptr) << "no StringListModel was restored";
+    ASSERT_EQ(loadedModel->items().size(), 3u);
+    EXPECT_EQ(loadedModel->items()[0], "alpha");
+    EXPECT_EQ(loadedModel->items()[2], "gamma");
+
+    // Attached to the view's controller, not just held.
+    EXPECT_EQ(loaded->controller().itemCount(), 3u);
+}

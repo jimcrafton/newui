@@ -24,11 +24,12 @@ namespace newui
         }
     }
 
-    void Controller::setModel(Model* val) {
+    void Controller::setModel(std::unique_ptr<Model> val) {
+        // Unsubscribe from the old model before model_ is reassigned - that destroys it.
         if (model_ != nullptr) {
             model_->onChanged.remove(modelChangedConnection_);
         }
-        model_ = val;
+        model_ = std::move(val);
         if (model_ != nullptr) {
             modelChangedConnection_ = model_->onChanged.add(this, &Controller::modelChanged);
         }

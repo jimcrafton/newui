@@ -1353,9 +1353,10 @@ TEST(RootViewArrowKeySpatialJump, DownArrowOnAListViewAtItsLastRowJumpsToTheCont
     auto* list = new newui::ListView();
     list->setBounds(newui::Rect(0, 0, 200, 60));
     list->setVisible(true);
-    StubListRowModel model;
+    auto modelOwner = std::make_unique<StubListRowModel>();
+    StubListRowModel& model = *modelOwner;
     model.rowCount = 3;
-    list->setModel(&model);
+    list->setModel(std::move(modelOwner));
     root->addChild(list);
 
     auto* below = new newui::SubView();
@@ -1385,9 +1386,10 @@ TEST(RootViewArrowKeySpatialJump, DownArrowOnAListViewNotYetAtItsLastRowStillMov
     auto* list = new newui::ListView();
     list->setBounds(newui::Rect(0, 0, 200, 60));
     list->setVisible(true);
-    StubListRowModel model;
+    auto modelOwner = std::make_unique<StubListRowModel>();
+    StubListRowModel& model = *modelOwner;
     model.rowCount = 3;
-    list->setModel(&model);
+    list->setModel(std::move(modelOwner));
     root->addChild(list);
 
     auto* below = new newui::SubView();

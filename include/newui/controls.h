@@ -1300,12 +1300,11 @@ namespace newui {
     // "the C in MVC" for a text-editing Control, same as Controller's own
     // doc comment describes, just with real hit-testing/coordinate-
     // translation responsibilities layered on top via subclassing.
-    // model()/setModel() below narrow Controller's own generic Model*-based
+    // model()/setModel() below narrow Controller's own generic Model-based
     // pair (controllers.h) to the concrete text::TextModel every caller
-    // here actually wants, and additionally own the TextModel instance
-    // itself (ownedModel_, heap, RAII) - Controller's own model_ stays
-    // non-owning throughout, same contract as always; TextController is
-    // simply always the one supplying what it points at.
+    // here actually wants. Ownership is Controller's own (it holds the
+    // model in a unique_ptr) - TextController adds only the wiring a
+    // TextModel needs (addView(), the vetoable Before handlers).
     //
     // Deliberately does NOT own paint(), TextRenderer, or any of the
     // ScrollView-hosting delegates (onQueryContentSize/onScrollOffsetChanged/
@@ -1360,25 +1359,11 @@ namespace newui {
     public:
         explicit TextController(Control& owner);
 
-        // NOT = default, and NOT safe to leave implicit - C++ destroys a
-        // derived object's own members (ownedModel_ included) BEFORE its
-        // base class destructor runs, so by the time ~Controller() would
-        // run its own "unsubscribe from model_->onChanged" cleanup
-        // (controllers.cpp), ownedModel_ - the very object model_ (a raw,
-        // non-owning pointer inherited from Controller) still points at -
-        // would already be destroyed: a real, confirmed use-after-free
-        // (a debug-heap free-pattern read inside Delegate<Model>::remove(),
-        // caught live while adding this class's own test coverage). This
-        // destructor's body runs before member destruction even begins,
-        // so it detaches from the model (Controller::setModel(nullptr))
-        // and unregisters from it (Model::removeView()) while ownedModel_
-        // is still perfectly valid - by the time ~Controller() itself
-        // later runs, its own model_ is already nullptr and its cleanup
-        // is a no-op.
+        // Unregisters owner_ from the model (Model::removeView()) while both are still alive - the
+        // model itself is destroyed later, by ~Controller().
         ~TextController();
 
-        // Narrows Controller's own model()/setModel(Model*) (controllers.h,
-        // a non-owning Model* pair) to the concrete text::TextModel every
+        // Narrows Controller's own model()/setModel() (controllers.h) to the concrete text::TextModel every
         // caller here actually wants - hides (doesn't override; a
         // pointer-to-reference/Model-to-TextModel return type isn't
         // covariant) Controller::model()/setModel() for any caller
@@ -1392,38 +1377,26 @@ namespace newui {
         // Swaps in a different TextModel (e.g. a custom subclass) - a
         // no-op for nullptr, since Controller::model() is never null here
         // (every handler below dereferences it directly, via model()
-        // above). Tears down the old model's registration/subscriptions
-        // (Model::removeView(), onBeforeChar/onBeforeRangeChanged) before
-        // dropping it, then wires the new one up exactly the same way the
-        // constructor already does for the default instance - including
-        // Controller::setModel() itself, which handles the onChanged-to-
-        // modelChanged() subscription TextController inherits but doesn't
-        // currently use (addView() below is the real repaint-on-change
-        // path here; modelChanged() stays available for a subclass that
-        // wants it).
+        // above). Unregisters owner_ from the old model (Model::
+        // removeView()) before Controller::setModel() destroys it, then
+        // wires the new one up exactly the same way the constructor
+        // already does for the default instance. Controller::setModel()
+        // also handles the onChanged-to-modelChanged() subscription
+        // TextController inherits but doesn't currently use (addView()
+        // below is the real repaint-on-change path here; modelChanged()
+        // stays available for a subclass that wants it).
         void setModel(std::unique_ptr<text::TextModel> model) {
             if (model == nullptr) {
                 return;
             }
             if (Controller::model() != nullptr) {
-                // Order matters: unsubscribe from the OLD model's
-                // onChanged (Controller::setModel(nullptr)) before
-                // ownedModel_ = std::move(model) below destroys it (a
-                // move-assignment destroys the previously-held object) -
-                // otherwise Controller's own modelChangedConnection_ is
-                // left pointing into a Delegate that's about to be torn
-                // down along with it, the same use-after-free this
-                // class's own destructor works around (controls.h/.cpp -
-                // see ~TextController()'s doc comment for the real crash
-                // this pattern caused, confirmed live).
                 this->model().removeView(&owner_);
-                Controller::setModel(nullptr);
             }
-            ownedModel_ = std::move(model);
-            Controller::setModel(ownedModel_.get());
-            ownedModel_->addView(&owner_);
-            ownedModel_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
-            ownedModel_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            text::TextModel* attached = model.get();
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
+            attached->addView(&owner_);
+            attached->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+            attached->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
             owner_.style().markDirty();
         }
 
@@ -1624,14 +1597,6 @@ namespace newui {
 
         text::TextLayoutEngine layoutEngine_;
 
-        // Owned here (heap, RAII) - Controller's own model_ (controllers.h,
-        // private to Controller) stays non-owning as always; setModel()
-        // above is what points Controller::model() at this. See this
-        // class's own class comment for why TextController holds the
-        // real Model-owning responsibility instead of the more usual
-        // "caller constructs it externally, Controller just observes"
-        // split every other Controller in this codebase uses.
-        std::unique_ptr<text::TextModel> ownedModel_;
         text::TextSelection selection_;
         text::Caret caret_;
         text::TextInputTraits traits_;
@@ -2003,15 +1968,12 @@ namespace newui {
 
         ListModel* model() const { return controller_->model(); }
 
-        // Controller::setModel()'s own non-owning contract, unchanged -
-        // this class never takes ownership of model, same as every other
-        // Controller in this codebase except TextController (see its own
-        // class comment for why that one's different). ListModel*
-        // specifically, not plain Model* - see ListController::model()/
-        // setModel()'s own doc comment (controllers.h) for why. Fires
-        // onContentSizeChanged (view.h) - itemCount() almost certainly
-        // just changed - and repaints.
-        void setModel(ListModel* model);
+        // Hands model to this view's controller, which owns it from here on (Controller::
+        // setModel()'s contract) - keep model() (or a pointer taken before the call) to go on
+        // using it. ListModel specifically, not plain Model - see ListController::model()/
+        // setModel()'s own doc comment (controllers.h) for why. Fires onContentSizeChanged
+        // (view.h) - itemCount() almost certainly just changed - and repaints.
+        void setModel(std::unique_ptr<ListModel> model);
 
         // Whether the row currently under the mouse gets a lighter
         // highlight (Item::setHighlighted(), items.h) - on by default,
@@ -2268,10 +2230,9 @@ namespace newui {
 
         TreeModel* model() const { return controller_->model(); }
 
-        // Controller::setModel()'s own non-owning contract - see
-        // ListView::setModel()'s own doc comment for the same reasoning,
-        // TreeModel* in place of ListModel*.
-        void setModel(TreeModel* model);
+        // The controller owns model from here on - see ListView::setModel()'s own doc comment
+        // for the same reasoning, TreeModel in place of ListModel.
+        void setModel(std::unique_ptr<TreeModel> model);
 
         bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
         void setHoverHighlightEnabled(bool value);
@@ -2448,10 +2409,10 @@ namespace newui {
         std::shared_ptr<ListController> sharedController() const { return controller_; }
 
         ListModel* model() const { return controller_->model(); }
-        // Same non-owning ListModel* contract as ListView::setModel() -
-        // see its own doc comment (controls.h). Clears selectedIndex() if
-        // it's no longer valid against the new model's size().
-        void setModel(ListModel* model);
+        // Same ownership as ListView::setModel() - the (shared) controller owns model. See its
+        // own doc comment (controls.h). Clears selectedIndex() if it's no longer valid against
+        // the new model's size().
+        void setModel(std::unique_ptr<ListModel> model);
 
         std::optional<std::size_t> selectedIndex() const { return selectedIndex_; }
         // A no-op if unchanged. Does not itself validate index against

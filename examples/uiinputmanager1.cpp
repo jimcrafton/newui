@@ -369,7 +369,8 @@ int main() {
     AddSectionHeader(contentContainer, "4) ListView keyboard navigation",
         "Click a row, then Up/Down/Home/End move it; Shift extends; Ctrl+Arrow+Ctrl+Space multi-selects.");
 
-    StringListModel listModel;
+    auto listModelOwner = std::make_unique<StringListModel>();
+    StringListModel& listModel = *listModelOwner;
     for (int i = 0; i < 20; ++i) {
         listModel.rows.push_back("Row " + std::to_string(i));
     }
@@ -379,7 +380,7 @@ int main() {
     contentContainer->addChild(listScrollView);
 
     auto* listView = new newui::ListView();
-    listView->setModel(&listModel);
+    listView->setModel(std::move(listModelOwner));
     listScrollView->addChild(listView);
 
     auto* listSelectionLabel = new newui::Label();
@@ -414,7 +415,8 @@ int main() {
     AddSectionHeader(contentContainer, "5) TreeView keyboard navigation",
         "Same as above, plus Left/Right to collapse/expand or move to the parent/first child.");
 
-    StringTreeModel treeModel;
+    auto treeModelOwner = std::make_unique<StringTreeModel>();
+    StringTreeModel& treeModel = *treeModelOwner;
     treeModel.childrenByParent[{}] = { "Fruits", "Vegetables" };
     treeModel.childrenByParent[{ 0u }] = { "Apple", "Banana", "Cherry" };
     treeModel.childrenByParent[{ 1u }] = { "Carrot", "Potato" };
@@ -424,7 +426,7 @@ int main() {
     contentContainer->addChild(treeScrollView);
 
     auto* treeView = new newui::TreeView();
-    treeView->setModel(&treeModel);
+    treeView->setModel(std::move(treeModelOwner));
     treeScrollView->addChild(treeView);
 
     auto* treeSelectionLabel = new newui::Label();
