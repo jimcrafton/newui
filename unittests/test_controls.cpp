@@ -2133,6 +2133,97 @@ TEST(StringListModelTest, ItemsChangeThroughTheModelAndFireOnChanged) {
     EXPECT_TRUE(model.empty());
 }
 
+TEST(StringTreeModelTest, FlatDepthListResolvesIntoARealTreeByPath) {
+    StringTreeModel model;
+    model.rows() = {
+        { 0, "Fruits" }, { 1, "Apple" }, { 1, "Banana" },
+        { 0, "Vegetables" }, { 1, "Carrot" },
+    };
+
+    EXPECT_EQ(model.childCount({}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0})), "Fruits");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{1})), "Vegetables");
+
+    EXPECT_EQ(model.childCount({0}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0})), "Apple");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 1})), "Banana");
+    EXPECT_EQ(model.childCount({0, 0}), 0u);
+
+    EXPECT_EQ(model.childCount({1}), 1u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{1, 0})), "Carrot");
+
+    // Out of range at every level: no crash, no value.
+    EXPECT_EQ(model.childCount({5}), 0u);
+    EXPECT_FALSE(model.value(std::vector<std::size_t>{5}).has_value());
+    EXPECT_FALSE(model.value(std::vector<std::size_t>{0, 5}).has_value());
+}
+
+TEST(StringTreeModelTest, ADeeperRowThanItsParentPlusOneIsAGrandchildNotSkippedEntirely) {
+    // Depth jumps by more than one (2 right after a depth-0 row) - Banana is still Apple's child,
+    // not Fruits', even though nothing at depth 1 separates them.
+    StringTreeModel model;
+    model.rows() = { { 0, "Fruits" }, { 1, "Apple" }, { 2, "Gala" }, { 2, "Fuji" } };
+
+    EXPECT_EQ(model.childCount({}), 1u);
+    EXPECT_EQ(model.childCount({0}), 1u);
+    ASSERT_EQ(model.childCount({0, 0}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0, 0})), "Gala");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0, 1})), "Fuji");
+}
+
+TEST(StringTreeModelTest, AddItemAppendsARootRowRemoveLastItemDropsTheLastRowRegardlessOfDepthAndFiresOnChanged) {
+    StringTreeModel model;
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.addItem("Fruits");
+    model.rows().push_back(TreeRow{ 1, "Apple" });   // a child, added directly (addItem() is root-only)
+    EXPECT_EQ(model.childCount({0}), 1u);
+    EXPECT_EQ(changes, 1);
+
+    model.removeLastItem();   // drops "Apple", a depth-1 row - not required to be a root row
+    EXPECT_EQ(model.childCount({0}), 0u);
+    EXPECT_EQ(changes, 2);
+
+    model.removeLastItem();
+    EXPECT_TRUE(model.empty());
+    model.removeLastItem();   // empty: no-op, no notification
+    EXPECT_EQ(changes, 3);
+}
+
+TEST(StringTreeModelTest, SetValueWritesTheTextAtAPathAndFiresOnChanged) {
+    StringTreeModel model;
+    model.rows() = { { 0, "Fruits" }, { 1, "Apple" } };
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.setValue(std::string("Pear"), std::vector<std::size_t>{0, 0});
+    EXPECT_EQ(model.rows()[1].text, "Pear");
+    EXPECT_EQ(changes, 1);
+
+    model.setValue(std::string("nope"), std::vector<std::size_t>{9});   // out of range: rows untouched
+    EXPECT_EQ(model.rows()[1].text, "Pear");
+    EXPECT_EQ(changes, 2);   // still fires - same "notify regardless" contract as the base Model::setValue()
+}
+
+TEST(TreeView, SetModelHandsOwnershipToTheControllerSoItOutlivesTheCallersPointer) {
+    auto* treeView = new TreeView();
+    auto model = std::make_unique<StringTreeModel>();
+    model->rows() = { { 0, "a" }, { 1, "b" } };
+    StringTreeModel* raw = model.get();
+
+    treeView->setModel(std::move(model));
+
+    EXPECT_EQ(treeView->model(), raw);
+    EXPECT_EQ(treeView->controller().visibleCount(), 1u);   // "a" only - "b" starts collapsed
+
+    treeView->setModel(nullptr);   // detaches and destroys it
+    EXPECT_EQ(treeView->model(), nullptr);
+
+    treeView->destroy();
+    delete treeView;
+}
+
 TEST(ListView, ContentSizeIsItemCountTimesRowHeight) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));

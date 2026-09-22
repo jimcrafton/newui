@@ -190,6 +190,59 @@ namespace newui {
         bool hasChildren(const std::vector<std::size_t>& path) const { return childCount(path) > 0; }
     };
 
+    // One row of a StringTreeModel (below) - depth 0 is a root-level row; a row is a child of the
+    // nearest earlier row with depth - 1 (the shape a plain indented outline already has). Kept
+    // flat, not as a real linked node tree, so it reflects as an ordinary vector<TreeRow>
+    // collection (see rows()) the same way GridLayout's own vector<GridTrack> does - no
+    // self-referential unique_ptr-tree reflection (MenuItem's own children_ needs, but doesn't
+    // have) required.
+    struct TreeRow {
+        std::size_t depth = 0;
+        std::string text;
+    };
+
+    // A ready-made TreeModel of plain strings, addressed the same depth-list way TreeRow describes.
+    // rows() is a reflected collection, so a design holding one saves and reloads its rows like any
+    // other property; addItem()/removeLastItem()/setValue()/clear() also fire onChanged so an
+    // attached view repaints.
+    class StringTreeModel : public TreeModel {
+    public:
+        // Declared (not implicit) so reflectgen registers it - a design reload builds one through it.
+        StringTreeModel() = default;
+
+        // What reflection reads and restores the rows through - it bypasses onChanged, so use the
+        // members below to change a live model.
+        std::vector<TreeRow>& rows() { return rows_; }
+        const std::vector<TreeRow>& rows() const { return rows_; }
+
+        // Appends a new root-level (depth 0) row.
+        void addItem(const std::string& text);
+        // Removes the last row outright, regardless of its depth - a no-op if empty. Simple by
+        // design: this never has to decide what "last" means once a subtree is involved.
+        void removeLastItem();
+
+        void clear() override;
+        bool empty() const override { return rows_.empty(); }
+
+        std::size_t childCount(const std::vector<std::size_t>& path) const override;
+
+        // key is a std::vector<std::size_t> path; the value is a std::string. An unresolvable path
+        // gives an empty any.
+        std::any value(const std::any& key = std::any()) override;
+        void setValue(const std::any& newValue, const std::any& key = std::any()) override;
+
+    private:
+        // The row index path addresses, or rows_.size() if path doesn't resolve to a real row.
+        std::size_t rowIndexForPath(const std::vector<std::size_t>& path) const;
+        // Row indices that are direct children of the row at parentIndex (rows_.size() for the
+        // root) - the rows immediately after it at parentDepth + 1, stopping at the first row back
+        // at parentDepth or shallower (a deeper row in between is a grandchild, skipped here - it's
+        // listed once its own parent is walked into).
+        std::vector<std::size_t> childRowIndices(std::size_t parentIndex, std::size_t parentDepth) const;
+
+        std::vector<TreeRow> rows_;
+    };
+
     // A Model that represents one open file - a text document, an image,
     // anything with real load/save semantics and a dirty flag. Adds
     // exactly what plain Model doesn't have: filePath()/isModified(), and

@@ -1137,3 +1137,41 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAListViewsStringListMo
     // Attached to the view's controller, not just held.
     EXPECT_EQ(loaded->controller().itemCount(), 3u);
 }
+
+// Same as the ListView test above, for TreeView + StringTreeModel - rows() is a reflected
+// collection of TreeRow (itself a plain reflected struct, like GridLayout's own GridTrack), so
+// nesting survives the round trip too, not just the flat text.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATreeViewsStringTreeModel) {
+    trackFile("BundleTreeModelFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleTreeModelFrame1");
+
+    auto* tree = new newui::TreeView();
+    tree->setName("myTree");
+    auto model = std::make_unique<newui::StringTreeModel>();
+    model->rows() = { { 0, "Fruits" }, { 1, "Apple" }, { 0, "Vegetables" } };
+    tree->setModel(std::move(model));
+    frame.rootView().addChild(tree);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTreeModelFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::TreeView*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* loadedModel = dynamic_cast<newui::StringTreeModel*>(loaded->model());
+    ASSERT_NE(loadedModel, nullptr) << "no StringTreeModel was restored";
+    ASSERT_EQ(loadedModel->rows().size(), 3u);
+    EXPECT_EQ(loadedModel->rows()[1].depth, 1u);
+    EXPECT_EQ(loadedModel->rows()[1].text, "Apple");
+
+    // Attached to the view's controller, not just held - and the nesting is real, not just
+    // three flat rows.
+    EXPECT_EQ(loadedModel->childCount({0}), 1u);
+    EXPECT_EQ(loaded->controller().visibleCount(), 2u);   // "Fruits" (collapsed) + "Vegetables"
+}
