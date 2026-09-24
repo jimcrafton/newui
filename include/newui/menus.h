@@ -95,10 +95,16 @@ namespace newui {
     // Shared, unmodified data model for both MenuBar (a SubView-tree menu
     // bar - see below) and ContextMenu (a native popup) - either can show
     // any MenuItem's children as a dropdown.
-    class MenuItem {
+    class MenuItem : public Component {
     public:
         MenuItem() = default;
         explicit MenuItem(std::string text) : text(std::move(text)) {}
+        // Deletes every child still attached (see addChild()).
+        ~MenuItem() override;
+
+        // Owns raw child pointers, like View - a copy would double-delete them.
+        MenuItem(const MenuItem&) = delete;
+        MenuItem& operator=(const MenuItem&) = delete;
 
         typedef Delegate<MenuItem> ClickDelegate;
         ClickDelegate onClick;
@@ -194,14 +200,29 @@ namespace newui {
             return item;
         }
 
-        // Takes ownership of child, sets child->parent_ to this, and
-        // returns the raw pointer just added (for chaining/wiring up
-        // onClick without a separate lookup).
-        MenuItem* addChild(std::unique_ptr<MenuItem> child);
-
-        const std::vector<std::unique_ptr<MenuItem>>& children() const {
+        // Child ownership mirrors View's: addChild() takes ownership (detaching child from any
+        // previous parent first), removeChild() detaches without deleting (the caller owns it
+        // again), and whatever is still attached is deleted with this item.
+        //
+        // @reflect collection add=addChild remove=removeChild - saved and loaded as a real tree,
+        // the same way View::childViews() is.
+        const std::vector<MenuItem*>& children() const {
             return children_;
         }
+
+        void addChild(MenuItem* child);
+        void removeChild(MenuItem* child);
+
+        // Convenience for building menus in code: takes ownership and returns the item just added
+        // (for wiring up onClick without a separate lookup).
+        //@reflect ignore=true
+        MenuItem* addChild(std::unique_ptr<MenuItem> child);
+
+        // Moves an attached child to newIndex (clamped); a no-op if child isn't a direct child.
+        void reorderChild(MenuItem* child, std::size_t newIndex);
+
+        // Deletes every child.
+        void deleteChildren();
 
         bool hasChildren() const {
             return !children_.empty();
@@ -216,6 +237,11 @@ namespace newui {
         MenuItem* parent() const {
             return parent_;
         }
+
+        // Same contract as View::setParent(): detaches from the current parent (if any), then
+        // appends to newParent (nullptr just detaches - the caller then owns this item). Refuses
+        // (false, no-op) if newParent is this item or one of its descendants.
+        bool setParent(MenuItem* newParent);
 
         // 0 until a ContextMenu::show() over this item's parent last
         // assigned one - only leaf items (no children, not a separator)
@@ -234,7 +260,7 @@ namespace newui {
         // call.
         friend class ContextMenu;
 
-        std::vector<std::unique_ptr<MenuItem>> children_;
+        std::vector<MenuItem*> children_;
         MenuItem* parent_ = nullptr;
         UINT commandId_ = 0;
         Action* action_ = nullptr;
@@ -377,10 +403,28 @@ namespace newui {
         // per top-level MenuItem.
         void setMenuItems(std::vector<std::unique_ptr<MenuItem>> items);
 
+        // The top-level menus (root()'s children) - what a saved MenuBar holds.
+        // addMenu()/removeMenu() follow MenuItem::addChild()/removeChild()'s ownership and rebuild
+        // the buttons.
+        //
+        // @reflect collection add=addMenu remove=removeMenu
+        const std::vector<MenuItem*>& menus() const {
+            return root_.children();
+        }
+        void addMenu(MenuItem* item);
+        void removeMenu(MenuItem* item);
+
+        // Recreates one button per top-level menu - call after changing root()'s children or a
+        // top-level item's text directly.
+        void rebuildButtons();
+
+        // Not reflected: menus() already covers its children.
+        //@reflect ignore=true
         MenuItem& root() {
             return root_;
         }
 
+        //@reflect ignore=true
         const MenuItem& root() const {
             return root_;
         }

@@ -9,6 +9,8 @@
 #include "newui/uicolormanager.h"
 #include "newui/graphics.h"
 
+#include <algorithm>
+
 #include <blend2d/blend2d.h>
 
 #include <utility>
@@ -174,11 +176,71 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
 
 namespace newui {
 
-MenuItem* MenuItem::addChild(std::unique_ptr<MenuItem> child) {
+MenuItem::~MenuItem() {
+    deleteChildren();
+}
+
+void MenuItem::addChild(MenuItem* child) {
+    if (child == nullptr || child->parent_ == this) {
+        return;
+    }
+    if (child->parent_ != nullptr) {
+        child->parent_->removeChild(child);
+    }
     child->parent_ = this;
-    MenuItem* raw = child.get();
-    children_.push_back(std::move(child));
+    children_.push_back(child);
+}
+
+MenuItem* MenuItem::addChild(std::unique_ptr<MenuItem> child) {
+    MenuItem* raw = child.release();
+    addChild(raw);
     return raw;
+}
+
+void MenuItem::removeChild(MenuItem* child) {
+    auto it = std::find(children_.begin(), children_.end(), child);
+    if (it == children_.end()) {
+        return;
+    }
+    children_.erase(it);
+    child->parent_ = nullptr;
+}
+
+void MenuItem::reorderChild(MenuItem* child, std::size_t newIndex) {
+    auto it = std::find(children_.begin(), children_.end(), child);
+    if (it == children_.end()) {
+        return;
+    }
+    children_.erase(it);
+    newIndex = newIndex < children_.size() ? newIndex : children_.size();
+    children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(newIndex), child);
+}
+
+void MenuItem::deleteChildren() {
+    std::vector<MenuItem*> children = std::move(children_);
+    children_.clear();
+    for (MenuItem* child : children) {
+        child->parent_ = nullptr;
+        delete child;
+    }
+}
+
+bool MenuItem::setParent(MenuItem* newParent) {
+    if (newParent == parent_) {
+        return true;
+    }
+    for (MenuItem* ancestor = newParent; ancestor != nullptr; ancestor = ancestor->parent_) {
+        if (ancestor == this) {
+            return false;  // would create a cycle
+        }
+    }
+    if (parent_ != nullptr) {
+        parent_->removeChild(this);
+    }
+    if (newParent != nullptr) {
+        newParent->addChild(this);
+    }
+    return true;
 }
 
 void MenuItem::setAction(Action* action) {
@@ -198,7 +260,7 @@ ContextMenu::~ContextMenu() {
 
 void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
     int position = 0;
-    for (auto& childPtr : parentItem.children_) {
+    for (MenuItem* childPtr : parentItem.children_) {
         MenuItem& item = *childPtr;
         item.ownerMenu_ = hmenu;
 
@@ -310,8 +372,7 @@ bool ContextMenu::dispatchCommand(UINT id) {
     MenuItem* item = it->second;
 
     if (item->radioGroup >= 0 && item->parent_ != nullptr) {
-        for (auto& siblingPtr : item->parent_->children_) {
-            MenuItem* sibling = siblingPtr.get();
+        for (MenuItem* sibling : item->parent_->children_) {
             if (sibling->radioGroup == item->radioGroup) {
                 setChecked(*sibling, sibling == item);
             }
@@ -415,11 +476,27 @@ MenuBar::MenuBar() {
 }
 
 void MenuBar::setMenuItems(std::vector<std::unique_ptr<MenuItem>> items) {
+    root_.deleteChildren();
+    for (auto& item : items) {
+        root_.addChild(std::move(item));
+    }
+    rebuildButtons();
+}
+
+void MenuBar::addMenu(MenuItem* item) {
+    root_.addChild(item);
+    rebuildButtons();
+}
+
+void MenuBar::removeMenu(MenuItem* item) {
+    root_.removeChild(item);
+    rebuildButtons();
+}
+
+void MenuBar::rebuildButtons() {
     // Detach + delete the previous button Views - removeChild() doesn't
     // delete (caller-managed, same convention as everywhere else raw
-    // View ownership terminates - see View::destroy()'s own while-loop),
-    // and the previous root_ tree they pointed into is about to be
-    // replaced anyway.
+    // View ownership terminates - see View::destroy()'s own while-loop).
     while (!childViews().empty()) {
         SubView* child = childViews().front();
         removeChild(child);
@@ -427,11 +504,7 @@ void MenuBar::setMenuItems(std::vector<std::unique_ptr<MenuItem>> items) {
         delete child;
     }
 
-    root_ = MenuItem();
-
-    for (auto& item : items) {
-        MenuItem* topLevel = root_.addChild(std::move(item));
-
+    for (MenuItem* topLevel : root_.children()) {
         ShapedMenuBarLabel shaped = ShapeMenuBarLabel(topLevel->text);
         Size buttonSize = shaped.valid
             ? Size(shaped.width + 24.0f, shaped.ascent + shaped.descent + 12.0f)

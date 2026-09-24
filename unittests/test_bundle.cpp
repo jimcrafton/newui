@@ -5,6 +5,7 @@
 #include "newui/dialogs.h"
 #include "newui/frame.h"
 #include "newui/layout.h"
+#include "newui/menus.h"
 #include "newui/property.h"
 #include "newui/rootview.h"
 #include "newui/rootviewproxy.h"
@@ -1174,4 +1175,56 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATreeViewsStringTreeMo
     // three flat rows.
     EXPECT_EQ(loadedModel->childCount({0}), 1u);
     EXPECT_EQ(loaded->controller().visibleCount(), 2u);   // "Fruits" (collapsed) + "Vegetables"
+}
+
+// MenuItem's children and MenuBar's menus are reflected collections, so a whole menu tree -
+// nested submenus included - survives a save/load, and the loaded bar rebuilds its buttons.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAMenuBarsMenuTree) {
+    trackFile("BundleMenuBarFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleMenuBarFrame1");
+
+    auto* bar = new newui::MenuBar();
+    bar->setName("myMenuBar");
+    auto* file = new newui::MenuItem("File");
+    file->addChild(new newui::MenuItem("Open"));
+    auto* recent = new newui::MenuItem("Recent");
+    recent->addChild(new newui::MenuItem("a.txt"));
+    file->addChild(recent);
+    file->addChild(newui::MenuItem::Separator().release());
+    auto* exitItem = new newui::MenuItem("Exit");
+    exitItem->shortcutText = "Alt+F4";
+    file->addChild(exitItem);
+    bar->addMenu(file);
+    bar->addMenu(new newui::MenuItem("Edit"));
+    frame.rootView().addChild(bar);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleMenuBarFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::MenuBar*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    ASSERT_EQ(loaded->menus().size(), 2u);
+    newui::MenuItem* loadedFile = loaded->menus()[0];
+    EXPECT_EQ(loadedFile->text, "File");
+    EXPECT_EQ(loadedFile->parent(), &loaded->root());
+    EXPECT_EQ(loaded->menus()[1]->text, "Edit");
+
+    ASSERT_EQ(loadedFile->children().size(), 4u);
+    EXPECT_EQ(loadedFile->children()[0]->text, "Open");
+    newui::MenuItem* loadedRecent = loadedFile->children()[1];
+    ASSERT_EQ(loadedRecent->children().size(), 1u);
+    EXPECT_EQ(loadedRecent->children()[0]->text, "a.txt");
+    EXPECT_EQ(loadedRecent->children()[0]->parent(), loadedRecent);
+    EXPECT_TRUE(loadedFile->children()[2]->isSeparator);
+    EXPECT_EQ(loadedFile->children()[3]->shortcutText, "Alt+F4");
+
+    // One button per top-level menu.
+    EXPECT_EQ(loaded->childViews().size(), 2u);
 }

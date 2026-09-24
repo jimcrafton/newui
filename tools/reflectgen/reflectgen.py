@@ -651,7 +651,8 @@ class PropertyAccessor:
 # a getter/add/remove triple can't be told apart from three unrelated
 # methods by shape alone.
 class CollectionAccessor:
-    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, add_name, remove_name):
+    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, add_name, remove_name,
+                 add_expr=None, remove_expr=None):
         self.key = key  # the collection's own name, e.g. "childViews"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "childViews"
@@ -660,6 +661,10 @@ class CollectionAccessor:
         self.ambiguous = ambiguous  # see PropertyAccessor.ambiguous - same selectOverload<>() reasoning
         self.add_name = add_name  # real C++ method name, or None (enumerate-only, no add)
         self.remove_name = remove_name  # real C++ method name, or None (enumerate-only, no remove)
+        # Member-pointer expressions for add/remove - selectOverload<>()-wrapped when the name is
+        # overloaded (e.g. MenuItem::addChild(MenuItem*) beside addChild(unique_ptr<MenuItem>)).
+        self.add_expr = add_expr
+        self.remove_expr = remove_expr
 
 
 class ClassInfo:
@@ -1288,7 +1293,7 @@ def is_add_remove_shaped(cursor):
 # and the shape being assembled (getter+add+remove vs. getter+setter) are
 # different enough that sharing the loop body would need as much branching
 # as just writing two loops.
-def collect_collection_accessors(method_cursors_by_name, consumed):
+def collect_collection_accessors(method_cursors_by_name, consumed, class_name):
     accessors = []
 
     for getter_name, cursors in method_cursors_by_name.items():
@@ -1319,6 +1324,16 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
         add_cursor = find_method(annotations.get("add"))
         remove_cursor = find_method(annotations.get("remove"))
 
+        def member_expr(cursor):
+            if cursor is None:
+                return None
+            target = f"&{class_name}::{cursor.spelling}"
+            if len(method_cursors_by_name.get(cursor.spelling, [])) <= 1:
+                return target
+            arg_type = qualify_type_spelling(next(cursor.get_arguments()).type)
+            const_suffix = " const" if cursor.is_const_method() else ""
+            return f"selectOverload<void ({class_name}::*)({arg_type}){const_suffix}>({target})"
+
         accessors.append(CollectionAccessor(
             key=key,
             scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
@@ -1328,6 +1343,8 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
             ambiguous=len(cursors) > 1,
             add_name=add_cursor.spelling if add_cursor else None,
             remove_name=remove_cursor.spelling if remove_cursor else None,
+            add_expr=member_expr(add_cursor),
+            remove_expr=member_expr(remove_cursor),
         ))
 
         consumed.update(cursors)
@@ -1373,7 +1390,7 @@ def collect_class(cursor):
 
     consumed_by_accessors = set()
     info.property_accessors = collect_property_accessors(method_cursors_by_name, field_cursors, consumed_by_accessors, name)
-    info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors)
+    info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors, name)
 
     for child in cursor.get_children():
         kind = child.kind
@@ -1844,7 +1861,7 @@ def emit_register_function(info,function_listing):
         getter_expr = emit_property_getter_expr(info, ca)
         args = [f'"{ca.key}"', ca.scope, getter_expr]
         if ca.add_name:
-            args.append(f"&{info.name}::{ca.add_name}")
+            args.append(ca.add_expr or f"&{info.name}::{ca.add_name}")
         if ca.remove_name:
             if not ca.add_name:
                 # ClassBuilder::propertyCollection()'s remove parameter
@@ -1852,7 +1869,7 @@ def emit_register_function(info,function_listing):
                 # (no add_name) still has to fill that slot with an
                 # explicit nullptr to reach remove.
                 args.append("nullptr")
-            args.append(f"&{info.name}::{ca.remove_name}")
+            args.append(ca.remove_expr or f"&{info.name}::{ca.remove_name}")
         chain.append(f".propertyCollection({', '.join(args)})")
 
     for m in info.methods:

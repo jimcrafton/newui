@@ -71,7 +71,7 @@ TEST(MenuItem, AddChildSetsParentAndReturnsRawPointer) {
     newui::MenuItem* raw = root.addChild(std::make_unique<newui::MenuItem>("Child"));
 
     ASSERT_EQ(root.children().size(), 1u);
-    EXPECT_EQ(root.children()[0].get(), raw);
+    EXPECT_EQ(root.children()[0], raw);
     EXPECT_EQ(raw->parent(), &root);
     EXPECT_TRUE(root.hasChildren());
     EXPECT_FALSE(raw->hasChildren());
@@ -399,6 +399,102 @@ TEST(MenuBar, ItsGeneratedButtonsAreInternalNonSelectableParts) {
     EXPECT_TRUE(bar->childViews()[0]->isInternal());
     EXPECT_FALSE(bar->childViews()[0]->isSelectableAtDesignTime());
     EXPECT_FALSE(bar->isInternal());
+
+    bar->destroy();
+    delete bar;
+}
+
+TEST(MenuItemTree, AddChildTakesOwnershipAndMovesAnItemFromItsPreviousParent)
+{
+    newui::MenuItem a("a");
+    newui::MenuItem b("b");
+    auto* child = new newui::MenuItem("child");
+
+    a.addChild(child);
+    EXPECT_EQ(child->parent(), &a);
+
+    b.addChild(child);
+    EXPECT_EQ(child->parent(), &b);
+    EXPECT_TRUE(a.children().empty());
+    ASSERT_EQ(b.children().size(), 1u);
+    EXPECT_EQ(b.children()[0], child);
+}
+
+TEST(MenuItemTree, RemoveChildDetachesWithoutDeleting)
+{
+    newui::MenuItem parent("parent");
+    auto* child = new newui::MenuItem("child");
+    parent.addChild(child);
+
+    parent.removeChild(child);
+
+    EXPECT_TRUE(parent.children().empty());
+    EXPECT_EQ(child->parent(), nullptr);
+    EXPECT_EQ(child->text, "child");   // still alive - the caller owns it again
+    delete child;
+}
+
+TEST(MenuItemTree, SetParentMovesAndRefusesACycle)
+{
+    newui::MenuItem root("root");
+    auto* a = root.addChild(std::make_unique<newui::MenuItem>("a"));
+    auto* b = a->addChild(std::make_unique<newui::MenuItem>("b"));
+
+    EXPECT_FALSE(a->setParent(b)) << "a can't become a child of its own descendant";
+    EXPECT_EQ(a->parent(), &root);
+
+    EXPECT_TRUE(b->setParent(&root));
+    EXPECT_EQ(b->parent(), &root);
+    EXPECT_TRUE(a->children().empty());
+    EXPECT_EQ(root.children().size(), 2u);
+
+    EXPECT_TRUE(b->setParent(nullptr));
+    EXPECT_EQ(b->parent(), nullptr);
+    EXPECT_EQ(root.children().size(), 1u);
+    delete b;
+}
+
+TEST(MenuItemTree, ReorderChildMovesWithinTheSameParent)
+{
+    newui::MenuItem root("root");
+    auto* a = root.addChild(std::make_unique<newui::MenuItem>("a"));
+    auto* b = root.addChild(std::make_unique<newui::MenuItem>("b"));
+    auto* c = root.addChild(std::make_unique<newui::MenuItem>("c"));
+
+    root.reorderChild(c, 0);
+    EXPECT_EQ(root.children(), (std::vector<newui::MenuItem*>{ c, a, b }));
+
+    root.reorderChild(c, 99);   // clamped to the end
+    EXPECT_EQ(root.children(), (std::vector<newui::MenuItem*>{ a, b, c }));
+}
+
+TEST(MenuItemTree, IsAComponentWithAName)
+{
+    newui::MenuItem item("File");
+    item.setName("fileMenu");
+    newui::Component& component = item;
+    EXPECT_EQ(component.name(), "fileMenu");
+}
+
+TEST(MenuBarMenus, AddAndRemoveMenuRebuildTheButtons)
+{
+    auto* bar = new newui::MenuBar();
+    auto* file = new newui::MenuItem("File");
+    bar->addMenu(file);
+    bar->addMenu(new newui::MenuItem("Edit"));
+    EXPECT_EQ(bar->childViews().size(), 2u);
+    EXPECT_EQ(file->parent(), &bar->root());
+
+    bar->removeMenu(file);
+    EXPECT_EQ(bar->menus().size(), 1u);
+    EXPECT_EQ(bar->childViews().size(), 1u);
+    EXPECT_EQ(file->parent(), nullptr);
+    delete file;
+
+    bar->menus()[0]->text = "Edit2";
+    bar->rebuildButtons();
+    ASSERT_EQ(bar->childViews().size(), 1u);
+    EXPECT_EQ(bar->childViews()[0]->name(), "Edit2");
 
     bar->destroy();
     delete bar;
