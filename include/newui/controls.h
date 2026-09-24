@@ -1016,13 +1016,13 @@ namespace newui {
         // corresponding scrolling need on).
         Point contentOrigin() const;
 
-    private:
         // Recomputes which of vBar_/hBar_ are needed for the current
         // contentSize_ vs. this ScrollView's own bounds, each visible
         // bar's range()/pageSize(), and viewport_'s bounds (client area
         // minus whichever bar(s) end up reserved) - called from
-        // handleSizeChanged(), setContentSize(), and addChild()/
-        // removeChild(), every place that can change the answer.
+        // setBounds() (via View), handleSizeChanged(), setContentSize(),
+        // and addChild()/removeChild(), every place that can change the
+        // answer. A no-op until the constructor has created the chrome.
         //
         // First re-derives contentSize_ itself when !contentSizeOverridden_
         // and viewport_ has exactly one content child: queries that
@@ -1045,7 +1045,9 @@ namespace newui {
         // small enough (pinned to viewport size) that shifting anything
         // via origin() would just be shifting it out of its own clip
         // rect for no reason.
-        void updateLayout();
+        void updateLayout() override;
+
+    private:
 
         // viewport_'s sole content child, if (and only if) it answers
         // View::onQueryContentSize (view.h) - nullptr for zero, several,

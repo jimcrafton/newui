@@ -170,7 +170,9 @@ namespace newui {
         // never needs to call this directly; it's exposed for the rare
         // case of forcing a re-arrange without either of those (e.g.
         // after mutating a child's LayoutParams in place).
-        void updateLayout();
+        // Virtual so a view that arranges its own chrome (ScrollView) gets the full update however
+        // it's called - through a View& included.
+        virtual void updateLayout();
 
         ViewStyle& style() {
             return *style_;

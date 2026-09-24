@@ -1663,6 +1663,11 @@ namespace newui {
         // (ScrollView.BarsHiddenWhenContentFitsViewport et al., all
         // called destroy() and crashed before this fix).
         if (child == viewport_ || child == vBar_ || child == hBar_) {
+            // Chrome only leaves during destroy(); clear it first so the virtual updateLayout()
+            // SubView::removeChild() triggers sees it gone rather than touching a dying view.
+            if (child == viewport_) { viewport_ = nullptr; }
+            if (child == vBar_) { vBar_ = nullptr; }
+            if (child == hBar_) { hBar_ = nullptr; }
             SubView::removeChild(child);
             return;
         }
@@ -1718,6 +1723,10 @@ namespace newui {
     }
 
     void ScrollView::updateLayout() {
+        // View's constructor-time addChild() calls reach here before all three exist.
+        if (viewport_ == nullptr || vBar_ == nullptr || hBar_ == nullptr) {
+            return;
+        }
         SubView* soleChild = viewport_->childViews().size() == 1 ? viewport_->childViews().front() : nullptr;
         SubView* virtualizedChild = virtualizedContentChild();
 
