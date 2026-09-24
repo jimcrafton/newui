@@ -201,7 +201,7 @@ namespace newui {
 	}
 
 	void RootView::setBounds(const Rect& bounds) {
-		if (bounds == bounds_) {
+		if (bounds == bounds_ || isDestroying()) {
 			return;
 		}
 

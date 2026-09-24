@@ -499,3 +499,11 @@ TEST(MenuBarMenus, AddAndRemoveMenuRebuildTheButtons)
     bar->destroy();
     delete bar;
 }
+
+TEST(MenuMnemonics, StripMnemonicsRemovesMarkersAndKeepsEscapedAmpersands)
+{
+    EXPECT_EQ(newui::stripMnemonics("&File"), "File");
+    EXPECT_EQ(newui::stripMnemonics("Save && E&xit"), "Save & Exit");
+    EXPECT_EQ(newui::stripMnemonics("Trailing&"), "Trailing&");
+    EXPECT_EQ(newui::stripMnemonics(""), "");
+}

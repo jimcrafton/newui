@@ -1,3 +1,4 @@
+#include "newui/layout.h"
 #include "newui/subview.h"
 #include "newui/viewstyle.h"
 
@@ -1167,4 +1168,79 @@ TEST(RectIntersected, DisjointRectsGiveAZeroSizedRect) {
 
 TEST(RectIntersected, HandlesNegativeCoordinates) {
     EXPECT_EQ(newui::Rect(-30, -30, 40, 40).intersected(newui::Rect(-10, -10, 40, 40)), newui::Rect(-10, -10, 20, 20));
+}
+
+namespace
+{
+    class CountingLayout : public newui::Layout {
+    public:
+        explicit CountingLayout(int& count) : count_(count) {}
+        void arrange(newui::View& container) override {
+            ++count_;
+            for (newui::SubView* child : container.childViews()) {
+                child->setBounds(newui::Rect(0.0f, 0.0f, 10.0f + count_, 10.0f));   // a real resize each pass
+            }
+        }
+    private:
+        int& count_;
+    };
+}
+
+// destroy() marks the whole subtree Destroying before detaching anything, so the teardown's own
+// child removals never lay out or resize what is going away - listeners whose owners are already
+// gone (a designer's canvas-size hook, say) never run.
+TEST(ViewDestroying, DestroyingATreeSkipsLayoutAndResizeInsideIt)
+{
+    int parentArranges = 0;
+    int innerArranges = 0;
+    int sizeChanges = 0;
+    auto* parent = new newui::SubView();
+    parent->setBounds(newui::Rect(0, 0, 200, 200));
+    parent->setLayout(std::make_unique<CountingLayout>(parentArranges));
+    auto* inner = new newui::SubView();
+    inner->setLayout(std::make_unique<CountingLayout>(innerArranges));
+    parent->addChild(inner);
+    auto* leaf = new newui::SubView();
+    inner->addChild(leaf);
+    auto* sibling = new newui::SubView();
+    parent->addChild(sibling);
+    for (newui::SubView* view : { inner, leaf, sibling }) {
+        view->onSizeChanged.add([&sizeChanges](newui::View&, const newui::Size&) {
+            ++sizeChanges;
+            return newui::SyncReturn::Handled;
+        });
+    }
+    parentArranges = innerArranges = sizeChanges = 0;
+
+    parent->destroy();
+
+    EXPECT_TRUE(parent->isDestroying());
+    EXPECT_EQ(parentArranges, 0);
+    EXPECT_EQ(innerArranges, 0);
+    EXPECT_EQ(sizeChanges, 0);
+    delete parent;
+}
+
+TEST(ViewDestroying, DestroyingOneChildStillRelayoutsItsLiveParent)
+{
+    int parentArranges = 0;
+    auto* parent = new newui::SubView();
+    parent->setBounds(newui::Rect(0, 0, 200, 200));
+    parent->setLayout(std::make_unique<CountingLayout>(parentArranges));
+    auto* doomed = new newui::SubView();
+    parent->addChild(doomed);
+    auto* survivor = new newui::SubView();
+    parent->addChild(survivor);
+    parentArranges = 0;
+
+    doomed->destroy();
+    delete doomed;
+
+    EXPECT_FALSE(parent->isDestroying());
+    EXPECT_FALSE(survivor->isDestroying());
+    EXPECT_GT(parentArranges, 0) << "the parent re-arranges its remaining children";
+    ASSERT_EQ(parent->childViews().size(), 1u);
+
+    parent->destroy();
+    delete parent;
 }

@@ -116,6 +116,9 @@ float Splitter::firstPaneSize(const Rect& bounds) const {
 }
 
 void Splitter::arrangePanes() {
+    if (isDestroying()) {
+        return;
+    }
     const std::vector<SubView*>& children = childViews();
     Rect bounds = getClientBounds();
     float pos = firstPaneSize(bounds);

@@ -1724,7 +1724,7 @@ namespace newui {
 
     void ScrollView::updateLayout() {
         // View's constructor-time addChild() calls reach here before all three exist.
-        if (viewport_ == nullptr || vBar_ == nullptr || hBar_ == nullptr) {
+        if (viewport_ == nullptr || vBar_ == nullptr || hBar_ == nullptr || isDestroying()) {
             return;
         }
         SubView* soleChild = viewport_->childViews().size() == 1 ? viewport_->childViews().front() : nullptr;

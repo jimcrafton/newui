@@ -114,7 +114,8 @@ public:
             return;
         }
 
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(menuItem->text());
+        const std::string label = newui::stripMnemonics(menuItem->text());
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(label);
         if (!shaped.valid) {
             return;
         }
@@ -133,7 +134,7 @@ public:
         // its own theme-aware color to match instead of staying fixed.
         newui::Color textColor = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText);
         ctx.set_fill_style(textColor.toBLRgba32());
-        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text().c_str());
+        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, label.c_str());
     }
 };
 
@@ -175,6 +176,17 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
 }  // namespace
 
 namespace newui {
+
+std::string stripMnemonics(const std::string& text) {
+    std::string out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '&' && i + 1 < text.size()) {
+            ++i;   // "&&" keeps one '&'
+        }
+        out += text[i];
+    }
+    return out;
+}
 
 MenuItem::~MenuItem() {
     deleteChildren();
@@ -505,7 +517,7 @@ void MenuBar::rebuildButtons() {
     }
 
     for (MenuItem* topLevel : root_.children()) {
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(topLevel->text());
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(stripMnemonics(topLevel->text()));
         Size buttonSize = shaped.valid
             ? Size(shaped.width + 24.0f, shaped.ascent + shaped.descent + 12.0f)
             : Size(60.0f, 28.0f);

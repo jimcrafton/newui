@@ -17,6 +17,7 @@ namespace newui {
 
 	void View::destroy()
 	{
+		markDestroying();
 		// Deliberately re-reads childViews_.front() each pass rather than
 		// holding an iterator across the loop: child->destroy() removes
 		// itself from its parent's childViews_ (see SubView::destroy()'s
@@ -206,7 +207,17 @@ namespace newui {
 		updateLayout();
 	}
 
+	void View::markDestroying() {
+		setDestroying();
+		for (SubView* child : childViews_) {
+			child->markDestroying();
+		}
+	}
+
 	void View::updateLayout() {
+		if (isDestroying()) {
+			return;
+		}
 		if (layout_) {
 			layout_->arrange(*this);
 		}

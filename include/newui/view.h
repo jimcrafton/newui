@@ -174,6 +174,10 @@ namespace newui {
         // it's called - through a View& included.
         virtual void updateLayout();
 
+        // Marks this View and every descendant Destroying (Component::isDestroying()) - destroy()
+        // does this first, so tearing the tree down never lays out or resizes what is going away.
+        void markDestroying();
+
         ViewStyle& style() {
             return *style_;
         }

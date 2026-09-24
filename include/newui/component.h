@@ -39,6 +39,14 @@ namespace newui {
         return static_cast<DesignTimeFlags>(~static_cast<std::uint32_t>(a));
     }
 
+    // Lifecycle state bits on a Component - transient, never persisted.
+    enum class ComponentState : std::uint32_t {
+        None = 0,
+        // Being torn down (set on a whole subtree before any of it is detached): layout and
+        // resize work is skipped, so listeners whose owners are already gone never run.
+        Destroying = 1,
+    };
+
     // Common base for anything nameable/design-time-aware: View, Model,
     // Controller. Not a Delphi TComponent - just a name and the design-time flags.
     // Non-virtual: no call site needs polymorphic dispatch here.
@@ -90,9 +98,17 @@ namespace newui {
         //@reflect ignore=true
         bool isSelectableAtDesignTime() const { return !isNotSelectable(); }
 
+        //@reflect ignore=true
+        ComponentState componentState() const { return componentState_; }
+        //@reflect ignore=true
+        bool isDestroying() const { return componentState_ == ComponentState::Destroying; }
+        //@reflect ignore=true
+        void setDestroying() { componentState_ = ComponentState::Destroying; }
+
     protected:
         std::string name_;
         DesignTimeFlags designTimeFlags_ = DesignTimeFlags::None;
+        ComponentState componentState_ = ComponentState::None;
     };
 
 }

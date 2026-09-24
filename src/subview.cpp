@@ -11,7 +11,7 @@ SubView::~SubView()
 
 
 void SubView::setBounds(const Rect& bounds) {
-    if (bounds == bounds_) {
+    if (bounds == bounds_ || isDestroying()) {
         return;
     }
 
@@ -86,6 +86,7 @@ bool SubView::initialize()
 
 void SubView::destroy()
 {
+	markDestroying();   // before detaching - the parent's relayout must not touch this subtree
 	parentView_ = nullptr;
 
     // Remove this SubView from its parent's children list if it has a parent

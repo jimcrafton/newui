@@ -95,6 +95,10 @@ namespace newui {
     // Shared, unmodified data model for both MenuBar (a SubView-tree menu
     // bar - see below) and ContextMenu (a native popup) - either can show
     // any MenuItem's children as a dropdown.
+    // text with its "&" mnemonic markers removed ("&File" -> "File", "Save && Exit" ->
+    // "Save & Exit") - what a self-drawn menu label shows. Native popups interpret "&" themselves.
+    std::string stripMnemonics(const std::string& text);
+
     class MenuItem : public Component {
     public:
         MenuItem() = default;
@@ -260,7 +264,9 @@ namespace newui {
         // ever get one; Windows never sends WM_COMMAND for a
         // submenu-opening item, so parent items have no command id.
         // Transient - only meaningful while that show() call is still on
-        // the stack (see ContextMenu::show()'s doc comment).
+        // the stack (see ContextMenu::show()'s doc comment). Not reflected:
+        // runtime-only, never saved or edited.
+        //@reflect ignore=true
         UINT commandId() const {
             return commandId_;
         }
