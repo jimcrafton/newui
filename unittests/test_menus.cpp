@@ -79,7 +79,7 @@ TEST(MenuItem, AddChildSetsParentAndReturnsRawPointer) {
 
 TEST(MenuItem, SeparatorFactorySetsIsSeparator) {
     auto sep = newui::MenuItem::Separator();
-    EXPECT_TRUE(sep->isSeparator);
+    EXPECT_TRUE(sep->isSeparator());
 }
 
 TEST(MenuItem, DefaultCommandIdIsZeroBeforeAnyBuild) {
@@ -127,7 +127,7 @@ TEST(ContextMenu, BuildNativeMenuBuildsCorrectNestingAndText) {
 TEST(ContextMenu, LeafItemTextIncludesTabSeparatedShortcut) {
     newui::MenuItem root;
     newui::MenuItem* save = root.addChild(std::make_unique<newui::MenuItem>("Save"));
-    save->shortcutText = "Ctrl+S";
+    save->setShortcutText("Ctrl+S");
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -185,7 +185,7 @@ TEST(ContextMenu, DispatchCommandReturnsFalseForUnknownId) {
 TEST(ContextMenu, RadioGroupMembersGetRadioCheckMenuFlag) {
     newui::MenuItem root;
     newui::MenuItem* smallItem = root.addChild(std::make_unique<newui::MenuItem>("Small"));
-    smallItem->radioGroup = 0;
+    smallItem->setRadioGroup(0);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -201,14 +201,14 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
     newui::MenuItem root;
 
     newui::MenuItem* smallItem = root.addChild(std::make_unique<newui::MenuItem>("Small"));
-    smallItem->radioGroup = 0;
-    smallItem->checked = true;
+    smallItem->setRadioGroup(0);
+    smallItem->setChecked(true);
 
     newui::MenuItem* mediumItem = root.addChild(std::make_unique<newui::MenuItem>("Medium"));
-    mediumItem->radioGroup = 0;
+    mediumItem->setRadioGroup(0);
 
     newui::MenuItem* largeItem = root.addChild(std::make_unique<newui::MenuItem>("Large"));
-    largeItem->radioGroup = 0;
+    largeItem->setRadioGroup(0);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -218,9 +218,9 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
 
     menu.dispatchCommand(mediumItem->commandId());
 
-    EXPECT_FALSE(smallItem->checked);
-    EXPECT_TRUE(mediumItem->checked);
-    EXPECT_FALSE(largeItem->checked);
+    EXPECT_FALSE(smallItem->isChecked());
+    EXPECT_TRUE(mediumItem->isChecked());
+    EXPECT_FALSE(largeItem->isChecked());
 
     EXPECT_EQ(::GetMenuState(menu.handle(), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
     EXPECT_NE(::GetMenuState(menu.handle(), mediumItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
@@ -235,11 +235,11 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
     menu.buildNativeMenu(root);
 
     menu.setChecked(*wrap, true);
-    EXPECT_TRUE(wrap->checked);
+    EXPECT_TRUE(wrap->isChecked());
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 
     menu.setEnabled(*wrap, false);
-    EXPECT_FALSE(wrap->state.isEnabled());
+    EXPECT_FALSE(wrap->state().isEnabled());
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_GRAYED, 0u);
 }
 
@@ -251,7 +251,7 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
 TEST(ContextMenu, OwnerDrawnItemGetsOwnerDrawFlagAndItemDataPointer) {
     newui::MenuItem root;
     newui::MenuItem* custom = root.addChild(std::make_unique<newui::MenuItem>("Custom"));
-    custom->ownerDrawn = true;
+    custom->setOwnerDrawn(true);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -360,7 +360,7 @@ TEST(MenuBar, SetMenuItemsBuildsOneThemedButtonPerTopLevelItem) {
         EXPECT_TRUE(button->isVisible());
         EXPECT_NE(dynamic_cast<const newui::ThemedMenuBarItemStyle*>(&button->style()), nullptr);
         EXPECT_GT(button->desiredSize().width, 0.0f);
-        EXPECT_EQ(button->name(), bar->root().children()[i]->text);
+        EXPECT_EQ(button->name(), bar->root().children()[i]->text());
     }
 
     bar->destroy();
@@ -430,7 +430,7 @@ TEST(MenuItemTree, RemoveChildDetachesWithoutDeleting)
 
     EXPECT_TRUE(parent.children().empty());
     EXPECT_EQ(child->parent(), nullptr);
-    EXPECT_EQ(child->text, "child");   // still alive - the caller owns it again
+    EXPECT_EQ(child->text(), "child");   // still alive - the caller owns it again
     delete child;
 }
 
@@ -491,7 +491,7 @@ TEST(MenuBarMenus, AddAndRemoveMenuRebuildTheButtons)
     EXPECT_EQ(file->parent(), nullptr);
     delete file;
 
-    bar->menus()[0]->text = "Edit2";
+    bar->menus()[0]->setText("Edit2");
     bar->rebuildButtons();
     ASSERT_EQ(bar->childViews().size(), 1u);
     EXPECT_EQ(bar->childViews()[0]->name(), "Edit2");

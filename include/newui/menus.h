@@ -98,7 +98,7 @@ namespace newui {
     class MenuItem : public Component {
     public:
         MenuItem() = default;
-        explicit MenuItem(std::string text) : text(std::move(text)) {}
+        explicit MenuItem(std::string text) : text_(std::move(text)) {}
         // Deletes every child still attached (see addChild()).
         ~MenuItem() override;
 
@@ -111,31 +111,38 @@ namespace newui {
 
 
         
-        MenuState state;
+        MenuState& state() { return state_; }
+        const MenuState& state() const { return state_; }
 
-        std::string text;
-        
-        bool isSeparator = false;
-        bool checked = false;
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text) { text_ = text; }
+
+        bool isSeparator() const { return separator_; }
+        void setSeparator(bool separator) { separator_ = separator; }
+
+        bool isChecked() const { return checked_; }
+        void setChecked(bool checked) { checked_ = checked; }
 
         // >= 0: this item is mutually exclusive with every sibling that
         // shares the same non-negative value - see
         // ContextMenu::dispatchCommand(). -1 (default): not part of a
         // radio group, checked (if set) toggles independently.
-        int radioGroup = -1;
+        int radioGroup() const { return radioGroup_; }
+        void setRadioGroup(int radioGroup) { radioGroup_ = radioGroup; }
 
         // Display-only, e.g. "Ctrl+S" - shown right-aligned next to text
-        // (appended as "text\tshortcutText" when the native item is
+        // (appended as "text	shortcutText" when the native item is
         // built). Ignored (see onDraw) when ownerDrawn is set - Windows
         // never renders dwTypeData/text itself for an MFT_OWNERDRAW item,
         // only onMeasure/onDraw's handler decides what appears. No real
         // accelerator-table/keyboard handling is wired up for it either
         // way - just the visual.
-        std::string shortcutText;
+        const std::string& shortcutText() const { return shortcutText_; }
+        void setShortcutText(const std::string& shortcutText) { shortcutText_ = shortcutText; }
 
         // Opt in to drawing this item yourself (MFT_OWNERDRAW) instead of
         // Windows' own native rendering - see onMeasure/onDraw below.
-        // Ignored on a separator (isSeparator always wins - a native
+        // Ignored on a separator (isSeparator() always wins - a native
         // separator is cheap and rarely worth owner-drawing).
         //
         // Known limitation, confirmed live: Windows falls back to legacy,
@@ -145,10 +152,11 @@ namespace newui {
         // popup's own frame/background around an owner-drawn item stays
         // stuck in light chrome even when enableDarkModeForWindow()
         // (uicolormanager.h) has been applied to its owner. No known
-        // workaround short of not owner-drawing at all - see bitmap
+        // workaround short of not owner-drawing at all - see bitmap()
         // below for a native alternative (an icon next to plain text)
         // that doesn't hit this.
-        bool ownerDrawn = false;
+        bool isOwnerDrawn() const { return ownerDrawn_; }
+        void setOwnerDrawn(bool ownerDrawn) { ownerDrawn_ = ownerDrawn; }
 
         // Native MIIM_BITMAP icon shown to the left of a plain
         // (non-owner-drawn) item's text - caller-owned, borrowed only
@@ -156,8 +164,12 @@ namespace newui {
         // Win32 handle this class avoids owning - see the class
         // comment). nullptr (default) = no icon, plain MFT_STRING as
         // before. The way to get a "colored glyph next to a label" look
-        // without MFT_OWNERDRAW's dark-mode caveat above.
-        HBITMAP bitmap = nullptr;
+        // without MFT_OWNERDRAW's dark-mode caveat above. Not reflected:
+        // a runtime handle can't be saved.
+        //@reflect ignore=true
+        HBITMAP bitmap() const { return bitmap_; }
+        //@reflect ignore=true
+        void setBitmap(HBITMAP bitmap) { bitmap_ = bitmap; }
 
         // Fired from Frame's WM_MEASUREITEM (via DispatchMenuMeasureItem())
         // only when ownerDrawn is set. outSize arrives pre-filled with a
@@ -196,7 +208,7 @@ namespace newui {
 
         static std::unique_ptr<MenuItem> Separator() {
             auto item = std::make_unique<MenuItem>();
-            item->isSeparator = true;
+            item->setSeparator(true);
             return item;
         }
 
@@ -273,6 +285,15 @@ namespace newui {
         // dangles once the popup is torn down (harmless - nothing reads
         // it afterward).
         HMENU ownerMenu_ = nullptr;
+
+        MenuState state_;
+        std::string text_;
+        bool separator_ = false;
+        bool checked_ = false;
+        int radioGroup_ = -1;
+        std::string shortcutText_;
+        bool ownerDrawn_ = false;
+        HBITMAP bitmap_ = nullptr;
     };
 
     // Builds a real, transient native Win32 popup menu (HMENU) from an

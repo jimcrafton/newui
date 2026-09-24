@@ -25,9 +25,9 @@
 namespace {
 
 newui::Size defaultMenuItemMeasure(const newui::MenuItem& item) {
-    std::string label = item.shortcutText.empty()
-        ? item.text
-        : item.text + "    " + item.shortcutText;
+    std::string label = item.shortcutText().empty()
+        ? item.text()
+        : item.text() + "    " + item.shortcutText();
     if (label.empty()) {
         label = " ";
     }
@@ -114,7 +114,7 @@ public:
             return;
         }
 
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(menuItem->text);
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(menuItem->text());
         if (!shaped.valid) {
             return;
         }
@@ -133,7 +133,7 @@ public:
         // its own theme-aware color to match instead of staying fixed.
         newui::Color textColor = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText);
         ctx.set_fill_style(textColor.toBLRgba32());
-        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text.c_str());
+        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text().c_str());
     }
 };
 
@@ -274,35 +274,35 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
         // built below, is the only place that needs to.
         if (item.action() != nullptr) {
             item.action()->update();
-            item.state.setEnabled(item.action()->enabled());
+            item.state().setEnabled(item.action()->enabled());
         }
 
         MENUITEMINFOA mii = {};
         mii.cbSize = sizeof(mii);
         mii.fMask = MIIM_FTYPE | MIIM_STATE;
-        mii.fState = (item.state.isEnabled() ? MFS_ENABLED : MFS_DISABLED)
-            | (item.checked ? MFS_CHECKED : MFS_UNCHECKED);
+        mii.fState = (item.state().isEnabled() ? MFS_ENABLED : MFS_DISABLED)
+            | (item.isChecked() ? MFS_CHECKED : MFS_UNCHECKED);
 
         std::string label;  // must outlive the InsertMenuItemA() call below
 
-        if (item.isSeparator) {
+        if (item.isSeparator()) {
             mii.fType = MFT_SEPARATOR;
         } else {
-            mii.fType = (item.ownerDrawn ? MFT_OWNERDRAW : MFT_STRING)
-                | (item.radioGroup >= 0 ? MFT_RADIOCHECK : 0);
+            mii.fType = (item.isOwnerDrawn() ? MFT_OWNERDRAW : MFT_STRING)
+                | (item.radioGroup() >= 0 ? MFT_RADIOCHECK : 0);
 
-            if (item.ownerDrawn) {
+            if (item.isOwnerDrawn()) {
                 mii.fMask |= MIIM_DATA;
                 mii.dwItemData = reinterpret_cast<ULONG_PTR>(&item);
             } else {
-                label = item.shortcutText.empty() ? item.text : item.text + "\t" + item.shortcutText;
+                label = item.shortcutText().empty() ? item.text() : item.text() + "\t" + item.shortcutText();
                 mii.fMask |= MIIM_STRING;
                 mii.dwTypeData = const_cast<char*>(label.c_str());
                 mii.cch = static_cast<UINT>(label.size());
 
-                if (item.bitmap != nullptr) {
+                if (item.bitmap() != nullptr) {
                     mii.fMask |= MIIM_BITMAP;
-                    mii.hbmpItem = item.bitmap;
+                    mii.hbmpItem = item.bitmap();
                 }
             }
 
@@ -319,7 +319,7 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
 
         ::InsertMenuItemA(hmenu, static_cast<UINT>(position), TRUE, &mii);
 
-        if (!item.isSeparator && item.hasChildren()) {
+        if (!item.isSeparator() && item.hasChildren()) {
             buildMenuLevel(mii.hSubMenu, item);
         }
 
@@ -371,9 +371,9 @@ bool ContextMenu::dispatchCommand(UINT id) {
     }
     MenuItem* item = it->second;
 
-    if (item->radioGroup >= 0 && item->parent_ != nullptr) {
+    if (item->radioGroup() >= 0 && item->parent_ != nullptr) {
         for (MenuItem* sibling : item->parent_->children_) {
-            if (sibling->radioGroup == item->radioGroup) {
+            if (sibling->radioGroup() == item->radioGroup()) {
                 setChecked(*sibling, sibling == item);
             }
         }
@@ -384,7 +384,7 @@ bool ContextMenu::dispatchCommand(UINT id) {
 }
 
 void ContextMenu::setChecked(MenuItem& item, bool checked) {
-    item.checked = checked;
+    item.setChecked(checked);
     // A parent/separator item never got a real commandId_ (stays 0) -
     // MF_BYCOMMAND against id 0 simply finds nothing in ownerMenu_ and
     // no-ops, so this is harmless to call on one, it just has no visible
@@ -396,7 +396,7 @@ void ContextMenu::setChecked(MenuItem& item, bool checked) {
 }
 
 void ContextMenu::setEnabled(MenuItem& item, bool enabled) {
-    item.state.setEnabled(enabled);
+    item.state().setEnabled(enabled);
     if (item.ownerMenu_ != nullptr) {
         ::EnableMenuItem(item.ownerMenu_, item.commandId_,
             MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
@@ -448,11 +448,11 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
     }
 
 
-    item->state.setDisabled((dis.itemState & ODS_DISABLED) == ODS_DISABLED);
-    item->state.setInactive((dis.itemState & ODS_INACTIVE) == ODS_INACTIVE);
-    item->state.setGreyedOut((dis.itemState & ODS_GRAYED) == ODS_GRAYED);
-    item->state.setFocused((dis.itemState & ODS_FOCUS) == ODS_FOCUS);
-    item->state.setHighlighted((dis.itemState & ODS_HOTLIGHT) == ODS_HOTLIGHT);
+    item->state().setDisabled((dis.itemState & ODS_DISABLED) == ODS_DISABLED);
+    item->state().setInactive((dis.itemState & ODS_INACTIVE) == ODS_INACTIVE);
+    item->state().setGreyedOut((dis.itemState & ODS_GRAYED) == ODS_GRAYED);
+    item->state().setFocused((dis.itemState & ODS_FOCUS) == ODS_FOCUS);
+    item->state().setHighlighted((dis.itemState & ODS_HOTLIGHT) == ODS_HOTLIGHT);
     //item->state.setSelected((dis.itemState & ODS_SELECTED) == ODS_SELECTED);
 
 
@@ -505,13 +505,13 @@ void MenuBar::rebuildButtons() {
     }
 
     for (MenuItem* topLevel : root_.children()) {
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(topLevel->text);
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(topLevel->text());
         Size buttonSize = shaped.valid
             ? Size(shaped.width + 24.0f, shaped.ascent + shaped.descent + 12.0f)
             : Size(60.0f, 28.0f);
 
         auto* button = new MenuBarButtonView();
-        button->setName(topLevel->text);
+        button->setName(topLevel->text());
         button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         button->setVisible(true);
         button->menuItem = topLevel;

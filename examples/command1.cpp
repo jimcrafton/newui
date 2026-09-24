@@ -242,7 +242,7 @@ int main() {
 
     auto editMenu = std::make_unique<newui::MenuItem>("Edit");
     newui::MenuItem* copyItem = editMenu->addChild(std::make_unique<newui::MenuItem>("Copy"));
-    copyItem->shortcutText = "Ctrl+C";
+    copyItem->setShortcutText("Ctrl+C");
     // setAction() is what makes this item's enabled/grayed-out state
     // track copyAction.onActionUpdated automatically (see the
     // ContextMenu::buildMenuLevel() comment, menus.cpp) - onClick still
@@ -253,7 +253,7 @@ int main() {
         return newui::SyncReturn::Handled;
     });
     newui::MenuItem* pasteItem = editMenu->addChild(std::make_unique<newui::MenuItem>("Paste"));
-    pasteItem->shortcutText = "Ctrl+V";
+    pasteItem->setShortcutText("Ctrl+V");
     pasteItem->setAction(&pasteAction);
     pasteItem->onClick.add([&root](newui::MenuItem&) {
         root.performCommand(newui::commands::paste);

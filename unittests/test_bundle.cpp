@@ -1194,7 +1194,7 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAMenuBarsMenuTree) {
     file->addChild(recent);
     file->addChild(newui::MenuItem::Separator().release());
     auto* exitItem = new newui::MenuItem("Exit");
-    exitItem->shortcutText = "Alt+F4";
+    exitItem->setShortcutText("Alt+F4");
     file->addChild(exitItem);
     bar->addMenu(file);
     bar->addMenu(new newui::MenuItem("Edit"));
@@ -1212,18 +1212,18 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAMenuBarsMenuTree) {
 
     ASSERT_EQ(loaded->menus().size(), 2u);
     newui::MenuItem* loadedFile = loaded->menus()[0];
-    EXPECT_EQ(loadedFile->text, "File");
+    EXPECT_EQ(loadedFile->text(), "File");
     EXPECT_EQ(loadedFile->parent(), &loaded->root());
-    EXPECT_EQ(loaded->menus()[1]->text, "Edit");
+    EXPECT_EQ(loaded->menus()[1]->text(), "Edit");
 
     ASSERT_EQ(loadedFile->children().size(), 4u);
-    EXPECT_EQ(loadedFile->children()[0]->text, "Open");
+    EXPECT_EQ(loadedFile->children()[0]->text(), "Open");
     newui::MenuItem* loadedRecent = loadedFile->children()[1];
     ASSERT_EQ(loadedRecent->children().size(), 1u);
-    EXPECT_EQ(loadedRecent->children()[0]->text, "a.txt");
+    EXPECT_EQ(loadedRecent->children()[0]->text(), "a.txt");
     EXPECT_EQ(loadedRecent->children()[0]->parent(), loadedRecent);
-    EXPECT_TRUE(loadedFile->children()[2]->isSeparator);
-    EXPECT_EQ(loadedFile->children()[3]->shortcutText, "Alt+F4");
+    EXPECT_TRUE(loadedFile->children()[2]->isSeparator());
+    EXPECT_EQ(loadedFile->children()[3]->shortcutText(), "Alt+F4");
 
     // One button per top-level menu.
     EXPECT_EQ(loaded->childViews().size(), 2u);

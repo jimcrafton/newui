@@ -149,13 +149,13 @@ newui::SyncReturn SettingChanged(newui::Application&, std::uint32_t action, std:
 newui::Frame* g_demoFrame = nullptr;
 
 newui::SyncReturn MenuItemClicked(newui::MenuItem& item) {
-    printf("Menu item clicked: \"%s\" (command id %u)\n", item.text.c_str(), item.commandId());
+    printf("Menu item clicked: \"%s\" (command id %u)\n", item.text().c_str(), item.commandId());
     fflush(stdout);  // printf alone can sit in a fully-buffered console until exit
     return newui::SyncReturn::Handled;
 }
 
 newui::SyncReturn ExitClicked(newui::MenuItem& item) {
-    printf("Menu item clicked: \"%s\" - closing the window\n", item.text.c_str());
+    printf("Menu item clicked: \"%s\" - closing the window\n", item.text().c_str());
     fflush(stdout);
     if (g_demoFrame != nullptr && g_demoFrame->frameHandle() != nullptr) {
         ::SendMessage(g_demoFrame->frameHandle(), WM_CLOSE, 0, 0);
@@ -205,8 +205,8 @@ newui::SyncReturn ScreenshotHotkey(newui::View& /*sender*/, std::uint32_t keyMas
 // item's dropdown is shown, a fresh ContextMenu build reads item.checked
 // and renders the checkmark correctly either way.
 newui::SyncReturn WordWrapToggled(newui::MenuItem& item) {
-    item.checked = !item.checked;
-    printf("Word Wrap: %s\n", item.checked ? "on" : "off");
+    item.setChecked(!item.isChecked());
+    printf("Word Wrap: %s\n", item.isChecked() ? "on" : "off");
     fflush(stdout);
     return newui::SyncReturn::Handled;
 }
@@ -251,7 +251,7 @@ void AddDemoMenuBar(newui::RootView& root, HBITMAP fancyItemBitmap) {
     fileMenu->addChild(std::make_unique<newui::MenuItem>("New"))->onClick.add(&MenuItemClicked);
     fileMenu->addChild(std::make_unique<newui::MenuItem>("Open"))->onClick.add(&MenuItemClicked);
     newui::MenuItem* saveItem = fileMenu->addChild(std::make_unique<newui::MenuItem>("Save"));
-    saveItem->shortcutText = "Ctrl+S";
+    saveItem->setShortcutText("Ctrl+S");
     saveItem->onClick.add(&MenuItemClicked);
     fileMenu->addChild(newui::MenuItem::Separator());
     fileMenu->addChild(std::make_unique<newui::MenuItem>("Exit"))->onClick.add(&ExitClicked);
@@ -266,8 +266,8 @@ void AddDemoMenuBar(newui::RootView& root, HBITMAP fancyItemBitmap) {
     auto viewMenu = std::make_unique<newui::MenuItem>("View");
     for (const char* label : { "Small", "Medium", "Large" }) {
         auto sizeItem = std::make_unique<newui::MenuItem>(label);
-        sizeItem->radioGroup = 0;
-        sizeItem->checked = (std::string(label) == "Medium");
+        sizeItem->setRadioGroup(0);
+        sizeItem->setChecked(std::string(label) == "Medium");
         sizeItem->onClick.add(&MenuItemClicked);
         viewMenu->addChild(std::move(sizeItem));
     }
@@ -275,7 +275,7 @@ void AddDemoMenuBar(newui::RootView& root, HBITMAP fancyItemBitmap) {
 
     auto helpMenu = std::make_unique<newui::MenuItem>("Help");
     auto fancyItem = std::make_unique<newui::MenuItem>("Fancy (Native Icon)");
-    fancyItem->bitmap = fancyItemBitmap;
+    fancyItem->setBitmap(fancyItemBitmap);
     fancyItem->onClick.add(&MenuItemClicked);
     helpMenu->addChild(std::move(fancyItem));
     menuItems.push_back(std::move(helpMenu));
