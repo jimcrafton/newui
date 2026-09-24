@@ -1509,6 +1509,10 @@ namespace newui {
         // onReturnPressed-style hook to react to.
         virtual SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
+        // Selects the whole text, caret at the end (handleMouseDown()'s
+        // triple-click; also for callers that want a field ready to type over).
+        void selectAll();
+
     private:
         // Maps a point in the owner's own local space (as delivered by
         // onMouseDown/onMouseMove/onMouseUp/onMouseDblClick) into
@@ -1562,10 +1566,6 @@ namespace newui {
         // just repositions the caret there with no selection if localPt
         // lands on a non-word character.
         void selectWordAt(const Point& localPt);
-
-        // handleMouseDown()'s own triple-click behavior - see its own
-        // doc comment above.
-        void selectAll();
 
         // caret_'s blink timer flips isVisible() on its own schedule,
         // independent of any Windows message - without this, that new
