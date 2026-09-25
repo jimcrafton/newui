@@ -209,6 +209,11 @@ namespace newui {
 		}
 		break;
 
+		case VK_INSERT: {
+			result = vkInsert;
+		}
+		break;
+
 		case VK_CONTROL: {
 			result = vkCtrl;
 		}

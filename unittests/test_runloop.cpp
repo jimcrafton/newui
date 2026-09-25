@@ -2,6 +2,7 @@
 #include "newui/delegate.h"
 #include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
+#include "newui/utils.h"
 
 #include <gtest/gtest.h>
 
@@ -710,4 +711,12 @@ TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
 
     runLoop.quit();
     loopThread.join();
+}
+
+// Insert was declared (vkInsert) but never translated, so it never reached any key handler.
+TEST(TranslateVirtualKey, EditingKeysAreTranslated)
+{
+    EXPECT_EQ(newui::translateVirtualKey(VK_INSERT, 0), static_cast<std::uint32_t>(newui::vkInsert));
+    EXPECT_EQ(newui::translateVirtualKey(VK_DELETE, 0), static_cast<std::uint32_t>(newui::vkDelete));
+    EXPECT_EQ(newui::translateVirtualKey(VK_F2, 0), static_cast<std::uint32_t>(newui::vkF2));
 }
