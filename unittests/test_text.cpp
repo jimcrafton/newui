@@ -1350,3 +1350,155 @@ TEST(TextLayoutEngine, UpdateReflectsChangedTextOnASubsequentCall) {
     // rather than reusing the first call's cached layout.
     EXPECT_GT(longerRects[0].width(), shortRects[0].width());
 }
+
+namespace {
+    bool imageHasInk(const BLImage& image) {
+        BLImageData data;
+        image.get_data(&data);
+        const uint8_t* base = static_cast<const uint8_t*>(data.pixel_data);
+        for (int y = 0; y < data.size.h; ++y) {
+            const uint32_t* row = reinterpret_cast<const uint32_t*>(base + y * data.stride);
+            for (int x = 0; x < data.size.w; ++x) {
+                if ((row[x] >> 24) > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+}
+
+TEST(TextLayoutEngine, SplitsTheTextIntoLinesAtEachBreak) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"a\nbb\r\nccc");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 3u);
+    EXPECT_EQ(engine.lineStart(0), 0u);
+    EXPECT_EQ(engine.lineLength(0), 1u);
+    EXPECT_EQ(engine.lineStart(1), 2u);
+    EXPECT_EQ(engine.lineLength(1), 2u);
+    EXPECT_EQ(engine.lineStart(2), 6u);
+    EXPECT_EQ(engine.lineLength(2), 3u);
+    EXPECT_EQ(engine.lineAt(4), 1u);
+    EXPECT_EQ(engine.lineAt(9), 2u);
+    EXPECT_GT(engine.lineTop(1), engine.lineTop(0));
+    EXPECT_FLOAT_EQ(engine.lineTop(2), engine.lineTop(1) + engine.lineHeight(1));
+    EXPECT_FLOAT_EQ(engine.contentHeight(), engine.lineTop(2) + engine.lineHeight(2));
+}
+
+TEST(TextLayoutEngine, EmptyAndTrailingLinesHaveARealHeight) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"abc\n");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 2u);
+    EXPECT_NEAR(engine.lineHeight(1), engine.lineHeight(0), 0.5f);
+
+    newui::Point topLeft;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(4), topLeft, height);
+    EXPECT_NEAR(topLeft.y, engine.lineTop(1), 0.5f);
+    EXPECT_GT(height, 0.0f);
+}
+
+TEST(TextLayoutEngine, AnEditRebuildsOnlyTheLinesItTouched) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage original(L"one\ntwo\nthree\nfour\nfive");
+    ASSERT_TRUE(engine.update(original, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 5u);
+
+    TextStorage edited(L"one\ntwo\nthreeX\nfour\nfive");
+    ASSERT_TRUE(engine.update(edited, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
+
+    TextStorage split(L"one\ntwo\nthr\neeX\nfour\nfive");
+    ASSERT_TRUE(engine.update(split, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 2u);
+    EXPECT_EQ(engine.lineCount(), 6u);
+    EXPECT_EQ(engine.lineStart(5), 21u);
+
+    // A different width re-lays out everything.
+    ASSERT_TRUE(engine.update(split, font, 400.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 6u);
+}
+
+TEST(TextLayoutEngine, HitTestingMapsAcrossLines) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"first\nsecond\nthird");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    newui::Point topLeft;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(8), topLeft, height);
+    EXPECT_NEAR(topLeft.y, engine.lineTop(1), 0.5f);
+    EXPECT_GT(topLeft.x, 0.0f);
+
+    const TextPosition hit = engine.hitTestPoint(newui::Point(1.0f, engine.lineTop(2) + 2.0f));
+    ASSERT_TRUE(hit.isValid());
+    EXPECT_EQ(hit.offset(), 13u);
+
+    // Past the end of a line lands before its break, not on the next line.
+    const TextPosition end = engine.hitTestPoint(newui::Point(480.0f, engine.lineTop(0) + 2.0f));
+    EXPECT_EQ(end.offset(), 5u);
+    // Below everything: the last line.
+    EXPECT_EQ(engine.lineAt(engine.hitTestPoint(newui::Point(1.0f, 1000.0f)).offset()), 2u);
+
+    const TextRange line = engine.lineRange(TextPosition(9));
+    EXPECT_EQ(line.start(), 6u);
+    EXPECT_EQ(line.length(), 6u);
+}
+
+TEST(TextLayoutEngine, HitTestRangeSpanningLinesCoversEachLineAndTheBreaks) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"first\nsecond\nthird");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    // "rst\nsecond\nth"
+    const std::vector<newui::Rect> rects = engine.hitTestRange(TextRange(2, 13));
+    ASSERT_EQ(rects.size(), 5u);   // three text runs + two line breaks
+    EXPECT_NEAR(rects.front().top(), engine.lineTop(0), 0.5f);
+    EXPECT_NEAR(rects.back().top(), engine.lineTop(2), 0.5f);
+}
+
+TEST(TextRenderer, EngineRenderDrawsOnlyTheLinesInView) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    std::wstring text = L"X";
+    for (int i = 0; i < 200; ++i) {
+        text += L"\n";
+    }
+    text += L"X";
+    TextStorage storage(text);
+    ASSERT_TRUE(engine.update(storage, font, 120.0f, 40.0f));
+    newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
+    TextRenderer renderer;
+
+    // Scrolled to the middle: only empty lines in view.
+    BLImage middle(120, 40, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(middle);
+        ctx.clear_all();
+        renderer.render(ctx, 120, 40, engine, black, engine.lineTop(100));
+        ctx.end();
+    }
+    EXPECT_FALSE(imageHasInk(middle));
+
+    // Scrolled to the last line.
+    BLImage last(120, 40, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(last);
+        ctx.clear_all();
+        renderer.render(ctx, 120, 40, engine, black, engine.lineTop(200));
+        ctx.end();
+    }
+    EXPECT_TRUE(imageHasInk(last));
+}

@@ -740,8 +740,15 @@ namespace newui::text {
         // this class's own doc comment on why the two can't be resized
         // independently the way the old DC-render-target version could.
         bool ensureRenderTarget(int width, int height);
-        // Both render()s end here: colors layout's ranges, draws it, and composites the result.
-        void drawLayout(BLContext& ctx, int width, int height, IDWriteTextLayout* layout, std::size_t textLength,
+        // A layout drawn at y = top, covering text [textStart, textStart + textLength).
+        struct LayoutPiece {
+            IDWriteTextLayout* layout;
+            float top;
+            std::size_t textStart;
+            std::size_t textLength;
+        };
+        // Both render()s end here: colors each piece's ranges, draws them, and composites the result.
+        void drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
             const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns);
 
         // Holds the real ID2D1RenderTarget/IWICBitmap (_com_ptr_t)
@@ -850,11 +857,25 @@ namespace newui::text {
         // no layout has been built yet.
         float contentHeight() const;
 
+        // The text is laid out one line (split at '\n'; "\r\n" is one break) per layout, so an
+        // edit re-lays out only the lines it touched and drawing covers only visible lines.
+        // Always at least one line once update() has succeeded.
+        std::size_t lineCount() const;
+        // Offset of line's first character, and its length excluding the line break.
+        std::size_t lineStart(std::size_t line) const;
+        std::size_t lineLength(std::size_t line) const;
+        // Its y and height (all its wrapped rows).
+        float lineTop(std::size_t line) const;
+        float lineHeight(std::size_t line) const;
+        // The line holding offset.
+        std::size_t lineAt(std::size_t offset) const;
+        // How many line layouts the last rebuilding update() created (the rest were reused).
+        std::size_t layoutsBuiltLastUpdate() const;
+
     private:
-        // Holds the real IDWriteTextLayout (_com_ptr_t), plus a cached
-        // IDWriteTextFormat (the same shared TextFormatCache helper
-        // TextRenderer uses) - see this file's own top-of-file comment
-        // on why neither can be named directly here.
+        // The per-line IDWriteTextLayouts (_com_ptr_t), plus a cached IDWriteTextFormat (the same
+        // shared TextFormatCache helper TextRenderer uses) - see this file's own top-of-file
+        // comment on why neither can be named directly here.
         struct Impl;
         std::unique_ptr<Impl> impl_;
 

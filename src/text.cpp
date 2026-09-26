@@ -10,6 +10,7 @@
 #include <comdef.h>
 #include <comip.h>
 
+#include <algorithm>
 #include <map>
 
 #pragma comment(lib, "d2d1.lib")
@@ -576,12 +577,13 @@ namespace newui::text {
             return;
         }
         textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
-        drawLayout(ctx, width, height, textLayout.GetInterfacePtr(), text.size(), textColor, scrollOffsetY, colorRuns);
+        drawLayouts(ctx, width, height, { LayoutPiece{ textLayout.GetInterfacePtr(), 0.0f, 0, text.size() } },
+            textColor, scrollOffsetY, colorRuns);
     }
 
-    void TextRenderer::drawLayout(BLContext& ctx, int width, int height, IDWriteTextLayout* textLayout,
-            std::size_t textLength, const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
-        if (width <= 0 || height <= 0 || textLayout == nullptr || !ensureRenderTarget(width, height)) {
+    void TextRenderer::drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
+        if (width <= 0 || height <= 0 || pieces.empty() || !ensureRenderTarget(width, height)) {
             return;
         }
 
@@ -598,35 +600,36 @@ namespace newui::text {
 
         // Each run's brush is its drawing effect - DrawTextLayout() draws a range whose effect is an
         // ID2D1Brush with that brush, so no custom IDWriteTextRenderer is needed. One brush per
-        // distinct color (a document has thousands of runs but a handful of colors). A shared
-        // layout (TextLayoutEngine's) may still carry the previous paint's effects - clear first.
-        const DWRITE_TEXT_RANGE whole{ 0, static_cast<UINT32>(textLength) };
-        textLayout->SetDrawingEffect(nullptr, whole);
+        // distinct color (a document has thousands of runs but a handful of colors). A layout that
+        // outlives this call (TextLayoutEngine's) may still carry an earlier paint's effects - each
+        // piece is cleared first, and again once drawn.
         std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
-        for (const TextColorRun& run : colorRuns) {
-            if (run.length == 0 || run.start >= textLength) {
-                continue;
+        for (const LayoutPiece& piece : pieces) {
+            const DWRITE_TEXT_RANGE whole{ 0, static_cast<UINT32>(piece.textLength) };
+            piece.layout->SetDrawingEffect(nullptr, whole);
+            const std::size_t pieceEnd = piece.textStart + piece.textLength;
+            for (const TextColorRun& run : colorRuns) {
+                const std::size_t runEnd = run.start + run.length;
+                const std::size_t from = run.start > piece.textStart ? run.start : piece.textStart;
+                const std::size_t to = runEnd < pieceEnd ? runEnd : pieceEnd;
+                if (run.length == 0 || to <= from) {
+                    continue;
+                }
+                const std::uint32_t key = run.color.toBLRgba32().value;
+                ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
+                if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
+                        D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
+                    continue;
+                }
+                piece.layout->SetDrawingEffect(runBrush.GetInterfacePtr(),
+                    DWRITE_TEXT_RANGE{ static_cast<UINT32>(from - piece.textStart), static_cast<UINT32>(to - from) });
             }
-            const std::uint32_t key = run.color.toBLRgba32().value;
-            ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
-            if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
-                    D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
-                continue;
+            if (SUCCEEDED(brushHr)) {
+                // scrollOffsetY shifts everything up before rasterizing - see
+                // render()'s own doc comment (text.h).
+                impl_->renderTarget->DrawTextLayout(
+                    D2D1::Point2F(0.0f, piece.top - scrollOffsetY), piece.layout, brush.GetInterfacePtr());
             }
-            const std::size_t available = textLength - run.start;
-            DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
-                static_cast<UINT32>(run.length < available ? run.length : available) };
-            textLayout->SetDrawingEffect(runBrush.GetInterfacePtr(), range);
-        }
-
-        if (SUCCEEDED(brushHr)) {
-            // scrollOffsetY shifts the whole layout up before rasterizing -
-            // see render()'s own doc comment (text.h) on why this is
-            // safe/correct regardless of how tall the real content is,
-            // even though the layout was only ever built against this
-            // render target's own small height.
-            impl_->renderTarget->DrawTextLayout(
-                D2D1::Point2F(0.0f, -scrollOffsetY), textLayout, brush.GetInterfacePtr());
         }
 
         // EndDraw() has to be called to close out BeginDraw() regardless
@@ -634,9 +637,11 @@ namespace newui::text {
         // session without it leaves the render target in an inconsistent
         // state for the next render() call.
         HRESULT endHr = impl_->renderTarget->EndDraw();
-        // The brushes belong to this render target - don't leave them attached to a layout that
-        // outlives this call.
-        textLayout->SetDrawingEffect(nullptr, whole);
+        // The brushes belong to this render target - don't leave them attached to layouts that
+        // outlive this call.
+        for (const LayoutPiece& piece : pieces) {
+            piece.layout->SetDrawingEffect(nullptr, DWRITE_TEXT_RANGE{ 0, static_cast<UINT32>(piece.textLength) });
+        }
         if (endHr == D2DERR_RECREATE_TARGET) {
             // Device loss (rare for a software render target, but a real
             // integration still has to handle it) - drop the render
@@ -687,32 +692,58 @@ namespace newui::text {
         // lock unlocks the bitmap automatically at scope exit.
     }
 
+    // One DirectWrite layout per line of the text (split at '\n'; a "\r\n" pair is one break), so
+    // an edit re-lays out only the lines it touched and drawing touches only the visible ones.
     struct TextLayoutEngine::Impl {
-        IDWriteTextLayoutPtr layout;
-        TextFormatCache textFormat;
+        struct Line {
+            std::size_t start = 0;       // offset of the line's first character in the text
+            std::size_t length = 0;      // its content, not counting the line break
+            std::size_t terminator = 0;  // the break's length: 0 (the last line), 1 or 2
+            float top = 0.0f;
+            float height = 0.0f;
+            std::wstring text;
+            std::vector<TextFontRun> runs;   // clipped to the line, line-relative
+            IDWriteTextLayoutPtr layout;
+        };
 
-        // Non-owning - purely to detect "the font actually changed"
-        // (compared by identity against whatever TextFormatCache::
-        // resolve() just returned) without update() needing its own
-        // separate copy of TextFormatCache's own name/size/bold/italic
-        // tracking. A stale/dangling value here is harmless: it's never
-        // dereferenced, only ever compared against a fresh resolve()
-        // result.
+        std::vector<Line> lines;
+        TextFormatCache textFormat;
         IDWriteTextFormat* lastFormat = nullptr;
+        std::size_t lastBuilt = 0;
+
+        // The line holding offset (the last one starting at or before it).
+        std::size_t lineForOffset(std::size_t offset) const {
+            auto it = std::upper_bound(lines.begin(), lines.end(), offset,
+                [](std::size_t value, const Line& line) { return value < line.start; });
+            return it == lines.begin() ? 0 : static_cast<std::size_t>(it - lines.begin()) - 1;
+        }
+
+        // The line at y (clamped to the first / last).
+        std::size_t lineForY(float y) const {
+            auto it = std::upper_bound(lines.begin(), lines.end(), y,
+                [](float value, const Line& line) { return value < line.top + line.height; });
+            return it == lines.end() ? lines.size() - 1 : static_cast<std::size_t>(it - lines.begin());
+        }
     };
 
     TextLayoutEngine::TextLayoutEngine() : impl_(std::make_unique<Impl>()) {}
 
+    TextLayoutEngine::~TextLayoutEngine() = default;
+
     // Defined after TextLayoutEngine::Impl, which it reaches into (TextRenderer is a friend).
     void TextRenderer::render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
             const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
-        drawLayout(ctx, width, height, layout.impl_->layout.GetInterfacePtr(), layout.lastText_.size(),
-            textColor, scrollOffsetY, colorRuns);
+        const auto& lines = layout.impl_->lines;
+        if (lines.empty()) {
+            return;
+        }
+        std::vector<LayoutPiece> pieces;
+        for (std::size_t i = layout.impl_->lineForY(scrollOffsetY);
+                i < lines.size() && lines[i].top < scrollOffsetY + static_cast<float>(height); ++i) {
+            pieces.push_back({ lines[i].layout.GetInterfacePtr(), lines[i].top, lines[i].start, lines[i].length });
+        }
+        drawLayouts(ctx, width, height, pieces, textColor, scrollOffsetY, colorRuns);
     }
-
-    // impl_'s own _com_ptr_t/TextFormatCache members release themselves -
-    // nothing left to do here.
-    TextLayoutEngine::~TextLayoutEngine() = default;
 
     bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap,
             const std::vector<TextFontRun>& fontRuns) {
@@ -722,53 +753,124 @@ namespace newui::text {
         }
 
         const std::wstring& text = storage.text();
-        bool needsRebuild = impl_->layout == nullptr
-            || format != impl_->lastFormat
-            || lastText_ != text
-            || lastMaxWidth_ != maxWidth
-            || lastMaxHeight_ != maxHeight
-            || lastWordWrap_ != wordWrap
-            || lastFontRuns_ != fontRuns;
-        if (!needsRebuild) {
+        const bool sameShape = format == impl_->lastFormat
+            && lastMaxWidth_ == maxWidth
+            && lastMaxHeight_ == maxHeight
+            && lastWordWrap_ == wordWrap;
+        if (sameShape && !impl_->lines.empty() && lastText_ == text && lastFontRuns_ == fontRuns) {
             return true;
         }
 
-        IDWriteTextLayoutPtr layout;
-        HRESULT hr = DirectWriteResources::dwriteFactory().CreateTextLayout(
-            text.c_str(), static_cast<UINT32>(text.size()), format, maxWidth, maxHeight, &layout);
-        if (FAILED(hr)) {
-            impl_->layout = nullptr;
-            return false;
+        std::vector<Impl::Line> fresh;
+        std::size_t pos = 0;
+        while (true) {
+            const std::size_t newline = text.find(L'\n', pos);
+            const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
+            std::size_t contentEnd = end;
+            if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
+                --contentEnd;
+            }
+            Impl::Line line;
+            line.start = pos;
+            line.length = contentEnd - pos;
+            line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
+            line.text = text.substr(pos, line.length);
+            for (const TextFontRun& run : fontRuns) {
+                const std::size_t runEnd = run.start + run.length;
+                const std::size_t from = run.start > pos ? run.start : pos;
+                const std::size_t to = runEnd < contentEnd ? runEnd : contentEnd;
+                if (to > from) {
+                    TextFontRun local = run;
+                    local.start = from - pos;
+                    local.length = to - from;
+                    line.runs.push_back(local);
+                }
+            }
+            fresh.push_back(std::move(line));
+            if (newline == std::wstring::npos) {
+                break;
+            }
+            pos = newline + 1;
         }
-        layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
-        for (const TextFontRun& run : fontRuns) {
-            if (run.length == 0 || run.start >= text.size()) {
-                continue;
+
+        // Keep the layouts of unchanged lines (same text and styling), matched from the front and
+        // the back - so one edit rebuilds only the lines it actually touched.
+        std::vector<Impl::Line>& old = impl_->lines;
+        auto unchanged = [](const Impl::Line& a, const Impl::Line& b) { return a.text == b.text && a.runs == b.runs; };
+        auto reuse = [](Impl::Line& into, const Impl::Line& from) {
+            into.layout = from.layout;
+            into.height = from.height;
+        };
+        if (sameShape) {
+            std::size_t prefix = 0;
+            while (prefix < old.size() && prefix < fresh.size() && unchanged(old[prefix], fresh[prefix])) {
+                reuse(fresh[prefix], old[prefix]);
+                ++prefix;
             }
-            const std::size_t available = text.size() - run.start;
-            const DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
-                static_cast<UINT32>(run.length < available ? run.length : available) };
-            if (run.bold) {
-                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
-            }
-            if (run.italic) {
-                layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range);
-            }
-            if (run.underline) {
-                layout->SetUnderline(TRUE, range);
-            }
-            if (run.strikethrough) {
-                layout->SetStrikethrough(TRUE, range);
-            }
-            if (!run.fontName.empty()) {
-                layout->SetFontFamilyName(utf8ToWide(run.fontName).c_str(), range);
-            }
-            if (run.fontSize > 0.0f) {
-                layout->SetFontSize(run.fontSize, range);
+            std::size_t suffix = 0;
+            while (suffix < old.size() - prefix && suffix < fresh.size() - prefix
+                    && unchanged(old[old.size() - 1 - suffix], fresh[fresh.size() - 1 - suffix])) {
+                reuse(fresh[fresh.size() - 1 - suffix], old[old.size() - 1 - suffix]);
+                ++suffix;
             }
         }
 
-        impl_->layout = layout;
+        impl_->lastBuilt = 0;
+        float emptyLineHeight = 0.0f;   // an empty layout can report 0 - use one space's line height
+        float top = 0.0f;
+        for (Impl::Line& line : fresh) {
+            if (line.layout == nullptr) {
+                IDWriteTextLayoutPtr layout;
+                if (FAILED(DirectWriteResources::dwriteFactory().CreateTextLayout(
+                        line.text.c_str(), static_cast<UINT32>(line.text.size()), format, maxWidth, maxHeight, &layout))) {
+                    impl_->lines.clear();
+                    return false;
+                }
+                layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+                for (const TextFontRun& run : line.runs) {
+                    const DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start), static_cast<UINT32>(run.length) };
+                    if (run.bold) {
+                        layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
+                    }
+                    if (run.italic) {
+                        layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range);
+                    }
+                    if (run.underline) {
+                        layout->SetUnderline(TRUE, range);
+                    }
+                    if (run.strikethrough) {
+                        layout->SetStrikethrough(TRUE, range);
+                    }
+                    if (!run.fontName.empty()) {
+                        layout->SetFontFamilyName(utf8ToWide(run.fontName).c_str(), range);
+                    }
+                    if (run.fontSize > 0.0f) {
+                        layout->SetFontSize(run.fontSize, range);
+                    }
+                }
+                DWRITE_TEXT_METRICS metrics{};
+                layout->GetMetrics(&metrics);
+                line.height = metrics.height;
+                if (line.height <= 0.0f) {
+                    if (emptyLineHeight <= 0.0f) {
+                        IDWriteTextLayoutPtr space;
+                        if (SUCCEEDED(DirectWriteResources::dwriteFactory().CreateTextLayout(
+                                L" ", 1, format, maxWidth, maxHeight, &space))) {
+                            DWRITE_TEXT_METRICS spaceMetrics{};
+                            space->GetMetrics(&spaceMetrics);
+                            emptyLineHeight = spaceMetrics.height;
+                        }
+                    }
+                    line.height = emptyLineHeight;
+                }
+                line.layout = layout;
+                ++impl_->lastBuilt;
+            }
+            line.top = top;
+            top += line.height;
+        }
+
+        impl_->lines = std::move(fresh);
         impl_->lastFormat = format;
         lastText_ = text;
         lastMaxWidth_ = maxWidth;
@@ -780,34 +882,39 @@ namespace newui::text {
 
     std::vector<Rect> TextLayoutEngine::hitTestRange(const TextRange& range) const {
         std::vector<Rect> result;
-        if (impl_->layout == nullptr) {
+        const auto& lines = impl_->lines;
+        if (lines.empty() || range.length() == 0) {
             return result;
         }
-
-        // First call (null buffer) exists purely to learn how many
-        // DWRITE_HIT_TEST_METRICS a real call will need (a multi-line
-        // range spans more than one contiguous run) - its own HRESULT is
-        // expected to report "not enough buffer" and is deliberately not
-        // treated as a real failure; actualCount == 0 (an empty/invalid
-        // range) is the only thing checked here.
-        UINT32 actualCount = 0;
-        impl_->layout->HitTestTextRange(static_cast<UINT32>(range.start()), static_cast<UINT32>(range.length()),
-            0.0f, 0.0f, nullptr, 0, &actualCount);
-        if (actualCount == 0) {
-            return result;
-        }
-
-        std::vector<DWRITE_HIT_TEST_METRICS> metrics(actualCount);
-        HRESULT hr = impl_->layout->HitTestTextRange(static_cast<UINT32>(range.start()),
-            static_cast<UINT32>(range.length()), 0.0f, 0.0f, metrics.data(), actualCount, &actualCount);
-        if (FAILED(hr)) {
-            return result;
-        }
-
-        result.reserve(actualCount);
-        for (UINT32 i = 0; i < actualCount; ++i) {
-            const DWRITE_HIT_TEST_METRICS& m = metrics[i];
-            result.emplace_back(m.left, m.top, m.width, m.height);
+        for (std::size_t i = impl_->lineForOffset(range.start()); i < lines.size() && lines[i].start < range.end(); ++i) {
+            const Impl::Line& line = lines[i];
+            const std::size_t lineEnd = line.start + line.length;
+            const std::size_t from = range.start() > line.start ? range.start() : line.start;
+            const std::size_t to = range.end() < lineEnd ? range.end() : lineEnd;
+            if (to > from) {
+                UINT32 count = 0;
+                line.layout->HitTestTextRange(static_cast<UINT32>(from - line.start), static_cast<UINT32>(to - from),
+                    0.0f, line.top, nullptr, 0, &count);
+                if (count > 0) {
+                    std::vector<DWRITE_HIT_TEST_METRICS> metrics(count);
+                    if (SUCCEEDED(line.layout->HitTestTextRange(static_cast<UINT32>(from - line.start),
+                            static_cast<UINT32>(to - from), 0.0f, line.top, metrics.data(), count, &count))) {
+                        for (UINT32 m = 0; m < count; ++m) {
+                            result.emplace_back(metrics[m].left, metrics[m].top, metrics[m].width, metrics[m].height);
+                        }
+                    }
+                }
+            }
+            // The line break itself, when the range runs through it - a sliver at the line's end,
+            // as a single whole-document layout would show it.
+            if (line.terminator > 0 && range.start() <= lineEnd && range.end() > lineEnd) {
+                FLOAT x = 0.0f;
+                FLOAT y = 0.0f;
+                DWRITE_HIT_TEST_METRICS metrics{};
+                if (SUCCEEDED(line.layout->HitTestTextPosition(static_cast<UINT32>(line.length), FALSE, &x, &y, &metrics))) {
+                    result.emplace_back(x, line.top + y, metrics.height * 0.3f, metrics.height);
+                }
+            }
         }
         return result;
     }
@@ -815,96 +922,78 @@ namespace newui::text {
     void TextLayoutEngine::hitTestPosition(const TextPosition& position, Point& outTopLeft, float& outHeight) const {
         outTopLeft = Point();
         outHeight = 0.0f;
-        if (impl_->layout == nullptr || !position.isValid()) {
+        if (impl_->lines.empty() || !position.isValid()) {
             return;
         }
-
+        const Impl::Line& line = impl_->lines[impl_->lineForOffset(position.offset())];
+        const std::size_t local = position.offset() - line.start;
         FLOAT pointX = 0.0f;
         FLOAT pointY = 0.0f;
         DWRITE_HIT_TEST_METRICS metrics{};
-        HRESULT hr = impl_->layout->HitTestTextPosition(
-            static_cast<UINT32>(position.offset()), FALSE, &pointX, &pointY, &metrics);
-        if (FAILED(hr)) {
+        if (FAILED(line.layout->HitTestTextPosition(static_cast<UINT32>(local < line.length ? local : line.length),
+                FALSE, &pointX, &pointY, &metrics))) {
             return;
         }
-
-        outTopLeft = Point(pointX, pointY);
+        outTopLeft = Point(pointX, line.top + pointY);
         outHeight = metrics.height;
     }
 
     TextPosition TextLayoutEngine::hitTestPoint(const Point& localPoint) const {
-        if (impl_->layout == nullptr) {
+        if (impl_->lines.empty()) {
             return TextPosition();
         }
-
+        const Impl::Line& line = impl_->lines[impl_->lineForY(localPoint.y)];
         BOOL isTrailingHit = FALSE;
         BOOL isInside = FALSE;
         DWRITE_HIT_TEST_METRICS metrics{};
-        HRESULT hr = impl_->layout->HitTestPoint(localPoint.x, localPoint.y, &isTrailingHit, &isInside, &metrics);
-        if (FAILED(hr)) {
+        if (FAILED(line.layout->HitTestPoint(localPoint.x, localPoint.y - line.top, &isTrailingHit, &isInside, &metrics))) {
             return TextPosition();
         }
-
-        size_t offset = metrics.textPosition;
+        std::size_t offset = metrics.textPosition;
         if (isTrailingHit) {
             offset += metrics.length;
         }
-        return TextPosition(offset);
+        return TextPosition(line.start + (offset < line.length ? offset : line.length));
     }
 
     TextRange TextLayoutEngine::lineRange(const TextPosition& position) const {
-        if (impl_->layout == nullptr || !position.isValid()) {
+        if (impl_->lines.empty() || !position.isValid()) {
             return TextRange();
         }
+        const Impl::Line& line = impl_->lines[impl_->lineForOffset(position.offset())];
+        const std::size_t local = position.offset() - line.start < line.length ? position.offset() - line.start : line.length;
 
-        // Same two-pass pattern hitTestRange() already uses - the first
-        // call (null buffer) exists purely to learn the line count.
-        UINT32 lineCount = 0;
-        impl_->layout->GetLineMetrics(nullptr, 0, &lineCount);
-        if (lineCount == 0) {
-            return TextRange();
+        // The wrapped row within the line - what Home/End move across.
+        UINT32 rowCount = 0;
+        line.layout->GetLineMetrics(nullptr, 0, &rowCount);
+        if (rowCount == 0) {
+            return TextRange(line.start, line.length);
         }
-
-        std::vector<DWRITE_LINE_METRICS> metrics(lineCount);
-        HRESULT hr = impl_->layout->GetLineMetrics(metrics.data(), lineCount, &lineCount);
-        if (FAILED(hr)) {
-            return TextRange();
+        std::vector<DWRITE_LINE_METRICS> rows(rowCount);
+        if (FAILED(line.layout->GetLineMetrics(rows.data(), rowCount, &rowCount))) {
+            return TextRange(line.start, line.length);
         }
-
-        size_t offset = position.offset();
-        size_t lineStart = 0;
-        for (UINT32 i = 0; i < lineCount; ++i) {
-            size_t lineLength = metrics[i].length;
-            size_t lineEnd = lineStart + lineLength;
-            bool isLastLine = (i + 1 == lineCount);
-            // A boundary offset (exactly lineEnd) belongs to the *next*
-            // line's own range - except on the last line, where there is
-            // no next line to fall through to.
-            if (offset < lineEnd || (isLastLine && offset <= lineEnd)) {
-                size_t contentLength = lineLength - metrics[i].newlineLength;
-                return TextRange(lineStart, contentLength);
+        std::size_t rowStart = 0;
+        for (UINT32 r = 0; r < rowCount; ++r) {
+            const std::size_t rowEnd = rowStart + rows[r].length;
+            if (local < rowEnd || (r + 1 == rowCount && local <= rowEnd)) {
+                return TextRange(line.start + rowStart, rows[r].length - rows[r].newlineLength);
             }
-            lineStart = lineEnd;
+            rowStart = rowEnd;
         }
-
-        // Not normally reachable (offset is always <= the total text
-        // length a valid TextPosition can hold) - fall back to the last
-        // line found rather than an invalid range.
-        const DWRITE_LINE_METRICS& last = metrics[lineCount - 1];
-        size_t lastContentLength = last.length - last.newlineLength;
-        return TextRange(lineStart - last.length, lastContentLength);
+        return TextRange(line.start, line.length);
     }
 
     float TextLayoutEngine::contentHeight() const {
-        if (impl_->layout == nullptr) {
-            return 0.0f;
-        }
-        DWRITE_TEXT_METRICS metrics{};
-        HRESULT hr = impl_->layout->GetMetrics(&metrics);
-        if (FAILED(hr)) {
-            return 0.0f;
-        }
-        return metrics.height;
+        return impl_->lines.empty() ? 0.0f : impl_->lines.back().top + impl_->lines.back().height;
     }
+
+    std::size_t TextLayoutEngine::lineCount() const { return impl_->lines.size(); }
+    std::size_t TextLayoutEngine::lineStart(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].start : 0; }
+    std::size_t TextLayoutEngine::lineLength(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].length : 0; }
+    float TextLayoutEngine::lineTop(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].top : 0.0f; }
+    float TextLayoutEngine::lineHeight(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].height : 0.0f; }
+    std::size_t TextLayoutEngine::lineAt(std::size_t offset) const { return impl_->lines.empty() ? 0 : impl_->lineForOffset(offset); }
+    std::size_t TextLayoutEngine::layoutsBuiltLastUpdate() const { return impl_->lastBuilt; }
 
 }
