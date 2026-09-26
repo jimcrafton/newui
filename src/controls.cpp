@@ -2440,6 +2440,48 @@ namespace newui {
         }
     }
 
+    namespace {
+        // Moves each item's [start, start + length) through an edit (see adjustRunsForEdit()),
+        // dropping any left empty.
+        template <typename Item>
+        void adjustForEdit(std::vector<Item>& items, std::size_t start, std::size_t removed, std::size_t inserted) {
+            const std::size_t editEnd = start + removed;
+            auto moveStart = [&](std::size_t p) { return p < start ? p : p >= editEnd ? p - removed + inserted : start + inserted; };
+            auto moveEnd = [&](std::size_t p) { return p <= start ? p : p >= editEnd ? p - removed + inserted : start; };
+            std::size_t kept = 0;
+            for (Item& item : items) {
+                const std::size_t from = moveStart(item.start);
+                const std::size_t to = moveEnd(item.start + item.length);
+                if (to > from) {
+                    item.start = from;
+                    item.length = to - from;
+                    items[kept++] = std::move(item);
+                }
+            }
+            items.resize(kept);
+        }
+    }
+
+    void TextController::adjustRunsForEdit(std::size_t start, std::size_t removed, std::size_t inserted) {
+        adjustForEdit(colorRuns_, start, removed, inserted);
+        adjustForEdit(fontRuns_, start, removed, inserted);
+        adjustForEdit(decorations_, start, removed, inserted);
+    }
+
+    SyncReturn TextController::handleModelAfterChar(text::TextModel& /*sender*/, size_t offset, wchar_t /*ch*/, text::CharChangeKind kind) {
+        if (kind == text::CharChangeKind::Inserted) {
+            adjustRunsForEdit(offset, 0, 1);
+        } else {
+            adjustRunsForEdit(offset, 1, 0);
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleModelAfterRangeChanged(text::TextModel& /*sender*/, const text::TextRange& range, const std::wstring& replacement) {
+        adjustRunsForEdit(range.start(), range.length(), replacement.size());
+        return SyncReturn::Handled;
+    }
+
     SyncReturn TextController::handleCaretPositionChanged(text::Caret& /*sender*/) {
         onEditStateChanged(*this);
         return SyncReturn::Handled;

@@ -1,6 +1,7 @@
 #include "newui/textstyle.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace newui {
 
@@ -36,8 +37,15 @@ namespace newui {
 
         ExpandedTextStyles expandTextStyles(const TextStyleSheet& sheet, const std::vector<TextStyleRange>& ranges) {
             ExpandedTextStyles out;
+            out.colorRuns.reserve(ranges.size());
+            // A document has thousands of ranges but a handful of style names - look each up once.
+            std::unordered_map<std::string, const TextStyle*> resolved;
             for (const TextStyleRange& range : ranges) {
-                const TextStyle* style = sheet.style(range.style);
+                auto found = resolved.find(range.style);
+                if (found == resolved.end()) {
+                    found = resolved.emplace(range.style, sheet.style(range.style)).first;
+                }
+                const TextStyle* style = found->second;
                 if (style == nullptr || range.length == 0) {
                     continue;
                 }

@@ -491,3 +491,40 @@ TEST(LabelAlignment, LeftAlignedTextStartsAtTheLeft) {
     label.setTextAlignment(TextAlignment::Right);
     EXPECT_GT(firstInkColumn(label), 200);
 }
+
+// Edits carry color runs and decorations along, so they stay on their characters until reset.
+TEST(TextControlRuns, EditsMoveRunsAndDecorations) {
+    TextControl control;
+    control.setText(L"alpha beta gamma");
+    const Color red(1.0f, 0.0f, 0.0f, 1.0f);
+    control.setColorRuns({ text::TextColorRun{ 0, 5, red }, text::TextColorRun{ 6, 4, red }, text::TextColorRun{ 11, 5, red } });
+    text::TextDecoration squiggle;
+    squiggle.start = 11;
+    squiggle.length = 5;
+    control.setDecorations({ squiggle });
+
+    control.model().insert(0, L"xx");   // before everything: all shift
+    ASSERT_EQ(control.colorRuns().size(), 3u);
+    EXPECT_EQ(control.colorRuns()[0].start, 2u);
+    EXPECT_EQ(control.colorRuns()[2].start, 13u);
+    EXPECT_EQ(control.decorations()[0].start, 13u);
+
+    control.model().insert(10, L"!");   // inside "beta" (now 8..12): it grows
+    EXPECT_EQ(control.colorRuns()[1].start, 8u);
+    EXPECT_EQ(control.colorRuns()[1].length, 5u);
+    EXPECT_EQ(control.colorRuns()[2].start, 14u);
+
+    control.model().remove(text::TextRange(8, 5));   // all of "be!ta": its run goes
+    ASSERT_EQ(control.colorRuns().size(), 2u);
+    EXPECT_EQ(control.colorRuns()[1].start, 9u);
+    EXPECT_EQ(control.colorRuns()[1].length, 5u);
+
+    control.model().remove(text::TextRange(5, 6));   // across the end of "alpha" into "gamma"
+    ASSERT_EQ(control.colorRuns().size(), 2u);
+    EXPECT_EQ(control.colorRuns()[0].start, 2u);
+    EXPECT_EQ(control.colorRuns()[0].length, 3u);
+    EXPECT_EQ(control.colorRuns()[1].start, 5u);
+    EXPECT_EQ(control.colorRuns()[1].length, 3u);
+    EXPECT_EQ(control.decorations()[0].start, 5u);
+    EXPECT_EQ(control.decorations()[0].length, 3u);
+}

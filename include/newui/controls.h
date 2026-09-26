@@ -1404,6 +1404,8 @@ namespace newui {
             attached->addView(&owner_);
             attached->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
             attached->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            attached->onAfterChar.add(this, &TextController::handleModelAfterChar);
+            attached->onAfterRangeChanged.add(this, &TextController::handleModelAfterRangeChanged);
             modelAttached(*attached);
             owner_.style().markDirty();
         }
@@ -1433,8 +1435,10 @@ namespace newui {
         const Color& textColor() const { return textColor_; }
         void setTextColor(const Color& color) { textColor_ = color; owner_.style().markDirty(); }
 
-        // Per-range colors over textColor() (text::TextColorRun) - e.g. syntax highlighting. The
-        // caller keeps them in step with the text (they index into it); empty = plain text.
+        // Per-range colors over textColor() (text::TextColorRun) - e.g. syntax highlighting; empty =
+        // plain text. Edits move them along (see adjustRunsForEdit()), so they stay on the right
+        // characters until the caller next sets them - e.g. a highlighter that re-runs after typing
+        // pauses.
         //@reflect ignore=true
         const std::vector<text::TextColorRun>& colorRuns() const { return colorRuns_; }
         //@reflect ignore=true
@@ -1646,6 +1650,12 @@ namespace newui {
         // own doc comment.
         SyncReturn handleCaretVisibilityChanged(text::Caret& sender);
         SyncReturn handleCaretPositionChanged(text::Caret& sender);
+        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind);
+        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement);
+        // Moves colorRuns_, fontRuns_ and decorations_ through an edit replacing removed characters
+        // at start with inserted ones: after it they shift, one it lands inside grows or shrinks,
+        // one it swallows goes.
+        void adjustRunsForEdit(std::size_t start, std::size_t removed, std::size_t inserted);
         SyncReturn handleSelectionChanged(text::TextSelection& sender, const text::TextRange& range);
 
         // traits_ enforcement lives here, not in the key handlers above -
