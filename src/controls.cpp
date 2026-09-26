@@ -1732,14 +1732,24 @@ namespace newui {
         SubView* virtualizedChild = virtualizedContentChild();
 
         Rect client = getClientBounds();
+        // Natural thickness of each bar - its current size once it has
+        // one, else a fallback for the very first pass (off by a couple of
+        // pixels at most, corrected on the next pass).
+        constexpr float kBarThicknessFallback = 16.0f;
+        float vBarWidth = vBar_->bounds().size().width > 0.0f ? vBar_->bounds().size().width : kBarThicknessFallback;
+        float hBarHeight = hBar_->bounds().size().height > 0.0f ? hBar_->bounds().size().height : kBarThicknessFallback;
         if (virtualizedChild) {
-            // Pin to the full client width first - contentSize() below
-            // needs a real wrap width to answer meaningfully, and
-            // whatever bounds() this child happened to have before being
-            // hosted here (its construction default, most likely) isn't
-            // it. Narrowed to the final viewportWidth (if a vertical bar
-            // ends up reserved) further down, once that's known.
-            virtualizedChild->setBounds(Rect(0.0f, 0.0f, client.size().width, client.size().height));
+            // Pin to a real width first - contentSize() below needs one to
+            // wrap against, and whatever bounds() this child had before
+            // being hosted here isn't it. The space left beside the bars
+            // as they are now: in the steady state that's also the final
+            // width, so the child isn't laid out at two widths every call
+            // (a TextControl re-lays out every line on a width change -
+            // ~40ms a pass for 5500 lines in Debug, twice per keystroke
+            // before this). Re-pinned further down if a bar comes or goes.
+            const float width = client.size().width - (vBar_->isVisible() ? vBarWidth : 0.0f);
+            const float height = client.size().height - (hBar_->isVisible() ? hBarHeight : 0.0f);
+            virtualizedChild->setBounds(Rect(0.0f, 0.0f, width > 0.0f ? width : 0.0f, height > 0.0f ? height : 0.0f));
         }
 
         // Re-derive contentSize_ from the sole content child's own
@@ -1756,21 +1766,6 @@ namespace newui {
             contentSize_ = soleChild ? soleChild->contentSize() : Size();
         }
 
-        // Natural thickness of each bar - queried from its own arrow part
-        // the same way ScrollBar::resolvedArrowSize() does internally;
-        // reuse partSize() through a throwaway-free path isn't available
-        // here (that helper is private to ScrollBar), so this asks each
-        // bar's own current bounds' cross-axis size once one exists, or
-        // falls back to the bar's own arrow fallback constant's rough
-        // equivalent for the very first layout pass before either bar has
-        // ever been sized. Good enough - this only ever misjudges by a
-        // couple pixels on the first frame, self-corrects immediately
-        // once GetThemePartSize() is available (see ThemedViewStyle::
-        // partSize()'s own "no theme cached yet" fallback, viewstyle.h).
-        constexpr float kBarThicknessFallback = 16.0f;
-        float vBarWidth = vBar_->bounds().size().width > 0.0f ? vBar_->bounds().size().width : kBarThicknessFallback;
-        float hBarHeight = hBar_->bounds().size().height > 0.0f ? hBar_->bounds().size().height : kBarThicknessFallback;
-
         // Two-pass: whether one bar is needed can change whether the
         // other is (showing a vertical bar narrows the viewport, which
         // can newly make a horizontal bar necessary, and vice versa) -
@@ -1778,10 +1773,9 @@ namespace newui {
         // against the space actually left after the other is reserved.
         //
         // The needH re-check is skipped for a virtualizedChild: its
-        // contentSize_.width was just pinned to the *full* client width
-        // above (see "Pin to the full client width first"), so it's
-        // self-referential - it always equals client.size().width
-        // exactly, never an independent "wants more width" signal. Left
+        // contentSize_.width was just pinned above (see "Pin to a real
+        // width first"), so it's self-referential - it's whatever width
+        // it was given, never an independent "wants more width" signal. Left
         // ungated, contentSize_.width > (client.size().width - vBarWidth)
         // is trivially true any time needV is true at all, spuriously
         // reserving a horizontal bar for every vertically-scrolling

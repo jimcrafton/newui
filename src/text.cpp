@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <tuple>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -822,6 +823,7 @@ namespace newui::text {
             std::size_t length = 0;      // its span of the text (hidden text included), not counting the line break
             std::size_t terminator = 0;  // the break's length: 0 (the last line), 1 or 2
             std::size_t textLine = 0;    // the line of the text it starts on
+            std::size_t textLines = 1;   // how many lines of the text it shows (a collapsed fold joins several)
             float baseline = 0.0f;       // its first row's, from top
             float top = 0.0f;
             float height = 0.0f;
@@ -925,6 +927,42 @@ namespace newui::text {
         drawLayouts(ctx, width, height, pieces, textColor, scrollOffsetY, colorRuns, foldColor);
     }
 
+    namespace {
+        // runs clipped to [from, to), relative to from, in a fixed order - for comparing the styling
+        // of two stretches of text.
+        std::vector<TextFontRun> runsWithin(const std::vector<TextFontRun>& runs, std::size_t from, std::size_t to) {
+            std::vector<TextFontRun> out;
+            for (const TextFontRun& run : runs) {
+                const std::size_t start = run.start > from ? run.start : from;
+                const std::size_t end = run.start + run.length < to ? run.start + run.length : to;
+                if (end > start) {
+                    TextFontRun clipped = run;
+                    clipped.start = start - from;
+                    clipped.length = end - start;
+                    out.push_back(clipped);
+                }
+            }
+            std::sort(out.begin(), out.end(), [](const TextFontRun& a, const TextFontRun& b) {
+                return std::tie(a.start, a.length, a.bold, a.italic, a.underline, a.strikethrough, a.fontSize, a.fontName)
+                    < std::tie(b.start, b.length, b.bold, b.italic, b.underline, b.strikethrough, b.fontSize, b.fontName);
+            });
+            return out;
+        }
+
+        // Collapsed folds starting in [from, to), relative to from.
+        std::vector<TextFold> foldsWithin(const std::vector<TextFold>& folds, std::size_t from, std::size_t to) {
+            std::vector<TextFold> out;
+            for (const TextFold& fold : folds) {
+                if (fold.start >= from && fold.start < to) {
+                    TextFold relative = fold;
+                    relative.start -= from;
+                    out.push_back(relative);
+                }
+            }
+            return out;
+        }
+    }
+
     bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap,
             const std::vector<TextFontRun>& fontRuns, const std::vector<TextFold>& folds, std::size_t tabWidth) {
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
@@ -964,93 +1002,161 @@ namespace newui::text {
         }
         std::sort(sortedRuns.begin(), sortedRuns.end(),
             [](const TextFontRun* a, const TextFontRun* b) { return a->start < b->start; });
-        std::size_t nextRun = 0;
-        std::vector<const TextFontRun*> activeRuns;
 
-        std::vector<Impl::Line> fresh;
-        std::size_t nextFold = 0;
-        std::size_t pos = 0;
-        std::size_t textLine = 0;
-        bool done = false;
-        while (!done) {
-            Impl::Line line;
-            line.start = pos;
-            line.textLine = textLine;
-            while (true) {
-                const std::size_t newline = text.find(L'\n', pos);
-                const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
-                while (nextFold < collapsed.size() && collapsed[nextFold].start < pos) {
-                    ++nextFold;   // inside text an earlier fold already hides
+        // Lays out lines (no DirectWrite yet - see below) from text offset from, a line's start,
+        // until one would start at stopAt or past it, or the text ends. Returns where it stopped.
+        auto build = [&](std::size_t from, std::size_t stopAt, std::vector<Impl::Line>& out) {
+            std::size_t nextFold = static_cast<std::size_t>(std::lower_bound(collapsed.begin(), collapsed.end(), from,
+                [](const TextFold& fold, std::size_t offset) { return fold.start < offset; }) - collapsed.begin());
+            std::size_t nextRun = static_cast<std::size_t>(std::lower_bound(sortedRuns.begin(), sortedRuns.end(), from,
+                [](const TextFontRun* run, std::size_t offset) { return run->start < offset; }) - sortedRuns.begin());
+            std::vector<const TextFontRun*> activeRuns;
+            for (std::size_t i = 0; i < nextRun; ++i) {
+                if (sortedRuns[i]->start + sortedRuns[i]->length > from) {
+                    activeRuns.push_back(sortedRuns[i]);   // began earlier, still running
                 }
-                if (nextFold < collapsed.size() && collapsed[nextFold].start <= end) {
-                    const TextFold& fold = collapsed[nextFold++];
-                    const std::size_t foldEnd = fold.start + fold.length < text.size() ? fold.start + fold.length : text.size();
-                    line.segments.push_back({ pos, line.text.size(), fold.start - pos });
-                    line.text.append(text, pos, fold.start - pos);
-                    line.placeholders.push_back({ line.text.size(), fold.placeholder.size(), fold.start, foldEnd });
-                    line.text += fold.placeholder;
-                    textLine += static_cast<std::size_t>(std::count(text.begin() + fold.start, text.begin() + foldEnd, L'\n'));
-                    pos = foldEnd;
-                    continue;
-                }
-                std::size_t contentEnd = end;
-                if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
-                    --contentEnd;
-                }
-                line.segments.push_back({ pos, line.text.size(), contentEnd - pos });
-                line.text.append(text, pos, contentEnd - pos);
-                line.length = contentEnd - line.start;
-                line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
-                done = newline == std::wstring::npos;
-                pos = newline + 1;
-                ++textLine;
-                break;
             }
-
-            for (const LayoutSegment& segment : line.segments) {
-                const std::size_t segmentEnd = segment.textStart + segment.length;
-                while (nextRun < sortedRuns.size() && sortedRuns[nextRun]->start < segmentEnd) {
-                    activeRuns.push_back(sortedRuns[nextRun++]);
+            std::size_t pos = from;
+            bool done = false;
+            while (!done && pos < stopAt) {
+                Impl::Line line;
+                line.start = pos;
+                while (true) {
+                    const std::size_t newline = text.find(L'\n', pos);
+                    const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
+                    while (nextFold < collapsed.size() && collapsed[nextFold].start < pos) {
+                        ++nextFold;   // inside text an earlier fold already hides
+                    }
+                    if (nextFold < collapsed.size() && collapsed[nextFold].start <= end) {
+                        const TextFold& fold = collapsed[nextFold++];
+                        const std::size_t foldEnd = fold.start + fold.length < text.size() ? fold.start + fold.length : text.size();
+                        line.segments.push_back({ pos, line.text.size(), fold.start - pos });
+                        line.text.append(text, pos, fold.start - pos);
+                        line.placeholders.push_back({ line.text.size(), fold.placeholder.size(), fold.start, foldEnd });
+                        line.text += fold.placeholder;
+                        line.textLines += static_cast<std::size_t>(std::count(text.begin() + fold.start, text.begin() + foldEnd, L'\n'));
+                        pos = foldEnd;
+                        continue;
+                    }
+                    std::size_t contentEnd = end;
+                    if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
+                        --contentEnd;
+                    }
+                    line.segments.push_back({ pos, line.text.size(), contentEnd - pos });
+                    line.text.append(text, pos, contentEnd - pos);
+                    line.length = contentEnd - line.start;
+                    line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
+                    done = newline == std::wstring::npos;
+                    pos = done ? std::wstring::npos : newline + 1;
+                    break;
                 }
-                activeRuns.erase(std::remove_if(activeRuns.begin(), activeRuns.end(), [&](const TextFontRun* run) {
-                    return run->start + run->length <= segment.textStart;
-                }), activeRuns.end());
-                for (const TextFontRun* run : activeRuns) {
-                    const std::size_t runEnd = run->start + run->length;
-                    const std::size_t from = run->start > segment.textStart ? run->start : segment.textStart;
-                    const std::size_t to = runEnd < segmentEnd ? runEnd : segmentEnd;
-                    if (to > from) {
-                        TextFontRun local = *run;
-                        local.start = segment.layoutStart + (from - segment.textStart);
-                        local.length = to - from;
-                        line.runs.push_back(local);
+
+                for (const LayoutSegment& segment : line.segments) {
+                    const std::size_t segmentEnd = segment.textStart + segment.length;
+                    while (nextRun < sortedRuns.size() && sortedRuns[nextRun]->start < segmentEnd) {
+                        activeRuns.push_back(sortedRuns[nextRun++]);
+                    }
+                    activeRuns.erase(std::remove_if(activeRuns.begin(), activeRuns.end(), [&](const TextFontRun* run) {
+                        return run->start + run->length <= segment.textStart;
+                    }), activeRuns.end());
+                    for (const TextFontRun* run : activeRuns) {
+                        const std::size_t runEnd = run->start + run->length;
+                        const std::size_t runFrom = run->start > segment.textStart ? run->start : segment.textStart;
+                        const std::size_t runTo = runEnd < segmentEnd ? runEnd : segmentEnd;
+                        if (runTo > runFrom) {
+                            TextFontRun local = *run;
+                            local.start = segment.layoutStart + (runFrom - segment.textStart);
+                            local.length = runTo - runFrom;
+                            line.runs.push_back(local);
+                        }
                     }
                 }
+                out.push_back(std::move(line));
             }
-            fresh.push_back(std::move(line));
-        }
-
-        // Keep the layouts of unchanged lines (same laid-out text and styling), matched from the
-        // front and the back - so one edit rebuilds only the lines it actually touched.
-        std::vector<Impl::Line>& old = impl_->lines;
-        auto unchanged = [](const Impl::Line& a, const Impl::Line& b) { return a.text == b.text && a.runs == b.runs; };
-        auto reuse = [](Impl::Line& into, const Impl::Line& from) {
-            into.layout = from.layout;
-            into.height = from.height;
-            into.baseline = from.baseline;
+            return pos;
         };
-        if (sameShape) {
+
+        std::vector<Impl::Line>& lines = impl_->lines;
+        bool edited = false;
+        if (sameShape && !lines.empty() && lastText_ != text) {
+            // An edit: rebuild only the lines it touched. The text before it (prefix) and after it
+            // (suffix) is unchanged, so are their lines - moved along by the edit's length -
+            // provided their styling and folds are too. Otherwise, the full path below.
+            const std::wstring& old = lastText_;
+            const std::size_t shorter = old.size() < text.size() ? old.size() : text.size();
             std::size_t prefix = 0;
-            while (prefix < old.size() && prefix < fresh.size() && unchanged(old[prefix], fresh[prefix])) {
-                reuse(fresh[prefix], old[prefix]);
+            while (prefix < shorter && old[prefix] == text[prefix]) {
                 ++prefix;
             }
             std::size_t suffix = 0;
-            while (suffix < old.size() - prefix && suffix < fresh.size() - prefix
-                    && unchanged(old[old.size() - 1 - suffix], fresh[fresh.size() - 1 - suffix])) {
-                reuse(fresh[fresh.size() - 1 - suffix], old[old.size() - 1 - suffix]);
+            while (suffix < shorter - prefix && old[old.size() - 1 - suffix] == text[text.size() - 1 - suffix]) {
                 ++suffix;
             }
+            const std::size_t first = impl_->lineForOffset(prefix);
+            // The first line after the edit whose preceding break is unchanged too.
+            const std::size_t oldSuffixStart = old.size() - suffix;
+            std::size_t keep = static_cast<std::size_t>(std::upper_bound(lines.begin(), lines.end(), oldSuffixStart,
+                [](std::size_t offset, const Impl::Line& line) { return offset < line.start; }) - lines.begin());
+            keep = keep > first + 1 ? keep : first + 1;
+            const std::size_t from = lines[first].start;
+            const std::size_t oldStop = keep < lines.size() ? lines[keep].start : old.size();
+            const std::size_t newStop = keep < lines.size() ? oldStop - old.size() + text.size() : std::wstring::npos;
+            const std::size_t newSuffixStart = keep < lines.size() ? newStop : text.size();
+
+            const bool sameAround = runsWithin(lastFontRuns_, 0, from) == runsWithin(fontRuns, 0, from)
+                && runsWithin(lastFontRuns_, oldStop, old.size()) == runsWithin(fontRuns, newSuffixStart, text.size())
+                && foldsWithin(lastFolds_, 0, from) == foldsWithin(collapsed, 0, from)
+                && foldsWithin(lastFolds_, oldStop, old.size()) == foldsWithin(collapsed, newSuffixStart, text.size());
+            if (sameAround) {
+                std::vector<Impl::Line> rebuilt;
+                const std::size_t reached = build(from, newStop, rebuilt);
+                if (keep >= lines.size() || reached == newStop) {
+                    for (std::size_t i = keep; i < lines.size(); ++i) {
+                        Impl::Line& line = lines[i];
+                        line.start = line.start - old.size() + text.size();
+                        for (LayoutSegment& segment : line.segments) {
+                            segment.textStart = segment.textStart - old.size() + text.size();
+                        }
+                        for (Impl::Placeholder& placeholder : line.placeholders) {
+                            placeholder.foldStart = placeholder.foldStart - old.size() + text.size();
+                            placeholder.foldEnd = placeholder.foldEnd - old.size() + text.size();
+                        }
+                    }
+                    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(first), lines.begin() + static_cast<std::ptrdiff_t>(keep));
+                    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(first),
+                        std::make_move_iterator(rebuilt.begin()), std::make_move_iterator(rebuilt.end()));
+                    edited = true;
+                }
+            }
+        }
+
+        if (!edited) {
+            std::vector<Impl::Line> fresh;
+            build(0, std::wstring::npos, fresh);
+
+            // Keep the layouts of unchanged lines (same laid-out text and styling), matched from
+            // the front and the back.
+            std::vector<Impl::Line>& old = lines;
+            auto unchanged = [](const Impl::Line& a, const Impl::Line& b) { return a.text == b.text && a.runs == b.runs; };
+            auto reuse = [](Impl::Line& into, const Impl::Line& from) {
+                into.layout = from.layout;
+                into.height = from.height;
+                into.baseline = from.baseline;
+            };
+            if (sameShape) {
+                std::size_t prefix = 0;
+                while (prefix < old.size() && prefix < fresh.size() && unchanged(old[prefix], fresh[prefix])) {
+                    reuse(fresh[prefix], old[prefix]);
+                    ++prefix;
+                }
+                std::size_t suffix = 0;
+                while (suffix < old.size() - prefix && suffix < fresh.size() - prefix
+                        && unchanged(old[old.size() - 1 - suffix], fresh[fresh.size() - 1 - suffix])) {
+                    reuse(fresh[fresh.size() - 1 - suffix], old[old.size() - 1 - suffix]);
+                    ++suffix;
+                }
+            }
+            lines = std::move(fresh);
         }
 
         if (format != impl_->lastFormat || impl_->digitWidth <= 0.0f) {
@@ -1065,15 +1171,18 @@ namespace newui::text {
         }
         const float tabStop = tabWidth > 0 ? static_cast<float>(tabWidth) * impl_->digitWidth : 0.0f;
 
+        // DirectWrite layouts for the lines that need one, then everyone's position.
         impl_->lastBuilt = 0;
         float emptyLineHeight = 0.0f;   // an empty layout can report 0 - use one space's line height
         float top = 0.0f;
-        for (Impl::Line& line : fresh) {
+        std::size_t textLine = 0;
+        for (Impl::Line& line : lines) {
             if (line.layout == nullptr) {
                 IDWriteTextLayoutPtr layout;
                 if (FAILED(DirectWriteResources::dwriteFactory().CreateTextLayout(
                         line.text.c_str(), static_cast<UINT32>(line.text.size()), format, maxWidth, maxHeight, &layout))) {
-                    impl_->lines.clear();
+                    lines.clear();
+                    lastText_.clear();
                     return false;
                 }
                 layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -1125,9 +1234,10 @@ namespace newui::text {
             }
             line.top = top;
             top += line.height;
+            line.textLine = textLine;
+            textLine += line.textLines;
         }
 
-        impl_->lines = std::move(fresh);
         impl_->lastFormat = format;
         lastText_ = text;
         lastMaxWidth_ = maxWidth;

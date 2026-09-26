@@ -528,3 +528,89 @@ TEST(TextControlRuns, EditsMoveRunsAndDecorations) {
     EXPECT_EQ(control.decorations()[0].start, 5u);
     EXPECT_EQ(control.decorations()[0].length, 3u);
 }
+
+namespace {
+    // Lays text out from scratch and compares every line with engine's.
+    void expectSameAsFresh(const text::TextLayoutEngine& engine, const std::wstring& value,
+            const std::vector<text::TextFontRun>& runs, const std::vector<text::TextFold>& folds, const char* step) {
+        const Font font = FontManager::monospaceFont(14.0f);
+        text::TextLayoutEngine fresh;
+        text::TextStorage storage(value);
+        ASSERT_TRUE(fresh.update(storage, font, 500.0f, 400.0f, true, runs, folds));
+        ASSERT_EQ(engine.lineCount(), fresh.lineCount()) << step;
+        for (std::size_t i = 0; i < fresh.lineCount(); ++i) {
+            EXPECT_EQ(engine.lineStart(i), fresh.lineStart(i)) << step << " line " << i;
+            EXPECT_EQ(engine.lineLength(i), fresh.lineLength(i)) << step << " line " << i;
+            EXPECT_EQ(engine.lineNumber(i), fresh.lineNumber(i)) << step << " line " << i;
+            EXPECT_FLOAT_EQ(engine.lineTop(i), fresh.lineTop(i)) << step << " line " << i;
+        }
+        EXPECT_FLOAT_EQ(engine.contentHeight(), fresh.contentHeight()) << step;
+        EXPECT_EQ(engine.whitespaceMarks(0.0f, 100000.0f).size(), fresh.whitespaceMarks(0.0f, 100000.0f).size()) << step;
+        EXPECT_EQ(engine.placeholderRects(0.0f, 100000.0f).size(), fresh.placeholderRects(0.0f, 100000.0f).size()) << step;
+    }
+}
+
+// An edit re-lays out only the lines it touched - and ends up exactly where laying everything out
+// again would.
+TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
+    const Font font = FontManager::monospaceFont(14.0f);
+    text::TextLayoutEngine engine;
+    std::wstring value;
+    for (int i = 0; i < 60; ++i) {
+        value += L"line " + std::to_wstring(i) + L" {\r\n  body\n}\n";
+    }
+    std::vector<text::TextFontRun> runs;
+    std::vector<text::TextFold> folds;
+    text::TextFold fold;   // the second block, collapsed
+    fold.start = value.find(L"{", value.find(L"line 1 ")) + 1;
+    fold.length = value.find(L"}", fold.start) - fold.start;
+    fold.collapsed = true;
+    folds.push_back(fold);
+
+    auto apply = [&](const char* step) {
+        text::TextStorage storage(value);
+        ASSERT_TRUE(engine.update(storage, font, 500.0f, 400.0f, true, runs, folds));
+        expectSameAsFresh(engine, value, runs, folds, step);
+    };
+    apply("initial");
+
+    auto edit = [&](std::size_t at, std::size_t removed, const std::wstring& inserted) {
+        value.replace(at, removed, inserted);
+        const std::ptrdiff_t delta = static_cast<std::ptrdiff_t>(inserted.size()) - static_cast<std::ptrdiff_t>(removed);
+        for (text::TextFold& f : folds) {
+            if (f.start >= at + removed) {
+                f.start = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(f.start) + delta);
+            }
+        }
+    };
+
+    edit(value.find(L"line 30") + 4, 0, L"X");
+    apply("typing mid-document");
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
+
+    edit(value.find(L"line 40") + 7, 0, L"\n");
+    apply("inserting a line break");
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 2u);
+
+    const std::size_t joinAt = value.find(L"\n", value.find(L"line 45"));
+    edit(joinAt - 1, 2, L"");   // the \r\n
+    apply("deleting a CRLF, joining lines");
+
+    edit(0, 0, L"// top\n");
+    apply("inserting before everything (and the fold)");
+
+    edit(value.size() - 2, 2, L"");
+    apply("deleting at the end");
+
+    edit(folds[0].start - 1, 0, L"Y");   // just before the collapsed fold's line content
+    apply("typing on the fold's line");
+
+    runs.push_back(text::TextFontRun{ value.find(L"line 50"), 4, true });
+    apply("a font run added");
+    edit(value.find(L"line 50") + 2, 0, L"Z");
+    runs[0].length += 1;
+    apply("typing inside a font run");
+
+    folds[0].collapsed = false;
+    apply("fold expanded");
+}
