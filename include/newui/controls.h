@@ -1754,6 +1754,11 @@ namespace newui {
         // behavior for the same key.
         ReturnPressedDelegate onReturnPressed;
 
+        // A hint drawn ghosted (the theme's disabled-text color) while the field is empty - "Search",
+        // say. Gone as soon as there's text; back if it's cleared. Never part of text().
+        const std::string& placeholder() const { return placeholder_; }
+        void setPlaceholder(const std::string& placeholder) { placeholder_ = placeholder; style().markDirty(); }
+
         // Draws into getClientBounds(), on top of whatever paintStyle()
         // already drew for editStyle_'s own native background/border -
         // selection_'s highlight, then this control's own single-line
@@ -1787,6 +1792,7 @@ namespace newui {
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+        std::string placeholder_;
     };
 
     // A multi-line text editing control - TextField's own class comment

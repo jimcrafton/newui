@@ -4248,3 +4248,70 @@ TEST(TextStyles, AStyleSheetSurvivesSaveAndLoad) {
     EXPECT_EQ(error->decoration(), text::TextDecorationKind::Squiggle);
     EXPECT_TRUE(loaded->style("comment")->isItalic());
 }
+
+namespace {
+    std::vector<std::uint32_t> renderField(TextField& field) {
+        BLImage image(200, 30, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            field.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < 30; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            pixels.insert(pixels.end(), row, row + 200);
+        }
+        return pixels;
+    }
+
+    std::size_t inkIn(const std::vector<std::uint32_t>& pixels) {
+        std::size_t count = 0;
+        for (std::uint32_t px : pixels) {
+            count += ((px >> 8) & 0xFF) < 220 ? 1 : 0;
+        }
+        return count;
+    }
+}
+
+TEST(TextFieldPlaceholder, ShowsWhileEmptyAndIsNeverPartOfTheText) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 200, 30));
+    field.controller().caret().stop();
+    const std::size_t blank = inkIn(renderField(field));
+
+    field.setPlaceholder("Search");
+    const std::vector<std::uint32_t> withPlaceholder = renderField(field);
+
+    EXPECT_GT(inkIn(withPlaceholder), blank + 20) << "the placeholder is drawn";
+    EXPECT_TRUE(field.text().empty());
+}
+
+TEST(TextFieldPlaceholder, TextReplacesItAndClearingBringsItBack) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 200, 30));
+    field.setPlaceholder("Search");
+    const std::vector<std::uint32_t> empty = renderField(field);
+
+    field.setText(L"abc");
+    EXPECT_NE(renderField(field), empty);
+    EXPECT_EQ(field.text(), L"abc");
+
+    field.setText(L"");
+    EXPECT_EQ(renderField(field), empty);
+}
+
+TEST(TextFieldPlaceholder, IsAReflectedProperty) {
+    const reflection::Class* cls = reflection::classinfo(typeid(TextField));
+    ASSERT_NE(cls, nullptr);
+    std::vector<const reflection::Property*> properties;
+    cls->allProperties(properties);
+    bool found = false;
+    for (const reflection::Property* property : properties) {
+        found = found || property->name() == "placeholder";
+    }
+    EXPECT_TRUE(found);
+}

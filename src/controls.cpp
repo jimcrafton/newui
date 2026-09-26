@@ -10,6 +10,7 @@
 #include "newui/popupframe.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
+#include "newui/utils.h"
 
 #include <algorithm>
 #include <any>
@@ -2723,8 +2724,14 @@ namespace newui {
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         controller_->drawSelection(ctx);
-        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+        if (controller_->model().text().empty() && !placeholder_.empty()) {
+            renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+                utf8ToWide(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
+                0.0f, /*wordWrap=*/false);
+        } else {
+            renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+                controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+        }
         controller_->drawCaret(ctx);
         ctx.restore();
     }
