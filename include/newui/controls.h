@@ -1417,6 +1417,20 @@ namespace newui {
         const Color& textColor() const { return textColor_; }
         void setTextColor(const Color& color) { textColor_ = color; owner_.style().markDirty(); }
 
+        // Per-range colors over textColor() (text::TextColorRun) - e.g. syntax highlighting. The
+        // caller keeps them in step with the text (they index into it); empty = plain text.
+        //@reflect ignore=true
+        const std::vector<text::TextColorRun>& colorRuns() const { return colorRuns_; }
+        //@reflect ignore=true
+        void setColorRuns(std::vector<text::TextColorRun> runs) { colorRuns_ = std::move(runs); owner_.style().markDirty(); }
+
+        // Squiggles, underlines, boxes and background fills over ranges of the text
+        // (text::TextDecoration) - same keep-in-step contract as setColorRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextDecoration>& decorations() const { return decorations_; }
+        //@reflect ignore=true
+        void setDecorations(std::vector<text::TextDecoration> decorations) { decorations_ = std::move(decorations); owner_.style().markDirty(); }
+
         bool isMultiline() const { return multiline_; }
         void setMultiline(bool value) { multiline_ = value; }
 
@@ -1477,6 +1491,9 @@ namespace newui {
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
         void drawCaret(BLContext& ctx) const;
+        // backgrounds: the Background decorations (drawn under the selection and text); otherwise
+        // every other kind (drawn over the text).
+        void drawDecorations(BLContext& ctx, bool backgrounds) const;
 
         // Every one of these mirrors the identically-named View delegate
         // (minus the View& sender parameter, which this class has no use
@@ -1618,6 +1635,8 @@ namespace newui {
 
         Font font_;
         Color textColor_;
+        std::vector<text::TextColorRun> colorRuns_;
+        std::vector<text::TextDecoration> decorations_;
     };
 
     // A single-line text editing control - a thin View-integration shim
@@ -1852,6 +1871,18 @@ namespace newui {
 
         const Color& textColor() const { return controller_->textColor(); }
         void setTextColor(const Color& color) { controller_->setTextColor(color); }
+
+        // See TextController::setColorRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextColorRun>& colorRuns() const { return controller_->colorRuns(); }
+        //@reflect ignore=true
+        void setColorRuns(std::vector<text::TextColorRun> runs) { controller_->setColorRuns(std::move(runs)); }
+
+        // See TextController::setDecorations().
+        //@reflect ignore=true
+        const std::vector<text::TextDecoration>& decorations() const { return controller_->decorations(); }
+        //@reflect ignore=true
+        void setDecorations(std::vector<text::TextDecoration> decorations) { controller_->setDecorations(std::move(decorations)); }
 
         // Draws into getClientBounds(): selection_'s highlight, then
         // this control's own word-wrapped text (renderer_.render(),

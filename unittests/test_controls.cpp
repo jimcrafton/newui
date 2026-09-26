@@ -3908,3 +3908,127 @@ TEST(ScrollView, ItsScrollBarsAreInternalNonSelectableButItsViewportIsNot) {
     scroll->destroy();
     delete scroll;
 }
+
+namespace {
+    // Pixels in a 300x40 render of textControl that are clearly red (text drawn in the red run).
+    std::size_t redTextPixels(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 300; ++x) {
+                const std::uint32_t px = row[x];
+                const std::uint32_t r = (px >> 16) & 0xFF, g = (px >> 8) & 0xFF, b = px & 0xFF;
+                count += (r > 120 && g < 60 && b < 60) ? 1 : 0;
+            }
+        }
+        return count;
+    }
+}
+
+// Color runs (e.g. syntax highlighting) recolor ranges of the text; plain black text has no red.
+TEST(TextControl, ColorRunsRecolorTheirRangeOfTheText) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"WWWWWW plain");
+    textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    ASSERT_EQ(redTextPixels(textControl), 0u);
+
+    textControl.setColorRuns({ text::TextColorRun{ 0, 6, Color(1.0f, 0.0f, 0.0f, 1.0f) } });
+
+    EXPECT_GT(redTextPixels(textControl), 20u);
+}
+
+TEST(TextControl, ColorRunsPastTheEndOfTheTextAreIgnored) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"abc");
+    textControl.setColorRuns({ text::TextColorRun{ 2, 50, Color(1.0f, 0.0f, 0.0f, 1.0f) },
+                               text::TextColorRun{ 10, 5, Color(0.0f, 1.0f, 0.0f, 1.0f) } });
+
+    EXPECT_GT(redTextPixels(textControl), 0u) << "the in-range part is clamped, not dropped";
+}
+
+namespace {
+    // Pixels of a 300x40 render of textControl that are clearly the given primary color.
+    std::size_t colorPixels(TextControl& textControl, int channel) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 300; ++x) {
+                const std::uint32_t px = row[x];
+                const int v[3] = { int((px >> 16) & 0xFF), int((px >> 8) & 0xFF), int(px & 0xFF) };
+                const int a = int((px >> 24) & 0xFF);
+                bool dominant = a > 100 && v[channel] > 150;
+                for (int other = 0; other < 3; ++other) {
+                    dominant = dominant && (other == channel || v[other] < 90);
+                }
+                count += dominant ? 1 : 0;
+            }
+        }
+        return count;
+    }
+
+    TextControl& decoratedText(TextControl& textControl) {
+        textControl.setBounds(Rect(0, 0, 300, 40));
+        textControl.setText(L"alpha beta gamma");
+        textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+        return textControl;
+    }
+}
+
+TEST(TextControlDecorations, NoneMeansNothingColoredIsDrawn) {
+    TextControl textControl;
+    decoratedText(textControl);
+    for (int channel = 0; channel < 3; ++channel) {
+        EXPECT_EQ(colorPixels(textControl, channel), 0u) << channel;
+    }
+}
+
+TEST(TextControlDecorations, EachKindDrawsInItsColor) {
+    using Kind = text::TextDecorationKind;
+    const struct { Kind kind; int channel; } cases[] = {
+        { Kind::Squiggle, 0 }, { Kind::Underline, 0 }, { Kind::Box, 2 }, { Kind::RoundBox, 2 }, { Kind::Background, 1 },
+    };
+    for (const auto& testCase : cases) {
+        TextControl textControl;
+        decoratedText(textControl);
+        text::TextDecoration decoration;
+        decoration.start = 6;   // "beta"
+        decoration.length = 4;
+        decoration.kind = testCase.kind;
+        decoration.color = Color(testCase.channel == 0 ? 1.0f : 0.0f, testCase.channel == 1 ? 1.0f : 0.0f,
+            testCase.channel == 2 ? 1.0f : 0.0f, 1.0f);
+        textControl.setDecorations({ decoration });
+        EXPECT_GT(colorPixels(textControl, testCase.channel), 5u) << "kind " << int(testCase.kind);
+    }
+}
+
+TEST(TextControlDecorations, ARangePastTheEndIsClampedNotDropped) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::TextDecoration decoration;
+    decoration.start = 11;   // "gamma" and far beyond
+    decoration.length = 500;
+    decoration.kind = text::TextDecorationKind::Squiggle;
+    decoration.color = Color(1.0f, 0.0f, 0.0f, 1.0f);
+    textControl.setDecorations({ decoration });
+    EXPECT_GT(colorPixels(textControl, 0), 5u);
+}

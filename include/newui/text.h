@@ -628,6 +628,36 @@ namespace newui::text {
     // (keyed by font name/size/bold/italic), the same "resolve lazily,
     // re-resolve only when it actually changes" shape Font::blFont()
     // itself already uses for BLFont.
+    // A color for one range of a text control's text - how syntax highlighting (or any
+    // per-range coloring) reaches the renderer. start/length are in UTF-16 code units of the
+    // text, like every other text position here. Only color: it never changes the layout, so
+    // caret and hit-testing stay exact.
+    struct TextColorRun {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        Color color;
+    };
+
+    // Something drawn on or around a range of text - over the laid-out glyphs, not through
+    // DirectWrite, so it never changes the layout: a squiggle under it (a spelling or syntax
+    // problem), a straight underline, a box or rounded box around it, or a fill behind it. A range
+    // that wraps gets one per line it covers. start/length are UTF-16 code units, like
+    // TextColorRun.
+    enum class TextDecorationKind { Squiggle, Underline, Box, RoundBox, Background };
+
+    struct TextDecoration {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        TextDecorationKind kind = TextDecorationKind::Squiggle;
+        Color color;
+        float thickness = 1.0f;   // line width (Squiggle, Underline, Box, RoundBox)
+        float radius = 3.0f;      // corner radius (RoundBox)
+    };
+
+    // Paints decoration onto the rects its range covers (one per line, from a layout's
+    // hit-testing), in the same space as those rects.
+    void drawTextDecoration(BLContext& ctx, const TextDecoration& decoration, const std::vector<Rect>& rects);
+
     class TextRenderer {
     public:
         // Declared (not = default) and defined in text.cpp, where Impl
@@ -667,8 +697,10 @@ namespace newui::text {
         // to be told the same thing separately; the two are always
         // called with matching values for one owning control (see
         // TextField::paint()/TextControl::paint(), controls.cpp).
+        // colorRuns (optional) recolor ranges of text over textColor.
         void render(BLContext& ctx, int width, int height, const std::wstring& text,
-            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true);
+            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true,
+            const std::vector<TextColorRun>& colorRuns = {});
 
     private:
         // (Re)builds the WIC bitmap + render target together for the

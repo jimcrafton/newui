@@ -10,6 +10,8 @@
 #include <comdef.h>
 #include <comip.h>
 
+#include <map>
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -507,8 +509,57 @@ namespace newui::text {
         return true;
     }
 
+    void drawTextDecoration(BLContext& ctx, const TextDecoration& decoration, const std::vector<Rect>& rects) {
+        const BLRgba32 color = decoration.color.toBLRgba32();
+        const double thickness = decoration.thickness > 0.0f ? decoration.thickness : 1.0f;
+        ctx.save();
+        ctx.set_stroke_width(thickness);
+        ctx.set_stroke_style(color);
+        ctx.set_fill_style(color);
+        for (const Rect& r : rects) {
+            if (r.width() <= 0.0f || r.height() <= 0.0f) {
+                continue;
+            }
+            switch (decoration.kind) {
+            case TextDecorationKind::Background:
+                ctx.fill_rect(r.left(), r.top(), r.width(), r.height());
+                break;
+            case TextDecorationKind::Underline: {
+                const double y = r.bottom() - thickness * 0.5;
+                ctx.stroke_line(r.left(), y, r.right(), y);
+                break;
+            }
+            case TextDecorationKind::Squiggle: {
+                // A zigzag along the bottom of the line: 2px up and down every 2px.
+                const double amplitude = 1.5;
+                const double step = 2.0;
+                const double baseY = r.bottom() - amplitude - thickness * 0.5;
+                BLPath wave;
+                wave.move_to(r.left(), baseY + amplitude);
+                bool up = true;
+                for (double x = r.left() + step; x <= r.right(); x += step) {
+                    wave.line_to(x, up ? baseY - amplitude : baseY + amplitude);
+                    up = !up;
+                }
+                ctx.stroke_path(wave);
+                break;
+            }
+            case TextDecorationKind::Box:
+                ctx.stroke_rect(r.left() + thickness * 0.5, r.top() + thickness * 0.5,
+                    r.width() - thickness, r.height() - thickness);
+                break;
+            case TextDecorationKind::RoundBox:
+                ctx.stroke_round_rect(r.left() + thickness * 0.5, r.top() + thickness * 0.5,
+                    r.width() - thickness, r.height() - thickness, decoration.radius);
+                break;
+            }
+        }
+        ctx.restore();
+    }
+
     void TextRenderer::render(BLContext& ctx, int width, int height, const std::wstring& text,
-            const Font& font, const Color& textColor, float scrollOffsetY, bool wordWrap) {
+            const Font& font, const Color& textColor, float scrollOffsetY, bool wordWrap,
+            const std::vector<TextColorRun>& colorRuns) {
         if (width <= 0 || height <= 0) {
             return;
         }
@@ -535,6 +586,26 @@ namespace newui::text {
 
         if (SUCCEEDED(layoutHr)) {
             textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+
+            // Each run's brush is its drawing effect - DrawTextLayout() draws a range whose effect
+            // is an ID2D1Brush with that brush, so no custom IDWriteTextRenderer is needed. One
+            // brush per distinct color (a document has thousands of runs but a handful of colors).
+            std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
+            for (const TextColorRun& run : colorRuns) {
+                if (run.length == 0 || run.start >= text.size()) {
+                    continue;
+                }
+                const std::uint32_t key = run.color.toBLRgba32().value;
+                ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
+                if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
+                        D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
+                    continue;
+                }
+                const std::size_t available = text.size() - run.start;
+                DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
+                    static_cast<UINT32>(run.length < available ? run.length : available) };
+                textLayout->SetDrawingEffect(runBrush.GetInterfacePtr(), range);
+            }
         }
         if (SUCCEEDED(brushHr) && SUCCEEDED(layoutHr)) {
             // scrollOffsetY shifts the whole layout up before rasterizing -

@@ -2325,6 +2325,25 @@ namespace newui {
         ctx.restore();
     }
 
+    void TextController::drawDecorations(BLContext& ctx, bool backgrounds) const {
+        if (decorations_.empty()) {
+            return;
+        }
+        const std::size_t textLength = model().text().size();
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::TextDecoration& decoration : decorations_) {
+            if ((decoration.kind == text::TextDecorationKind::Background) != backgrounds
+                || decoration.length == 0 || decoration.start >= textLength) {
+                continue;
+            }
+            const std::size_t available = textLength - decoration.start;
+            const text::TextRange range(decoration.start, decoration.length < available ? decoration.length : available);
+            text::drawTextDecoration(ctx, decoration, layoutEngine_.hitTestRange(range));
+        }
+        ctx.restore();
+    }
+
     void TextController::drawCaret(BLContext& ctx) const {
         if (!caret_.isVisible()) {
             return;
@@ -2767,9 +2786,12 @@ namespace newui {
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
+        controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/true);
+            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/true,
+            controller_->colorRuns());
+        controller_->drawDecorations(ctx, /*backgrounds=*/false);
         controller_->drawCaret(ctx);
         ctx.restore();
     }
