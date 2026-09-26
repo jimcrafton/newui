@@ -25,6 +25,8 @@ using newui::text::TextModel;
 using newui::text::TextPosition;
 using newui::text::TextRange;
 using newui::text::TextRenderer;
+using newui::text::TextFold;
+using newui::text::TextFontRun;
 using newui::text::TextSelection;
 using newui::text::TextStorage;
 
@@ -1501,4 +1503,107 @@ TEST(TextRenderer, EngineRenderDrawsOnlyTheLinesInView) {
         ctx.end();
     }
     EXPECT_TRUE(imageHasInk(last));
+}
+
+namespace {
+    // "a {" / "  b" / "}" / "c", with [3, 8) - the break after '{' up to '}' - foldable.
+    const wchar_t* kFoldText = L"a {\n  b\n}\nc";
+    TextFold blockFold(bool collapsed) {
+        TextFold fold;
+        fold.start = 3;
+        fold.length = 5;
+        fold.placeholder = L"...";
+        fold.collapsed = collapsed;
+        return fold;
+    }
+}
+
+TEST(TextLayoutEngine, AnExpandedFoldChangesNothing) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    EXPECT_EQ(engine.lineCount(), 4u);
+    EXPECT_TRUE(engine.placeholderRects(0.0f, 1000.0f).empty());
+}
+
+TEST(TextLayoutEngine, ACollapsedFoldJoinsItsLinesAroundThePlaceholder) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(true) }));
+
+    ASSERT_EQ(engine.lineCount(), 2u);
+    EXPECT_EQ(engine.lineStart(0), 0u);
+    EXPECT_EQ(engine.lineLength(0), 9u);   // "a {" + hidden + "}"
+    EXPECT_EQ(engine.lineStart(1), 10u);
+    EXPECT_EQ(engine.lineAt(6), 0u);
+
+    // The fold's edges sit either side of the placeholder; hidden text maps to its start.
+    newui::Point before, after, hidden;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(3), before, height);
+    engine.hitTestPosition(TextPosition(8), after, height);
+    engine.hitTestPosition(TextPosition(6), hidden, height);
+    EXPECT_GT(after.x, before.x + 5.0f);
+    EXPECT_NEAR(after.y, before.y, 0.5f);
+    EXPECT_NEAR(hidden.x, before.x, 0.5f);
+
+    const std::vector<newui::Rect> placeholders = engine.placeholderRects(0.0f, 1000.0f);
+    ASSERT_EQ(placeholders.size(), 1u);
+    const newui::Point centre(placeholders[0].left() + placeholders[0].width() / 2.0f,
+        placeholders[0].top() + placeholders[0].height() / 2.0f);
+    std::size_t foldStart = 0;
+    EXPECT_TRUE(engine.foldAtPoint(centre, foldStart));
+    EXPECT_EQ(foldStart, 3u);
+    EXPECT_FALSE(engine.foldAtPoint(newui::Point(1.0f, centre.y), foldStart));
+
+    // A click on the placeholder never lands inside the hidden text.
+    const std::size_t hit = engine.hitTestPoint(centre).offset();
+    EXPECT_TRUE(hit == 3u || hit == 8u);
+    // Home/End span the joined line.
+    const TextRange line = engine.lineRange(TextPosition(8));
+    EXPECT_EQ(line.start(), 0u);
+    EXPECT_EQ(line.length(), 9u);
+    // A range through hidden text covers the placeholder.
+    EXPECT_EQ(engine.hitTestRange(TextRange(5, 1)).size(), 1u);
+}
+
+TEST(TextLayoutEngine, CollapsingAFoldRebuildsOnlyTheJoinedLine) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(true) }));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 3u);
+}
+
+TEST(TextLayoutEngine, FontRunsFollowTheTextAroundACollapsedFold) {
+    TextLayoutEngine plainEngine;
+    TextLayoutEngine boldEngine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"xx {\n hidden\n} yyyy");
+    TextFold fold;
+    fold.start = 4;
+    fold.length = 9;
+    fold.collapsed = true;
+    TextFontRun bold;
+    bold.start = 13;   // "} yyyy"
+    bold.length = 6;
+    bold.bold = true;
+    ASSERT_TRUE(plainEngine.update(storage, font, 500.0f, 200.0f, true, {}, { fold }));
+    ASSERT_TRUE(boldEngine.update(storage, font, 500.0f, 200.0f, true, { bold }, { fold }));
+
+    newui::Point plainEnd, boldEnd, plainFold, boldFold;
+    float height = 0.0f;
+    plainEngine.hitTestPosition(TextPosition(19), plainEnd, height);
+    boldEngine.hitTestPosition(TextPosition(19), boldEnd, height);
+    plainEngine.hitTestPosition(TextPosition(13), plainFold, height);
+    boldEngine.hitTestPosition(TextPosition(13), boldFold, height);
+    EXPECT_NEAR(boldFold.x, plainFold.x, 0.5f) << "text before the run is unchanged";
+    EXPECT_GT(boldEnd.x, plainEnd.x) << "the run lands on the text after the fold";
 }

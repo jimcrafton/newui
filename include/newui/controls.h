@@ -1400,6 +1400,7 @@ namespace newui {
             attached->addView(&owner_);
             attached->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
             attached->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            modelAttached(*attached);
             owner_.style().markDirty();
         }
 
@@ -1544,7 +1545,15 @@ namespace newui {
         // triple-click; also for callers that want a field ready to type over).
         void selectAll();
 
-    private:
+    protected:
+        Control& owner() const { return owner_; }
+
+        // Folds laid out by ensureLayoutUpToDate() - none here; TextFoldingController has them.
+        virtual const std::vector<text::TextFold>& layoutFolds() const;
+
+        // Called once model is attached (setModel()), for a subclass to subscribe to it too.
+        virtual void modelAttached(text::TextModel& model) {}
+
         // Maps a point in the owner's own local space (as delivered by
         // onMouseDown/onMouseMove/onMouseUp/onMouseDblClick) into
         // layoutEngine_'s own coordinate space, anchored at
@@ -1576,6 +1585,8 @@ namespace newui {
         // comment (controls.cpp) on why that's needed here rather than
         // relying on some other event to do it.
         void moveCaret(size_t newOffset, bool extendSelection, bool resetPreferredColumn = true);
+
+    private:
 
         // vkUpArrow/vkDownArrow - hit-tests one line above/below the
         // caret's current on-screen position (via two existing

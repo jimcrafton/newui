@@ -577,12 +577,13 @@ namespace newui::text {
             return;
         }
         textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
-        drawLayouts(ctx, width, height, { LayoutPiece{ textLayout.GetInterfacePtr(), 0.0f, 0, text.size() } },
-            textColor, scrollOffsetY, colorRuns);
+        drawLayouts(ctx, width, height,
+            { LayoutPiece{ textLayout.GetInterfacePtr(), 0.0f, text.size(), { LayoutSegment{ 0, 0, text.size() } }, {} } },
+            textColor, scrollOffsetY, colorRuns, textColor);
     }
 
     void TextRenderer::drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
-            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns, const Color& foldColor) {
         if (width <= 0 || height <= 0 || pieces.empty() || !ensureRenderTarget(width, height)) {
             return;
         }
@@ -604,25 +605,34 @@ namespace newui::text {
         // outlives this call (TextLayoutEngine's) may still carry an earlier paint's effects - each
         // piece is cleared first, and again once drawn.
         std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
+        ID2D1SolidColorBrushPtr foldBrush;
+        impl_->renderTarget->CreateSolidColorBrush(D2D1::ColorF(foldColor.r, foldColor.g, foldColor.b, foldColor.a), &foldBrush);
         for (const LayoutPiece& piece : pieces) {
-            const DWRITE_TEXT_RANGE whole{ 0, static_cast<UINT32>(piece.textLength) };
-            piece.layout->SetDrawingEffect(nullptr, whole);
-            const std::size_t pieceEnd = piece.textStart + piece.textLength;
-            for (const TextColorRun& run : colorRuns) {
-                const std::size_t runEnd = run.start + run.length;
-                const std::size_t from = run.start > piece.textStart ? run.start : piece.textStart;
-                const std::size_t to = runEnd < pieceEnd ? runEnd : pieceEnd;
-                if (run.length == 0 || to <= from) {
-                    continue;
+            piece.layout->SetDrawingEffect(nullptr, DWRITE_TEXT_RANGE{ 0, static_cast<UINT32>(piece.layoutLength) });
+            for (const LayoutSegment& segment : piece.segments) {
+                const std::size_t segmentEnd = segment.textStart + segment.length;
+                for (const TextColorRun& run : colorRuns) {
+                    const std::size_t runEnd = run.start + run.length;
+                    const std::size_t from = run.start > segment.textStart ? run.start : segment.textStart;
+                    const std::size_t to = runEnd < segmentEnd ? runEnd : segmentEnd;
+                    if (run.length == 0 || to <= from) {
+                        continue;
+                    }
+                    const std::uint32_t key = run.color.toBLRgba32().value;
+                    ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
+                    if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
+                            D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
+                        continue;
+                    }
+                    piece.layout->SetDrawingEffect(runBrush.GetInterfacePtr(), DWRITE_TEXT_RANGE{
+                        static_cast<UINT32>(segment.layoutStart + (from - segment.textStart)), static_cast<UINT32>(to - from) });
                 }
-                const std::uint32_t key = run.color.toBLRgba32().value;
-                ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
-                if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
-                        D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
-                    continue;
+            }
+            if (foldBrush) {
+                for (const LayoutSegment& placeholder : piece.placeholders) {
+                    piece.layout->SetDrawingEffect(foldBrush.GetInterfacePtr(), DWRITE_TEXT_RANGE{
+                        static_cast<UINT32>(placeholder.layoutStart), static_cast<UINT32>(placeholder.length) });
                 }
-                piece.layout->SetDrawingEffect(runBrush.GetInterfacePtr(),
-                    DWRITE_TEXT_RANGE{ static_cast<UINT32>(from - piece.textStart), static_cast<UINT32>(to - from) });
             }
             if (SUCCEEDED(brushHr)) {
                 // scrollOffsetY shifts everything up before rasterizing - see
@@ -640,7 +650,7 @@ namespace newui::text {
         // The brushes belong to this render target - don't leave them attached to layouts that
         // outlive this call.
         for (const LayoutPiece& piece : pieces) {
-            piece.layout->SetDrawingEffect(nullptr, DWRITE_TEXT_RANGE{ 0, static_cast<UINT32>(piece.textLength) });
+            piece.layout->SetDrawingEffect(nullptr, DWRITE_TEXT_RANGE{ 0, static_cast<UINT32>(piece.layoutLength) });
         }
         if (endHr == D2DERR_RECREATE_TARGET) {
             // Device loss (rare for a software render target, but a real
@@ -692,18 +702,63 @@ namespace newui::text {
         // lock unlocks the bitmap automatically at scope exit.
     }
 
-    // One DirectWrite layout per line of the text (split at '\n'; a "\r\n" pair is one break), so
-    // an edit re-lays out only the lines it touched and drawing touches only the visible ones.
+    // One DirectWrite layout per visual line. A visual line is a line of the text (split at '\n';
+    // a "\r\n" pair is one break) - or, where a collapsed TextFold hides text, the lines it joins:
+    // the text before the fold, its placeholder, then the text after it. Segments map the
+    // layout's characters back to the text. An edit re-lays out only the lines it touched, and
+    // drawing touches only the visible ones.
     struct TextLayoutEngine::Impl {
+        struct Placeholder {
+            std::size_t layoutStart = 0;
+            std::size_t length = 0;
+            std::size_t foldStart = 0;
+            std::size_t foldEnd = 0;
+        };
+
         struct Line {
-            std::size_t start = 0;       // offset of the line's first character in the text
-            std::size_t length = 0;      // its content, not counting the line break
+            std::size_t start = 0;       // the text offset the line starts at
+            std::size_t length = 0;      // its span of the text (hidden text included), not counting the line break
             std::size_t terminator = 0;  // the break's length: 0 (the last line), 1 or 2
             float top = 0.0f;
             float height = 0.0f;
-            std::wstring text;
-            std::vector<TextFontRun> runs;   // clipped to the line, line-relative
+            std::wstring text;           // what's laid out: the visible text with placeholders
+            std::vector<LayoutSegment> segments;
+            std::vector<Placeholder> placeholders;
+            std::vector<TextFontRun> runs;   // in layout positions
             IDWriteTextLayoutPtr layout;
+
+            std::size_t end() const { return start + length; }
+
+            // A text offset's layout position; hidden text maps to the start of its placeholder.
+            std::size_t toLayout(std::size_t offset) const {
+                for (const LayoutSegment& segment : segments) {
+                    if (offset >= segment.textStart && offset <= segment.textStart + segment.length) {
+                        return segment.layoutStart + (offset - segment.textStart);
+                    }
+                }
+                for (const Placeholder& placeholder : placeholders) {
+                    if (offset > placeholder.foldStart && offset < placeholder.foldEnd) {
+                        return placeholder.layoutStart;
+                    }
+                }
+                return text.size();
+            }
+
+            // A layout position's text offset; inside a placeholder, the nearer edge of its fold.
+            std::size_t toText(std::size_t layoutOffset) const {
+                for (const Placeholder& placeholder : placeholders) {
+                    if (layoutOffset > placeholder.layoutStart && layoutOffset < placeholder.layoutStart + placeholder.length) {
+                        return (layoutOffset - placeholder.layoutStart) * 2 <= placeholder.length
+                            ? placeholder.foldStart : placeholder.foldEnd;
+                    }
+                }
+                for (const LayoutSegment& segment : segments) {
+                    if (layoutOffset >= segment.layoutStart && layoutOffset <= segment.layoutStart + segment.length) {
+                        return segment.textStart + (layoutOffset - segment.layoutStart);
+                    }
+                }
+                return end();
+            }
         };
 
         std::vector<Line> lines;
@@ -724,6 +779,22 @@ namespace newui::text {
                 [](float value, const Line& line) { return value < line.top + line.height; });
             return it == lines.end() ? lines.size() - 1 : static_cast<std::size_t>(it - lines.begin());
         }
+
+        static void appendRangeRects(const Line& line, std::size_t layoutStart, std::size_t length, std::vector<Rect>& out) {
+            UINT32 count = 0;
+            line.layout->HitTestTextRange(static_cast<UINT32>(layoutStart), static_cast<UINT32>(length),
+                0.0f, line.top, nullptr, 0, &count);
+            if (count == 0) {
+                return;
+            }
+            std::vector<DWRITE_HIT_TEST_METRICS> metrics(count);
+            if (SUCCEEDED(line.layout->HitTestTextRange(static_cast<UINT32>(layoutStart), static_cast<UINT32>(length),
+                    0.0f, line.top, metrics.data(), count, &count))) {
+                for (UINT32 m = 0; m < count; ++m) {
+                    out.emplace_back(metrics[m].left, metrics[m].top, metrics[m].width, metrics[m].height);
+                }
+            }
+        }
     };
 
     TextLayoutEngine::TextLayoutEngine() : impl_(std::make_unique<Impl>()) {}
@@ -732,7 +803,7 @@ namespace newui::text {
 
     // Defined after TextLayoutEngine::Impl, which it reaches into (TextRenderer is a friend).
     void TextRenderer::render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
-            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns, const Color& foldColor) {
         const auto& lines = layout.impl_->lines;
         if (lines.empty()) {
             return;
@@ -740,61 +811,117 @@ namespace newui::text {
         std::vector<LayoutPiece> pieces;
         for (std::size_t i = layout.impl_->lineForY(scrollOffsetY);
                 i < lines.size() && lines[i].top < scrollOffsetY + static_cast<float>(height); ++i) {
-            pieces.push_back({ lines[i].layout.GetInterfacePtr(), lines[i].top, lines[i].start, lines[i].length });
+            LayoutPiece piece{ lines[i].layout.GetInterfacePtr(), lines[i].top, lines[i].text.size(), lines[i].segments, {} };
+            for (const TextLayoutEngine::Impl::Placeholder& placeholder : lines[i].placeholders) {
+                piece.placeholders.push_back({ placeholder.foldStart, placeholder.layoutStart, placeholder.length });
+            }
+            pieces.push_back(std::move(piece));
         }
-        drawLayouts(ctx, width, height, pieces, textColor, scrollOffsetY, colorRuns);
+        drawLayouts(ctx, width, height, pieces, textColor, scrollOffsetY, colorRuns, foldColor);
     }
 
     bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap,
-            const std::vector<TextFontRun>& fontRuns) {
+            const std::vector<TextFontRun>& fontRuns, const std::vector<TextFold>& folds) {
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
         if (format == nullptr) {
             return false;
         }
 
         const std::wstring& text = storage.text();
+
+        // Only collapsed folds matter here, outermost first where they start together.
+        std::vector<TextFold> collapsed;
+        for (const TextFold& fold : folds) {
+            if (fold.collapsed && fold.length > 0 && fold.start < text.size()) {
+                collapsed.push_back(fold);
+            }
+        }
+        std::sort(collapsed.begin(), collapsed.end(), [](const TextFold& a, const TextFold& b) {
+            return a.start != b.start ? a.start < b.start : a.length > b.length;
+        });
+
         const bool sameShape = format == impl_->lastFormat
             && lastMaxWidth_ == maxWidth
             && lastMaxHeight_ == maxHeight
             && lastWordWrap_ == wordWrap;
-        if (sameShape && !impl_->lines.empty() && lastText_ == text && lastFontRuns_ == fontRuns) {
+        if (sameShape && !impl_->lines.empty() && lastText_ == text && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
             return true;
         }
 
-        std::vector<Impl::Line> fresh;
-        std::size_t pos = 0;
-        while (true) {
-            const std::size_t newline = text.find(L'\n', pos);
-            const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
-            std::size_t contentEnd = end;
-            if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
-                --contentEnd;
+        // Font runs by start, swept alongside the segments (which only move forward) - so each
+        // segment looks at the few runs that can reach it, not all of them.
+        std::vector<const TextFontRun*> sortedRuns;
+        for (const TextFontRun& run : fontRuns) {
+            if (run.length > 0) {
+                sortedRuns.push_back(&run);
             }
+        }
+        std::sort(sortedRuns.begin(), sortedRuns.end(),
+            [](const TextFontRun* a, const TextFontRun* b) { return a->start < b->start; });
+        std::size_t nextRun = 0;
+        std::vector<const TextFontRun*> activeRuns;
+
+        std::vector<Impl::Line> fresh;
+        std::size_t nextFold = 0;
+        std::size_t pos = 0;
+        bool done = false;
+        while (!done) {
             Impl::Line line;
             line.start = pos;
-            line.length = contentEnd - pos;
-            line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
-            line.text = text.substr(pos, line.length);
-            for (const TextFontRun& run : fontRuns) {
-                const std::size_t runEnd = run.start + run.length;
-                const std::size_t from = run.start > pos ? run.start : pos;
-                const std::size_t to = runEnd < contentEnd ? runEnd : contentEnd;
-                if (to > from) {
-                    TextFontRun local = run;
-                    local.start = from - pos;
-                    local.length = to - from;
-                    line.runs.push_back(local);
+            while (true) {
+                const std::size_t newline = text.find(L'\n', pos);
+                const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
+                while (nextFold < collapsed.size() && collapsed[nextFold].start < pos) {
+                    ++nextFold;   // inside text an earlier fold already hides
+                }
+                if (nextFold < collapsed.size() && collapsed[nextFold].start <= end) {
+                    const TextFold& fold = collapsed[nextFold++];
+                    const std::size_t foldEnd = fold.start + fold.length < text.size() ? fold.start + fold.length : text.size();
+                    line.segments.push_back({ pos, line.text.size(), fold.start - pos });
+                    line.text.append(text, pos, fold.start - pos);
+                    line.placeholders.push_back({ line.text.size(), fold.placeholder.size(), fold.start, foldEnd });
+                    line.text += fold.placeholder;
+                    pos = foldEnd;
+                    continue;
+                }
+                std::size_t contentEnd = end;
+                if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
+                    --contentEnd;
+                }
+                line.segments.push_back({ pos, line.text.size(), contentEnd - pos });
+                line.text.append(text, pos, contentEnd - pos);
+                line.length = contentEnd - line.start;
+                line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
+                done = newline == std::wstring::npos;
+                pos = newline + 1;
+                break;
+            }
+
+            for (const LayoutSegment& segment : line.segments) {
+                const std::size_t segmentEnd = segment.textStart + segment.length;
+                while (nextRun < sortedRuns.size() && sortedRuns[nextRun]->start < segmentEnd) {
+                    activeRuns.push_back(sortedRuns[nextRun++]);
+                }
+                activeRuns.erase(std::remove_if(activeRuns.begin(), activeRuns.end(), [&](const TextFontRun* run) {
+                    return run->start + run->length <= segment.textStart;
+                }), activeRuns.end());
+                for (const TextFontRun* run : activeRuns) {
+                    const std::size_t runEnd = run->start + run->length;
+                    const std::size_t from = run->start > segment.textStart ? run->start : segment.textStart;
+                    const std::size_t to = runEnd < segmentEnd ? runEnd : segmentEnd;
+                    if (to > from) {
+                        TextFontRun local = *run;
+                        local.start = segment.layoutStart + (from - segment.textStart);
+                        local.length = to - from;
+                        line.runs.push_back(local);
+                    }
                 }
             }
             fresh.push_back(std::move(line));
-            if (newline == std::wstring::npos) {
-                break;
-            }
-            pos = newline + 1;
         }
 
-        // Keep the layouts of unchanged lines (same text and styling), matched from the front and
-        // the back - so one edit rebuilds only the lines it actually touched.
+        // Keep the layouts of unchanged lines (same laid-out text and styling), matched from the
+        // front and the back - so one edit rebuilds only the lines it actually touched.
         std::vector<Impl::Line>& old = impl_->lines;
         auto unchanged = [](const Impl::Line& a, const Impl::Line& b) { return a.text == b.text && a.runs == b.runs; };
         auto reuse = [](Impl::Line& into, const Impl::Line& from) {
@@ -877,6 +1004,7 @@ namespace newui::text {
         lastMaxHeight_ = maxHeight;
         lastWordWrap_ = wordWrap;
         lastFontRuns_ = fontRuns;
+        lastFolds_ = std::move(collapsed);
         return true;
     }
 
@@ -888,30 +1016,27 @@ namespace newui::text {
         }
         for (std::size_t i = impl_->lineForOffset(range.start()); i < lines.size() && lines[i].start < range.end(); ++i) {
             const Impl::Line& line = lines[i];
-            const std::size_t lineEnd = line.start + line.length;
-            const std::size_t from = range.start() > line.start ? range.start() : line.start;
-            const std::size_t to = range.end() < lineEnd ? range.end() : lineEnd;
-            if (to > from) {
-                UINT32 count = 0;
-                line.layout->HitTestTextRange(static_cast<UINT32>(from - line.start), static_cast<UINT32>(to - from),
-                    0.0f, line.top, nullptr, 0, &count);
-                if (count > 0) {
-                    std::vector<DWRITE_HIT_TEST_METRICS> metrics(count);
-                    if (SUCCEEDED(line.layout->HitTestTextRange(static_cast<UINT32>(from - line.start),
-                            static_cast<UINT32>(to - from), 0.0f, line.top, metrics.data(), count, &count))) {
-                        for (UINT32 m = 0; m < count; ++m) {
-                            result.emplace_back(metrics[m].left, metrics[m].top, metrics[m].width, metrics[m].height);
-                        }
-                    }
+            for (const LayoutSegment& segment : line.segments) {
+                const std::size_t segmentEnd = segment.textStart + segment.length;
+                const std::size_t from = range.start() > segment.textStart ? range.start() : segment.textStart;
+                const std::size_t to = range.end() < segmentEnd ? range.end() : segmentEnd;
+                if (to > from) {
+                    Impl::appendRangeRects(line, segment.layoutStart + (from - segment.textStart), to - from, result);
+                }
+            }
+            // A range reaching into hidden text covers its placeholder.
+            for (const Impl::Placeholder& placeholder : line.placeholders) {
+                if (range.start() < placeholder.foldEnd && range.end() > placeholder.foldStart && placeholder.length > 0) {
+                    Impl::appendRangeRects(line, placeholder.layoutStart, placeholder.length, result);
                 }
             }
             // The line break itself, when the range runs through it - a sliver at the line's end,
             // as a single whole-document layout would show it.
-            if (line.terminator > 0 && range.start() <= lineEnd && range.end() > lineEnd) {
+            if (line.terminator > 0 && range.start() <= line.end() && range.end() > line.end()) {
                 FLOAT x = 0.0f;
                 FLOAT y = 0.0f;
                 DWRITE_HIT_TEST_METRICS metrics{};
-                if (SUCCEEDED(line.layout->HitTestTextPosition(static_cast<UINT32>(line.length), FALSE, &x, &y, &metrics))) {
+                if (SUCCEEDED(line.layout->HitTestTextPosition(static_cast<UINT32>(line.text.size()), FALSE, &x, &y, &metrics))) {
                     result.emplace_back(x, line.top + y, metrics.height * 0.3f, metrics.height);
                 }
             }
@@ -926,11 +1051,10 @@ namespace newui::text {
             return;
         }
         const Impl::Line& line = impl_->lines[impl_->lineForOffset(position.offset())];
-        const std::size_t local = position.offset() - line.start;
         FLOAT pointX = 0.0f;
         FLOAT pointY = 0.0f;
         DWRITE_HIT_TEST_METRICS metrics{};
-        if (FAILED(line.layout->HitTestTextPosition(static_cast<UINT32>(local < line.length ? local : line.length),
+        if (FAILED(line.layout->HitTestTextPosition(static_cast<UINT32>(line.toLayout(position.offset())),
                 FALSE, &pointX, &pointY, &metrics))) {
             return;
         }
@@ -949,11 +1073,11 @@ namespace newui::text {
         if (FAILED(line.layout->HitTestPoint(localPoint.x, localPoint.y - line.top, &isTrailingHit, &isInside, &metrics))) {
             return TextPosition();
         }
-        std::size_t offset = metrics.textPosition;
+        std::size_t layoutOffset = metrics.textPosition;
         if (isTrailingHit) {
-            offset += metrics.length;
+            layoutOffset += metrics.length;
         }
-        return TextPosition(line.start + (offset < line.length ? offset : line.length));
+        return TextPosition(line.toText(layoutOffset < line.text.size() ? layoutOffset : line.text.size()));
     }
 
     TextRange TextLayoutEngine::lineRange(const TextPosition& position) const {
@@ -961,23 +1085,22 @@ namespace newui::text {
             return TextRange();
         }
         const Impl::Line& line = impl_->lines[impl_->lineForOffset(position.offset())];
-        const std::size_t local = position.offset() - line.start < line.length ? position.offset() - line.start : line.length;
+        const std::size_t local = line.toLayout(position.offset());
 
         // The wrapped row within the line - what Home/End move across.
         UINT32 rowCount = 0;
         line.layout->GetLineMetrics(nullptr, 0, &rowCount);
-        if (rowCount == 0) {
-            return TextRange(line.start, line.length);
-        }
         std::vector<DWRITE_LINE_METRICS> rows(rowCount);
-        if (FAILED(line.layout->GetLineMetrics(rows.data(), rowCount, &rowCount))) {
+        if (rowCount == 0 || FAILED(line.layout->GetLineMetrics(rows.data(), rowCount, &rowCount))) {
             return TextRange(line.start, line.length);
         }
         std::size_t rowStart = 0;
         for (UINT32 r = 0; r < rowCount; ++r) {
             const std::size_t rowEnd = rowStart + rows[r].length;
-            if (local < rowEnd || (r + 1 == rowCount && local <= rowEnd)) {
-                return TextRange(line.start + rowStart, rows[r].length - rows[r].newlineLength);
+            if (local < rowEnd || r + 1 == rowCount) {
+                const std::size_t from = line.toText(rowStart);
+                const std::size_t to = line.toText(rowEnd - rows[r].newlineLength);
+                return TextRange(from, to > from ? to - from : 0);
             }
             rowStart = rowEnd;
         }
@@ -988,12 +1111,53 @@ namespace newui::text {
         return impl_->lines.empty() ? 0.0f : impl_->lines.back().top + impl_->lines.back().height;
     }
 
+    std::vector<Rect> TextLayoutEngine::placeholderRects(float top, float bottom) const {
+        std::vector<Rect> result;
+        const auto& lines = impl_->lines;
+        if (lines.empty()) {
+            return result;
+        }
+        for (std::size_t i = impl_->lineForY(top); i < lines.size() && lines[i].top < bottom; ++i) {
+            for (const Impl::Placeholder& placeholder : lines[i].placeholders) {
+                if (placeholder.length > 0) {
+                    Impl::appendRangeRects(lines[i], placeholder.layoutStart, placeholder.length, result);
+                }
+            }
+        }
+        return result;
+    }
+
+    bool TextLayoutEngine::foldAtPoint(const Point& localPoint, std::size_t& outFoldStart) const {
+        if (impl_->lines.empty()) {
+            return false;
+        }
+        const Impl::Line& line = impl_->lines[impl_->lineForY(localPoint.y)];
+        if (line.placeholders.empty() || localPoint.y < line.top || localPoint.y >= line.top + line.height) {
+            return false;
+        }
+        BOOL isTrailingHit = FALSE;
+        BOOL isInside = FALSE;
+        DWRITE_HIT_TEST_METRICS metrics{};
+        if (FAILED(line.layout->HitTestPoint(localPoint.x, localPoint.y - line.top, &isTrailingHit, &isInside, &metrics))
+                || !isInside) {
+            return false;
+        }
+        for (const Impl::Placeholder& placeholder : line.placeholders) {
+            if (metrics.textPosition >= placeholder.layoutStart && metrics.textPosition < placeholder.layoutStart + placeholder.length) {
+                outFoldStart = placeholder.foldStart;
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::size_t TextLayoutEngine::lineCount() const { return impl_->lines.size(); }
     std::size_t TextLayoutEngine::lineStart(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].start : 0; }
     std::size_t TextLayoutEngine::lineLength(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].length : 0; }
     float TextLayoutEngine::lineTop(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].top : 0.0f; }
     float TextLayoutEngine::lineHeight(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].height : 0.0f; }
     std::size_t TextLayoutEngine::lineAt(std::size_t offset) const { return impl_->lines.empty() ? 0 : impl_->lineForOffset(offset); }
+    std::size_t TextLayoutEngine::lineAtY(float y) const { return impl_->lines.empty() ? 0 : impl_->lineForY(y); }
     std::size_t TextLayoutEngine::layoutsBuiltLastUpdate() const { return impl_->lastBuilt; }
 
 }

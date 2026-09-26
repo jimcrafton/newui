@@ -684,6 +684,29 @@ namespace newui::text {
     // hit-testing), in the same space as those rects.
     void drawTextDecoration(BLContext& ctx, const TextDecoration& decoration, const std::vector<Rect>& rects);
 
+    // A foldable region of the text (outlining). Collapsed, [start, start + length) is hidden and
+    // placeholder is shown in its place, inline: the text before and after it stays put, so a
+    // block's "{ ... }" joins its first and last lines.
+    struct TextFold {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        std::wstring placeholder = L"...";
+        bool collapsed = false;
+
+        std::size_t end() const { return start + length; }
+        bool operator==(const TextFold& other) const {
+            return start == other.start && length == other.length && placeholder == other.placeholder && collapsed == other.collapsed;
+        }
+        bool operator!=(const TextFold& other) const { return !(*this == other); }
+    };
+
+    // length characters of the text at textStart, laid out at layoutStart in a line's layout.
+    struct LayoutSegment {
+        std::size_t textStart = 0;
+        std::size_t layoutStart = 0;
+        std::size_t length = 0;
+    };
+
     class TextRenderer {
     public:
         // Declared (not = default) and defined in text.cpp, where Impl
@@ -731,8 +754,10 @@ namespace newui::text {
         // Draws layout's own current layout (its text, font runs and wrapping) rather than
         // building one - so what's drawn is exactly what layout hit-tests against. layout must be
         // up to date (TextLayoutEngine::update()).
+        // Collapsed folds' placeholders are drawn in foldColor.
         void render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
-            const Color& textColor, float scrollOffsetY = 0.0f, const std::vector<TextColorRun>& colorRuns = {});
+            const Color& textColor, float scrollOffsetY = 0.0f, const std::vector<TextColorRun>& colorRuns = {},
+            const Color& foldColor = Color(0.5f, 0.5f, 0.5f, 1.0f));
 
     private:
         // (Re)builds the WIC bitmap + render target together for the
@@ -740,16 +765,18 @@ namespace newui::text {
         // this class's own doc comment on why the two can't be resized
         // independently the way the old DC-render-target version could.
         bool ensureRenderTarget(int width, int height);
-        // A layout drawn at y = top, covering text [textStart, textStart + textLength).
+        // A layout drawn at y = top: segments map it to the text, placeholders (textStart: the
+        // fold's start) are folds' stand-ins.
         struct LayoutPiece {
             IDWriteTextLayout* layout;
             float top;
-            std::size_t textStart;
-            std::size_t textLength;
+            std::size_t layoutLength;
+            std::vector<LayoutSegment> segments;
+            std::vector<LayoutSegment> placeholders;
         };
         // Both render()s end here: colors each piece's ranges, draws them, and composites the result.
         void drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
-            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns);
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns, const Color& foldColor);
 
         // Holds the real ID2D1RenderTarget/IWICBitmap (_com_ptr_t)
         // members, plus a cached IDWriteTextFormat (via the same
@@ -809,9 +836,10 @@ namespace newui::text {
         // own case (a genuinely single-line control - wrapping would be
         // wrong there regardless of how the result then gets displayed/
         // scrolled).
-        // fontRuns (optional) bold / italicize / underline / strike ranges of the text.
+        // fontRuns (optional) bold / italicize / underline / strike ranges of the text. folds
+        // (optional): the collapsed ones are laid out as their placeholders.
         bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true,
-            const std::vector<TextFontRun>& fontRuns = {});
+            const std::vector<TextFontRun>& fontRuns = {}, const std::vector<TextFold>& folds = {});
 
         // One highlight rect per contiguous visual run range covers (a
         // multi-line selection spans more than one line, hence possibly
@@ -857,18 +885,26 @@ namespace newui::text {
         // no layout has been built yet.
         float contentHeight() const;
 
-        // The text is laid out one line (split at '\n'; "\r\n" is one break) per layout, so an
-        // edit re-lays out only the lines it touched and drawing covers only visible lines.
-        // Always at least one line once update() has succeeded.
+        // The text is laid out one visual line (split at '\n'; "\r\n" is one break) per layout,
+        // so an edit re-lays out only the lines it touched and drawing covers only visible lines.
+        // A collapsed fold joins the lines it spans into one. Always at least one line once
+        // update() has succeeded.
         std::size_t lineCount() const;
-        // Offset of line's first character, and its length excluding the line break.
+        // Offset of line's first character, and the length of text it spans (hidden text
+        // included), excluding the line break.
         std::size_t lineStart(std::size_t line) const;
         std::size_t lineLength(std::size_t line) const;
         // Its y and height (all its wrapped rows).
         float lineTop(std::size_t line) const;
         float lineHeight(std::size_t line) const;
-        // The line holding offset.
+        // The line holding offset, and the line at y (clamped to the first / last).
         std::size_t lineAt(std::size_t offset) const;
+        std::size_t lineAtY(float y) const;
+
+        // Where collapsed folds' placeholders are, on lines within [top, bottom).
+        std::vector<Rect> placeholderRects(float top, float bottom) const;
+        // Whether localPoint is on a collapsed fold's placeholder, and that fold's start.
+        bool foldAtPoint(const Point& localPoint, std::size_t& outFoldStart) const;
         // How many line layouts the last rebuilding update() created (the rest were reused).
         std::size_t layoutsBuiltLastUpdate() const;
 
@@ -887,6 +923,7 @@ namespace newui::text {
         float lastMaxHeight_ = 0.0f;
         bool lastWordWrap_ = true;
         std::vector<TextFontRun> lastFontRuns_;
+        std::vector<TextFold> lastFolds_;   // the collapsed ones, sorted
     };
 
 }

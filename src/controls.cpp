@@ -2291,7 +2291,13 @@ namespace newui {
 
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = owner_.getClientBounds();
-        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_);
+        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_,
+            layoutFolds());
+    }
+
+    const std::vector<text::TextFold>& TextController::layoutFolds() const {
+        static const std::vector<text::TextFold> none;
+        return none;
     }
 
     void TextController::setScrollOffsetY(float y) {
