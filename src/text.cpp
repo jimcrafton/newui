@@ -564,7 +564,22 @@ namespace newui::text {
             return;
         }
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
-        if (!ensureRenderTarget(width, height) || format == nullptr) {
+        if (format == nullptr) {
+            return;
+        }
+        IDWriteTextLayoutPtr textLayout;
+        if (FAILED(DirectWriteResources::dwriteFactory().CreateTextLayout(
+                text.c_str(), static_cast<UINT32>(text.size()), format,
+                static_cast<float>(width), static_cast<float>(height), &textLayout))) {
+            return;
+        }
+        textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+        drawLayout(ctx, width, height, textLayout.GetInterfacePtr(), text.size(), textColor, scrollOffsetY, colorRuns);
+    }
+
+    void TextRenderer::drawLayout(BLContext& ctx, int width, int height, IDWriteTextLayout* textLayout,
+            std::size_t textLength, const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
+        if (width <= 0 || height <= 0 || textLayout == nullptr || !ensureRenderTarget(width, height)) {
             return;
         }
 
@@ -579,50 +594,47 @@ namespace newui::text {
         HRESULT brushHr = impl_->renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(textColor.r, textColor.g, textColor.b, textColor.a), &brush);
 
-        IDWriteTextLayoutPtr textLayout;
-        HRESULT layoutHr = DirectWriteResources::dwriteFactory().CreateTextLayout(
-            text.c_str(), static_cast<UINT32>(text.size()), format,
-            static_cast<float>(width), static_cast<float>(height), &textLayout);
-
-        if (SUCCEEDED(layoutHr)) {
-            textLayout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
-
-            // Each run's brush is its drawing effect - DrawTextLayout() draws a range whose effect
-            // is an ID2D1Brush with that brush, so no custom IDWriteTextRenderer is needed. One
-            // brush per distinct color (a document has thousands of runs but a handful of colors).
-            std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
-            for (const TextColorRun& run : colorRuns) {
-                if (run.length == 0 || run.start >= text.size()) {
-                    continue;
-                }
-                const std::uint32_t key = run.color.toBLRgba32().value;
-                ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
-                if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
-                        D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
-                    continue;
-                }
-                const std::size_t available = text.size() - run.start;
-                DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
-                    static_cast<UINT32>(run.length < available ? run.length : available) };
-                textLayout->SetDrawingEffect(runBrush.GetInterfacePtr(), range);
+        // Each run's brush is its drawing effect - DrawTextLayout() draws a range whose effect is an
+        // ID2D1Brush with that brush, so no custom IDWriteTextRenderer is needed. One brush per
+        // distinct color (a document has thousands of runs but a handful of colors). A shared
+        // layout (TextLayoutEngine's) may still carry the previous paint's effects - clear first.
+        const DWRITE_TEXT_RANGE whole{ 0, static_cast<UINT32>(textLength) };
+        textLayout->SetDrawingEffect(nullptr, whole);
+        std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
+        for (const TextColorRun& run : colorRuns) {
+            if (run.length == 0 || run.start >= textLength) {
+                continue;
             }
+            const std::uint32_t key = run.color.toBLRgba32().value;
+            ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
+            if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
+                    D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
+                continue;
+            }
+            const std::size_t available = textLength - run.start;
+            DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
+                static_cast<UINT32>(run.length < available ? run.length : available) };
+            textLayout->SetDrawingEffect(runBrush.GetInterfacePtr(), range);
         }
-        if (SUCCEEDED(brushHr) && SUCCEEDED(layoutHr)) {
+
+        if (SUCCEEDED(brushHr)) {
             // scrollOffsetY shifts the whole layout up before rasterizing -
-            // see this method's own doc comment (text.h) on why this is
+            // see render()'s own doc comment (text.h) on why this is
             // safe/correct regardless of how tall the real content is,
-            // even though textLayout itself was only ever built against
-            // this render target's own small height.
+            // even though the layout was only ever built against this
+            // render target's own small height.
             impl_->renderTarget->DrawTextLayout(
-                D2D1::Point2F(0.0f, -scrollOffsetY), textLayout.GetInterfacePtr(), brush.GetInterfacePtr());
+                D2D1::Point2F(0.0f, -scrollOffsetY), textLayout, brush.GetInterfacePtr());
         }
-        // brush/textLayout (_com_ptr_t) release themselves at scope exit.
 
         // EndDraw() has to be called to close out BeginDraw() regardless
-        // of whether the brush/layout above succeeded - abandoning a
-        // draw session without it leaves the render target in an
-        // inconsistent state for the next render() call.
+        // of whether the brush above succeeded - abandoning a draw
+        // session without it leaves the render target in an inconsistent
+        // state for the next render() call.
         HRESULT endHr = impl_->renderTarget->EndDraw();
+        // The brushes belong to this render target - don't leave them attached to a layout that
+        // outlives this call.
+        textLayout->SetDrawingEffect(nullptr, whole);
         if (endHr == D2DERR_RECREATE_TARGET) {
             // Device loss (rare for a software render target, but a real
             // integration still has to handle it) - drop the render
@@ -635,7 +647,7 @@ namespace newui::text {
             bufferHeight_ = 0;
             return;
         }
-        if (FAILED(brushHr) || FAILED(layoutHr) || FAILED(endHr)) {
+        if (FAILED(brushHr) || FAILED(endHr)) {
             return;
         }
 
@@ -689,11 +701,19 @@ namespace newui::text {
 
     TextLayoutEngine::TextLayoutEngine() : impl_(std::make_unique<Impl>()) {}
 
+    // Defined after TextLayoutEngine::Impl, which it reaches into (TextRenderer is a friend).
+    void TextRenderer::render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns) {
+        drawLayout(ctx, width, height, layout.impl_->layout.GetInterfacePtr(), layout.lastText_.size(),
+            textColor, scrollOffsetY, colorRuns);
+    }
+
     // impl_'s own _com_ptr_t/TextFormatCache members release themselves -
     // nothing left to do here.
     TextLayoutEngine::~TextLayoutEngine() = default;
 
-    bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap) {
+    bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap,
+            const std::vector<TextFontRun>& fontRuns) {
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
         if (format == nullptr) {
             return false;
@@ -705,7 +725,8 @@ namespace newui::text {
             || lastText_ != text
             || lastMaxWidth_ != maxWidth
             || lastMaxHeight_ != maxHeight
-            || lastWordWrap_ != wordWrap;
+            || lastWordWrap_ != wordWrap
+            || lastFontRuns_ != fontRuns;
         if (!needsRebuild) {
             return true;
         }
@@ -718,6 +739,26 @@ namespace newui::text {
             return false;
         }
         layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+        for (const TextFontRun& run : fontRuns) {
+            if (run.length == 0 || run.start >= text.size()) {
+                continue;
+            }
+            const std::size_t available = text.size() - run.start;
+            const DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start),
+                static_cast<UINT32>(run.length < available ? run.length : available) };
+            if (run.bold) {
+                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
+            }
+            if (run.italic) {
+                layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range);
+            }
+            if (run.underline) {
+                layout->SetUnderline(TRUE, range);
+            }
+            if (run.strikethrough) {
+                layout->SetStrikethrough(TRUE, range);
+            }
+        }
 
         impl_->layout = layout;
         impl_->lastFormat = format;
@@ -725,6 +766,7 @@ namespace newui::text {
         lastMaxWidth_ = maxWidth;
         lastMaxHeight_ = maxHeight;
         lastWordWrap_ = wordWrap;
+        lastFontRuns_ = fontRuns;
         return true;
     }
 

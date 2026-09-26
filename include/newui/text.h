@@ -39,6 +39,7 @@
 struct ID2D1Factory;
 struct IDWriteFactory;
 struct IWICImagingFactory;
+struct IDWriteTextLayout;
 
 namespace newui::text {
 
@@ -638,6 +639,27 @@ namespace newui::text {
         Color color;
     };
 
+    // Font styling for one range of a text control's text - unlike TextColorRun it can change the
+    // layout (bold is wider), so it's applied to the one layout used for both drawing and
+    // hit-testing (TextLayoutEngine), keeping the caret and clicks on the drawn glyphs.
+    // start/length are UTF-16 code units.
+    struct TextFontRun {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        bool bold = false;
+        bool italic = false;
+        bool underline = false;
+        bool strikethrough = false;
+
+        bool operator==(const TextFontRun& other) const {
+            return start == other.start && length == other.length && bold == other.bold
+                && italic == other.italic && underline == other.underline && strikethrough == other.strikethrough;
+        }
+        bool operator!=(const TextFontRun& other) const { return !(*this == other); }
+    };
+
+    class TextLayoutEngine;
+
     // Something drawn on or around a range of text - over the laid-out glyphs, not through
     // DirectWrite, so it never changes the layout: a squiggle under it (a spelling or syntax
     // problem), a straight underline, a box or rounded box around it, or a fill behind it. A range
@@ -702,12 +724,21 @@ namespace newui::text {
             const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true,
             const std::vector<TextColorRun>& colorRuns = {});
 
+        // Draws layout's own current layout (its text, font runs and wrapping) rather than
+        // building one - so what's drawn is exactly what layout hit-tests against. layout must be
+        // up to date (TextLayoutEngine::update()).
+        void render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
+            const Color& textColor, float scrollOffsetY = 0.0f, const std::vector<TextColorRun>& colorRuns = {});
+
     private:
         // (Re)builds the WIC bitmap + render target together for the
         // given size if either doesn't already exist at that size - see
         // this class's own doc comment on why the two can't be resized
         // independently the way the old DC-render-target version could.
         bool ensureRenderTarget(int width, int height);
+        // Both render()s end here: colors layout's ranges, draws it, and composites the result.
+        void drawLayout(BLContext& ctx, int width, int height, IDWriteTextLayout* layout, std::size_t textLength,
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns);
 
         // Holds the real ID2D1RenderTarget/IWICBitmap (_com_ptr_t)
         // members, plus a cached IDWriteTextFormat (via the same
@@ -767,7 +798,9 @@ namespace newui::text {
         // own case (a genuinely single-line control - wrapping would be
         // wrong there regardless of how the result then gets displayed/
         // scrolled).
-        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true);
+        // fontRuns (optional) bold / italicize / underline / strike ranges of the text.
+        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true,
+            const std::vector<TextFontRun>& fontRuns = {});
 
         // One highlight rect per contiguous visual run range covers (a
         // multi-line selection spans more than one line, hence possibly
@@ -821,10 +854,14 @@ namespace newui::text {
         struct Impl;
         std::unique_ptr<Impl> impl_;
 
+        // TextRenderer draws this engine's layout itself (render(..., const TextLayoutEngine&)).
+        friend class TextRenderer;
+
         std::wstring lastText_;
         float lastMaxWidth_ = 0.0f;
         float lastMaxHeight_ = 0.0f;
         bool lastWordWrap_ = true;
+        std::vector<TextFontRun> lastFontRuns_;
     };
 
 }

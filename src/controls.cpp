@@ -2290,7 +2290,7 @@ namespace newui {
 
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = owner_.getClientBounds();
-        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
+        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_);
     }
 
     void TextController::setScrollOffsetY(float y) {
@@ -2724,7 +2724,7 @@ namespace newui {
         ctx.translate(clientBounds.left(), clientBounds.top());
         controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/false);
+            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
         controller_->drawCaret(ctx);
         ctx.restore();
     }
@@ -2789,8 +2789,7 @@ namespace newui {
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/true,
-            controller_->colorRuns());
+            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
         controller_->drawCaret(ctx);
         ctx.restore();

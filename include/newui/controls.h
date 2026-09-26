@@ -1424,6 +1424,19 @@ namespace newui {
         //@reflect ignore=true
         void setColorRuns(std::vector<text::TextColorRun> runs) { colorRuns_ = std::move(runs); owner_.style().markDirty(); }
 
+        // Bold / italic / underline / strikethrough ranges (text::TextFontRun) - applied to the
+        // one layout that's both drawn and hit-tested, so the caret stays on the glyphs. Same
+        // keep-in-step contract as setColorRuns(); bold can change the content size.
+        //@reflect ignore=true
+        const std::vector<text::TextFontRun>& fontRuns() const { return fontRuns_; }
+        //@reflect ignore=true
+        void setFontRuns(std::vector<text::TextFontRun> runs) { fontRuns_ = std::move(runs); owner_.style().markDirty(); }
+
+        // The layout this controller draws and hit-tests against - current as of the last
+        // ensureLayoutUpToDate().
+        //@reflect ignore=true
+        const text::TextLayoutEngine& layoutEngine() const { return layoutEngine_; }
+
         // Squiggles, underlines, boxes and background fills over ranges of the text
         // (text::TextDecoration) - same keep-in-step contract as setColorRuns().
         //@reflect ignore=true
@@ -1636,6 +1649,7 @@ namespace newui {
         Font font_;
         Color textColor_;
         std::vector<text::TextColorRun> colorRuns_;
+        std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
     };
 
@@ -1877,6 +1891,12 @@ namespace newui {
         const std::vector<text::TextColorRun>& colorRuns() const { return controller_->colorRuns(); }
         //@reflect ignore=true
         void setColorRuns(std::vector<text::TextColorRun> runs) { controller_->setColorRuns(std::move(runs)); }
+
+        // See TextController::setFontRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextFontRun>& fontRuns() const { return controller_->fontRuns(); }
+        //@reflect ignore=true
+        void setFontRuns(std::vector<text::TextFontRun> runs) { controller_->setFontRuns(std::move(runs)); onContentSizeChanged(*this); }
 
         // See TextController::setDecorations().
         //@reflect ignore=true

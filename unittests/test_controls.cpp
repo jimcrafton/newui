@@ -4032,3 +4032,113 @@ TEST(TextControlDecorations, ARangePastTheEndIsClampedNotDropped) {
     textControl.setDecorations({ decoration });
     EXPECT_GT(colorPixels(textControl, 0), 5u);
 }
+
+namespace {
+    struct InkScan {
+        int rightmostInk = -1;      // rightmost column with dark text pixels
+        std::size_t ink = 0;        // dark pixels
+        std::vector<std::uint32_t> pixels;
+    };
+
+    InkScan scanInk(TextControl& textControl, int width, int height) {
+        BLImage image(width, height, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        InkScan scan;
+        for (int y = 0; y < height; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < width; ++x) {
+                scan.pixels.push_back(row[x]);
+                const bool dark = ((row[x] >> 8) & 0xFF) < 128;
+                if (dark) {
+                    scan.rightmostInk = x > scan.rightmostInk ? x : scan.rightmostInk;
+                    ++scan.ink;
+                }
+            }
+        }
+        return scan;
+    }
+
+    TextControl& styledText(TextControl& textControl, const std::wstring& text) {
+        textControl.setBounds(Rect(0, 0, 400, 40));
+        textControl.setFont(Font("Segoe UI", 16.0f));
+        textControl.setText(text);
+        textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+        return textControl;
+    }
+}
+
+TEST(TextControlFontRuns, BoldWidensTheTextAndMovesTheCaretPositionsAfterIt) {
+    TextControl plain;
+    styledText(plain, L"mmmmmm x");
+    plain.controller().ensureLayoutUpToDate();
+    Point plainX;
+    float height = 0.0f;
+    plain.controller().layoutEngine().hitTestPosition(text::TextPosition(7), plainX, height);
+
+    TextControl bold;
+    styledText(bold, L"mmmmmm x");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 6;
+    run.bold = true;
+    bold.setFontRuns({ run });
+    bold.controller().ensureLayoutUpToDate();
+    Point boldX;
+    bold.controller().layoutEngine().hitTestPosition(text::TextPosition(7), boldX, height);
+
+    EXPECT_GT(boldX.x, plainX.x + 1.0f);
+}
+
+// The point of one shared layout: what's drawn is what's hit-tested.
+TEST(TextControlFontRuns, TheDrawnBoldTextEndsWhereItsHitTestRectEnds) {
+    TextControl textControl;
+    styledText(textControl, L"mmmmmmmm");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 8;
+    run.bold = true;
+    textControl.setFontRuns({ run });
+
+    const InkScan scan = scanInk(textControl, 400, 40);
+    const std::vector<Rect> rects = textControl.controller().layoutEngine().hitTestRange(text::TextRange(0, 8));
+    ASSERT_FALSE(rects.empty());
+    ASSERT_GE(scan.rightmostInk, 0);
+    EXPECT_LE(scan.rightmostInk, rects.back().right() + 1.0f);
+    EXPECT_GE(scan.rightmostInk, rects.back().right() - 4.0f);
+}
+
+TEST(TextControlFontRuns, UnderlineAddsInkBelowTheText) {
+    TextControl plain;
+    styledText(plain, L"abc abc abc");
+    TextControl underlined;
+    styledText(underlined, L"abc abc abc");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 11;
+    run.underline = true;
+    underlined.setFontRuns({ run });
+
+    // A line under ~80px of text.
+    EXPECT_GT(scanInk(underlined, 400, 40).ink, scanInk(plain, 400, 40).ink + 40);
+}
+
+TEST(TextControlFontRuns, ItalicChangesTheDrawnGlyphs) {
+    TextControl plain;
+    styledText(plain, L"lllllll");
+    TextControl italic;
+    styledText(italic, L"lllllll");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 7;
+    run.italic = true;
+    italic.setFontRuns({ run });
+
+    EXPECT_NE(scanInk(italic, 400, 40).pixels, scanInk(plain, 400, 40).pixels);
+}
