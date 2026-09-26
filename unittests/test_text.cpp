@@ -12,6 +12,7 @@
 #include <any>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -1515,6 +1516,33 @@ TEST(TextLayoutEngine, SplitsTheTextIntoLinesAtEachBreak) {
     EXPECT_GT(engine.lineTop(1), engine.lineTop(0));
     EXPECT_FLOAT_EQ(engine.lineTop(2), engine.lineTop(1) + engine.lineHeight(1));
     EXPECT_FLOAT_EQ(engine.contentHeight(), engine.lineTop(2) + engine.lineHeight(2));
+}
+
+// Run with --gtest_also_run_disabled_tests to see the numbers.
+TEST(TextLayoutEngine, DISABLED_TimingsOnALargeText) {
+    using clock = std::chrono::steady_clock;
+    auto ms = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::wstring text;
+    for (int i = 0; i < 100000; ++i) {
+        text += L"    int value" + std::to_wstring(i) + L" = compute(alpha, beta);\n";
+    }
+    TextStorage storage(text);
+    TextLayoutEngine engine;
+    newui::Font font;
+    auto t0 = clock::now();
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t1 = clock::now();
+    // A keystroke in the middle.
+    storage.insert(text.size() / 2, L"x");
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t2 = clock::now();
+    storage.insert(text.size() / 2 + 1, L"y");
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t3 = clock::now();
+    std::printf("100000 lines: first full layout %.0f ms (%zu DirectWrite layouts), keystroke %.2f ms then %.2f ms (%zu built)\n",
+        ms(t0, t1), static_cast<std::size_t>(engine.lineCount()), ms(t1, t2), ms(t2, t3), engine.layoutsBuiltLastUpdate());
 }
 
 TEST(TextLayoutEngine, ALoneCrBreaksALineToo) {
