@@ -1463,6 +1463,10 @@ namespace newui {
         // controls.cpp).
         void ensureLayoutUpToDate();
 
+        // Where the text goes within the owner: its client bounds, less any margin a subclass
+        // keeps (TextFoldingController's gutter). Layout, hit-testing and drawing all use it.
+        virtual Rect textArea() const { return owner_.getClientBounds(); }
+
         // The full height layoutEngine_'s current content actually needs
         // - see TextLayoutEngine::contentHeight()'s own doc comment
         // (text.h) for what "actually needs" means here (can exceed the

@@ -29,6 +29,19 @@ namespace newui {
         // drawSelection().
         void drawFoldPlaceholders(BLContext& ctx, float visibleHeight) const;
 
+        // A margin left of the text: line numbers, and a [+]/[-] on each line a fold starts on -
+        // clicking one collapses or expands it; clicking a line number selects that line.
+        bool gutterVisible() const { return gutterVisible_; }
+        void setGutterVisible(bool visible);
+        float gutterWidth() const;
+        // The client bounds less the gutter.
+        Rect textArea() const override;
+        // Draws the gutter, in the owner's local space.
+        void drawGutter(BLContext& ctx) const;
+        // The fold whose marker is on visual line (layoutEngine()'s), or kNoFold.
+        static constexpr std::size_t kNoFold = static_cast<std::size_t>(-1);
+        std::size_t markerFold(std::size_t line) const;
+
         SyncReturn handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) override;
         SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) override;
 
@@ -45,8 +58,18 @@ namespace newui {
         // offset itself if there's none.
         std::size_t stepOver(std::size_t offset, bool forward) const;
         void foldsChanged();
+        void countTextLines();
+
+        // x of the line numbers' right edge and the markers' column, in the owner's local space.
+        struct GutterColumns {
+            float numbersRight = 0.0f;
+            float markerLeft = 0.0f;
+        };
+        GutterColumns gutterColumns() const;
 
         std::vector<text::TextFold> folds_;
+        bool gutterVisible_ = true;
+        std::size_t textLineCount_ = 1;   // sizes the line-number column
     };
 
     // A TextControl with outlining - see TextFoldingController.
@@ -65,7 +88,11 @@ namespace newui {
         void setFolds(std::vector<text::TextFold> folds);
         void setFoldCollapsed(std::size_t index, bool collapsed);
 
-        // TextControl's, then the placeholders' boxes.
+        // See TextFoldingController::setGutterVisible().
+        bool gutterVisible() const;
+        void setGutterVisible(bool visible);
+
+        // TextControl's, then the placeholders' boxes and the gutter.
         void paint(BLContext& ctx) override;
     };
 

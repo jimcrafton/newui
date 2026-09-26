@@ -2285,12 +2285,12 @@ namespace newui {
     }
 
     Point TextController::toLayoutSpace(const Point& localPt) const {
-        Rect clientBounds = owner_.getClientBounds();
+        Rect clientBounds = textArea();
         return Point(localPt.x - clientBounds.left(), localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
     void TextController::ensureLayoutUpToDate() {
-        Rect clientBounds = owner_.getClientBounds();
+        Rect clientBounds = textArea();
         layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_,
             layoutFolds());
     }
@@ -2784,7 +2784,7 @@ namespace newui {
     }
 
     void TextControl::paint(BLContext& ctx) {
-        Rect clientBounds = getClientBounds();
+        Rect clientBounds = controller_->textArea();
         if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
             return;
         }

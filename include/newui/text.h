@@ -900,6 +900,10 @@ namespace newui::text {
         // The line holding offset, and the line at y (clamped to the first / last).
         std::size_t lineAt(std::size_t offset) const;
         std::size_t lineAtY(float y) const;
+        // The (0-based) line of the text it starts on - what a line-number margin shows.
+        std::size_t lineNumber(std::size_t line) const;
+        // Its first row's baseline, down from lineTop().
+        float lineBaseline(std::size_t line) const;
 
         // Where collapsed folds' placeholders are, on lines within [top, bottom).
         std::vector<Rect> placeholderRects(float top, float bottom) const;

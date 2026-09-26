@@ -719,6 +719,8 @@ namespace newui::text {
             std::size_t start = 0;       // the text offset the line starts at
             std::size_t length = 0;      // its span of the text (hidden text included), not counting the line break
             std::size_t terminator = 0;  // the break's length: 0 (the last line), 1 or 2
+            std::size_t textLine = 0;    // the line of the text it starts on
+            float baseline = 0.0f;       // its first row's, from top
             float top = 0.0f;
             float height = 0.0f;
             std::wstring text;           // what's laid out: the visible text with placeholders
@@ -864,10 +866,12 @@ namespace newui::text {
         std::vector<Impl::Line> fresh;
         std::size_t nextFold = 0;
         std::size_t pos = 0;
+        std::size_t textLine = 0;
         bool done = false;
         while (!done) {
             Impl::Line line;
             line.start = pos;
+            line.textLine = textLine;
             while (true) {
                 const std::size_t newline = text.find(L'\n', pos);
                 const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
@@ -881,6 +885,7 @@ namespace newui::text {
                     line.text.append(text, pos, fold.start - pos);
                     line.placeholders.push_back({ line.text.size(), fold.placeholder.size(), fold.start, foldEnd });
                     line.text += fold.placeholder;
+                    textLine += static_cast<std::size_t>(std::count(text.begin() + fold.start, text.begin() + foldEnd, L'\n'));
                     pos = foldEnd;
                     continue;
                 }
@@ -894,6 +899,7 @@ namespace newui::text {
                 line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
                 done = newline == std::wstring::npos;
                 pos = newline + 1;
+                ++textLine;
                 break;
             }
 
@@ -927,6 +933,7 @@ namespace newui::text {
         auto reuse = [](Impl::Line& into, const Impl::Line& from) {
             into.layout = from.layout;
             into.height = from.height;
+            into.baseline = from.baseline;
         };
         if (sameShape) {
             std::size_t prefix = 0;
@@ -990,6 +997,10 @@ namespace newui::text {
                     }
                     line.height = emptyLineHeight;
                 }
+                DWRITE_LINE_METRICS firstRow{};
+                UINT32 rowCount = 0;
+                layout->GetLineMetrics(&firstRow, 1, &rowCount);
+                line.baseline = rowCount > 0 && firstRow.baseline > 0.0f ? firstRow.baseline : line.height * 0.8f;
                 line.layout = layout;
                 ++impl_->lastBuilt;
             }
@@ -1158,6 +1169,8 @@ namespace newui::text {
     float TextLayoutEngine::lineHeight(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].height : 0.0f; }
     std::size_t TextLayoutEngine::lineAt(std::size_t offset) const { return impl_->lines.empty() ? 0 : impl_->lineForOffset(offset); }
     std::size_t TextLayoutEngine::lineAtY(float y) const { return impl_->lines.empty() ? 0 : impl_->lineForY(y); }
+    std::size_t TextLayoutEngine::lineNumber(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].textLine : 0; }
+    float TextLayoutEngine::lineBaseline(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].baseline : 0.0f; }
     std::size_t TextLayoutEngine::layoutsBuiltLastUpdate() const { return impl_->lastBuilt; }
 
 }

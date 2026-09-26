@@ -173,3 +173,86 @@ TEST(TextFoldingControl, ACollapsedFoldHidesItsLinesWhenPainted) {
     EXPECT_EQ(redPixelsFrom(control, belowFirstLine), 0u);
     EXPECT_GT(redPixelsFrom(control, 0), 20u) << "the first line, with the text after the fold, still draws";
 }
+
+TEST(TextFoldingControl, TheGutterSitsLeftOfTheTextAndWidensWithTheLineCount) {
+    TextFoldingControl control;
+    setUp(control, false);
+    const Rect client = control.getClientBounds();
+    const Rect area = control.controller().textArea();
+    EXPECT_GT(area.left(), client.left() + 10.0f);
+    EXPECT_NEAR(area.right(), client.right(), 0.5f);
+
+    std::wstring many;
+    for (int i = 0; i < 1500; ++i) {
+        many += L"x\n";
+    }
+    control.setText(many);
+    EXPECT_GT(control.controller().textArea().left(), area.left()) << "four digits need more room than two";
+
+    control.setGutterVisible(false);
+    EXPECT_NEAR(control.controller().textArea().left(), client.left(), 0.5f);
+}
+
+TEST(TextFoldingControl, LineNumbersCountHiddenLines) {
+    TextFoldingControl control;
+    setUp(control, true);
+    control.controller().ensureLayoutUpToDate();
+    const text::TextLayoutEngine& engine = control.controller().layoutEngine();
+    ASSERT_EQ(engine.lineCount(), 2u);
+    EXPECT_EQ(engine.lineNumber(0), 0u);
+    EXPECT_EQ(engine.lineNumber(1), 3u);
+    EXPECT_GT(engine.lineBaseline(0), 0.0f);
+    EXPECT_LT(engine.lineBaseline(0), engine.lineHeight(0));
+}
+
+TEST(TextFoldingControl, AFoldsMarkerIsOnTheLineItStartsOn) {
+    TextFoldingControl control;
+    setUp(control, false);
+    control.controller().ensureLayoutUpToDate();
+    TextFoldingController* folding = control.foldingController();
+    ASSERT_NE(folding, nullptr);
+    EXPECT_EQ(folding->markerFold(0), 0u);
+    EXPECT_EQ(folding->markerFold(1), TextFoldingController::kNoFold);
+    EXPECT_EQ(folding->markerFold(3), TextFoldingController::kNoFold);
+
+    control.setFoldCollapsed(0, true);
+    control.controller().ensureLayoutUpToDate();
+    EXPECT_EQ(folding->markerFold(0), 0u);
+    EXPECT_EQ(folding->markerFold(1), TextFoldingController::kNoFold);
+
+    // A fold within one line has no marker.
+    text::TextFold inline_;
+    inline_.start = 0;
+    inline_.length = 2;
+    control.setFolds({ inline_ });
+    control.controller().ensureLayoutUpToDate();
+    EXPECT_EQ(folding->markerFold(0), TextFoldingController::kNoFold);
+}
+
+// The gutter really draws: ink in it, beyond its plain background.
+TEST(TextFoldingControl, TheGutterPaintsNumbersAndMarkers) {
+    TextFoldingControl control;
+    setUp(control, false);
+    const int gutterRight = static_cast<int>(control.controller().textArea().left()) - 1;
+    BLImage image(300, 200, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(image);
+        ctx.clear_all();
+        control.paint(ctx);
+        ctx.end();
+    }
+    BLImageData data{};
+    image.get_data(&data);
+    auto pixel = [&](int x, int y) {
+        return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride)[x];
+    };
+    const std::uint32_t background = pixel(gutterRight - 1, 190);
+    std::size_t ink = 0;
+    const Rect client = control.getClientBounds();   // inside the control's border
+    for (int y = static_cast<int>(client.top()) + 1; y < static_cast<int>(client.bottom()) - 1; ++y) {
+        for (int x = static_cast<int>(client.left()) + 1; x < gutterRight; ++x) {
+            ink += pixel(x, y) != background ? 1 : 0;
+        }
+    }
+    EXPECT_GT(ink, 40u);
+}
