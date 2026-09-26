@@ -1577,6 +1577,14 @@ namespace newui {
         // triple-click; also for callers that want a field ready to type over).
         void selectAll();
 
+        // Undo/redo through the model (a HistoryTextModel remembers edits; the plain TextModel
+        // has none, so these are false). Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo. On success
+        // the caret moves to the end of the text that was put back, with no selection.
+        bool canUndo() const { return model().canUndo(); }
+        bool canRedo() const { return model().canRedo(); }
+        bool undo();
+        bool redo();
+
     protected:
         Control& owner() const { return owner_; }
 
@@ -1781,6 +1789,10 @@ namespace newui {
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        bool canUndo() const { return controller_->canUndo(); }
+        bool canRedo() const { return controller_->canRedo(); }
+        bool undo() { return controller_->undo(); }
+        bool redo() { return controller_->redo(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -1928,6 +1940,10 @@ namespace newui {
 
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        bool canUndo() const { return controller_->canUndo(); }
+        bool canRedo() const { return controller_->canRedo(); }
+        bool undo() { return controller_->undo(); }
+        bool redo() { return controller_->redo(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }

@@ -47,7 +47,7 @@ namespace newui::text {
         bool redo(TextRange* affected = nullptr) override;
 
         // The next edit starts a new step even if it could continue the last one.
-        void breakCoalescing() { mergeable_ = false; }
+        void breakCoalescing() override { mergeable_ = false; }
         // Everything until the matching endGroup() is one step. Groups nest; only the outermost
         // counts.
         void beginGroup();

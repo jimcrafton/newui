@@ -569,6 +569,9 @@ namespace newui::text {
         virtual bool canRedo() const { return false; }
         virtual bool undo(TextRange* affected = nullptr) { (void)affected; return false; }
         virtual bool redo(TextRange* affected = nullptr) { (void)affected; return false; }
+        // The next edit starts a new undo step (a caret move, a click, losing focus) - nothing
+        // here.
+        virtual void breakCoalescing() {}
 
         // Model: value()/setValue() bridge the generic std::any API to
         // this class's own typed text() above - value() returns text()

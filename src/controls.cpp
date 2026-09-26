@@ -2272,6 +2272,7 @@ namespace newui {
     }
 
     SyncReturn TextController::handleLostFocus() {
+        model().breakCoalescing();
         caret_.stop();
         if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
             editStyle->focused = false;
@@ -2491,7 +2492,26 @@ namespace newui {
         selection_.clear();
     }
 
+    bool TextController::undo() {
+        text::TextRange affected;
+        if (!model().undo(&affected)) {
+            return false;
+        }
+        moveCaret(affected.end(), false);
+        return true;
+    }
+
+    bool TextController::redo() {
+        text::TextRange affected;
+        if (!model().redo(&affected)) {
+            return false;
+        }
+        moveCaret(affected.end(), false);
+        return true;
+    }
+
     void TextController::moveCaret(size_t newOffset, bool extendSelection, bool resetPreferredColumn) {
+        model().breakCoalescing();   // moving away ends a typing run
         if (resetPreferredColumn) {
             hasPreferredColumnX_ = false;
         }
@@ -2769,6 +2789,16 @@ namespace newui {
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
                 moveCaret(line.isValid() ? line.end() : model().length(), extend);
                 return SyncReturn::Handled;
+            }
+            case vkLetterZ:
+            case vkLetterY: {
+                // Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo. Left alone (Ignored) when there's nothing
+                // to do, so a caller above can still act on the key.
+                if ((keyMask & kmCtrl) == 0 || (keyMask & kmAlt) != 0) {
+                    return SyncReturn::Ignored;
+                }
+                const bool redoing = VKeyCode == vkLetterY || (keyMask & kmShift) != 0;
+                return (redoing ? redo() : undo()) ? SyncReturn::Handled : SyncReturn::Ignored;
             }
             case vkInsert: {
                 // Plain Insert only - Ctrl+Insert / Shift+Insert are copy / paste.

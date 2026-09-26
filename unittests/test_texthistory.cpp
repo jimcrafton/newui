@@ -1,5 +1,7 @@
 #include "newui/texthistory.h"
 
+#include "newui/controls.h"
+
 #include <gtest/gtest.h>
 
 #include <random>
@@ -437,4 +439,36 @@ TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
         ASSERT_EQ(model.text(), reference);
         EXPECT_FALSE(model.canRedo());
     }
+}
+
+TEST(TextControlUndo, UndoAndRedoGoThroughTheModelAndPlaceTheCaretAtTheEndOfTheRestoredText) {
+    newui::TextControl control;
+    control.setModel(std::make_unique<HistoryTextModel>());
+    control.setText(L"hello world");
+    EXPECT_FALSE(control.canUndo());
+
+    control.model().remove(TextRange(5, 6));   // " world"
+    ASSERT_EQ(control.text(), L"hello");
+    EXPECT_TRUE(control.canUndo());
+    control.caret().setPosition(newui::text::TextPosition(0));
+
+    ASSERT_TRUE(control.undo());
+    EXPECT_EQ(control.text(), L"hello world");
+    EXPECT_EQ(control.caret().position().offset(), 11u);   // after what came back
+    EXPECT_TRUE(control.canRedo());
+
+    ASSERT_TRUE(control.redo());
+    EXPECT_EQ(control.text(), L"hello");
+    EXPECT_EQ(control.caret().position().offset(), 5u);
+    EXPECT_FALSE(control.undo() && control.undo());   // only one step to undo
+}
+
+TEST(TextControlUndo, APlainTextModelHasNoHistory) {
+    newui::TextControl control;
+    control.setText(L"abc");
+    control.model().insert(3, L"d");
+    EXPECT_FALSE(control.canUndo());
+    EXPECT_FALSE(control.undo());
+    EXPECT_FALSE(control.redo());
+    EXPECT_EQ(control.text(), L"abcd");
 }
