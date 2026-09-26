@@ -1585,6 +1585,15 @@ namespace newui {
         bool undo();
         bool redo();
 
+        // Plain-text clipboard. copy() puts the selection on it (false with no selection, and never
+        // for a secure-entry field); cut() also removes it (false for a read-only field); paste()
+        // replaces the selection - or inserts at the caret - with what's on it (false when there's
+        // no text there). A single-line control turns line breaks in pasted text into spaces.
+        // Ctrl+C / X / V / A, Ctrl+Insert, Shift+Insert and Shift+Delete do these.
+        bool copy();
+        bool cut();
+        bool paste();
+
     protected:
         Control& owner() const { return owner_; }
 
@@ -1793,6 +1802,9 @@ namespace newui {
         bool canRedo() const { return controller_->canRedo(); }
         bool undo() { return controller_->undo(); }
         bool redo() { return controller_->redo(); }
+        bool copy() { return controller_->copy(); }
+        bool cut() { return controller_->cut(); }
+        bool paste() { return controller_->paste(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -1944,6 +1956,9 @@ namespace newui {
         bool canRedo() const { return controller_->canRedo(); }
         bool undo() { return controller_->undo(); }
         bool redo() { return controller_->redo(); }
+        bool copy() { return controller_->copy(); }
+        bool cut() { return controller_->cut(); }
+        bool paste() { return controller_->paste(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }

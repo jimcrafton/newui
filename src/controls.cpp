@@ -1,6 +1,7 @@
 #include "newui/controls.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
+#include "newui/clipboardmgr.h"
 #include "newui/color.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
@@ -2492,6 +2493,58 @@ namespace newui {
         selection_.clear();
     }
 
+    bool TextController::copy() {
+        if (selection_.isEmpty() || traits_.isSecureTextEntry()) {
+            return false;
+        }
+        return ClipboardManager::setText(model().storage().substring(selection_.ranges()[0]), &owner_);
+    }
+
+    bool TextController::cut() {
+        if (traits_.isReadOnly() || !copy()) {
+            return false;
+        }
+        const text::TextRange range = selection_.ranges()[0];
+        clearSelection();
+        model().remove(range);
+        moveCaret(range.start(), false);
+        return true;
+    }
+
+    bool TextController::paste() {
+        std::wstring pasted;
+        if (traits_.isReadOnly() || !ClipboardManager::getText(pasted) || pasted.empty()) {
+            return false;
+        }
+        if (!multiline_) {
+            std::wstring flat;
+            for (std::size_t i = 0; i < pasted.size(); ++i) {
+                if (pasted[i] == L'\r' && i + 1 < pasted.size() && pasted[i + 1] == L'\n') {
+                    ++i;   // "\r\n" is one break
+                }
+                flat += (pasted[i] == L'\r' || pasted[i] == L'\n') ? L' ' : pasted[i];
+            }
+            pasted = std::move(flat);
+        }
+        const text::PieceTree before = model().snapshot();
+        std::size_t caretAt;
+        if (!selection_.isEmpty()) {
+            const text::TextRange range = selection_.ranges()[0];
+            clearSelection();
+            model().replace(range, pasted);
+            caretAt = range.start() + pasted.size();
+        } else {
+            const std::size_t at = caret_.position().isValid() ? caret_.position().offset() : model().length();
+            model().insert(at, pasted);
+            caretAt = at + pasted.size();
+        }
+        if (model().snapshot().sameAs(before)) {
+            return false;   // a listener vetoed it (read-only, max length)
+        }
+        moveCaret(caretAt, false);
+        return true;
+    }
+
     bool TextController::undo() {
         text::TextRange affected;
         if (!model().undo(&affected)) {
@@ -2748,6 +2801,9 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkDelete: {
+                if ((keyMask & (kmShift | kmCtrl | kmAlt)) == kmShift && !selection_.isEmpty()) {
+                    return cut() ? SyncReturn::Handled : SyncReturn::Ignored;   // Shift+Delete
+                }
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
@@ -2800,9 +2856,31 @@ namespace newui {
                 const bool redoing = VKeyCode == vkLetterY || (keyMask & kmShift) != 0;
                 return (redoing ? redo() : undo()) ? SyncReturn::Handled : SyncReturn::Ignored;
             }
+            case vkLetterA:
+            case vkLetterC:
+            case vkLetterX:
+            case vkLetterV: {
+                // Ctrl alone (Ctrl+Shift+letter and Ctrl+Alt+letter are someone else's).
+                if ((keyMask & (kmShift | kmCtrl | kmAlt)) != kmCtrl) {
+                    return SyncReturn::Ignored;
+                }
+                if (VKeyCode == vkLetterA) {
+                    selectAll();
+                    return SyncReturn::Handled;
+                }
+                const bool done = VKeyCode == vkLetterC ? copy() : VKeyCode == vkLetterX ? cut() : paste();
+                return done ? SyncReturn::Handled : SyncReturn::Ignored;
+            }
             case vkInsert: {
-                // Plain Insert only - Ctrl+Insert / Shift+Insert are copy / paste.
-                if ((keyMask & (kmShift | kmCtrl | kmAlt)) != 0) {
+                // Ctrl+Insert / Shift+Insert are copy / paste; plain Insert toggles overwrite.
+                const std::uint32_t modifiers = keyMask & (kmShift | kmCtrl | kmAlt);
+                if (modifiers == kmCtrl) {
+                    return copy() ? SyncReturn::Handled : SyncReturn::Ignored;
+                }
+                if (modifiers == kmShift) {
+                    return paste() ? SyncReturn::Handled : SyncReturn::Ignored;
+                }
+                if (modifiers != 0) {
                     return SyncReturn::Ignored;
                 }
                 setOverwriteMode(!overwriteMode_);

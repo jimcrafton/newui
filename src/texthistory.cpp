@@ -85,6 +85,11 @@ namespace newui::text {
         if (after.sameAs(before)) {
             return;   // vetoed, or nothing to do
         }
+        // Whatever path this takes, the history has changed by the time it returns.
+        struct Notify {
+            HistoryTextModel& model;
+            ~Notify() { model.notifyHistoryChanged(); }
+        } notify{ *this };
         // A new edit ends the redo history - and the clean state, if that was in it.
         redo_.clear();
         if (cleanDepth_ != npos && cleanDepth_ > undo_.size()) {
@@ -195,6 +200,7 @@ namespace newui::text {
         }
         redo_.push_back(std::move(item));
         mergeable_ = false;
+        notifyHistoryChanged();
         return true;
     }
 
@@ -219,6 +225,7 @@ namespace newui::text {
         }
         undo_.push_back(std::move(item));
         mergeable_ = false;
+        notifyHistoryChanged();
         return true;
     }
 
@@ -227,7 +234,9 @@ namespace newui::text {
             group_ = Item();
             mergeable_ = false;
         }
-        ++groupDepth_;
+        if (++groupDepth_ == 1) {
+            notifyHistoryChanged();   // nothing can be undone until the group ends
+        }
     }
 
     void HistoryTextModel::endGroup() {
@@ -240,6 +249,7 @@ namespace newui::text {
             }
             group_ = Item();
             mergeable_ = false;
+            notifyHistoryChanged();
         }
     }
 
@@ -250,6 +260,7 @@ namespace newui::text {
         groupDepth_ = 0;
         mergeable_ = false;
         cleanDepth_ = npos;
+        notifyHistoryChanged();
     }
 
     void HistoryTextModel::markClean() {

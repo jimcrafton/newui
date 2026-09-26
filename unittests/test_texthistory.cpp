@@ -1,5 +1,6 @@
 #include "newui/texthistory.h"
 
+#include "newui/clipboardmgr.h"
 #include "newui/controls.h"
 
 #include <gtest/gtest.h>
@@ -471,4 +472,145 @@ TEST(TextControlUndo, APlainTextModelHasNoHistory) {
     EXPECT_FALSE(control.undo());
     EXPECT_FALSE(control.redo());
     EXPECT_EQ(control.text(), L"abcd");
+}
+
+namespace {
+    std::wstring clipboardText() {
+        std::wstring out;
+        newui::ClipboardManager::getText(out);
+        return out;
+    }
+}
+
+TEST(TextControlClipboard, CopyPutsTheSelectionOnTheClipboardAndLeavesTheText) {
+    newui::TextControl control;
+    control.setText(L"hello world");
+    EXPECT_FALSE(control.copy());   // nothing selected
+    control.selection().setRange(TextRange(6, 5));
+    ASSERT_TRUE(control.copy());
+    EXPECT_EQ(clipboardText(), L"world");
+    EXPECT_EQ(control.text(), L"hello world");
+}
+
+TEST(TextControlClipboard, CutRemovesTheSelectionAndPlacesTheCaretWhereItWas) {
+    newui::TextControl control;
+    control.setModel(std::make_unique<HistoryTextModel>());
+    control.setText(L"hello world");
+    control.selection().setRange(TextRange(0, 6));
+    ASSERT_TRUE(control.cut());
+    EXPECT_EQ(clipboardText(), L"hello ");
+    EXPECT_EQ(control.text(), L"world");
+    EXPECT_EQ(control.caret().position().offset(), 0u);
+    EXPECT_TRUE(control.selection().isEmpty());
+    ASSERT_TRUE(control.undo());   // one undo step
+    EXPECT_EQ(control.text(), L"hello world");
+}
+
+TEST(TextControlClipboard, PasteReplacesTheSelectionOrInsertsAtTheCaretAndIsOneUndoStep) {
+    newui::TextControl control;
+    control.setModel(std::make_unique<HistoryTextModel>());
+    ASSERT_TRUE(newui::ClipboardManager::setText(L"XYZ"));
+    control.setText(L"abcdef");
+    control.selection().setRange(TextRange(1, 2));
+    ASSERT_TRUE(control.paste());
+    EXPECT_EQ(control.text(), L"aXYZdef");
+    EXPECT_EQ(control.caret().position().offset(), 4u);
+
+    control.caret().setPosition(newui::text::TextPosition(7));
+    ASSERT_TRUE(control.paste());
+    EXPECT_EQ(control.text(), L"aXYZdefXYZ");
+
+    ASSERT_TRUE(control.undo());
+    EXPECT_EQ(control.text(), L"aXYZdef");
+    ASSERT_TRUE(control.undo());
+    EXPECT_EQ(control.text(), L"abcdef");
+}
+
+TEST(TextControlClipboard, PasteIntoASingleLineFieldTurnsLineBreaksIntoSpaces) {
+    newui::TextField field;
+    ASSERT_TRUE(newui::ClipboardManager::setText(L"a\r\nb\nc\rd"));
+    ASSERT_TRUE(field.paste());
+    EXPECT_EQ(field.text(), L"a b c d");
+}
+
+TEST(TextControlClipboard, PasteWithNoTextOnTheClipboardDoesNothing) {
+    newui::TextControl control;
+    control.setText(L"abc");
+    ASSERT_TRUE(newui::ClipboardManager::setText(L""));
+    EXPECT_FALSE(control.paste());
+    EXPECT_EQ(control.text(), L"abc");
+}
+
+TEST(TextControlClipboard, SecureEntryNeverCopiesAndReadOnlyNeverChanges) {
+    newui::TextControl secret;
+    secret.setText(L"hunter2");
+    secret.selection().setRange(TextRange(0, 7));
+    ASSERT_TRUE(newui::ClipboardManager::setText(L"untouched"));
+    secret.inputTraits().setSecureTextEntry(true);
+    EXPECT_FALSE(secret.copy());
+    EXPECT_FALSE(secret.cut());
+    EXPECT_EQ(clipboardText(), L"untouched");
+    EXPECT_EQ(secret.text(), L"hunter2");
+
+    newui::TextControl locked;
+    locked.setText(L"fixed");
+    locked.selection().setRange(TextRange(0, 5));
+    locked.inputTraits().setReadOnly(true);
+    EXPECT_TRUE(locked.copy());          // reading is fine
+    EXPECT_FALSE(locked.cut());
+    EXPECT_FALSE(locked.paste());
+    EXPECT_EQ(locked.text(), L"fixed");
+}
+
+TEST(HistoryTextModel, OnHistoryChangedFiresAfterTheHistoryIsUpdatedNotBefore) {
+    HistoryTextModel model(L"abc");
+    struct Seen { bool canUndo; bool canRedo; };
+    std::vector<Seen> seen;
+    model.onHistoryChanged.add([&](TextModel& sender) {
+        seen.push_back({ sender.canUndo(), sender.canRedo() });
+        return newui::SyncReturn::Ignored;
+    });
+    // onChanged is the one that comes first, and sees the answers before the step is recorded.
+    bool undoableInOnChanged = true;
+    model.onChanged.add([&](newui::Model&) {
+        undoableInOnChanged = model.canUndo();
+        return newui::SyncReturn::Ignored;
+    });
+
+    model.insert(3, L"d");
+    ASSERT_EQ(seen.size(), 1u);
+    EXPECT_TRUE(seen[0].canUndo);
+    EXPECT_FALSE(seen[0].canRedo);
+    EXPECT_FALSE(undoableInOnChanged) << "why onHistoryChanged exists";
+
+    model.undo();
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_FALSE(seen[1].canUndo);
+    EXPECT_TRUE(seen[1].canRedo);
+
+    model.redo();
+    ASSERT_EQ(seen.size(), 3u);
+    EXPECT_TRUE(seen[2].canUndo);
+
+    model.setText(L"loaded");   // the history is forgotten
+    ASSERT_GE(seen.size(), 4u);
+    EXPECT_FALSE(seen.back().canUndo);
+    EXPECT_FALSE(seen.back().canRedo);
+
+    // A group: nothing to undo until it ends.
+    seen.clear();
+    model.beginGroup();
+    ASSERT_EQ(seen.size(), 1u);
+    model.insert(0, L"x");
+    model.endGroup();
+    EXPECT_TRUE(seen.back().canUndo);
+
+    // A vetoed edit changes nothing.
+    seen.clear();
+    model.onBeforeChar.add([](TextModel&, size_t, wchar_t, newui::text::CharChangeKind, bool& canChange) {
+        canChange = false;
+        return newui::SyncReturn::Handled;
+    });
+    model.insert(0, L"y");
+    EXPECT_TRUE(seen.empty());
 }

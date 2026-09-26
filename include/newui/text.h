@@ -573,6 +573,13 @@ namespace newui::text {
         // here.
         virtual void breakCoalescing() {}
 
+        // Fired when what canUndo()/canRedo() answer may have changed: after an edit has been
+        // recorded, after undo()/redo(), and when the history is reset. onChanged comes first and
+        // sees the old answers; this one sees the new ones (a toolbar button follows it). Never
+        // fires from a plain TextModel.
+        typedef Delegate<TextModel> HistoryChangedDelegate;
+        HistoryChangedDelegate onHistoryChanged;
+
         // Model: value()/setValue() bridge the generic std::any API to
         // this class's own typed text() above - value() returns text()
         // boxed as std::any(std::wstring); setValue() calls setText() if
@@ -590,6 +597,10 @@ namespace newui::text {
         // as any other whole-content replace - a no-op (storage() left
         // untouched, onCleared() never fires) if vetoed.
         void clear() override;
+
+    protected:
+        // For a subclass that keeps history: fires onHistoryChanged.
+        void notifyHistoryChanged() { onHistoryChanged(*this); }
 
     private:
         // Fires onBeforeChar and returns whether the caller should
