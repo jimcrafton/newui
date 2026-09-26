@@ -299,6 +299,10 @@ namespace newui {
         const std::string& text() const { return text_; }
         void setText(const std::string& text);
 
+        // Centered by default.
+        TextAlignment textAlignment() const { return labelStyle_->textAlignment(); }
+        void setTextAlignment(TextAlignment value) { labelStyle_->setTextAlignment(value); style().markDirty(); }
+
         bool isHotLink() const { return hotLink_; }
         void setHotLink(bool value);
 

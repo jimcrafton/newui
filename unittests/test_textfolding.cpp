@@ -289,8 +289,6 @@ TEST(TextFoldingControl, TheGutterHasItsOwnBackground) {
     };
     const Rect client = control.getClientBounds();
     const int y = static_cast<int>(client.bottom()) - 5;
-    EXPECT_EQ(pixel(static_cast<int>(client.left()) + 2, y),
-        UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32().value);
     EXPECT_NE(pixel(static_cast<int>(client.left()) + 2, y), pixel(static_cast<int>(client.right()) - 5, y));
 }
 
@@ -415,4 +413,81 @@ TEST(TextWhitespace, MarksPaintOnlyWhenShown) {
         differing += hidden[i] != shown[i] ? 1 : 0;
     }
     EXPECT_GT(differing, 20u);
+}
+
+namespace {
+    // Pixels whose channels differ a lot - ClearType's colored fringes on black-on-white text.
+    std::size_t fringePixels(TextControl& control, double offsetX) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            ctx.translate(offsetX, 0.0);
+            control.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 60; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 300; ++x) {
+                const int r = (row[x] >> 16) & 0xFF, g = (row[x] >> 8) & 0xFF, b = row[x] & 0xFF;
+                const int high = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                const int low = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                count += high - low > 40 ? 1 : 0;
+            }
+        }
+        return count;
+    }
+}
+
+// On whole pixels the text is drawn opaque, over what's under it, with ClearType (when the system
+// uses it); off them it falls back to grayscale over a transparent bitmap.
+TEST(TextRendererClearType, OpaqueOnWholePixelsGrayscaleOtherwise) {
+    UINT smoothing = 0;
+    ::SystemParametersInfo(SPI_GETFONTSMOOTHINGTYPE, 0, &smoothing, 0);
+    if (smoothing != FE_FONTSMOOTHINGCLEARTYPE) {
+        GTEST_SKIP() << "ClearType is off on this machine";
+    }
+    TextControl control;
+    control.setBounds(Rect(0, 0, 300, 60));
+    control.setText(L"meta: { author: \"x\" }");
+    control.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    EXPECT_GT(fringePixels(control, 0.0), 50u);
+    EXPECT_EQ(fringePixels(control, 0.5), 0u);
+}
+
+// A left-aligned Label starts at its left edge; a centered one well in from it.
+TEST(LabelAlignment, LeftAlignedTextStartsAtTheLeft) {
+    auto firstInkColumn = [](Label& label) {
+        BLImage image(300, 30, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            label.paintStyle(ctx);   // LabelStyle draws the text
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        for (int x = 0; x < 300; ++x) {
+            for (int y = 0; y < 30; ++y) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    return x;
+                }
+            }
+        }
+        return 300;
+    };
+    Label label;
+    label.setBounds(Rect(0, 0, 300, 30));
+    label.setText("Ln 1, Ch 1");
+    label.setTextColor(BLRgba32(0xFF000000u));
+    EXPECT_EQ(label.textAlignment(), TextAlignment::Center);
+    EXPECT_GT(firstInkColumn(label), 80);
+    label.setTextAlignment(TextAlignment::Left);
+    EXPECT_LT(firstInkColumn(label), 10);
+    label.setTextAlignment(TextAlignment::Right);
+    EXPECT_GT(firstInkColumn(label), 200);
 }

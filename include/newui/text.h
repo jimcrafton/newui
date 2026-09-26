@@ -778,6 +778,9 @@ namespace newui::text {
         // this class's own doc comment on why the two can't be resized
         // independently the way the old DC-render-target version could.
         bool ensureRenderTarget(int width, int height);
+        // The opaque counterpart drawLayouts() draws ClearType text on, over a copy of the pixels
+        // already under the text.
+        bool ensureOpaqueRenderTarget(int width, int height);
         // A layout drawn at y = top: segments map it to the text, placeholders (textStart: the
         // fold's start) are folds' stand-ins.
         struct LayoutPiece {
@@ -809,6 +812,8 @@ namespace newui::text {
         // this class allocates itself.
         int bufferWidth_ = 0;
         int bufferHeight_ = 0;
+        int opaqueWidth_ = 0;
+        int opaqueHeight_ = 0;
     };
 
     // Owns a persistent IDWriteTextLayout for one TextStorage's current

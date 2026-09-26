@@ -528,6 +528,9 @@ namespace newui {
     // on every unrelated repaint and thickened visibly - which is why this
     // comment used to recommend an opaque backgroundFill as a workaround.
     // Set one only if you actually want that look.)
+    // Where a Label's text sits across its width.
+    enum class TextAlignment { Left, Center, Right };
+
     class LabelStyle : public ViewStyle {
     public:
         const std::string& text() const { return text_; }
@@ -547,6 +550,10 @@ namespace newui {
         bool wordWrap() const { return wordWrap_; }
         void setWordWrap(bool value) { wordWrap_ = value; }
 
+        // Centered by default.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; }
+
         LabelStyle() {
 			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
@@ -557,6 +564,7 @@ namespace newui {
         std::string text_;
         Color textColor_ = Color::null();
         bool wordWrap_ = false;
+        TextAlignment textAlignment_ = TextAlignment::Center;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),

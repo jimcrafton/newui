@@ -67,7 +67,8 @@ namespace newui {
         if (!gutterVisible_) {
             return 0.0f;
         }
-        return gutterColumns().markerLeft + kMarkerSize + kMarkerGap - owner().getClientBounds().left();
+        // Whole pixels, so the text beside it starts on a pixel boundary (sharp, and ClearType-able).
+        return std::ceil(gutterColumns().markerLeft + kMarkerSize + kMarkerGap - owner().getClientBounds().left());
     }
 
     Rect TextFoldingController::textArea() const {
@@ -110,15 +111,21 @@ namespace newui {
         const double width = gutterWidth();
         ctx.clip_to_rect(BLRect(client.left(), client.top(), width, client.height()));
 
-        // Set apart from the text: its own background, and a recessed (etched) edge - a shadow
-        // line, then a highlight.
-        ctx.fill_rect(BLRect(client.left(), client.top(), width, client.height()),
-            UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+        // Set apart from the text: a shade of its background toward the text color (so it works
+        // in light and dark themes alike), and a recessed (etched) edge - a shadow line, then a
+        // highlight.
+        const Color background = UIColorManager::colorFor(UIColorRole::ControlBackground);
+        const Color ink = UIColorManager::colorFor(UIColorRole::ControlText);
+        auto toward = [&](float amount) {
+            return Color(background.r + (ink.r - background.r) * amount, background.g + (ink.g - background.g) * amount,
+                background.b + (ink.b - background.b) * amount, 1.0f).toBLRgba32();
+        };
+        ctx.fill_rect(BLRect(client.left(), client.top(), width, client.height()), toward(0.06f));
         const double edge = std::floor(columns.markerLeft + kMarkerSize + kEdgeInset) + 0.5;
         ctx.set_stroke_width(1.0);
-        ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+        ctx.set_stroke_style(toward(0.28f));
         ctx.stroke_line(edge, client.top(), edge, client.bottom());
-        ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+        ctx.set_stroke_style(background.toBLRgba32());
         ctx.stroke_line(edge + 1.0, client.top(), edge + 1.0, client.bottom());
 
         ctx.set_fill_style(color);

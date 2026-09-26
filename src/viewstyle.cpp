@@ -928,7 +928,12 @@ namespace newui {
 			BLTextMetrics textMetrics;
 			blFont->get_text_metrics(glyphBuffer, textMetrics);
 			double textWidth = textMetrics.advance.x;
-			double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
+			double x = clientBounds.left();
+			if (textAlignment_ == TextAlignment::Center) {
+				x += (clientBounds.size().width - textWidth) * 0.5;
+			} else if (textAlignment_ == TextAlignment::Right) {
+				x += clientBounds.size().width - textWidth;
+			}
 
 			ctx.fill_utf8_text(BLPoint(x, y), *blFont, line.c_str(), line.size());
 

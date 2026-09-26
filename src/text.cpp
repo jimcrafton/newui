@@ -11,6 +11,8 @@
 #include <comip.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <map>
 
 #pragma comment(lib, "d2d1.lib")
@@ -462,6 +464,8 @@ namespace newui::text {
     struct TextRenderer::Impl {
         ID2D1RenderTargetPtr renderTarget;
         IWICBitmapPtr wicBitmap;
+        ID2D1RenderTargetPtr opaqueRenderTarget;   // see ensureOpaqueRenderTarget()
+        IWICBitmapPtr opaqueBitmap;
         TextFormatCache textFormat;
     };
 
@@ -592,19 +596,78 @@ namespace newui::text {
 
     void TextRenderer::drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
             const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns, const Color& foldColor) {
-        if (width <= 0 || height <= 0 || pieces.empty() || !ensureRenderTarget(width, height)) {
+        if (width <= 0 || height <= 0 || pieces.empty()) {
             return;
         }
 
-        impl_->renderTarget->BeginDraw();
-        // Fully transparent clear - only the glyphs DrawTextLayout()
-        // below should end up opaque; blit_image() below composites the
-        // rest of this bitmap's (untouched, still-zero) alpha as
-        // "nothing here" over whatever the caller already painted.
-        impl_->renderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+        // Opaque when the pixels already under the text can be read back from ctx's target (a
+        // whole-pixel translation, the area inside the target): the text is then drawn onto a
+        // copy of them with ClearType, as Windows draws text. Otherwise onto a transparent bitmap,
+        // where Direct2D can only antialias in grayscale - which, blended over the background,
+        // looks heavier and softer.
+        BLImage* target = ctx.target_image();
+        const BLMatrix2D& transform = ctx.final_transform();
+        const double originX = transform.m20;
+        const double originY = transform.m21;
+        bool opaque = target != nullptr && !target->is_empty()
+            && transform.type() <= BL_TRANSFORM_TYPE_TRANSLATE
+            && originX == std::floor(originX) && originY == std::floor(originY)
+            && originX >= 0.0 && originY >= 0.0
+            && originX + width <= target->width() && originY + height <= target->height()
+            && (target->format() == BL_FORMAT_PRGB32 || target->format() == BL_FORMAT_XRGB32);
+        // ...and only over a backdrop that's fully painted - over anything see-through, the opaque
+        // bitmap would put black where there was nothing.
+        BLImageData source{};
+        const std::uint8_t* from = nullptr;
+        if (opaque) {
+            ctx.flush(BL_CONTEXT_FLUSH_SYNC);
+            opaque = target->get_data(&source) == BL_SUCCESS;
+            from = opaque ? static_cast<const std::uint8_t*>(source.pixel_data)
+                + static_cast<std::intptr_t>(originY) * source.stride + static_cast<std::intptr_t>(originX) * 4 : nullptr;
+            for (int y = 0; opaque && source.format == BL_FORMAT_PRGB32 && y < height; ++y) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(from + static_cast<std::intptr_t>(y) * source.stride);
+                for (int x = 0; x < width; ++x) {
+                    if ((row[x] >> 24) != 0xFF) {
+                        opaque = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!(opaque ? ensureOpaqueRenderTarget(width, height) : ensureRenderTarget(width, height))) {
+            return;
+        }
+        ID2D1RenderTarget* renderTarget = opaque ? impl_->opaqueRenderTarget.GetInterfacePtr() : impl_->renderTarget.GetInterfacePtr();
+        IWICBitmap* bitmap = opaque ? impl_->opaqueBitmap.GetInterfacePtr() : impl_->wicBitmap.GetInterfacePtr();
+
+        if (opaque) {
+            // What's been painted so far (background, selection, highlights) becomes the backdrop.
+            WICRect lockRect{ 0, 0, width, height };
+            IWICBitmapLockPtr lock;
+            UINT stride = 0;
+            UINT size = 0;
+            WICInProcPointer pixels = nullptr;
+            if (FAILED(bitmap->Lock(&lockRect, WICBitmapLockWrite, &lock))
+                    || FAILED(lock->GetStride(&stride)) || FAILED(lock->GetDataPointer(&size, &pixels)) || pixels == nullptr) {
+                return;
+            }
+            for (int y = 0; y < height; ++y) {
+                std::memcpy(pixels + static_cast<std::size_t>(y) * stride, from + static_cast<std::intptr_t>(y) * source.stride,
+                    static_cast<std::size_t>(width) * 4);
+            }
+        }
+
+        renderTarget->BeginDraw();
+        if (!opaque) {
+            // Fully transparent clear - only the glyphs DrawTextLayout()
+            // below should end up opaque; blit_image() below composites the
+            // rest of this bitmap's (untouched, still-zero) alpha as
+            // "nothing here" over whatever the caller already painted.
+            renderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+        }
 
         ID2D1SolidColorBrushPtr brush;
-        HRESULT brushHr = impl_->renderTarget->CreateSolidColorBrush(
+        HRESULT brushHr = renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(textColor.r, textColor.g, textColor.b, textColor.a), &brush);
 
         // Each run's brush is its drawing effect - DrawTextLayout() draws a range whose effect is an
@@ -614,7 +677,7 @@ namespace newui::text {
         // piece is cleared first, and again once drawn.
         std::map<std::uint32_t, ID2D1SolidColorBrushPtr> runBrushes;
         ID2D1SolidColorBrushPtr foldBrush;
-        impl_->renderTarget->CreateSolidColorBrush(D2D1::ColorF(foldColor.r, foldColor.g, foldColor.b, foldColor.a), &foldBrush);
+        renderTarget->CreateSolidColorBrush(D2D1::ColorF(foldColor.r, foldColor.g, foldColor.b, foldColor.a), &foldBrush);
         for (const LayoutPiece& piece : pieces) {
             piece.layout->SetDrawingEffect(nullptr, DWRITE_TEXT_RANGE{ 0, static_cast<UINT32>(piece.layoutLength) });
             for (const LayoutSegment& segment : piece.segments) {
@@ -628,7 +691,7 @@ namespace newui::text {
                     }
                     const std::uint32_t key = run.color.toBLRgba32().value;
                     ID2D1SolidColorBrushPtr& runBrush = runBrushes[key];
-                    if (!runBrush && FAILED(impl_->renderTarget->CreateSolidColorBrush(
+                    if (!runBrush && FAILED(renderTarget->CreateSolidColorBrush(
                             D2D1::ColorF(run.color.r, run.color.g, run.color.b, run.color.a), &runBrush))) {
                         continue;
                     }
@@ -645,7 +708,7 @@ namespace newui::text {
             if (SUCCEEDED(brushHr)) {
                 // scrollOffsetY shifts everything up before rasterizing - see
                 // render()'s own doc comment (text.h).
-                impl_->renderTarget->DrawTextLayout(
+                renderTarget->DrawTextLayout(
                     D2D1::Point2F(0.0f, piece.top - scrollOffsetY), piece.layout, brush.GetInterfacePtr());
             }
         }
@@ -654,7 +717,7 @@ namespace newui::text {
         // of whether the brush above succeeded - abandoning a draw
         // session without it leaves the render target in an inconsistent
         // state for the next render() call.
-        HRESULT endHr = impl_->renderTarget->EndDraw();
+        HRESULT endHr = renderTarget->EndDraw();
         // The brushes belong to this render target - don't leave them attached to layouts that
         // outlive this call.
         for (const LayoutPiece& piece : pieces) {
@@ -663,11 +726,12 @@ namespace newui::text {
         if (endHr == D2DERR_RECREATE_TARGET) {
             // Device loss (rare for a software render target, but a real
             // integration still has to handle it) - drop the render
-            // target/bitmap and force bufferWidth_/bufferHeight_ back to
-            // 0 so ensureRenderTarget() rebuilds everything fresh next
-            // render() instead of drawing through a now-invalid target.
+            // targets/bitmaps so the next render() rebuilds them fresh
+            // instead of drawing through a now-invalid target.
             impl_->renderTarget = nullptr;
             impl_->wicBitmap = nullptr;
+            impl_->opaqueRenderTarget = nullptr;
+            impl_->opaqueBitmap = nullptr;
             bufferWidth_ = 0;
             bufferHeight_ = 0;
             return;
@@ -681,7 +745,7 @@ namespace newui::text {
         // supplied buffer, is WIC's real "get pixels out" mechanism.
         WICRect lockRect{0, 0, width, height};
         IWICBitmapLockPtr lock;
-        HRESULT lockHr = impl_->wicBitmap->Lock(&lockRect, WICBitmapLockRead, &lock);
+        HRESULT lockHr = bitmap->Lock(&lockRect, WICBitmapLockRead, &lock);
         if (FAILED(lockHr)) {
             return;
         }
@@ -697,17 +761,47 @@ namespace newui::text {
 
         // No copy: wraps the locked bitmap memory directly for the
         // duration of this call - lock stays alive (keeping the bitmap
-        // locked) until it goes out of scope below. Its pixel layout
-        // (32bpp top-down premultiplied BGRA) is exactly BL_FORMAT_PRGB32 -
-        // same fact ThemedViewStyle::paint() and gfx::Image already rely
-        // on for their own (GDI-backed) buffers.
+        // locked) until it goes out of scope below. The transparent
+        // bitmap is 32bpp top-down premultiplied BGRA - exactly
+        // BL_FORMAT_PRGB32; the opaque one's alpha byte is undefined, so
+        // it's XRGB32 (every pixel opaque, replacing what was there).
         BLImage textImage;
-        textImage.create_from_data(width, height, BL_FORMAT_PRGB32, lockedData, static_cast<intptr_t>(stride));
+        textImage.create_from_data(width, height, opaque ? BL_FORMAT_XRGB32 : BL_FORMAT_PRGB32,
+            lockedData, static_cast<intptr_t>(stride));
 
         ctx.save();
         ctx.blit_image(BLPoint(0, 0), textImage);
         ctx.restore();
         // lock unlocks the bitmap automatically at scope exit.
+    }
+
+    bool TextRenderer::ensureOpaqueRenderTarget(int width, int height) {
+        if (impl_->opaqueRenderTarget != nullptr && width == opaqueWidth_ && height == opaqueHeight_) {
+            return true;
+        }
+        // 32bpp BGR with the alpha ignored: an opaque target, the only kind Direct2D draws
+        // ClearType text on.
+        IWICBitmapPtr bitmap;
+        if (FAILED(DirectWriteResources::wicFactory().CreateBitmap(static_cast<UINT>(width), static_cast<UINT>(height),
+                GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnDemand, &bitmap))) {
+            return false;
+        }
+        const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+        ID2D1RenderTargetPtr renderTarget;
+        if (FAILED(DirectWriteResources::d2dFactory().CreateWicBitmapRenderTarget(bitmap.GetInterfacePtr(), props, &renderTarget))) {
+            return false;
+        }
+        // ClearType only if the user has it on (Control Panel's ClearType Tuner), grayscale if not.
+        UINT smoothing = 0;
+        ::SystemParametersInfo(SPI_GETFONTSMOOTHINGTYPE, 0, &smoothing, 0);
+        renderTarget->SetTextAntialiasMode(smoothing == FE_FONTSMOOTHINGCLEARTYPE
+            ? D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        impl_->opaqueBitmap = bitmap;
+        impl_->opaqueRenderTarget = renderTarget;
+        opaqueWidth_ = width;
+        opaqueHeight_ = height;
+        return true;
     }
 
     // One DirectWrite layout per visual line. A visual line is a line of the text (split at '\n';
