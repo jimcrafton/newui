@@ -2760,6 +2760,16 @@ namespace newui {
         controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
     }
 
+    void TextControl::restyle() {
+        if (styleSheet_ == nullptr) {
+            return;
+        }
+        text::ExpandedTextStyles expanded = text::expandTextStyles(*styleSheet_, styledRanges_);
+        setColorRuns(std::move(expanded.colorRuns));
+        setFontRuns(std::move(expanded.fontRuns));
+        setDecorations(std::move(expanded.decorations));
+    }
+
     void TextControl::paint(BLContext& ctx) {
         Rect clientBounds = getClientBounds();
         if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {

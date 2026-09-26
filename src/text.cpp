@@ -552,6 +552,8 @@ namespace newui::text {
                 ctx.stroke_round_rect(r.left() + thickness * 0.5, r.top() + thickness * 0.5,
                     r.width() - thickness, r.height() - thickness, decoration.radius);
                 break;
+            case TextDecorationKind::None:
+                break;
             }
         }
         ctx.restore();
@@ -757,6 +759,12 @@ namespace newui::text {
             }
             if (run.strikethrough) {
                 layout->SetStrikethrough(TRUE, range);
+            }
+            if (!run.fontName.empty()) {
+                layout->SetFontFamilyName(utf8ToWide(run.fontName).c_str(), range);
+            }
+            if (run.fontSize > 0.0f) {
+                layout->SetFontSize(run.fontSize, range);
             }
         }
 

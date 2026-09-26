@@ -650,10 +650,13 @@ namespace newui::text {
         bool italic = false;
         bool underline = false;
         bool strikethrough = false;
+        std::string fontName;   // empty: the control's font family
+        float fontSize = 0.0f;  // 0: the control's font size
 
         bool operator==(const TextFontRun& other) const {
             return start == other.start && length == other.length && bold == other.bold
-                && italic == other.italic && underline == other.underline && strikethrough == other.strikethrough;
+                && italic == other.italic && underline == other.underline && strikethrough == other.strikethrough
+                && fontName == other.fontName && fontSize == other.fontSize;
         }
         bool operator!=(const TextFontRun& other) const { return !(*this == other); }
     };
@@ -665,7 +668,8 @@ namespace newui::text {
     // problem), a straight underline, a box or rounded box around it, or a fill behind it. A range
     // that wraps gets one per line it covers. start/length are UTF-16 code units, like
     // TextColorRun.
-    enum class TextDecorationKind { Squiggle, Underline, Box, RoundBox, Background };
+    // None (last, so the others keep their values): nothing - e.g. a TextStyle without one.
+    enum class TextDecorationKind { Squiggle, Underline, Box, RoundBox, Background, None };
 
     struct TextDecoration {
         std::size_t start = 0;

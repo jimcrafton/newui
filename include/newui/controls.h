@@ -14,6 +14,7 @@
 #include <newui/geometry.h>
 #include <newui/subview.h>
 #include <newui/text.h>
+#include <newui/textstyle.h>
 #include <newui/viewstyle.h>
 
 #include <blend2d/blend2d.h>
@@ -1898,6 +1899,20 @@ namespace newui {
         //@reflect ignore=true
         void setFontRuns(std::vector<text::TextFontRun> runs) { controller_->setFontRuns(std::move(runs)); onContentSizeChanged(*this); }
 
+        // Styling by name instead of raw runs: ranges name TextStyles in the sheet, and are
+        // expanded into color runs, font runs and decorations (text::expandTextStyles()), replacing
+        // whatever those held. Swapping the sheet (a light/dark theme, say) restyles the same
+        // ranges; so does restyle() after editing a style in place. The sheet may be shared.
+        //@reflect ignore=true
+        void setStyleSheet(std::shared_ptr<const TextStyleSheet> sheet) { styleSheet_ = std::move(sheet); restyle(); }
+        //@reflect ignore=true
+        const std::shared_ptr<const TextStyleSheet>& styleSheet() const { return styleSheet_; }
+        //@reflect ignore=true
+        void setStyledRanges(std::vector<text::TextStyleRange> ranges) { styledRanges_ = std::move(ranges); restyle(); }
+        //@reflect ignore=true
+        const std::vector<text::TextStyleRange>& styledRanges() const { return styledRanges_; }
+        void restyle();
+
         // See TextController::setDecorations().
         //@reflect ignore=true
         const std::vector<text::TextDecoration>& decorations() const { return controller_->decorations(); }
@@ -1946,6 +1961,8 @@ namespace newui {
         SyncReturn handleModelChanged(Model& sender);
 
         std::unique_ptr<TextController> controller_;
+        std::shared_ptr<const TextStyleSheet> styleSheet_;
+        std::vector<text::TextStyleRange> styledRanges_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
 

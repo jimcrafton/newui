@@ -4142,3 +4142,109 @@ TEST(TextControlFontRuns, ItalicChangesTheDrawnGlyphs) {
 
     EXPECT_NE(scanInk(italic, 400, 40).pixels, scanInk(plain, 400, 40).pixels);
 }
+
+#include "newui/reflectionio.h"
+#include "newui/textstyle.h"
+
+namespace {
+    std::shared_ptr<TextStyleSheet> sampleSheet(const Color& keywordColor) {
+        auto sheet = std::make_shared<TextStyleSheet>();
+        auto* keyword = new TextStyle("keyword");
+        keyword->setBold(true);
+        keyword->setColor(keywordColor);
+        sheet->addStyle(keyword);
+        auto* comment = new TextStyle("comment");
+        comment->setItalic(true);
+        comment->setBackgroundColor(Color(1.0f, 1.0f, 0.0f, 1.0f));
+        sheet->addStyle(comment);
+        auto* error = new TextStyle("error");
+        error->setDecoration(text::TextDecorationKind::Squiggle);
+        error->setDecorationColor(Color(1.0f, 0.0f, 0.0f, 1.0f));
+        sheet->addStyle(error);
+        return sheet;
+    }
+}
+
+TEST(TextStyles, ExpandTurnsEachStyleIntoRunsAndDecorations) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, {
+        { 0, 4, "keyword" }, { 5, 6, "comment" }, { 12, 3, "error" }, { 16, 2, "noSuchStyle" } });
+
+    ASSERT_EQ(out.colorRuns.size(), 1u) << "only keyword sets a color";
+    EXPECT_EQ(out.colorRuns[0].start, 0u);
+    EXPECT_EQ(out.colorRuns[0].color, Color(0.0f, 0.0f, 1.0f, 1.0f));
+
+    ASSERT_EQ(out.fontRuns.size(), 2u);
+    EXPECT_TRUE(out.fontRuns[0].bold);
+    EXPECT_TRUE(out.fontRuns[1].italic);
+
+    ASSERT_EQ(out.decorations.size(), 2u);
+    EXPECT_EQ(out.decorations[0].kind, text::TextDecorationKind::Background);
+    EXPECT_EQ(out.decorations[0].start, 5u);
+    EXPECT_EQ(out.decorations[1].kind, text::TextDecorationKind::Squiggle);
+    EXPECT_EQ(out.decorations[1].start, 12u);
+}
+
+TEST(TextStyles, ATextControlStylesItsRangesAndRestylesWhenTheSheetChanges) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"auto x = 1; // note");
+    textControl.setStyledRanges({ { 0, 4, "keyword" }, { 12, 7, "comment" } });
+    EXPECT_TRUE(textControl.colorRuns().empty()) << "nothing to resolve names against yet";
+
+    textControl.setStyleSheet(sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f)));
+    ASSERT_EQ(textControl.colorRuns().size(), 1u);
+    EXPECT_EQ(textControl.fontRuns().size(), 2u);
+    EXPECT_EQ(textControl.decorations().size(), 1u);
+
+    textControl.setStyleSheet(sampleSheet(Color(0.0f, 0.5f, 0.0f, 1.0f)));   // a different theme
+    ASSERT_EQ(textControl.colorRuns().size(), 1u);
+    EXPECT_EQ(textControl.colorRuns()[0].color, Color(0.0f, 0.5f, 0.0f, 1.0f));
+}
+
+TEST(TextStyles, AStyleFontSizeChangesTheLayout) {
+    auto sheet = std::make_shared<TextStyleSheet>();
+    auto* big = new TextStyle("big");
+    big->setFontSize(36.0f);
+    sheet->addStyle(big);
+
+    TextControl plain;
+    plain.setBounds(Rect(0, 0, 400, 80));
+    plain.setText(L"small BIG");
+    plain.controller().ensureLayoutUpToDate();
+    const std::vector<Rect> plainRects = plain.controller().layoutEngine().hitTestRange(text::TextRange(6, 3));
+
+    TextControl styled;
+    styled.setBounds(Rect(0, 0, 400, 80));
+    styled.setText(L"small BIG");
+    styled.setStyleSheet(sheet);
+    styled.setStyledRanges({ { 6, 3, "big" } });
+    styled.controller().ensureLayoutUpToDate();
+    const std::vector<Rect> bigRects = styled.controller().layoutEngine().hitTestRange(text::TextRange(6, 3));
+
+    ASSERT_FALSE(plainRects.empty());
+    ASSERT_FALSE(bigRects.empty());
+    EXPECT_GT(bigRects[0].width(), plainRects[0].width() * 1.5f);
+}
+
+TEST(TextStyles, AStyleSheetSurvivesSaveAndLoad) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    sheet->setName("lightTheme");
+    reflection::ObjectWriter writer;
+    writer.write(sheet.get());
+
+    reflection::ObjectReader reader;
+    ASSERT_FALSE(json5::from_string(json5::to_string(writer.doc), reader.doc));
+    std::unique_ptr<TextStyleSheet> loaded(reader.readNew<TextStyleSheet>());
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->name(), "lightTheme");
+    ASSERT_EQ(loaded->styles().size(), 3u);
+    TextStyle* keyword = loaded->style("keyword");
+    ASSERT_NE(keyword, nullptr);
+    EXPECT_TRUE(keyword->isBold());
+    EXPECT_EQ(keyword->color(), Color(0.0f, 0.0f, 1.0f, 1.0f));
+    TextStyle* error = loaded->style("error");
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->decoration(), text::TextDecorationKind::Squiggle);
+    EXPECT_TRUE(loaded->style("comment")->isItalic());
+}
