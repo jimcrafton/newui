@@ -12,6 +12,7 @@
 #include <any>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -377,7 +378,7 @@ namespace newui::text {
         bool empty() const { return text_.empty(); }
 
         const std::wstring& text() const { return text_; }
-        void setText(const std::wstring& text) { text_ = text; }
+        void setText(const std::wstring& text) { text_ = text; lineStartsValid_ = false; }
 
         // The character at offset, or L'\0' if offset is out of range -
         // never throws (a caret one past the last character, or a stale
@@ -389,6 +390,51 @@ namespace newui::text {
         // length() - a range that runs past the end returns however much
         // of it actually exists rather than throwing.
         std::wstring substring(const TextRange& range) const;
+
+        // Range-based reads: everything a reader needs without assuming the
+        // content is one contiguous string (text() above is the exception,
+        // and only a convenience). Anything that runs per keystroke or per
+        // frame should use these. All clamp like substring() does.
+
+        // Appends the characters range covers to out.
+        void appendTo(const TextRange& range, std::wstring& out) const;
+
+        // The offset of the first ch at or after from, or npos.
+        static constexpr size_t npos = static_cast<size_t>(-1);
+        size_t find(wchar_t ch, size_t from = 0) const;
+
+        // How many ch fall inside range.
+        size_t count(wchar_t ch, const TextRange& range) const;
+
+        // Calls visit with each contiguous stretch of range, in order.
+        void forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const;
+
+        // Whole-content comparisons against a plain string, without copying
+        // this one: equality, the length of the shared start, and of the
+        // shared end (at most limit characters - callers pass what's left
+        // after the shared start so the two can't overlap).
+        bool equals(const std::wstring& other) const;
+        size_t commonPrefixLength(const std::wstring& other) const;
+        size_t commonSuffixLength(const std::wstring& other, size_t limit) const;
+
+        // Line breaks are "\n", "\r\n" and a lone '\r' - the one rule the
+        // layout engine, the folding gutter and the lexer all share.
+        // findLineBreak() is the offset of the first break starting at or
+        // after from (from must not be the '\n' of a "\r\n"), or npos, and
+        // sets *terminatorLength (if given) to 1 or 2. countLineBreaks() is
+        // how many breaks start inside range (a "\r\n" counts once, at its
+        // '\r').
+        size_t findLineBreak(size_t from, size_t* terminatorLength = nullptr) const;
+        size_t countLineBreaks(const TextRange& range) const;
+
+        // Lines: a line ends at a break. Always at least one line; an empty
+        // one after a final break. Not thread-safe (the index is built
+        // lazily) - UI thread only.
+        size_t lineCount() const;
+        // The offset line starts at (length() for a line past the last).
+        size_t lineStart(size_t line) const;
+        // The line offset is on (offset clamped to length()).
+        size_t lineOfOffset(size_t offset) const;
 
         // Inserts text at offset (clamped to [0, length()]) - equivalent
         // to replace(TextRange(offset, 0), text).
@@ -404,7 +450,11 @@ namespace newui::text {
         void replace(const TextRange& range, const std::wstring& replacement);
 
     private:
+        void buildLineStarts() const;
+
         std::wstring text_;
+        mutable std::vector<size_t> lineStarts_;   // built on demand, dropped by every edit
+        mutable bool lineStartsValid_ = false;
     };
 
     // Wraps TextStorage as a Model (models.h) - the "storage vs.
@@ -905,7 +955,7 @@ namespace newui::text {
         // no layout has been built yet.
         float contentHeight() const;
 
-        // The text is laid out one visual line (split at '\n'; "\r\n" is one break) per layout,
+        // The text is laid out one visual line (split at "\n", "\r\n" or a lone '\r') per layout,
         // so an edit re-lays out only the lines it touched and drawing covers only visible lines.
         // A collapsed fold joins the lines it spans into one. Always at least one line once
         // update() has succeeded.

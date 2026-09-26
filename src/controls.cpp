@@ -2332,7 +2332,7 @@ namespace newui {
         if (decorations_.empty()) {
             return;
         }
-        const std::size_t textLength = model().text().size();
+        const std::size_t textLength = model().length();
         ctx.save();
         ctx.translate(0.0f, -scrollOffsetY_);
         for (const text::TextDecoration& decoration : decorations_) {
@@ -2359,8 +2359,8 @@ namespace newui {
         float width = 0.0f;
         if (overwriteMode_ && caret_.position().isValid()) {
             const std::size_t offset = caret_.position().offset();
-            const std::wstring& text = model().text();
-            if (offset < text.size() && text[offset] != L'\n' && text[offset] != L'\r') {
+            const text::TextStorage& storage = model().storage();
+            if (offset < storage.length() && storage.at(offset) != L'\n' && storage.at(offset) != L'\r') {
                 const std::vector<Rect> rects = layoutEngine_.hitTestRange(text::TextRange(offset, 1));
                 width = rects.empty() ? 0.0f : rects.front().width();
             }
@@ -2563,16 +2563,16 @@ namespace newui {
             return;
         }
 
-        const std::wstring& text = model().text();
-        if (text.empty()) {
+        const text::TextStorage& chars = model().storage();
+        if (chars.empty()) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
             owner_.style().markDirty();
             return;
         }
 
-        size_t offset = (hitPos.offset() < text.size()) ? hitPos.offset() : (text.size() - 1);
-        if (!isTextEditingWordChar(text[offset])) {
+        size_t offset = (hitPos.offset() < chars.length()) ? hitPos.offset() : (chars.length() - 1);
+        if (!isTextEditingWordChar(chars.at(offset))) {
             clearSelection();
             caret_.setPosition(hitPos);
             owner_.style().markDirty();
@@ -2580,11 +2580,11 @@ namespace newui {
         }
 
         size_t start = offset;
-        while (start > 0 && isTextEditingWordChar(text[start - 1])) {
+        while (start > 0 && isTextEditingWordChar(chars.at(start - 1))) {
             --start;
         }
         size_t end = offset;
-        while (end < text.size() && isTextEditingWordChar(text[end])) {
+        while (end < chars.length() && isTextEditingWordChar(chars.at(end))) {
             ++end;
         }
 
@@ -2693,8 +2693,8 @@ namespace newui {
             insertAt = range.start() + 1;
         } else {
             insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
-            const std::wstring& text = model().text();
-            if (overwriteMode_ && insertAt < text.size() && text[insertAt] != L'\n' && text[insertAt] != L'\r') {
+            const text::TextStorage& storage = model().storage();
+            if (overwriteMode_ && insertAt < storage.length() && storage.at(insertAt) != L'\n' && storage.at(insertAt) != L'\r') {
                 model().replace(text::TextRange(insertAt, 1), std::wstring(1, ch));
             } else {
                 model().insert(insertAt, std::wstring(1, ch));

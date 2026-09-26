@@ -245,6 +245,133 @@ TEST(TextStorage, ReplaceWithEmptyRangeActsAsInsert) {
     EXPECT_EQ(storage.text(), L"helled");
 }
 
+TEST(TextStorage, AppendToAddsTheClampedRangeToWhatIsThere) {
+    TextStorage storage(L"hello world");
+    std::wstring out = L">";
+    storage.appendTo(TextRange(6, 5), out);
+    storage.appendTo(TextRange(9, 100), out);   // clamped
+    storage.appendTo(TextRange(50, 5), out);    // past the end: nothing
+    EXPECT_EQ(out, L">worldld");
+}
+
+TEST(TextStorage, FindLocatesTheFirstMatchFromAnOffset) {
+    TextStorage storage(L"a\nb\nc");
+    EXPECT_EQ(storage.find(L'\n'), 1u);
+    EXPECT_EQ(storage.find(L'\n', 2), 3u);
+    EXPECT_EQ(storage.find(L'\n', 4), TextStorage::npos);
+    EXPECT_EQ(storage.find(L'z'), TextStorage::npos);
+    EXPECT_EQ(storage.find(L'a', 1000), TextStorage::npos);
+}
+
+TEST(TextStorage, CountCountsWithinTheClampedRange) {
+    TextStorage storage(L"a\nb\nc\n");
+    EXPECT_EQ(storage.count(L'\n', TextRange(0, 6)), 3u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(2, 2)), 1u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(0, 100)), 3u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(100, 5)), 0u);
+}
+
+TEST(TextStorage, ForEachChunkVisitsTheWholeRangeInOrder) {
+    TextStorage storage(L"hello world");
+    std::wstring seen;
+    storage.forEachChunk(TextRange(3, 100), [&](const wchar_t* data, size_t length) { seen.append(data, length); });
+    EXPECT_EQ(seen, L"lo world");
+
+    int calls = 0;
+    storage.forEachChunk(TextRange(50, 5), [&](const wchar_t*, size_t) { ++calls; });
+    EXPECT_EQ(calls, 0);
+}
+
+TEST(TextStorage, EqualsAndCommonPrefixAndSuffixCompareWithoutCopying) {
+    TextStorage storage(L"hello world");
+    EXPECT_TRUE(storage.equals(L"hello world"));
+    EXPECT_FALSE(storage.equals(L"hello worle"));
+    EXPECT_EQ(storage.commonPrefixLength(L"hello there"), 6u);
+    EXPECT_EQ(storage.commonPrefixLength(L"hello"), 5u);
+    EXPECT_EQ(storage.commonPrefixLength(L"xyz"), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 100), 10u);
+    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 4), 4u);   // limited
+    EXPECT_EQ(storage.commonSuffixLength(L"xyz", 100), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(L"world", 100), 5u);
+}
+
+TEST(TextStorage, EmptyStorageHasOneEmptyLine) {
+    TextStorage storage;
+    EXPECT_EQ(storage.lineCount(), 1u);
+    EXPECT_EQ(storage.lineStart(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(50), 0u);
+}
+
+TEST(TextStorage, LinesEndAtNewlineAndAFinalNewlineStartsAnEmptyLine) {
+    TextStorage storage(L"ab\ncd\n");
+    EXPECT_EQ(storage.lineCount(), 3u);
+    EXPECT_EQ(storage.lineStart(0), 0u);
+    EXPECT_EQ(storage.lineStart(1), 3u);
+    EXPECT_EQ(storage.lineStart(2), 6u);
+    EXPECT_EQ(storage.lineStart(3), 6u);   // past the last: length()
+    EXPECT_EQ(storage.lineOfOffset(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(2), 0u);   // the '\n' itself is on line 0
+    EXPECT_EQ(storage.lineOfOffset(3), 1u);
+    EXPECT_EQ(storage.lineOfOffset(6), 2u);
+    EXPECT_EQ(storage.lineOfOffset(1000), 2u);
+}
+
+TEST(TextStorage, CrLfIsOneBreakAndALoneCrIsABreakToo) {
+    TextStorage storage(L"a\r\nb\rc\r\nd");
+    EXPECT_EQ(storage.lineCount(), 4u);
+    EXPECT_EQ(storage.lineStart(1), 3u);
+    EXPECT_EQ(storage.lineStart(2), 5u);
+    EXPECT_EQ(storage.lineStart(3), 8u);
+    EXPECT_EQ(storage.lineOfOffset(2), 0u);   // between the '\r' and '\n': still line 0
+    EXPECT_EQ(storage.lineOfOffset(4), 1u);   // the lone '\r'
+    EXPECT_EQ(storage.lineOfOffset(5), 2u);
+}
+
+TEST(TextStorage, ATrailingCrStartsAnEmptyLineAndCrCrIsTwoBreaks) {
+    EXPECT_EQ(TextStorage(L"a\r").lineCount(), 2u);
+    EXPECT_EQ(TextStorage(L"a\r\r").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(L"a\r\n\r\n").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(L"\n\r").lineCount(), 3u);
+}
+
+TEST(TextStorage, FindLineBreakReportsTheBreakAndItsLength) {
+    TextStorage storage(L"ab\r\ncd\ref\ngh");
+    size_t length = 0;
+    EXPECT_EQ(storage.findLineBreak(0, &length), 2u);
+    EXPECT_EQ(length, 2u);   // "\r\n"
+    EXPECT_EQ(storage.findLineBreak(4, &length), 6u);
+    EXPECT_EQ(length, 1u);   // a lone '\r'
+    EXPECT_EQ(storage.findLineBreak(7, &length), 9u);
+    EXPECT_EQ(length, 1u);   // '\n'
+    EXPECT_EQ(storage.findLineBreak(10), TextStorage::npos);
+    EXPECT_EQ(TextStorage(L"end\r").findLineBreak(0, &length), 3u);
+    EXPECT_EQ(length, 1u);   // a '\r' at the very end has nothing to pair with
+}
+
+TEST(TextStorage, CountLineBreaksCountsACrLfOnceAndOnlyBreaksStartingInRange) {
+    TextStorage storage(L"a\r\nb\rc\nd");
+    EXPECT_EQ(storage.countLineBreaks(TextRange(0, 100)), 3u);
+    EXPECT_EQ(storage.countLineBreaks(TextRange(0, 2)), 1u);    // "a\r": the break starts inside
+    EXPECT_EQ(storage.countLineBreaks(TextRange(2, 1)), 0u);    // just the '\n' half of a "\r\n"
+    EXPECT_EQ(storage.countLineBreaks(TextRange(3, 5)), 2u);
+    EXPECT_EQ(storage.countLineBreaks(TextRange(100, 5)), 0u);
+}
+
+TEST(TextStorage, TheLineIndexFollowsEdits) {
+    TextStorage storage(L"one\ntwo");
+    EXPECT_EQ(storage.lineCount(), 2u);
+    storage.insert(3, L"\nand a half");
+    EXPECT_EQ(storage.lineCount(), 3u);
+    EXPECT_EQ(storage.lineStart(2), 15u);
+    storage.remove(TextRange(3, 11));
+    EXPECT_EQ(storage.lineCount(), 2u);
+    storage.setText(L"x");
+    EXPECT_EQ(storage.lineCount(), 1u);
+    storage.replace(TextRange(0, 1), L"\n\n\n");
+    EXPECT_EQ(storage.lineCount(), 4u);
+}
+
 TEST(Caret, DefaultConstructedIsInactiveAndNotVisible) {
     Caret caret;
     EXPECT_FALSE(caret.isActive());
@@ -1388,6 +1515,58 @@ TEST(TextLayoutEngine, SplitsTheTextIntoLinesAtEachBreak) {
     EXPECT_GT(engine.lineTop(1), engine.lineTop(0));
     EXPECT_FLOAT_EQ(engine.lineTop(2), engine.lineTop(1) + engine.lineHeight(1));
     EXPECT_FLOAT_EQ(engine.contentHeight(), engine.lineTop(2) + engine.lineHeight(2));
+}
+
+TEST(TextLayoutEngine, ALoneCrBreaksALineToo) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"a\rbb\r\nccc\rd");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 4u);
+    EXPECT_EQ(engine.lineStart(1), 2u);
+    EXPECT_EQ(engine.lineLength(1), 2u);
+    EXPECT_EQ(engine.lineStart(2), 6u);
+    EXPECT_EQ(engine.lineLength(2), 3u);
+    EXPECT_EQ(engine.lineStart(3), 10u);
+    EXPECT_EQ(engine.lineLength(3), 1u);
+}
+
+namespace {
+    // The edit-aware update against a from-scratch one on the same final text.
+    void expectSameLines(const TextLayoutEngine& a, const TextLayoutEngine& b) {
+        ASSERT_EQ(a.lineCount(), b.lineCount());
+        for (std::size_t i = 0; i < a.lineCount(); ++i) {
+            EXPECT_EQ(a.lineStart(i), b.lineStart(i)) << "line " << i;
+            EXPECT_EQ(a.lineLength(i), b.lineLength(i)) << "line " << i;
+        }
+    }
+}
+
+TEST(TextLayoutEngine, EditsThatMakeOrBreakACrLfPairMatchAFreshLayout) {
+    struct Case { const wchar_t* before; std::size_t at; std::size_t remove; const wchar_t* insert; };
+    const Case cases[] = {
+        { L"a\rb\nc", 2, 0, L"\n" },       // '\n' typed after a '\r': "\r\n"
+        { L"a\r\nb\nc", 2, 1, L"" },       // its '\n' deleted: a lone '\r' again
+        { L"a\r\nb\nc", 1, 1, L"" },       // its '\r' deleted
+        { L"a\nb\nc", 1, 0, L"\r" },       // '\r' typed before a '\n'
+        { L"a\nb\nc", 1, 0, L"x\r" },      // text ending in '\r' typed before a '\n'
+        { L"a\rb\rc", 2, 0, L"\n\r" },
+        { L"a\r\rb", 2, 0, L"\n" },        // between two lone '\r's
+        { L"one\r\ntwo\r\nthree", 5, 3, L"" },   // a whole line removed
+    };
+    for (const Case& c : cases) {
+        TextLayoutEngine incremental;
+        newui::Font font;
+        TextStorage storage(c.before);
+        ASSERT_TRUE(incremental.update(storage, font, 500.0f, 200.0f));
+        storage.replace(TextRange(c.at, c.remove), c.insert);
+        ASSERT_TRUE(incremental.update(storage, font, 500.0f, 200.0f));
+
+        TextLayoutEngine fresh;
+        ASSERT_TRUE(fresh.update(storage, font, 500.0f, 200.0f));
+        expectSameLines(incremental, fresh);
+    }
 }
 
 TEST(TextLayoutEngine, EmptyAndTrailingLinesHaveARealHeight) {

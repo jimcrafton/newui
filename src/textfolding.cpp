@@ -26,8 +26,7 @@ namespace newui {
     }
 
     void TextFoldingController::countTextLines() {
-        const std::wstring& text = model().text();
-        textLineCount_ = 1 + static_cast<std::size_t>(std::count(text.begin(), text.end(), L'\n'));
+        textLineCount_ = model().storage().lineCount();
     }
 
     namespace {

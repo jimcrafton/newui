@@ -264,6 +264,127 @@ namespace newui::text {
         return text_.substr(clampedStart, clampedEnd - clampedStart);
     }
 
+    void TextStorage::appendTo(const TextRange& range, std::wstring& out) const {
+        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
+        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
+        if (start < end) {
+            out.append(text_, start, end - start);
+        }
+    }
+
+    size_t TextStorage::find(wchar_t ch, size_t from) const {
+        const size_t found = text_.find(ch, from);
+        return found == std::wstring::npos ? npos : found;
+    }
+
+    size_t TextStorage::count(wchar_t ch, const TextRange& range) const {
+        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
+        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
+        if (start >= end) {
+            return 0;
+        }
+        return static_cast<size_t>(std::count(text_.begin() + static_cast<std::ptrdiff_t>(start),
+            text_.begin() + static_cast<std::ptrdiff_t>(end), ch));
+    }
+
+    void TextStorage::forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const {
+        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
+        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
+        if (start < end) {
+            visit(text_.data() + start, end - start);
+        }
+    }
+
+    bool TextStorage::equals(const std::wstring& other) const {
+        return text_ == other;
+    }
+
+    size_t TextStorage::commonPrefixLength(const std::wstring& other) const {
+        const size_t shorter = text_.size() < other.size() ? text_.size() : other.size();
+        size_t n = 0;
+        while (n < shorter && text_[n] == other[n]) {
+            ++n;
+        }
+        return n;
+    }
+
+    size_t TextStorage::commonSuffixLength(const std::wstring& other, size_t limit) const {
+        const size_t shorter = text_.size() < other.size() ? text_.size() : other.size();
+        const size_t max = limit < shorter ? limit : shorter;
+        size_t n = 0;
+        while (n < max && text_[text_.size() - 1 - n] == other[other.size() - 1 - n]) {
+            ++n;
+        }
+        return n;
+    }
+
+    void TextStorage::buildLineStarts() const {
+        lineStarts_.clear();
+        lineStarts_.push_back(0);
+        for (size_t i = 0; i < text_.size(); ++i) {
+            if (text_[i] == L'\r' && i + 1 < text_.size() && text_[i + 1] == L'\n') {
+                ++i;   // "\r\n" is one break
+            }
+            if (text_[i] == L'\n' || text_[i] == L'\r') {
+                lineStarts_.push_back(i + 1);
+            }
+        }
+        lineStartsValid_ = true;
+    }
+
+    size_t TextStorage::findLineBreak(size_t from, size_t* terminatorLength) const {
+        for (size_t i = from; i < text_.size(); ++i) {
+            if (text_[i] == L'\n') {
+                if (terminatorLength != nullptr) {
+                    *terminatorLength = 1;
+                }
+                return i;
+            }
+            if (text_[i] == L'\r') {
+                if (terminatorLength != nullptr) {
+                    *terminatorLength = i + 1 < text_.size() && text_[i + 1] == L'\n' ? 2 : 1;
+                }
+                return i;
+            }
+        }
+        return npos;
+    }
+
+    size_t TextStorage::countLineBreaks(const TextRange& range) const {
+        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
+        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
+        size_t breaks = 0;
+        for (size_t i = start; i < end; ++i) {
+            if (text_[i] == L'\r' || (text_[i] == L'\n' && (i == 0 || text_[i - 1] != L'\r'))) {
+                ++breaks;
+            }
+        }
+        return breaks;
+    }
+
+    size_t TextStorage::lineCount() const {
+        if (!lineStartsValid_) {
+            buildLineStarts();
+        }
+        return lineStarts_.size();
+    }
+
+    size_t TextStorage::lineStart(size_t line) const {
+        if (!lineStartsValid_) {
+            buildLineStarts();
+        }
+        return line < lineStarts_.size() ? lineStarts_[line] : text_.size();
+    }
+
+    size_t TextStorage::lineOfOffset(size_t offset) const {
+        if (!lineStartsValid_) {
+            buildLineStarts();
+        }
+        const size_t clamped = offset < text_.size() ? offset : text_.size();
+        // The last line starting at or before clamped.
+        return static_cast<size_t>(std::upper_bound(lineStarts_.begin(), lineStarts_.end(), clamped) - lineStarts_.begin()) - 1;
+    }
+
     void TextStorage::insert(size_t offset, const std::wstring& text) {
         replace(TextRange(offset, 0), text);
     }
@@ -279,6 +400,7 @@ namespace newui::text {
             clampedEnd = clampedStart;
         }
         text_.replace(clampedStart, clampedEnd - clampedStart, replacement);
+        lineStartsValid_ = false;
     }
 
     bool TextModel::fireBeforeChar(size_t offset, wchar_t ch, CharChangeKind kind) {
@@ -805,7 +927,7 @@ namespace newui::text {
         return true;
     }
 
-    // One DirectWrite layout per visual line. A visual line is a line of the text (split at '\n';
+    // One DirectWrite layout per visual line. A visual line is a line of the text (split at "\n", "\r\n" or a lone '\r';
     // a "\r\n" pair is one break) - or, where a collapsed TextFold hides text, the lines it joins:
     // the text before the fold, its placeholder, then the text after it. Segments map the
     // layout's characters back to the text. An edit re-lays out only the lines it touched, and
@@ -822,6 +944,7 @@ namespace newui::text {
             std::size_t start = 0;       // the text offset the line starts at
             std::size_t length = 0;      // its span of the text (hidden text included), not counting the line break
             std::size_t terminator = 0;  // the break's length: 0 (the last line), 1 or 2
+            bool terminatorIsCr = false; // a lone '\r' (else '\n' - or "\r\n", terminator 2)
             std::size_t textLine = 0;    // the line of the text it starts on
             std::size_t textLines = 1;   // how many lines of the text it shows (a collapsed fold joins several)
             float baseline = 0.0f;       // its first row's, from top
@@ -970,12 +1093,12 @@ namespace newui::text {
             return false;
         }
 
-        const std::wstring& text = storage.text();
+        const std::size_t textSize = storage.length();
 
         // Only collapsed folds matter here, outermost first where they start together.
         std::vector<TextFold> collapsed;
         for (const TextFold& fold : folds) {
-            if (fold.collapsed && fold.length > 0 && fold.start < text.size()) {
+            if (fold.collapsed && fold.length > 0 && fold.start < textSize) {
                 collapsed.push_back(fold);
             }
         }
@@ -988,7 +1111,7 @@ namespace newui::text {
             && lastMaxHeight_ == maxHeight
             && lastWordWrap_ == wordWrap
             && lastTabWidth_ == tabWidth;
-        if (sameShape && !impl_->lines.empty() && lastText_ == text && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
+        if (sameShape && !impl_->lines.empty() && storage.equals(lastText_) && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
             return true;
         }
 
@@ -1022,32 +1145,30 @@ namespace newui::text {
                 Impl::Line line;
                 line.start = pos;
                 while (true) {
-                    const std::size_t newline = text.find(L'\n', pos);
-                    const std::size_t end = newline == std::wstring::npos ? text.size() : newline;
+                    std::size_t breakLength = 0;
+                    const std::size_t lineBreak = storage.findLineBreak(pos, &breakLength);
+                    const std::size_t end = lineBreak == TextStorage::npos ? textSize : lineBreak;
                     while (nextFold < collapsed.size() && collapsed[nextFold].start < pos) {
                         ++nextFold;   // inside text an earlier fold already hides
                     }
                     if (nextFold < collapsed.size() && collapsed[nextFold].start <= end) {
                         const TextFold& fold = collapsed[nextFold++];
-                        const std::size_t foldEnd = fold.start + fold.length < text.size() ? fold.start + fold.length : text.size();
+                        const std::size_t foldEnd = fold.start + fold.length < textSize ? fold.start + fold.length : textSize;
                         line.segments.push_back({ pos, line.text.size(), fold.start - pos });
-                        line.text.append(text, pos, fold.start - pos);
+                        storage.appendTo(TextRange(pos, fold.start - pos), line.text);
                         line.placeholders.push_back({ line.text.size(), fold.placeholder.size(), fold.start, foldEnd });
                         line.text += fold.placeholder;
-                        line.textLines += static_cast<std::size_t>(std::count(text.begin() + fold.start, text.begin() + foldEnd, L'\n'));
+                        line.textLines += storage.countLineBreaks(TextRange(fold.start, foldEnd - fold.start));
                         pos = foldEnd;
                         continue;
                     }
-                    std::size_t contentEnd = end;
-                    if (newline != std::wstring::npos && contentEnd > pos && text[contentEnd - 1] == L'\r') {
-                        --contentEnd;
-                    }
-                    line.segments.push_back({ pos, line.text.size(), contentEnd - pos });
-                    line.text.append(text, pos, contentEnd - pos);
-                    line.length = contentEnd - line.start;
-                    line.terminator = newline == std::wstring::npos ? 0 : newline + 1 - contentEnd;
-                    done = newline == std::wstring::npos;
-                    pos = done ? std::wstring::npos : newline + 1;
+                    line.segments.push_back({ pos, line.text.size(), end - pos });
+                    storage.appendTo(TextRange(pos, end - pos), line.text);
+                    line.length = end - line.start;
+                    line.terminator = lineBreak == TextStorage::npos ? 0 : breakLength;
+                    line.terminatorIsCr = lineBreak != TextStorage::npos && storage.at(lineBreak) == L'\r';
+                    done = lineBreak == TextStorage::npos;
+                    pos = done ? std::wstring::npos : lineBreak + breakLength;
                     break;
                 }
 
@@ -1078,21 +1199,17 @@ namespace newui::text {
 
         std::vector<Impl::Line>& lines = impl_->lines;
         bool edited = false;
-        if (sameShape && !lines.empty() && lastText_ != text) {
+        if (sameShape && !lines.empty() && !storage.equals(lastText_)) {
             // An edit: rebuild only the lines it touched. The text before it (prefix) and after it
             // (suffix) is unchanged, so are their lines - moved along by the edit's length -
             // provided their styling and folds are too. Otherwise, the full path below.
             const std::wstring& old = lastText_;
-            const std::size_t shorter = old.size() < text.size() ? old.size() : text.size();
-            std::size_t prefix = 0;
-            while (prefix < shorter && old[prefix] == text[prefix]) {
-                ++prefix;
-            }
-            std::size_t suffix = 0;
-            while (suffix < shorter - prefix && old[old.size() - 1 - suffix] == text[text.size() - 1 - suffix]) {
-                ++suffix;
-            }
-            const std::size_t first = impl_->lineForOffset(prefix);
+            const std::size_t shorter = old.size() < textSize ? old.size() : textSize;
+            const std::size_t prefix = storage.commonPrefixLength(old);
+            const std::size_t suffix = storage.commonSuffixLength(old, shorter - prefix);
+            // An edit right after a '\r' can turn it into half of a "\r\n" - the line it ends is
+            // touched too.
+            const std::size_t first = impl_->lineForOffset(prefix > 0 && storage.at(prefix - 1) == L'\r' ? prefix - 1 : prefix);
             // The first line after the edit whose preceding break is unchanged too.
             const std::size_t oldSuffixStart = old.size() - suffix;
             std::size_t keep = static_cast<std::size_t>(std::upper_bound(lines.begin(), lines.end(), oldSuffixStart,
@@ -1100,26 +1217,26 @@ namespace newui::text {
             keep = keep > first + 1 ? keep : first + 1;
             const std::size_t from = lines[first].start;
             const std::size_t oldStop = keep < lines.size() ? lines[keep].start : old.size();
-            const std::size_t newStop = keep < lines.size() ? oldStop - old.size() + text.size() : std::wstring::npos;
-            const std::size_t newSuffixStart = keep < lines.size() ? newStop : text.size();
+            const std::size_t newStop = keep < lines.size() ? oldStop - old.size() + textSize : std::wstring::npos;
+            const std::size_t newSuffixStart = keep < lines.size() ? newStop : textSize;
 
             const bool sameAround = runsWithin(lastFontRuns_, 0, from) == runsWithin(fontRuns, 0, from)
-                && runsWithin(lastFontRuns_, oldStop, old.size()) == runsWithin(fontRuns, newSuffixStart, text.size())
+                && runsWithin(lastFontRuns_, oldStop, old.size()) == runsWithin(fontRuns, newSuffixStart, textSize)
                 && foldsWithin(lastFolds_, 0, from) == foldsWithin(collapsed, 0, from)
-                && foldsWithin(lastFolds_, oldStop, old.size()) == foldsWithin(collapsed, newSuffixStart, text.size());
+                && foldsWithin(lastFolds_, oldStop, old.size()) == foldsWithin(collapsed, newSuffixStart, textSize);
             if (sameAround) {
                 std::vector<Impl::Line> rebuilt;
                 const std::size_t reached = build(from, newStop, rebuilt);
                 if (keep >= lines.size() || reached == newStop) {
                     for (std::size_t i = keep; i < lines.size(); ++i) {
                         Impl::Line& line = lines[i];
-                        line.start = line.start - old.size() + text.size();
+                        line.start = line.start - old.size() + textSize;
                         for (LayoutSegment& segment : line.segments) {
-                            segment.textStart = segment.textStart - old.size() + text.size();
+                            segment.textStart = segment.textStart - old.size() + textSize;
                         }
                         for (Impl::Placeholder& placeholder : line.placeholders) {
-                            placeholder.foldStart = placeholder.foldStart - old.size() + text.size();
-                            placeholder.foldEnd = placeholder.foldEnd - old.size() + text.size();
+                            placeholder.foldStart = placeholder.foldStart - old.size() + textSize;
+                            placeholder.foldEnd = placeholder.foldEnd - old.size() + textSize;
                         }
                     }
                     lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(first), lines.begin() + static_cast<std::ptrdiff_t>(keep));
@@ -1239,7 +1356,8 @@ namespace newui::text {
         }
 
         impl_->lastFormat = format;
-        lastText_ = text;
+        lastText_.clear();
+        storage.appendTo(TextRange(0, textSize), lastText_);
         lastMaxWidth_ = maxWidth;
         lastMaxHeight_ = maxHeight;
         lastWordWrap_ = wordWrap;
@@ -1427,14 +1545,13 @@ namespace newui::text {
                         mark(line, at, WhitespaceKind::Space, false);
                     } else if (ch == L'\t') {
                         mark(line, at, WhitespaceKind::Tab, false);
-                    } else if (ch == L'\r') {
-                        mark(line, at, WhitespaceKind::CarriageReturn, false);
                     }
                 }
             }
             if (line.terminator > 0) {
                 mark(line, line.text.size(),
-                    line.terminator == 2 ? WhitespaceKind::CarriageReturnLineFeed : WhitespaceKind::LineFeed, true);
+                    line.terminator == 2 ? WhitespaceKind::CarriageReturnLineFeed
+                        : line.terminatorIsCr ? WhitespaceKind::CarriageReturn : WhitespaceKind::LineFeed, true);
             }
         }
         return marks;
