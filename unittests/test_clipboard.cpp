@@ -345,3 +345,22 @@ TEST(ClipboardManager, GetImageReturnsFalseWhenClipboardHasNoImage) {
     BLImage read;
     EXPECT_FALSE(newui::ClipboardManager::getImage(read));
 }
+
+TEST(ClipboardManager, SetMimeDataSetPutsEveryFormatOnTheClipboardAtOnce) {
+    const std::vector<std::uint8_t> privateData = { 'a', 'b', 'c' };
+    ASSERT_TRUE(newui::ClipboardManager::setMimeDataSet({
+        { L"application/x-newui-test-multi", privateData },
+        { L"text/plain", newui::ClipboardManager::textMimeData(L"plain version") },
+    }));
+
+    std::vector<std::uint8_t> read;
+    ASSERT_TRUE(newui::ClipboardManager::getMimeData(L"application/x-newui-test-multi", read));
+    EXPECT_EQ(read, privateData);
+    std::wstring text;
+    ASSERT_TRUE(newui::ClipboardManager::getText(text));
+    EXPECT_EQ(text, L"plain version");
+}
+
+TEST(ClipboardManager, SetMimeDataSetWithNothingToWriteFails) {
+    EXPECT_FALSE(newui::ClipboardManager::setMimeDataSet({}));
+}
