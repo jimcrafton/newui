@@ -1199,4 +1199,41 @@ namespace newui::text {
     float TextLayoutEngine::lineBaseline(std::size_t line) const { return line < impl_->lines.size() ? impl_->lines[line].baseline : 0.0f; }
     std::size_t TextLayoutEngine::layoutsBuiltLastUpdate() const { return impl_->lastBuilt; }
 
+    std::vector<WhitespaceMark> TextLayoutEngine::whitespaceMarks(float top, float bottom) const {
+        std::vector<WhitespaceMark> marks;
+        const auto& lines = impl_->lines;
+        if (lines.empty()) {
+            return marks;
+        }
+        auto mark = [&marks](const Impl::Line& line, std::size_t layoutOffset, WhitespaceKind kind, bool zeroWidth) {
+            FLOAT x = 0.0f;
+            FLOAT y = 0.0f;
+            DWRITE_HIT_TEST_METRICS metrics{};
+            if (SUCCEEDED(line.layout->HitTestTextPosition(static_cast<UINT32>(layoutOffset), FALSE, &x, &y, &metrics))) {
+                marks.push_back({ kind, Rect(x, line.top + y, zeroWidth ? 0.0f : metrics.width, metrics.height) });
+            }
+        };
+        for (std::size_t i = impl_->lineForY(top); i < lines.size() && lines[i].top < bottom; ++i) {
+            const Impl::Line& line = lines[i];
+            for (const LayoutSegment& segment : line.segments) {   // placeholders aren't text
+                for (std::size_t k = 0; k < segment.length; ++k) {
+                    const std::size_t at = segment.layoutStart + k;
+                    const wchar_t ch = line.text[at];
+                    if (ch == L' ') {
+                        mark(line, at, WhitespaceKind::Space, false);
+                    } else if (ch == L'\t') {
+                        mark(line, at, WhitespaceKind::Tab, false);
+                    } else if (ch == L'\r') {
+                        mark(line, at, WhitespaceKind::CarriageReturn, false);
+                    }
+                }
+            }
+            if (line.terminator > 0) {
+                mark(line, line.text.size(),
+                    line.terminator == 2 ? WhitespaceKind::CarriageReturnLineFeed : WhitespaceKind::LineFeed, true);
+            }
+        }
+        return marks;
+    }
+
 }

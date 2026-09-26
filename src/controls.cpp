@@ -2377,6 +2377,61 @@ namespace newui {
         caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight, width);
     }
 
+    void TextController::drawWhitespace(BLContext& ctx, float visibleHeight) const {
+        if (!showsWhitespace_) {
+            return;
+        }
+        const std::vector<text::WhitespaceMark> marks = layoutEngine_.whitespaceMarks(scrollOffsetY_, scrollOffsetY_ + visibleHeight);
+        if (marks.empty()) {
+            return;
+        }
+        const BLRgba32 color = UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+        const Font labelFont(font_.name(), font_.size() * 0.55f);
+        BLFont* labelBlFont = labelFont.blFont();
+        const float labelAscent = labelFont.measureText("C").ascent;
+
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        ctx.set_fill_style(color);
+        ctx.set_stroke_style(color);
+        ctx.set_stroke_width(1.0);
+        for (const text::WhitespaceMark& mark : marks) {
+            const Rect& r = mark.rect;
+            const double midY = r.top() + r.height() * 0.5;
+            switch (mark.kind) {
+                case text::WhitespaceKind::Space:
+                    ctx.fill_circle(r.left() + r.width() * 0.5, midY, 1.2);
+                    break;
+                case text::WhitespaceKind::Tab: {
+                    const double left = r.left() + 2.0;
+                    const double right = r.left() + r.width() - 2.0;
+                    if (right > left) {
+                        ctx.stroke_line(left, midY, right, midY);
+                        ctx.stroke_line(right - 3.0, midY - 3.0, right, midY);
+                        ctx.stroke_line(right - 3.0, midY + 3.0, right, midY);
+                    }
+                    break;
+                }
+                default: {
+                    // Line endings (and a stray CR): a small boxed label.
+                    const char* label = mark.kind == text::WhitespaceKind::CarriageReturnLineFeed ? "CRLF"
+                        : mark.kind == text::WhitespaceKind::LineFeed ? "LF" : "CR";
+                    if (labelBlFont == nullptr) {
+                        break;
+                    }
+                    const float width = labelFont.measureText(label).width;
+                    const double boxLeft = std::floor(r.left() + 3.0) + 0.5;
+                    const double boxHeight = labelAscent + 3.0;
+                    const double boxTop = std::floor(midY - boxHeight * 0.5) + 0.5;
+                    ctx.stroke_round_rect(boxLeft, boxTop, width + 4.0, boxHeight, 2.0);
+                    ctx.fill_utf8_text(BLPoint(boxLeft + 2.0, boxTop + 1.5 + labelAscent), *labelBlFont, label);
+                    break;
+                }
+            }
+        }
+        ctx.restore();
+    }
+
     void TextController::setOverwriteMode(bool overwrite) {
         if (overwriteMode_ != overwrite) {
             overwriteMode_ = overwrite;
@@ -2864,6 +2919,7 @@ namespace newui {
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
             controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
+        controller_->drawWhitespace(ctx, clientBounds.height());
         controller_->drawCaret(ctx);
         ctx.restore();
     }

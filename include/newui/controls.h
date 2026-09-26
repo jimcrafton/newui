@@ -1456,6 +1456,10 @@ namespace newui {
         //@reflect ignore=true
         void setDecorations(std::vector<text::TextDecoration> decorations) { decorations_ = std::move(decorations); owner_.style().markDirty(); }
 
+        // Whether spaces (a dot), tabs (an arrow) and line endings (CR / LF / CRLF) are marked.
+        bool showsWhitespace() const { return showsWhitespace_; }
+        void setShowsWhitespace(bool shows) { showsWhitespace_ = shows; owner_.style().markDirty(); }
+
         // Tab stops every tabWidth() characters (default 4; 0: DirectWrite's default).
         std::size_t tabWidth() const { return tabWidth_; }
         void setTabWidth(std::size_t width) { tabWidth_ = width; owner_.style().markDirty(); }
@@ -1527,6 +1531,8 @@ namespace newui {
         // backgrounds: the Background decorations (drawn under the selection and text); otherwise
         // every other kind (drawn over the text).
         void drawDecorations(BLContext& ctx, bool backgrounds) const;
+        // Marks for spaces, tabs and line endings (showsWhitespace()), faintly over the text.
+        void drawWhitespace(BLContext& ctx, float visibleHeight) const;
 
         // Every one of these mirrors the identically-named View delegate
         // (minus the View& sender parameter, which this class has no use
@@ -1685,6 +1691,7 @@ namespace newui {
         std::vector<text::TextDecoration> decorations_;
         bool overwriteMode_ = false;
         std::size_t tabWidth_ = 4;
+        bool showsWhitespace_ = false;
     };
 
     // A single-line text editing control - a thin View-integration shim
@@ -1924,6 +1931,10 @@ namespace newui {
         // own doc comment (controls.cpp) gives for the same firing on a
         // text change.
         void setFont(const Font& font) { controller_->setFont(font); onContentSizeChanged(*this); }
+
+        // See TextController::showsWhitespace().
+        bool showsWhitespace() const { return controller_->showsWhitespace(); }
+        void setShowsWhitespace(bool shows) { controller_->setShowsWhitespace(shows); }
 
         // See TextController::tabWidth().
         std::size_t tabWidth() const { return controller_->tabWidth(); }

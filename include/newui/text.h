@@ -706,6 +706,14 @@ namespace newui::text {
     };
 
     // length characters of the text at textStart, laid out at layoutStart in a line's layout.
+    // A whitespace character, or a line's ending, and where it's laid out - what a "show
+    // whitespace" view marks. A line ending's rect has no width: it sits just past the line's text.
+    enum class WhitespaceKind { Space, Tab, CarriageReturn, LineFeed, CarriageReturnLineFeed };
+    struct WhitespaceMark {
+        WhitespaceKind kind = WhitespaceKind::Space;
+        Rect rect;
+    };
+
     struct LayoutSegment {
         std::size_t textStart = 0;
         std::size_t layoutStart = 0;
@@ -918,6 +926,10 @@ namespace newui::text {
         bool foldAtPoint(const Point& localPoint, std::size_t& outFoldStart) const;
         // How many line layouts the last rebuilding update() created (the rest were reused).
         std::size_t layoutsBuiltLastUpdate() const;
+
+        // The spaces, tabs, stray carriage returns and line endings on lines within [top, bottom)
+        // - not in collapsed folds' hidden text.
+        std::vector<WhitespaceMark> whitespaceMarks(float top, float bottom) const;
 
     private:
         // The per-line IDWriteTextLayouts (_com_ptr_t), plus a cached IDWriteTextFormat (the same

@@ -355,3 +355,64 @@ TEST(TextControlTab, TabStopsAreCountedInCharacters) {
     control.setTabWidth(2);
     EXPECT_EQ(control.controller().tabWidth(), 2u);
 }
+
+TEST(TextWhitespace, SpacesTabsAndLineEndingsAreFound) {
+    text::TextLayoutEngine engine;
+    const Font font = FontManager::monospaceFont(14.0f);
+    text::TextStorage storage(L"a\tb c\r\nd\ne");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+    const std::vector<text::WhitespaceMark> marks = engine.whitespaceMarks(0.0f, 1000.0f);
+    ASSERT_EQ(marks.size(), 4u);
+    EXPECT_EQ(marks[0].kind, text::WhitespaceKind::Tab);
+    EXPECT_EQ(marks[1].kind, text::WhitespaceKind::Space);
+    EXPECT_EQ(marks[2].kind, text::WhitespaceKind::CarriageReturnLineFeed);
+    EXPECT_EQ(marks[3].kind, text::WhitespaceKind::LineFeed);
+    EXPECT_GT(marks[1].rect.width(), 0.0f);
+    EXPECT_NEAR(marks[0].rect.width(), 3.0f * marks[1].rect.width(), 1.0f) << "column 1 to the stop at 4";
+    EXPECT_GT(marks[3].rect.top(), marks[2].rect.top());
+}
+
+TEST(TextWhitespace, HiddenTextHasNoMarks) {
+    text::TextLayoutEngine engine;
+    const Font font = FontManager::monospaceFont(14.0f);
+    text::TextStorage storage(L"{\n  a b\n}");
+    text::TextFold fold;
+    fold.start = 1;
+    fold.length = 7;   // the break, "  a b" and the next break
+    fold.collapsed = true;
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { fold }));
+    EXPECT_TRUE(engine.whitespaceMarks(0.0f, 1000.0f).empty());
+}
+
+// The marks really paint, and only when switched on.
+TEST(TextWhitespace, MarksPaintOnlyWhenShown) {
+    auto ink = [](TextControl& control) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            control.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < 60; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            pixels.insert(pixels.end(), row, row + 300);
+        }
+        return pixels;
+    };
+    TextControl control;
+    control.setBounds(Rect(0, 0, 300, 60));
+    control.setText(L"    \t\n");   // only whitespace: nothing else draws
+    const std::vector<std::uint32_t> hidden = ink(control);
+    control.setShowsWhitespace(true);
+    EXPECT_TRUE(control.showsWhitespace());
+    const std::vector<std::uint32_t> shown = ink(control);
+    std::size_t differing = 0;
+    for (std::size_t i = 0; i < hidden.size(); ++i) {
+        differing += hidden[i] != shown[i] ? 1 : 0;
+    }
+    EXPECT_GT(differing, 20u);
+}
