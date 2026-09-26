@@ -322,3 +322,36 @@ TEST(TextFoldingControl, DefaultsToTheMonospaceFont) {
     EXPECT_EQ(control.font().name(), FontManager::monospaceFont().name());
     EXPECT_EQ(control.font().size(), FontManager::monospaceFont().size());
 }
+
+// A multi-line editor types Tab; a single-line field lets it move focus.
+TEST(TextControlTab, TextControlsTakeTabAndTextFieldsDoNot) {
+    TextControl control;
+    EXPECT_TRUE(control.wantsTabKey());
+    TextFoldingControl folding;
+    EXPECT_TRUE(folding.wantsTabKey());
+    TextField field;
+    EXPECT_FALSE(field.wantsTabKey());
+}
+
+// Tab stops land every tabWidth digits.
+TEST(TextControlTab, TabStopsAreCountedInCharacters) {
+    const Font font = FontManager::monospaceFont(14.0f);
+    const float digit = font.measureText("0000").width / 4.0f;
+    text::TextStorage storage(L"	X");
+    auto afterTab = [&](std::size_t tabWidth) {
+        text::TextLayoutEngine engine;
+        engine.update(storage, font, 500.0f, 100.0f, true, {}, {}, tabWidth);
+        Point topLeft;
+        float height = 0.0f;
+        engine.hitTestPosition(text::TextPosition(1), topLeft, height);
+        return topLeft.x;
+    };
+    EXPECT_NEAR(afterTab(4), 4.0f * digit, 1.0f);
+    EXPECT_NEAR(afterTab(2), 2.0f * digit, 1.0f);
+    EXPECT_NEAR(afterTab(8), 8.0f * digit, 1.0f);
+
+    TextControl control;
+    EXPECT_EQ(control.tabWidth(), 4u);
+    control.setTabWidth(2);
+    EXPECT_EQ(control.controller().tabWidth(), 2u);
+}

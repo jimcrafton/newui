@@ -775,6 +775,7 @@ namespace newui::text {
         TextFormatCache textFormat;
         IDWriteTextFormat* lastFormat = nullptr;
         std::size_t lastBuilt = 0;
+        float digitWidth = 0.0f;   // lastFormat's - tab stops are counted in it
 
         // The line holding offset (the last one starting at or before it).
         std::size_t lineForOffset(std::size_t offset) const {
@@ -831,7 +832,7 @@ namespace newui::text {
     }
 
     bool TextLayoutEngine::update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap,
-            const std::vector<TextFontRun>& fontRuns, const std::vector<TextFold>& folds) {
+            const std::vector<TextFontRun>& fontRuns, const std::vector<TextFold>& folds, std::size_t tabWidth) {
         IDWriteTextFormat* format = impl_->textFormat.resolve(font);
         if (format == nullptr) {
             return false;
@@ -853,7 +854,8 @@ namespace newui::text {
         const bool sameShape = format == impl_->lastFormat
             && lastMaxWidth_ == maxWidth
             && lastMaxHeight_ == maxHeight
-            && lastWordWrap_ == wordWrap;
+            && lastWordWrap_ == wordWrap
+            && lastTabWidth_ == tabWidth;
         if (sameShape && !impl_->lines.empty() && lastText_ == text && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
             return true;
         }
@@ -957,6 +959,18 @@ namespace newui::text {
             }
         }
 
+        if (format != impl_->lastFormat || impl_->digitWidth <= 0.0f) {
+            impl_->digitWidth = 0.0f;
+            IDWriteTextLayoutPtr digits;
+            if (SUCCEEDED(DirectWriteResources::dwriteFactory().CreateTextLayout(L"0000", 4, format, 10000.0f, 1000.0f, &digits))) {
+                DWRITE_TEXT_METRICS metrics{};
+                if (SUCCEEDED(digits->GetMetrics(&metrics))) {
+                    impl_->digitWidth = metrics.widthIncludingTrailingWhitespace / 4.0f;
+                }
+            }
+        }
+        const float tabStop = tabWidth > 0 ? static_cast<float>(tabWidth) * impl_->digitWidth : 0.0f;
+
         impl_->lastBuilt = 0;
         float emptyLineHeight = 0.0f;   // an empty layout can report 0 - use one space's line height
         float top = 0.0f;
@@ -969,6 +983,9 @@ namespace newui::text {
                     return false;
                 }
                 layout->SetWordWrapping(wordWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+                if (tabStop > 0.0f) {
+                    layout->SetIncrementalTabStop(tabStop);
+                }
                 for (const TextFontRun& run : line.runs) {
                     const DWRITE_TEXT_RANGE range{ static_cast<UINT32>(run.start), static_cast<UINT32>(run.length) };
                     if (run.bold) {
@@ -1024,6 +1041,7 @@ namespace newui::text {
         lastWordWrap_ = wordWrap;
         lastFontRuns_ = fontRuns;
         lastFolds_ = std::move(collapsed);
+        lastTabWidth_ = tabWidth;
         return true;
     }
 

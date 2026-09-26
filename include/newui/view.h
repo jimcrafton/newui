@@ -556,11 +556,8 @@ namespace newui {
         // at all) - for a future multi-line code/text editor that wants to
         // insert a literal tab character rather than move focus, the same
         // "WantsTabKey" escape hatch the docx's own IView sketch has.
-        // False by default, and nothing in this codebase currently sets it
-        // true - TextController (controls.h) has no literal-tab-insertion
-        // path to opt into yet (confirmed: no `case vkTab` anywhere in its
-        // handleKeyDown()), so this is a pure extension point today, not
-        // dead code serving an existing caller.
+        // False by default; TextControl sets it (a multi-line
+        // TextController then types the tab). Ctrl+Tab still moves focus.
         bool wantsTabKey() const {
             return wantsTabKey_;
         }

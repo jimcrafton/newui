@@ -2294,7 +2294,7 @@ namespace newui {
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = textArea();
         layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_,
-            layoutFolds());
+            layoutFolds(), tabWidth_);
     }
 
     const std::vector<text::TextFold>& TextController::layoutFolds() const {
@@ -2588,7 +2588,9 @@ namespace newui {
         // Control characters (Backspace/Tab/Enter/Escape/etc.) arrive
         // here too via WM_CHAR - handleKeyDown() (VKeyCode-driven) is
         // where those are actually handled, not this insertion path.
-        if (ch < 0x20 || ch == 0x7F) {
+        // A tab is typed like any character in a multi-line control - it only arrives at all when
+        // the owner wantsTabKey() (RootView moves focus on Tab otherwise).
+        if ((ch < 0x20 && !(ch == L'\t' && multiline_)) || ch == 0x7F) {
             return SyncReturn::Ignored;
         }
 
@@ -2802,6 +2804,7 @@ namespace newui {
         setStyle(std::move(editStyle));
 
         controller_->setMultiline(true);
+        setWantsTabKey(true);   // a multi-line editor: Tab types a tab; Ctrl+Tab still moves focus
 
         onGotFocus.add(this, &TextControl::handleGotFocus);
         onLostFocus.add(this, &TextControl::handleLostFocus);

@@ -842,9 +842,11 @@ namespace newui::text {
         // wrong there regardless of how the result then gets displayed/
         // scrolled).
         // fontRuns (optional) bold / italicize / underline / strike ranges of the text. folds
-        // (optional): the collapsed ones are laid out as their placeholders.
+        // (optional): the collapsed ones are laid out as their placeholders. tabWidth: tab stops
+        // every that many characters (a digit's width - exact in a monospaced font); 0 leaves
+        // DirectWrite's default (4x the font size).
         bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true,
-            const std::vector<TextFontRun>& fontRuns = {}, const std::vector<TextFold>& folds = {});
+            const std::vector<TextFontRun>& fontRuns = {}, const std::vector<TextFold>& folds = {}, std::size_t tabWidth = 4);
 
         // One highlight rect per contiguous visual run range covers (a
         // multi-line selection spans more than one line, hence possibly
@@ -933,6 +935,7 @@ namespace newui::text {
         bool lastWordWrap_ = true;
         std::vector<TextFontRun> lastFontRuns_;
         std::vector<TextFold> lastFolds_;   // the collapsed ones, sorted
+        std::size_t lastTabWidth_ = 4;
     };
 
 }

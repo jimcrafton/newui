@@ -1456,6 +1456,10 @@ namespace newui {
         //@reflect ignore=true
         void setDecorations(std::vector<text::TextDecoration> decorations) { decorations_ = std::move(decorations); owner_.style().markDirty(); }
 
+        // Tab stops every tabWidth() characters (default 4; 0: DirectWrite's default).
+        std::size_t tabWidth() const { return tabWidth_; }
+        void setTabWidth(std::size_t width) { tabWidth_ = width; owner_.style().markDirty(); }
+
         bool isMultiline() const { return multiline_; }
         void setMultiline(bool value) { multiline_ = value; }
 
@@ -1680,6 +1684,7 @@ namespace newui {
         std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
         bool overwriteMode_ = false;
+        std::size_t tabWidth_ = 4;
     };
 
     // A single-line text editing control - a thin View-integration shim
@@ -1919,6 +1924,10 @@ namespace newui {
         // own doc comment (controls.cpp) gives for the same firing on a
         // text change.
         void setFont(const Font& font) { controller_->setFont(font); onContentSizeChanged(*this); }
+
+        // See TextController::tabWidth().
+        std::size_t tabWidth() const { return controller_->tabWidth(); }
+        void setTabWidth(std::size_t width) { controller_->setTabWidth(width); onContentSizeChanged(*this); }
 
         const Color& textColor() const { return controller_->textColor(); }
         void setTextColor(const Color& color) { controller_->setTextColor(color); }

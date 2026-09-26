@@ -1065,7 +1065,9 @@ namespace newui {
 		// character instead of a focus change - in which case Tab isn't
 		// intercepted at all here; it falls straight through to the
 		// ordinary dispatch below, same as any other key.
-		bool focusedViewWantsTabKey = focusedSubView_ != nullptr && focusedSubView_->wantsTabKey();
+		// Ctrl+Tab always navigates, so focus can still leave a View that takes Tab.
+		bool focusedViewWantsTabKey = focusedSubView_ != nullptr && focusedSubView_->wantsTabKey()
+			&& (keyMask & kmCtrl) == 0;
 		if (VKeyCode == vkTab && !focusedViewWantsTabKey) {
 			if (eventType == keKeyDown) {
 				UIInputManager::instance().moveFocus(*this,
