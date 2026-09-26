@@ -256,3 +256,13 @@ TEST(TextFoldingControl, TheGutterPaintsNumbersAndMarkers) {
     }
     EXPECT_GT(ink, 40u);
 }
+
+// Return inserts a newline only in a multi-line controller - a swapped-in one must be too.
+TEST(TextFoldingControl, ItsControllerIsMultiLine) {
+    TextFoldingControl control;
+    EXPECT_TRUE(control.controller().isMultiline());
+
+    TextControl plain;
+    plain.setController(std::make_unique<TextController>(plain));
+    EXPECT_TRUE(plain.controller().isMultiline());
+}

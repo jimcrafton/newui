@@ -1863,6 +1863,8 @@ namespace newui {
                 return;
             }
             controller_ = std::move(controller);
+            // A TextControl is always multi-line - without this a swapped-in controller ignores Return.
+            controller_->setMultiline(true);
             controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
             style().markDirty();
             onContentSizeChanged(*this);
