@@ -107,6 +107,14 @@ namespace newui::text {
         std::size_t commonPrefixLength(const std::wstring& other) const;
         std::size_t commonSuffixLength(const std::wstring& other, std::size_t limit) const;
 
+        // The same, against another tree - stretches both share (an edit copies only what it
+        // touches) are skipped without comparing. sameAs() is the O(1) "same tree" test, which
+        // implies equal text; equals() also finds equal text in different trees.
+        bool sameAs(const PieceTree& other) const { return root_ == other.root_; }
+        bool equals(const PieceTree& other) const;
+        std::size_t commonPrefixLength(const PieceTree& other) const;
+        std::size_t commonSuffixLength(const PieceTree& other, std::size_t limit) const;
+
         std::size_t lineCount() const;
         // The offset line starts at (length() for a line past the last).
         std::size_t lineStart(std::size_t line) const;

@@ -38,6 +38,7 @@ add_executable(newui_tests
     test_shapes.cpp
     test_text.cpp
     test_piecetree.cpp
+    test_texthistory.cpp
     test_textfolding.cpp
     test_command.cpp
     test_clipboard.cpp

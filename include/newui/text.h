@@ -5,6 +5,7 @@
 #include "newui/font.h"
 #include "newui/geometry.h"
 #include "newui/models.h"
+#include "newui/piecetree.h"
 #include "newui/runloop.h"
 
 #include <blend2d/blend2d.h>
@@ -356,13 +357,10 @@ namespace newui::text {
 
     // Owns a text buffer's actual content - insertion, deletion, and
     // character extraction, addressed throughout by plain offset/length
-    // (TextPosition/TextRange above), never an iterator. That's
-    // deliberate: a std::wstring backing this directly is today's
-    // simplest correct choice, but every public member here is expressed
-    // in terms plain offsets can survive a swap to a more sophisticated
-    // backing (a piece table, a rope, a gap buffer) without this class's
-    // own public API changing at all - only replace()'s own
-    // implementation would need to.
+    // (TextPosition/TextRange above), never an iterator. The content is
+    // a PieceTree (piecetree.h): edits and line queries are O(log n) at
+    // any size, and snapshot() is an O(1) copy that later edits never
+    // touch - what undo history and background readers hold on to.
     //
     // Pure text storage - no change notification of its own (no
     // onChanged-style delegate). A caller that needs to know when this
@@ -372,13 +370,20 @@ namespace newui::text {
     class TextStorage {
     public:
         TextStorage() = default;
-        explicit TextStorage(const std::wstring& text) : text_(text) {}
+        explicit TextStorage(const std::wstring& text) : tree_(text) {}
 
-        size_t length() const { return text_.size(); }
-        bool empty() const { return text_.empty(); }
+        size_t length() const { return tree_.length(); }
+        bool empty() const { return tree_.empty(); }
 
-        const std::wstring& text() const { return text_; }
-        void setText(const std::wstring& text) { text_ = text; lineStartsValid_ = false; }
+        // The whole content as one string - a convenience: it's built on demand and kept until
+        // the next edit (O(n)), and the reference is good only until then. Prefer the range reads
+        // below, or snapshot(), for anything that runs per keystroke or per frame.
+        const std::wstring& text() const;
+        void setText(const std::wstring& text);
+
+        // The content as it is now, unaffected by later edits and safe to read on another thread
+        // (O(1)).
+        PieceTree snapshot() const { return tree_; }
 
         // The character at offset, or L'\0' if offset is out of range -
         // never throws (a caret one past the last character, or a stale
@@ -428,8 +433,7 @@ namespace newui::text {
         size_t countLineBreaks(const TextRange& range) const;
 
         // Lines: a line ends at a break. Always at least one line; an empty
-        // one after a final break. Not thread-safe (the index is built
-        // lazily) - UI thread only.
+        // one after a final break.
         size_t lineCount() const;
         // The offset line starts at (length() for a line past the last).
         size_t lineStart(size_t line) const;
@@ -450,11 +454,9 @@ namespace newui::text {
         void replace(const TextRange& range, const std::wstring& replacement);
 
     private:
-        void buildLineStarts() const;
-
-        std::wstring text_;
-        mutable std::vector<size_t> lineStarts_;   // built on demand, dropped by every edit
-        mutable bool lineStartsValid_ = false;
+        PieceTree tree_;
+        mutable std::wstring flat_;   // text()'s copy
+        mutable bool flatValid_ = false;
     };
 
     // Wraps TextStorage as a Model (models.h) - the "storage vs.
@@ -536,23 +538,37 @@ namespace newui::text {
 
         const std::wstring& text() const { return storage_.text(); }
 
+        // The content as it is now, unaffected by later edits and safe to read on another thread
+        // (O(1)) - see TextStorage::snapshot().
+        PieceTree snapshot() const { return storage_.snapshot(); }
+
+        // The mutators are virtual so a subclass can watch every edit (HistoryTextModel, in
+        // texthistory.h, records them for undo).
+
         // A no-op (storage() left exactly as it was) if onBeforeRangeChanged
         // vetoes.
-        void setText(const std::wstring& text);
+        virtual void setText(const std::wstring& text);
 
         // A no-op if onBeforeChar (text.size() == 1) or
         // onBeforeRangeChanged (every other size, including 0) vetoes.
-        void insert(size_t offset, const std::wstring& text);
+        virtual void insert(size_t offset, const std::wstring& text);
 
         // A no-op if onBeforeChar (range clamps to length 1) or
         // onBeforeRangeChanged (every other length) vetoes.
-        void remove(const TextRange& range);
+        virtual void remove(const TextRange& range);
 
         // Always goes through onBeforeRangeChanged/onAfterRangeChanged,
         // regardless of range's or replacement's length - see this
         // class's own doc comment on why a 1-for-1 replace() isn't
         // treated as a Char event. A no-op if vetoed.
-        void replace(const TextRange& range, const std::wstring& replacement);
+        virtual void replace(const TextRange& range, const std::wstring& replacement);
+
+        // Undo/redo: none here (always false); HistoryTextModel has them. On success
+        // *affected (if given) is where the text that was put back now sits.
+        virtual bool canUndo() const { return false; }
+        virtual bool canRedo() const { return false; }
+        virtual bool undo(TextRange* affected = nullptr) { (void)affected; return false; }
+        virtual bool redo(TextRange* affected = nullptr) { (void)affected; return false; }
 
         // Model: value()/setValue() bridge the generic std::any API to
         // this class's own typed text() above - value() returns text()
@@ -996,7 +1012,7 @@ namespace newui::text {
         // TextRenderer draws this engine's layout itself (render(..., const TextLayoutEngine&)).
         friend class TextRenderer;
 
-        std::wstring lastText_;
+        PieceTree lastText_;   // the text as of the last update() - an O(1) snapshot, not a copy
         float lastMaxWidth_ = 0.0f;
         float lastMaxHeight_ = 0.0f;
         bool lastWordWrap_ = true;

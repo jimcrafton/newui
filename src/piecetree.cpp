@@ -312,6 +312,116 @@ namespace newui::text {
         return matched;
     }
 
+    namespace {
+        struct Chunk {
+            const wchar_t* data;
+            std::size_t length;
+        };
+
+        std::vector<Chunk> chunksOf(const NodePtr& root, std::size_t from, std::size_t to) {
+            std::vector<Chunk> chunks;
+            auto each = [&](const wchar_t* data, std::size_t n) {
+                chunks.push_back({ data, n });
+                return true;
+            };
+            visitRange(root.get(), from, to, each);
+            return chunks;
+        }
+    }
+
+    std::size_t PieceTree::commonPrefixLength(const PieceTree& other) const {
+        if (sameAs(other)) {
+            return length();
+        }
+        const std::size_t limit = length() < other.length() ? length() : other.length();
+        const std::vector<Chunk> a = chunksOf(root_, 0, limit);
+        const std::vector<Chunk> b = chunksOf(other.root_, 0, limit);
+        std::size_t matched = 0;
+        std::size_t i = 0;
+        std::size_t j = 0;
+        std::size_t usedA = 0;
+        std::size_t usedB = 0;
+        while (i < a.size() && j < b.size()) {
+            const std::size_t remainingA = a[i].length - usedA;
+            const std::size_t remainingB = b[j].length - usedB;
+            const std::size_t run = remainingA < remainingB ? remainingA : remainingB;
+            const wchar_t* pa = a[i].data + usedA;
+            const wchar_t* pb = b[j].data + usedB;
+            if (pa != pb) {   // the very same characters need no comparing
+                std::size_t k = 0;
+                while (k < run && pa[k] == pb[k]) {
+                    ++k;
+                }
+                matched += k;
+                if (k < run) {
+                    return matched;
+                }
+            } else {
+                matched += run;
+            }
+            usedA += run;
+            usedB += run;
+            if (usedA == a[i].length) {
+                ++i;
+                usedA = 0;
+            }
+            if (usedB == b[j].length) {
+                ++j;
+                usedB = 0;
+            }
+        }
+        return matched;
+    }
+
+    std::size_t PieceTree::commonSuffixLength(const PieceTree& other, std::size_t limit) const {
+        std::size_t max = length() < other.length() ? length() : other.length();
+        max = limit < max ? limit : max;
+        if (sameAs(other)) {
+            return max;
+        }
+        const std::vector<Chunk> a = chunksOf(root_, length() - max, length());
+        const std::vector<Chunk> b = chunksOf(other.root_, other.length() - max, other.length());
+        std::size_t matched = 0;
+        std::size_t i = a.size();
+        std::size_t j = b.size();
+        std::size_t usedA = 0;   // from the end of a[i - 1]
+        std::size_t usedB = 0;
+        while (i > 0 && j > 0) {
+            const std::size_t remainingA = a[i - 1].length - usedA;
+            const std::size_t remainingB = b[j - 1].length - usedB;
+            const std::size_t run = remainingA < remainingB ? remainingA : remainingB;
+            const wchar_t* endA = a[i - 1].data + remainingA;
+            const wchar_t* endB = b[j - 1].data + remainingB;
+            if (endA != endB) {
+                std::size_t k = 0;
+                while (k < run && endA[-1 - static_cast<std::ptrdiff_t>(k)] == endB[-1 - static_cast<std::ptrdiff_t>(k)]) {
+                    ++k;
+                }
+                matched += k;
+                if (k < run) {
+                    return matched;
+                }
+            } else {
+                matched += run;
+            }
+            usedA += run;
+            usedB += run;
+            if (usedA == a[i - 1].length) {
+                --i;
+                usedA = 0;
+            }
+            if (usedB == b[j - 1].length) {
+                --j;
+                usedB = 0;
+            }
+        }
+        return matched;
+    }
+
+    bool PieceTree::equals(const PieceTree& other) const {
+        return sameAs(other) || (length() == other.length() && commonPrefixLength(other) == length());
+    }
+
     // Totals for the first offset characters.
     Stats PieceTree::statsBefore(std::size_t offset) const {
         Stats acc;

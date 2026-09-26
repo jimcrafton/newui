@@ -342,6 +342,50 @@ TEST(PieceTree, RandomEditsMatchAStringOnEveryQuery) {
     }
 }
 
+TEST(PieceTree, ComparingWithAnotherTreeMatchesComparingStrings) {
+    std::mt19937 rng(21);
+    for (int round = 0; round < 300; ++round) {
+        std::wstring refA = randomText(rng, rng() % 5000);
+        PieceTree a(refA);
+        PieceTree b = a;                      // shares everything with a
+        std::wstring refB = refA;
+        EXPECT_TRUE(a.sameAs(b));
+        EXPECT_TRUE(a.equals(b));
+        EXPECT_EQ(a.commonPrefixLength(b), refA.size());
+        EXPECT_EQ(a.commonSuffixLength(b, refA.size()), refA.size());
+
+        const int edits = static_cast<int>(rng() % 4);
+        for (int e = 0; e < edits; ++e) {
+            const std::size_t at = rng() % (refB.size() + 1);
+            const std::size_t span = rng() % 30;
+            const std::wstring text = randomText(rng, rng() % 30);
+            b.replace(at, span, text);
+            refB.replace(at, span < refB.size() - at ? span : refB.size() - at, text);
+        }
+        ASSERT_EQ(b.str(), refB);
+
+        std::size_t prefix = 0;
+        while (prefix < refA.size() && prefix < refB.size() && refA[prefix] == refB[prefix]) {
+            ++prefix;
+        }
+        std::size_t suffix = 0;
+        while (suffix < refA.size() && suffix < refB.size() && refA[refA.size() - 1 - suffix] == refB[refB.size() - 1 - suffix]) {
+            ++suffix;
+        }
+        ASSERT_EQ(a.commonPrefixLength(b), prefix) << "round " << round;
+        ASSERT_EQ(b.commonPrefixLength(a), prefix);
+        ASSERT_EQ(a.commonSuffixLength(b, 1000000), suffix) << "round " << round;
+        ASSERT_EQ(b.commonSuffixLength(a, 1000000), suffix);
+        ASSERT_EQ(a.commonSuffixLength(b, 5), suffix < 5 ? suffix : 5);
+        ASSERT_EQ(a.equals(b), refA == refB);
+
+        // The same text built independently: equal, but not the same tree.
+        const PieceTree rebuilt(refB);
+        EXPECT_TRUE(b.equals(rebuilt));
+        EXPECT_FALSE(b.sameAs(rebuilt) && !refB.empty());
+    }
+}
+
 TEST(PieceTree, SnapshotsCanBeReadOnAnotherThreadWhileTheOriginalIsEdited) {
     std::mt19937 rng(7);
     std::wstring ref = randomText(rng, 20000);

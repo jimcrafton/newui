@@ -140,6 +140,7 @@ add_library(newui STATIC
     "include/newui/reflectionio.h"
     "include/newui/text.h" "src/text.cpp"
     "include/newui/piecetree.h" "src/piecetree.cpp"
+    "include/newui/texthistory.h" "src/texthistory.cpp"
     "include/newui/textstyle.h" "src/textstyle.cpp"
     "include/newui/textfolding.h" "src/textfolding.cpp"
     "include/newui/overlay.h" "src/overlay.cpp"

@@ -248,141 +248,75 @@ namespace newui::text {
         ctx.restore();
     }
 
-    wchar_t TextStorage::at(size_t offset) const {
-        if (offset >= text_.size()) {
-            return L'\0';
+    void TextStorage::setText(const std::wstring& text) {
+        tree_ = PieceTree(text);
+        flatValid_ = false;
+    }
+
+    const std::wstring& TextStorage::text() const {
+        if (!flatValid_) {
+            flat_ = tree_.str();
+            flatValid_ = true;
         }
-        return text_[offset];
+        return flat_;
+    }
+
+    wchar_t TextStorage::at(size_t offset) const {
+        return tree_.at(offset);
     }
 
     std::wstring TextStorage::substring(const TextRange& range) const {
-        size_t clampedStart = range.start() < text_.size() ? range.start() : text_.size();
-        size_t clampedEnd = range.end() < text_.size() ? range.end() : text_.size();
-        if (clampedStart >= clampedEnd) {
-            return std::wstring();
-        }
-        return text_.substr(clampedStart, clampedEnd - clampedStart);
+        return tree_.substring(range.start(), range.length());
     }
 
     void TextStorage::appendTo(const TextRange& range, std::wstring& out) const {
-        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
-        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
-        if (start < end) {
-            out.append(text_, start, end - start);
-        }
+        tree_.appendTo(range.start(), range.length(), out);
     }
 
     size_t TextStorage::find(wchar_t ch, size_t from) const {
-        const size_t found = text_.find(ch, from);
-        return found == std::wstring::npos ? npos : found;
+        const size_t found = tree_.find(ch, from);
+        return found == PieceTree::npos ? npos : found;
     }
 
     size_t TextStorage::count(wchar_t ch, const TextRange& range) const {
-        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
-        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
-        if (start >= end) {
-            return 0;
-        }
-        return static_cast<size_t>(std::count(text_.begin() + static_cast<std::ptrdiff_t>(start),
-            text_.begin() + static_cast<std::ptrdiff_t>(end), ch));
+        return tree_.count(ch, range.start(), range.length());
     }
 
     void TextStorage::forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const {
-        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
-        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
-        if (start < end) {
-            visit(text_.data() + start, end - start);
-        }
+        tree_.forEachChunk(range.start(), range.length(), visit);
     }
 
     bool TextStorage::equals(const std::wstring& other) const {
-        return text_ == other;
+        return tree_.equals(other);
     }
 
     size_t TextStorage::commonPrefixLength(const std::wstring& other) const {
-        const size_t shorter = text_.size() < other.size() ? text_.size() : other.size();
-        size_t n = 0;
-        while (n < shorter && text_[n] == other[n]) {
-            ++n;
-        }
-        return n;
+        return tree_.commonPrefixLength(other);
     }
 
     size_t TextStorage::commonSuffixLength(const std::wstring& other, size_t limit) const {
-        const size_t shorter = text_.size() < other.size() ? text_.size() : other.size();
-        const size_t max = limit < shorter ? limit : shorter;
-        size_t n = 0;
-        while (n < max && text_[text_.size() - 1 - n] == other[other.size() - 1 - n]) {
-            ++n;
-        }
-        return n;
-    }
-
-    void TextStorage::buildLineStarts() const {
-        lineStarts_.clear();
-        lineStarts_.push_back(0);
-        for (size_t i = 0; i < text_.size(); ++i) {
-            if (text_[i] == L'\r' && i + 1 < text_.size() && text_[i + 1] == L'\n') {
-                ++i;   // "\r\n" is one break
-            }
-            if (text_[i] == L'\n' || text_[i] == L'\r') {
-                lineStarts_.push_back(i + 1);
-            }
-        }
-        lineStartsValid_ = true;
+        return tree_.commonSuffixLength(other, limit);
     }
 
     size_t TextStorage::findLineBreak(size_t from, size_t* terminatorLength) const {
-        for (size_t i = from; i < text_.size(); ++i) {
-            if (text_[i] == L'\n') {
-                if (terminatorLength != nullptr) {
-                    *terminatorLength = 1;
-                }
-                return i;
-            }
-            if (text_[i] == L'\r') {
-                if (terminatorLength != nullptr) {
-                    *terminatorLength = i + 1 < text_.size() && text_[i + 1] == L'\n' ? 2 : 1;
-                }
-                return i;
-            }
-        }
-        return npos;
+        const size_t found = tree_.findLineBreak(from, terminatorLength);
+        return found == PieceTree::npos ? npos : found;
     }
 
     size_t TextStorage::countLineBreaks(const TextRange& range) const {
-        const size_t start = range.start() < text_.size() ? range.start() : text_.size();
-        const size_t end = range.end() < text_.size() ? range.end() : text_.size();
-        size_t breaks = 0;
-        for (size_t i = start; i < end; ++i) {
-            if (text_[i] == L'\r' || (text_[i] == L'\n' && (i == 0 || text_[i - 1] != L'\r'))) {
-                ++breaks;
-            }
-        }
-        return breaks;
+        return tree_.countLineBreaks(range.start(), range.length());
     }
 
     size_t TextStorage::lineCount() const {
-        if (!lineStartsValid_) {
-            buildLineStarts();
-        }
-        return lineStarts_.size();
+        return tree_.lineCount();
     }
 
     size_t TextStorage::lineStart(size_t line) const {
-        if (!lineStartsValid_) {
-            buildLineStarts();
-        }
-        return line < lineStarts_.size() ? lineStarts_[line] : text_.size();
+        return tree_.lineStart(line);
     }
 
     size_t TextStorage::lineOfOffset(size_t offset) const {
-        if (!lineStartsValid_) {
-            buildLineStarts();
-        }
-        const size_t clamped = offset < text_.size() ? offset : text_.size();
-        // The last line starting at or before clamped.
-        return static_cast<size_t>(std::upper_bound(lineStarts_.begin(), lineStarts_.end(), clamped) - lineStarts_.begin()) - 1;
+        return tree_.lineOfOffset(offset);
     }
 
     void TextStorage::insert(size_t offset, const std::wstring& text) {
@@ -394,13 +328,8 @@ namespace newui::text {
     }
 
     void TextStorage::replace(const TextRange& range, const std::wstring& replacement) {
-        size_t clampedStart = range.start() < text_.size() ? range.start() : text_.size();
-        size_t clampedEnd = range.end() < text_.size() ? range.end() : text_.size();
-        if (clampedEnd < clampedStart) {
-            clampedEnd = clampedStart;
-        }
-        text_.replace(clampedStart, clampedEnd - clampedStart, replacement);
-        lineStartsValid_ = false;
+        tree_.replace(range.start(), range.length(), replacement);
+        flatValid_ = false;
     }
 
     bool TextModel::fireBeforeChar(size_t offset, wchar_t ch, CharChangeKind kind) {
@@ -1093,7 +1022,8 @@ namespace newui::text {
             return false;
         }
 
-        const std::size_t textSize = storage.length();
+        const PieceTree snapshot = storage.snapshot();
+        const std::size_t textSize = snapshot.length();
 
         // Only collapsed folds matter here, outermost first where they start together.
         std::vector<TextFold> collapsed;
@@ -1111,7 +1041,7 @@ namespace newui::text {
             && lastMaxHeight_ == maxHeight
             && lastWordWrap_ == wordWrap
             && lastTabWidth_ == tabWidth;
-        if (sameShape && !impl_->lines.empty() && storage.equals(lastText_) && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
+        if (sameShape && !impl_->lines.empty() && snapshot.equals(lastText_) && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
             return true;
         }
 
@@ -1199,44 +1129,44 @@ namespace newui::text {
 
         std::vector<Impl::Line>& lines = impl_->lines;
         bool edited = false;
-        if (sameShape && !lines.empty() && !storage.equals(lastText_)) {
+        if (sameShape && !lines.empty() && !snapshot.equals(lastText_)) {
             // An edit: rebuild only the lines it touched. The text before it (prefix) and after it
             // (suffix) is unchanged, so are their lines - moved along by the edit's length -
             // provided their styling and folds are too. Otherwise, the full path below.
-            const std::wstring& old = lastText_;
-            const std::size_t shorter = old.size() < textSize ? old.size() : textSize;
-            const std::size_t prefix = storage.commonPrefixLength(old);
-            const std::size_t suffix = storage.commonSuffixLength(old, shorter - prefix);
+            const std::size_t oldSize = lastText_.length();
+            const std::size_t shorter = oldSize < textSize ? oldSize : textSize;
+            const std::size_t prefix = snapshot.commonPrefixLength(lastText_);
+            const std::size_t suffix = snapshot.commonSuffixLength(lastText_, shorter - prefix);
             // An edit right after a '\r' can turn it into half of a "\r\n" - the line it ends is
             // touched too.
             const std::size_t first = impl_->lineForOffset(prefix > 0 && storage.at(prefix - 1) == L'\r' ? prefix - 1 : prefix);
             // The first line after the edit whose preceding break is unchanged too.
-            const std::size_t oldSuffixStart = old.size() - suffix;
+            const std::size_t oldSuffixStart = oldSize - suffix;
             std::size_t keep = static_cast<std::size_t>(std::upper_bound(lines.begin(), lines.end(), oldSuffixStart,
                 [](std::size_t offset, const Impl::Line& line) { return offset < line.start; }) - lines.begin());
             keep = keep > first + 1 ? keep : first + 1;
             const std::size_t from = lines[first].start;
-            const std::size_t oldStop = keep < lines.size() ? lines[keep].start : old.size();
-            const std::size_t newStop = keep < lines.size() ? oldStop - old.size() + textSize : std::wstring::npos;
+            const std::size_t oldStop = keep < lines.size() ? lines[keep].start : oldSize;
+            const std::size_t newStop = keep < lines.size() ? oldStop - oldSize + textSize : std::wstring::npos;
             const std::size_t newSuffixStart = keep < lines.size() ? newStop : textSize;
 
             const bool sameAround = runsWithin(lastFontRuns_, 0, from) == runsWithin(fontRuns, 0, from)
-                && runsWithin(lastFontRuns_, oldStop, old.size()) == runsWithin(fontRuns, newSuffixStart, textSize)
+                && runsWithin(lastFontRuns_, oldStop, oldSize) == runsWithin(fontRuns, newSuffixStart, textSize)
                 && foldsWithin(lastFolds_, 0, from) == foldsWithin(collapsed, 0, from)
-                && foldsWithin(lastFolds_, oldStop, old.size()) == foldsWithin(collapsed, newSuffixStart, textSize);
+                && foldsWithin(lastFolds_, oldStop, oldSize) == foldsWithin(collapsed, newSuffixStart, textSize);
             if (sameAround) {
                 std::vector<Impl::Line> rebuilt;
                 const std::size_t reached = build(from, newStop, rebuilt);
                 if (keep >= lines.size() || reached == newStop) {
                     for (std::size_t i = keep; i < lines.size(); ++i) {
                         Impl::Line& line = lines[i];
-                        line.start = line.start - old.size() + textSize;
+                        line.start = line.start - oldSize + textSize;
                         for (LayoutSegment& segment : line.segments) {
-                            segment.textStart = segment.textStart - old.size() + textSize;
+                            segment.textStart = segment.textStart - oldSize + textSize;
                         }
                         for (Impl::Placeholder& placeholder : line.placeholders) {
-                            placeholder.foldStart = placeholder.foldStart - old.size() + textSize;
-                            placeholder.foldEnd = placeholder.foldEnd - old.size() + textSize;
+                            placeholder.foldStart = placeholder.foldStart - oldSize + textSize;
+                            placeholder.foldEnd = placeholder.foldEnd - oldSize + textSize;
                         }
                     }
                     lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(first), lines.begin() + static_cast<std::ptrdiff_t>(keep));
@@ -1356,8 +1286,7 @@ namespace newui::text {
         }
 
         impl_->lastFormat = format;
-        lastText_.clear();
-        storage.appendTo(TextRange(0, textSize), lastText_);
+        lastText_ = snapshot;
         lastMaxWidth_ = maxWidth;
         lastMaxHeight_ = maxHeight;
         lastWordWrap_ = wordWrap;
