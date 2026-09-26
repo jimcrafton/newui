@@ -167,6 +167,10 @@ namespace newui::text {
         typedef Delegate<Caret> VisibilityChangedDelegate;
         VisibilityChangedDelegate onVisibilityChanged;
 
+        // Fired by setPosition() when the position actually changes.
+        typedef Delegate<Caret> PositionChangedDelegate;
+        PositionChangedDelegate onPositionChanged;
+
         Caret() = default;
         ~Caret();
 
@@ -227,7 +231,8 @@ namespace newui::text {
         // positioned this caret's current position() on screen; the
         // bar's width is this class's own concern, not the caller's -
         // see systemCaretWidth().
-        void draw(BLContext& ctx, const Point& topLeft, float height) const;
+        // width > 0: a half-transparent block that wide instead (overwrite mode's caret).
+        void draw(BLContext& ctx, const Point& topLeft, float height, float width = 0.0f) const;
 
         // The system's current caret width in pixels (SPI_GETCARETWIDTH) -
         // the same accessibility-configurable value a real Win32 EDIT

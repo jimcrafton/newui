@@ -72,7 +72,8 @@ namespace newui {
         std::size_t textLineCount_ = 1;   // sizes the line-number column
     };
 
-    // A TextControl with outlining - see TextFoldingController.
+    // A TextControl with outlining - see TextFoldingController. Starts in
+    // FontManager::monospaceFont(), as a control for source code.
     // @reflect category=textinput
     class TextFoldingControl : public TextControl {
     public:

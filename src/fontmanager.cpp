@@ -116,17 +116,40 @@ const FontIndex& fontIndex() {
     return index;
 }
 
+// The file for a family name - also as "<name> Regular", which is how Windows registers some
+// families (Cascadia Mono) whose name DirectWrite knows without it. Null if not installed.
+const std::string* findFontPath(const std::string& name) {
+    const FontIndex& idx = fontIndex();
+    auto it = idx.pathByLowerName.find(toLowerAscii(name));
+    if (it == idx.pathByLowerName.end()) {
+        it = idx.pathByLowerName.find(toLowerAscii(name + " Regular"));
+    }
+    return it != idx.pathByLowerName.end() ? &it->second : nullptr;
+}
+
 }  // namespace
+
+bool FontManager::isInstalled(const std::string& name) {
+    return findFontPath(name) != nullptr;
+}
+
+Font FontManager::monospaceFont(float size) {
+    static const char* const kPreferred[] = { "Cascadia Mono", "Consolas", "Lucida Console", "Courier New" };
+    for (const char* name : kPreferred) {
+        if (isInstalled(name)) {
+            return Font(name, size);
+        }
+    }
+    return Font("Courier New", size);
+}
 
 const std::vector<SystemFontInfo>& FontManager::listFonts() {
     return fontIndex().fonts;
 }
 
 bool FontManager::createFont(const std::string& nameOrPath, float size, BLFont& outFont) {
-    const FontIndex& idx = fontIndex();
-
-    auto it = idx.pathByLowerName.find(toLowerAscii(nameOrPath));
-    const std::string& path = (it != idx.pathByLowerName.end()) ? it->second : nameOrPath;
+    const std::string* installed = findFontPath(nameOrPath);
+    const std::string& path = installed != nullptr ? *installed : nameOrPath;
 
     BLFontFace face;
     if (face.create_from_file(path.c_str()) != BL_SUCCESS) {

@@ -99,8 +99,12 @@ namespace newui::text {
     }
 
     void Caret::setPosition(const TextPosition& position) {
+        const bool moved = position_ != position;
         position_ = position;
         visible_ = true;
+        if (moved) {
+            onPositionChanged(*this);
+        }
     }
 
     void Caret::start(RunLoop& runLoop) {
@@ -149,13 +153,17 @@ namespace newui::text {
         return false;  // keep blinking until stop()/the destructor cancels this
     }
 
-    void Caret::draw(BLContext& ctx, const Point& topLeft, float height) const {
+    void Caret::draw(BLContext& ctx, const Point& topLeft, float height, float width) const {
         if (!isVisible()) {
             return;
         }
-        float width = static_cast<float>(systemCaretWidth());
         ctx.save();
         ctx.set_fill_style(color_.toBLRgba32());
+        if (width > 0.0f) {
+            ctx.set_fill_alpha(0.5);
+        } else {
+            width = static_cast<float>(systemCaretWidth());
+        }
         ctx.fill_rect(BLRect(topLeft.x, topLeft.y, width, height));
         ctx.restore();
     }

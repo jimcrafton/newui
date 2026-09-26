@@ -4315,3 +4315,29 @@ TEST(TextFieldPlaceholder, IsAReflectedProperty) {
     }
     EXPECT_TRUE(found);
 }
+
+// What a status bar listens to: the caret moving, the selection changing, overwrite mode flipping.
+TEST(TextController, EditStateChangesAreReported) {
+    TextControl control;
+    control.setText(L"hello\nworld");
+    int changes = 0;
+    control.controller().onEditStateChanged.add([&changes](TextController&) {
+        ++changes;
+        return SyncReturn::Handled;
+    });
+
+    control.caret().setPosition(text::TextPosition(3));
+    EXPECT_EQ(changes, 1);
+    control.caret().setPosition(text::TextPosition(3));
+    EXPECT_EQ(changes, 1) << "not moved";
+
+    control.selection().setRange(text::TextRange(0, 4));
+    EXPECT_EQ(changes, 2);
+
+    EXPECT_FALSE(control.controller().isOverwriteMode());
+    control.controller().setOverwriteMode(true);
+    EXPECT_TRUE(control.controller().isOverwriteMode());
+    EXPECT_EQ(changes, 3);
+    control.controller().setOverwriteMode(true);
+    EXPECT_EQ(changes, 3) << "unchanged";
+}

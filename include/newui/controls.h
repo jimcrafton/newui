@@ -1410,6 +1410,16 @@ namespace newui {
         text::Caret& caret() { return caret_; }
         const text::Caret& caret() const { return caret_; }
 
+        // Overwrite mode: typing replaces the character after the caret (never a line break)
+        // instead of inserting, and the caret is drawn as a block. Insert toggles it.
+        bool isOverwriteMode() const { return overwriteMode_; }
+        void setOverwriteMode(bool overwrite);
+
+        // Fired when the caret moves, the selection changes or overwrite mode flips - what a
+        // status bar shows.
+        typedef Delegate<TextController> EditStateChangedDelegate;
+        EditStateChangedDelegate onEditStateChanged;
+
         text::TextInputTraits& inputTraits() { return traits_; }
         const text::TextInputTraits& inputTraits() const { return traits_; }
 
@@ -1621,6 +1631,8 @@ namespace newui {
         // while the mouse was moving). See Caret::onVisibilityChanged's
         // own doc comment.
         SyncReturn handleCaretVisibilityChanged(text::Caret& sender);
+        SyncReturn handleCaretPositionChanged(text::Caret& sender);
+        SyncReturn handleSelectionChanged(text::TextSelection& sender, const text::TextRange& range);
 
         // traits_ enforcement lives here, not in the key handlers above -
         // subscribing to model_'s own vetoable Before events means every
@@ -1667,6 +1679,7 @@ namespace newui {
         std::vector<text::TextColorRun> colorRuns_;
         std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
+        bool overwriteMode_ = false;
     };
 
     // A single-line text editing control - a thin View-integration shim

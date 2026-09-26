@@ -68,6 +68,13 @@ namespace newui {
         // default-constructed Font if SystemParametersInfo() fails.
         static Font getSystemFont(SystemUIFont which = SystemUIFont::Message);
 
+        // Whether a font family (as listFonts() or createFont() would find it) is installed.
+        static bool isInstalled(const std::string& name);
+
+        // A monospaced font for source code: the first installed of Cascadia Mono (Visual
+        // Studio's default), Consolas, Lucida Console and Courier New.
+        static Font monospaceFont(float size = 14.0f);
+
         // The process-wide FontManager singleton.
         static FontManager& instance();
 

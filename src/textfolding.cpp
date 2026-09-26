@@ -1,4 +1,5 @@
 #include "newui/textfolding.h"
+#include "newui/fontmanager.h"
 #include "newui/keyboard_constants.h"
 #include "newui/uicolormanager.h"
 
@@ -33,7 +34,8 @@ namespace newui {
         constexpr float kGutterPad = 4.0f;       // before the numbers
         constexpr float kNumbersGap = 6.0f;      // numbers to markers
         constexpr float kMarkerSize = 9.0f;
-        constexpr float kMarkerGap = 5.0f;       // markers to text
+        constexpr float kMarkerGap = 8.0f;       // markers to text, the gutter's edge between
+        constexpr float kEdgeInset = 3.0f;       // markers to the edge
 
         std::size_t digitCount(std::size_t value) {
             std::size_t digits = 1;
@@ -105,7 +107,20 @@ namespace newui {
         const BLRgba32 color = UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
 
         ctx.save();
-        ctx.clip_to_rect(BLRect(client.left(), client.top(), gutterWidth(), client.height()));
+        const double width = gutterWidth();
+        ctx.clip_to_rect(BLRect(client.left(), client.top(), width, client.height()));
+
+        // Set apart from the text: its own background, and a recessed (etched) edge - a shadow
+        // line, then a highlight.
+        ctx.fill_rect(BLRect(client.left(), client.top(), width, client.height()),
+            UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+        const double edge = std::floor(columns.markerLeft + kMarkerSize + kEdgeInset) + 0.5;
+        ctx.set_stroke_width(1.0);
+        ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32());
+        ctx.stroke_line(edge, client.top(), edge, client.bottom());
+        ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32());
+        ctx.stroke_line(edge + 1.0, client.top(), edge + 1.0, client.bottom());
+
         ctx.set_fill_style(color);
         ctx.set_stroke_style(color);
         ctx.set_stroke_width(1.0);
@@ -326,6 +341,7 @@ namespace newui {
 
     TextFoldingControl::TextFoldingControl() {
         setController(std::make_unique<TextFoldingController>(*this));
+        setFont(FontManager::monospaceFont());   // a code control
     }
 
     const std::vector<text::TextFold>& TextFoldingControl::folds() const {

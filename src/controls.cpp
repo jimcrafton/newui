@@ -2222,6 +2222,8 @@ namespace newui {
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText);
 
         caret_.onVisibilityChanged.add(this, &TextController::handleCaretVisibilityChanged);
+        caret_.onPositionChanged.add(this, &TextController::handleCaretPositionChanged);
+        selection_.onAfterSelectionChanged.add(this, &TextController::handleSelectionChanged);
 
         // Builds the default TextModel and wires it up via setModel()
         // itself (addView()/onBeforeChar/onBeforeRangeChanged, plus
@@ -2358,7 +2360,39 @@ namespace newui {
         Point caretTopLeft;
         float caretHeight = 0.0f;
         layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
-        caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight);
+        // Overwrite mode: a block over the character typing would replace (a digit's width at a
+        // line end).
+        float width = 0.0f;
+        if (overwriteMode_ && caret_.position().isValid()) {
+            const std::size_t offset = caret_.position().offset();
+            const std::wstring& text = model().text();
+            if (offset < text.size() && text[offset] != L'\n' && text[offset] != L'\r') {
+                const std::vector<Rect> rects = layoutEngine_.hitTestRange(text::TextRange(offset, 1));
+                width = rects.empty() ? 0.0f : rects.front().width();
+            }
+            if (width <= 0.0f) {
+                width = font_.measureText("0").width;
+            }
+        }
+        caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight, width);
+    }
+
+    void TextController::setOverwriteMode(bool overwrite) {
+        if (overwriteMode_ != overwrite) {
+            overwriteMode_ = overwrite;
+            owner_.style().markDirty();
+            onEditStateChanged(*this);
+        }
+    }
+
+    SyncReturn TextController::handleCaretPositionChanged(text::Caret& /*sender*/) {
+        onEditStateChanged(*this);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleSelectionChanged(text::TextSelection& /*sender*/, const text::TextRange& /*range*/) {
+        onEditStateChanged(*this);
+        return SyncReturn::Handled;
     }
 
     void TextController::clearSelection() {
@@ -2566,7 +2600,12 @@ namespace newui {
             insertAt = range.start() + 1;
         } else {
             insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
-            model().insert(insertAt, std::wstring(1, ch));
+            const std::wstring& text = model().text();
+            if (overwriteMode_ && insertAt < text.size() && text[insertAt] != L'\n' && text[insertAt] != L'\r') {
+                model().replace(text::TextRange(insertAt, 1), std::wstring(1, ch));
+            } else {
+                model().insert(insertAt, std::wstring(1, ch));
+            }
             insertAt += 1;
         }
         caret_.setPosition(text::TextPosition(insertAt));
@@ -2636,6 +2675,14 @@ namespace newui {
             case vkEnd: {
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
                 moveCaret(line.isValid() ? line.end() : model().length(), extend);
+                return SyncReturn::Handled;
+            }
+            case vkInsert: {
+                // Plain Insert only - Ctrl+Insert / Shift+Insert are copy / paste.
+                if ((keyMask & (kmShift | kmCtrl | kmAlt)) != 0) {
+                    return SyncReturn::Ignored;
+                }
+                setOverwriteMode(!overwriteMode_);
                 return SyncReturn::Handled;
             }
             case vkReturn: {

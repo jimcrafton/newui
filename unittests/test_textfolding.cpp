@@ -1,4 +1,6 @@
 #include "newui/textfolding.h"
+#include "newui/fontmanager.h"
+#include "newui/uicolormanager.h"
 
 #include <gtest/gtest.h>
 
@@ -233,7 +235,8 @@ TEST(TextFoldingControl, AFoldsMarkerIsOnTheLineItStartsOn) {
 TEST(TextFoldingControl, TheGutterPaintsNumbersAndMarkers) {
     TextFoldingControl control;
     setUp(control, false);
-    const int gutterRight = static_cast<int>(control.controller().textArea().left()) - 1;
+    // Left of the gutter's edge lines, so only numbers and markers count.
+    const int gutterRight = static_cast<int>(control.controller().textArea().left()) - 6;
     BLImage image(300, 200, BL_FORMAT_PRGB32);
     {
         BLContext ctx(image);
@@ -265,4 +268,57 @@ TEST(TextFoldingControl, ItsControllerIsMultiLine) {
     TextControl plain;
     plain.setController(std::make_unique<TextController>(plain));
     EXPECT_TRUE(plain.controller().isMultiline());
+}
+
+// The gutter is set apart: its own background, not the text's.
+TEST(TextFoldingControl, TheGutterHasItsOwnBackground) {
+    TextFoldingControl control;
+    control.setBounds(Rect(0, 0, 300, 200));
+    control.setText(L"");
+    BLImage image(300, 200, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(image);
+        ctx.clear_all();
+        control.paint(ctx);
+        ctx.end();
+    }
+    BLImageData data{};
+    image.get_data(&data);
+    auto pixel = [&](int x, int y) {
+        return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride)[x];
+    };
+    const Rect client = control.getClientBounds();
+    const int y = static_cast<int>(client.bottom()) - 5;
+    EXPECT_EQ(pixel(static_cast<int>(client.left()) + 2, y),
+        UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32().value);
+    EXPECT_NE(pixel(static_cast<int>(client.left()) + 2, y), pixel(static_cast<int>(client.right()) - 5, y));
+}
+
+TEST(FontManagerMonospace, IsInstalledAndReallyMonospaced) {
+    const Font font = FontManager::monospaceFont(14.0f);
+    EXPECT_TRUE(FontManager::isInstalled(font.name()));
+    EXPECT_EQ(font.size(), 14.0f);
+    ASSERT_NE(font.blFont(), nullptr);
+    EXPECT_NEAR(font.measureText("iiii").width, font.measureText("WWWW").width, 0.5f);
+}
+
+// Windows registers some families as "<name> Regular" (Cascadia Mono) - found either way.
+TEST(FontManagerMonospace, AFamilyIsFoundWithoutItsRegularSuffix) {
+    for (const SystemFontInfo& info : FontManager::listFonts()) {
+        const std::string suffix = " Regular";
+        if (info.name.size() > suffix.size() && info.name.compare(info.name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            const std::string family = info.name.substr(0, info.name.size() - suffix.size());
+            EXPECT_TRUE(FontManager::isInstalled(family)) << family;
+            BLFont font;
+            EXPECT_TRUE(FontManager::createFont(family, 12.0f, font)) << family;
+            return;
+        }
+    }
+    GTEST_SKIP() << "no \"<name> Regular\" font installed";
+}
+
+TEST(TextFoldingControl, DefaultsToTheMonospaceFont) {
+    TextFoldingControl control;
+    EXPECT_EQ(control.font().name(), FontManager::monospaceFont().name());
+    EXPECT_EQ(control.font().size(), FontManager::monospaceFont().size());
 }
