@@ -1228,3 +1228,42 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAMenuBarsMenuTree) {
     // One button per top-level menu.
     EXPECT_EQ(loaded->childViews().size(), 2u);
 }
+
+// The text counterparts the designer's Source view uses - same format as the file versions.
+TEST(BundleText, WriteThenLoadRootViewTextRoundTripsAndKeepsOtherTopLevelKeys) {
+    newui::Frame frame;
+    frame.setName("BundleTextFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    button->setText("OK");
+    frame.rootView().addChild(button);
+
+    const std::string existing = "{ title: \"My Window\", rootView: {} }";
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), existing);
+    EXPECT_NE(text.find("My Window"), std::string::npos) << "other top-level keys are kept";
+    EXPECT_NE(text.find("okButton"), std::string::npos);
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTextFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, false, &error)) << error;
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->text(), "OK");
+}
+
+TEST(BundleText, LoadRootViewFromTextReportsWhereTheTextIsBroken) {
+    newui::Frame frame;
+    std::string error;
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), "{ rootView: { ", false, &error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_TRUE(frame.rootView().childViews().empty());
+}
+
+TEST(BundleText, LoadRootViewFromTextNeedsARootViewObject) {
+    newui::Frame frame;
+    std::string error;
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), "{ title: \"x\" }", false, &error));
+    EXPECT_NE(error.find("rootView"), std::string::npos);
+}

@@ -285,6 +285,23 @@ namespace newui {
         template<typename T>
         bool writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode = false) const;
 
+        // Text counterparts of the *FromFile/*ToFile functions above - the same document format,
+        // for an editor that shows or edits a document's text (a designer's Source view). The file
+        // versions are built on these.
+        //
+        // writeRootViewToText(): target's tree as document text, keeping every other top-level key
+        // of existingText (e.g. the frame's title) as it is - existingText may be empty.
+        template<typename T>
+        std::string writeRootViewToText(T& target, const std::string& existingText, bool designMode = false) const;
+        // loadRootViewFromText(): reads text's "rootView" into target. False - with a message such
+        // as "line 3, column 5: ..." in *error, if given - when text doesn't parse or has no
+        // "rootView" object; target is untouched then.
+        template<typename T>
+        bool loadRootViewFromText(T& target, const std::string& text, bool designMode = false,
+            std::string* error = nullptr) const;
+        // Frame-level keys (title, ...) and animations from document text.
+        bool loadFrameFromText(Frame& frame, const std::string& text) const;
+
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).
         // appName() falls back to

@@ -657,9 +657,12 @@ namespace newui {
         if (!readTextFileAtPath(absolutePath, text) || text.empty()) {
             return false;
         }
+        return loadFrameFromText(frame, text);
+    }
 
+    bool Bundle::loadFrameFromText(Frame& frame, const std::string& text) const {
         reflection::ObjectReader reader;
-        if (json5::from_string(text, reader.doc)) {
+        if (text.empty() || json5::from_string(text, reader.doc)) {
             return false;
         }
 
@@ -697,10 +700,37 @@ namespace newui {
         if (!readTextFileAtPath(absolutePath, text) || text.empty()) {
             return false;
         }
+        return loadRootViewFromText(target, text, designMode);
+    }
 
-        reflection::ObjectReader reader;
-        if (json5::from_string(text, reader.doc)) {
+    template bool Bundle::loadRootViewFromFile<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::loadRootViewFromFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    bool Bundle::loadRootViewFromText(T& target, const std::string& text, bool designMode, std::string* error) const {
+        auto fail = [error](const std::string& message) {
+            if (error != nullptr) {
+                *error = message;
+            }
             return false;
+        };
+        if (text.empty()) {
+            return fail("the document is empty");
+        }
+        reflection::ObjectReader reader;
+        if (json5::error parseError = json5::from_string(text, reader.doc)) {
+            return fail(json5::to_string(parseError));
+        }
+        bool hasRootView = false;
+        if (reader.doc.is_object()) {
+            for (const auto& [key, value] : json5::object_view(reader.doc)) {
+                if (std::string(key) == "rootView" && value.is_object()) {
+                    hasRootView = true;
+                }
+            }
+        }
+        if (!hasRootView) {
+            return fail("the document has no rootView object");
         }
 
         reader.setDesignMode(designMode);
@@ -708,8 +738,8 @@ namespace newui {
         return true;
     }
 
-    template bool Bundle::loadRootViewFromFile<RootView>(RootView&, const std::string&, bool) const;
-    template bool Bundle::loadRootViewFromFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+    template bool Bundle::loadRootViewFromText<RootView>(RootView&, const std::string&, bool, std::string*) const;
+    template bool Bundle::loadRootViewFromText<RootViewProxy>(RootViewProxy&, const std::string&, bool, std::string*) const;
     template bool Bundle::loadRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
 
     bool Bundle::loadRootView(RootView& rootView) const {
@@ -887,10 +917,18 @@ namespace newui {
             return false;
         }
 
-        json5::document existingDoc;
         std::string existingText;
-        bool hasExisting = readTextFileAtPath(absolutePath, existingText) && !existingText.empty() &&
-                            !json5::from_string(existingText, existingDoc);
+        readTextFileAtPath(absolutePath, existingText);
+        return writeTextFileAtPath(absolutePath, writeRootViewToText(target, existingText, designMode));
+    }
+
+    template bool Bundle::writeRootViewToFile<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::writeRootViewToFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    std::string Bundle::writeRootViewToText(T& target, const std::string& existingText, bool designMode) const {
+        json5::document existingDoc;
+        bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
 
         reflection::ObjectWriter writer;
         writer.setDesignMode(designMode);
@@ -907,12 +945,11 @@ namespace newui {
 
         writer.writeNested("rootView", &target);
         writer.endObject(std::string(), nullptr);
-
-        return writeTextFileAtPath(absolutePath, json5::to_string(writer.doc));
+        return json5::to_string(writer.doc);
     }
 
-    template bool Bundle::writeRootViewToFile<RootView>(RootView&, const std::string&, bool) const;
-    template bool Bundle::writeRootViewToFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+    template std::string Bundle::writeRootViewToText<RootView>(RootView&, const std::string&, bool) const;
+    template std::string Bundle::writeRootViewToText<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
 
     void Bundle::ensureInfoLoaded() const {
         if (infoLoaded_) {
