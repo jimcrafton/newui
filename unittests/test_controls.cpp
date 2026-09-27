@@ -3982,19 +3982,30 @@ TEST(TextControl, HighlightsCurrentLineTintsTheFullLineWidthPastTheTextItself) {
     textControl.destroy();
 }
 
-TEST(TextControl, HighlightsCurrentLineIsOffByDefaultAndSuppressedByAnActiveSelection) {
+TEST(TextControl, HighlightsCurrentLineIsOffByDefault) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
     textControl.setText(L"ab");
     textControl.caret().setPosition(text::TextPosition(0));
     EXPECT_FALSE(textControl.highlightsCurrentLine());
 
-    textControl.setHighlightsCurrentLine(true);
-    const std::uint32_t highlighted = pixelAt(textControl, 300, 40, 250, 10);
+    textControl.destroy();
+}
 
+// A double-click word-select (a common real case) is still, deliberately, "on this line" - an
+// earlier version of this suppressed the tint for any active selection at all, on an assumption
+// about matching VS/VS Code that turned out to be wrong in practice; keep it through a selection.
+TEST(TextControl, HighlightsCurrentLineStaysThroughAnActiveSelection) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+
+    const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);
+    textControl.setHighlightsCurrentLine(true);
     textControl.selection().setRange(text::TextRange(0, 1));
-    const std::uint32_t withSelection = pixelAt(textControl, 300, 40, 250, 10);
-    EXPECT_NE(highlighted, withSelection) << "an active selection should suppress the current-line tint";
+    const std::uint32_t withSelectionOn = pixelAt(textControl, 300, 40, 250, 10);
+    EXPECT_NE(before, withSelectionOn) << "still tinted with an active selection, not suppressed";
 
     textControl.destroy();
 }

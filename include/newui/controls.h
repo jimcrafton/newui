@@ -1547,9 +1547,9 @@ namespace newui {
         // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
         // text's own extent, which is what makes this a dedicated draw call rather than a
         // Background TextDecoration (see highlightsCurrentLine()'s own comment). A no-op if
-        // highlightsCurrentLine() is off, there's an active selection (matching VS/VS Code, which
-        // both suppress it then too - the selection highlight already marks where you are), or
-        // there's no laid-out caret position yet. Call before drawSelection() (same "chrome first"
+        // highlightsCurrentLine() is off or there's no laid-out caret position yet - NOT suppressed
+        // by an active selection (e.g. a double-click word-select still keeps it). Call before
+        // drawSelection() (same "chrome first"
         // ordering every other draw* method here follows) so selection/text/decorations all still
         // read clearly on top of it.
         void drawCurrentLineHighlight(BLContext& ctx) const;

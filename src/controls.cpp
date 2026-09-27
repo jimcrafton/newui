@@ -2315,7 +2315,14 @@ namespace newui {
         // (text.h's own comment on it), and this highlight should stay solid throughout the blink
         // cycle, unlike the caret glyph itself. hitTestPosition() below already no-ops (caretHeight
         // stays 0) for an invalid/never-set position, which is the only real gate needed here.
-        if (!highlightsCurrentLine_ || !selection_.isEmpty()) {
+        //
+        // Also deliberately NOT suppressed by an active selection (an earlier version of this did
+        // that, on an assumption about matching VS/VS Code that turned out to be wrong in practice -
+        // real editors, and this one, keep the current-line tint through an ordinary selection too,
+        // e.g. a double-click word-select) - drawn before drawSelection() below (same "chrome
+        // first" ordering every draw* method here follows), so the selection highlight still reads
+        // clearly on top of it regardless.
+        if (!highlightsCurrentLine_) {
             return;
         }
         Point caretTopLeft;
