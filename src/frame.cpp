@@ -242,6 +242,16 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 					SWP_NOZORDER | SWP_NOACTIVATE);
 			}
 
+			// SetWindowPos above is expected to dispatch WM_SIZE synchronously (same as an
+			// ordinary interactive resize), which would reach sizeChange()/updateViewBounds()
+			// on its own - but live-testing found the content tree left stale/misaligned after
+			// a DPI-driven resize even though a manual resize right afterward snapped it into
+			// place correctly, so something about that nested-message path isn't reliable here.
+			// Calling this directly guarantees rootView_ actually gets resized to the frame's
+			// real new client rect - harmless if WM_SIZE already did it (setBounds() no-ops on
+			// an unchanged size).
+			updateViewBounds();
+
 			result = true;
 		}
 		break;
