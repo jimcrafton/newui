@@ -1190,6 +1190,31 @@ namespace newui {
 			}
 			break;
 
+			case WM_DPICHANGED: {
+				// Only ever actually fires for a genuinely top-level RootView
+				// (PopupTool, via its own WS_POPUP preCreateHints()) - Windows
+				// never delivers this to a WS_CHILD window, which is what
+				// this RootView's own viewHwnd_ is for every other case (see
+				// refreshDisplayMetrics()'s own doc comment for who handles
+				// those instead). Harmless dead code otherwise.
+				refreshDisplayMetrics();
+
+				// lParam points at Windows' own suggested new window rect for
+				// the new DPI - applying it keeps the window from visually
+				// jumping mid-drag across a DPI boundary (the documented
+				// WM_DPICHANGED handling pattern).
+				const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+				if (suggested != nullptr) {
+					::SetWindowPos(viewHwnd_, nullptr,
+						suggested->left, suggested->top,
+						suggested->right - suggested->left, suggested->bottom - suggested->top,
+						SWP_NOZORDER | SWP_NOACTIVATE);
+				}
+
+				result = true;
+			}
+			break;
+
 			case WM_PAINT: {
 
 				//this checks if we truly have work to do,
@@ -1637,8 +1662,15 @@ namespace newui {
 
 	}
 
+	void RootView::refreshDisplayMetrics() {
+		displayMetrics_ = DisplayMetrics::forWindow(viewHwnd_);
+		onDisplayMetricsChanged(*this);
+	}
+
 	void RootView::viewCreated()
 	{
+		refreshDisplayMetrics();
+
 		onCreated(*this);
 
 		// Every window gets exactly one real IDropTarget, registered

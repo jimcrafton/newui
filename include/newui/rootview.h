@@ -7,6 +7,7 @@
 
 #include <newui/newui.h>
 #include <newui/view.h>
+#include <newui/displayunit.h>
 #include <newui/geometry.h>
 #include <newui/namemanager.h>
 #include <newui/overlay.h>
@@ -361,6 +362,46 @@ namespace newui {
             return viewHwnd_;
         }
 
+        // Cached DPI/font-relative metrics for this RootView's own window -
+        // see newui/displayunit.h. Built from windowHandle() the first time
+        // a real HWND exists (viewCreated()) and kept fresh by
+        // refreshDisplayMetrics() below; falls back to
+        // DisplayMetrics::forWindow(nullptr)'s own 96-DPI default before
+        // that (or if this RootView never gets a real HWND) - same fallback
+        // View::displayMetrics() uses for an unparented View.
+        //@reflect ignore=true
+        const DisplayMetrics& displayMetrics() const {
+            return displayMetrics_;
+        }
+
+        // Rebuilds displayMetrics() from this RootView's current
+        // windowHandle() and fires onDisplayMetricsChanged(). Called
+        // automatically once a real HWND exists (viewCreated()). Also the
+        // right call for a live DPI change - but which window actually
+        // receives WM_DPICHANGED depends on how this RootView is hosted:
+        // Windows only ever delivers it to a genuine top-level window, and
+        // this RootView's own viewHwnd_ is a WS_CHILD (SIMPLE_VIEW,
+        // rootview.cpp) for every ordinary case:
+        //  - Frame-owned (the common case): the real top-level window is
+        //    Frame::frameHandle(), not this RootView's own HWND - Frame's
+        //    own WM_DPICHANGED handler calls this on its owned rootView_.
+        //  - A genuinely top-level RootView (PopupTool, which overrides
+        //    preCreateHints() for a real WS_POPUP window): this RootView's
+        //    own handleMessage() WM_DPICHANGED case calls this directly.
+        //  - Standalone, hosted inside an *external* parent HWND this
+        //    toolkit doesn't own (the VSIX-hosted editor case,
+        //    RootView(HWND, HINSTANCE, ...)): nobody here ever sees
+        //    WM_DPICHANGED at all, since the owning top-level window
+        //    (Visual Studio's own) is entirely outside this toolkit -
+        //    displayMetrics() stays at whatever it was resolved to at
+        //    viewCreated() time until the external host itself calls this
+        //    explicitly (it doesn't yet - a known, accepted gap for now,
+        //    see display-units-plan.md).
+        void refreshDisplayMetrics();
+
+        typedef Delegate<RootView> DisplayMetricsChangedDelegate;
+        DisplayMetricsChangedDelegate onDisplayMetricsChanged;
+
         // view's top-left in this RootView's own local/window-client space -
         // just view->localToRoot(Point(0,0)) (see View::localToRoot(), view.h).
         // Used internally by mouseMove()/mouseUp() to keep targeting
@@ -482,6 +523,9 @@ namespace newui {
 
 	    Frame* parentFrame_ = nullptr;
 		HWND viewHwnd_ = nullptr;
+
+		// See displayMetrics()/refreshDisplayMetrics() above.
+		DisplayMetrics displayMetrics_ = DisplayMetrics::forWindow(nullptr);
 
 		// Only set when constructed via the standalone (Frame-less)
 		// constructor above - parentFrame_ stays nullptr in that case.

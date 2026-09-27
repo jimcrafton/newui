@@ -10,6 +10,7 @@
 #include <newui/component.h>
 #include <newui/cursor.h>
 #include <newui/delegate.h>
+#include <newui/displayunit.h>
 #include <newui/dragndrop.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
@@ -705,6 +706,16 @@ namespace newui {
         // This View's own whole bounds (0,0,width,height in local space) in screen coordinates.
         // @reflect ignore=true
         Rect screenBounds() const;
+
+        // This View's own effective DisplayMetrics (newui/displayunit.h):
+        // rootView()'s cached instance, or DisplayMetrics::forDpi(96) if
+        // this View isn't attached to a RootView yet - same "degrade
+        // gracefully without a live window" shape localToScreen()/
+        // screenToLocal() above already use. Cheap - a cached lookup on the
+        // RootView side, not a fresh GetDpiForWindow/font-load - so safe to
+        // call per-item in a layout/paint pass (e.g. once per mark drawn).
+        // @reflect ignore=true
+        DisplayMetrics displayMetrics() const;
 
         // Maps a point/rect from this View's local space into target's - via root space when
         // both share a rootView(), via screen space otherwise (e.g. across two windows).

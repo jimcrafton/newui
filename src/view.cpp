@@ -108,6 +108,12 @@ namespace newui {
 		return Rect(screenToLocal(screenRect.pos()), screenRect.size());
 	}
 
+	DisplayMetrics View::displayMetrics() const
+	{
+		const RootView* root = rootView();
+		return (root != nullptr) ? root->displayMetrics() : DisplayMetrics::forDpi(kBaselineDpi);
+	}
+
 	Rect View::screenBounds() const
 	{
 		return localToScreen(Rect(Point(0.0f, 0.0f), bounds().size()));

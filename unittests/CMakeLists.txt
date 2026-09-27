@@ -13,6 +13,7 @@ add_executable(newui_tests
     test_animation.cpp
     test_curveinterpolation.cpp
     test_view.cpp
+    test_displayunit.cpp
     test_cursor.cpp
     test_graphics.cpp
     test_menus.cpp

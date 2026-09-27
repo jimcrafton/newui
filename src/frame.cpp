@@ -220,6 +220,32 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 		}
 		break;
 
+		case WM_DPICHANGED: {
+			// The real top-level window here is frameHandle_, not
+			// rootView_'s own HWND (a WS_CHILD - see
+			// RootView::refreshDisplayMetrics()'s own doc comment) - so
+			// Frame is what actually receives this, and has to push the
+			// refresh down explicitly.
+			if (nullptr != rootView_) {
+				rootView_->refreshDisplayMetrics();
+			}
+
+			// lParam points at Windows' own suggested new window rect for
+			// the new DPI - applying it keeps the frame from visually
+			// jumping mid-drag across a DPI boundary (the documented
+			// WM_DPICHANGED handling pattern).
+			const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+			if (suggested != nullptr) {
+				::SetWindowPos(frameHandle_, nullptr,
+					suggested->left, suggested->top,
+					suggested->right - suggested->left, suggested->bottom - suggested->top,
+					SWP_NOZORDER | SWP_NOACTIVATE);
+			}
+
+			result = true;
+		}
+		break;
+
 		case WM_DWMCOLORIZATIONCOLORCHANGED: {
 			// Same "refresh then notify" ordering as WM_THEMECHANGED above -
 			// an accent-color change affects themed chrome just as much as
