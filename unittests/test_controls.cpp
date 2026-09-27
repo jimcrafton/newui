@@ -3947,6 +3947,58 @@ TEST(TextControl, ColorRunsRecolorTheirRangeOfTheText) {
     EXPECT_GT(redTextPixels(textControl), 20u);
 }
 
+namespace {
+    std::uint32_t pixelAt(TextControl& textControl, int width, int height, int x, int y) {
+        BLImage image(width, height, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+        return row[x];
+    }
+}
+
+// Real-pixel check (not just the property round-tripping) - a short line leaves most of its own
+// width past the glyphs untouched by any TextDecoration/selection/color-run painting, so a pixel
+// there changing when the property is toggled proves the highlight actually spans the FULL
+// control width, not just the text's own extent (see highlightsCurrentLine()'s own comment on why
+// that distinction is the whole point of this being a dedicated draw call).
+TEST(TextControl, HighlightsCurrentLineTintsTheFullLineWidthPastTheTextItself) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+
+    const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);   // far right of "ab", same line
+    textControl.setHighlightsCurrentLine(true);
+    const std::uint32_t after = pixelAt(textControl, 300, 40, 250, 10);
+    EXPECT_NE(before, after);
+
+    textControl.destroy();
+}
+
+TEST(TextControl, HighlightsCurrentLineIsOffByDefaultAndSuppressedByAnActiveSelection) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+    EXPECT_FALSE(textControl.highlightsCurrentLine());
+
+    textControl.setHighlightsCurrentLine(true);
+    const std::uint32_t highlighted = pixelAt(textControl, 300, 40, 250, 10);
+
+    textControl.selection().setRange(text::TextRange(0, 1));
+    const std::uint32_t withSelection = pixelAt(textControl, 300, 40, 250, 10);
+    EXPECT_NE(highlighted, withSelection) << "an active selection should suppress the current-line tint";
+
+    textControl.destroy();
+}
+
 TEST(TextControl, ColorRunsPastTheEndOfTheTextAreIgnored) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));

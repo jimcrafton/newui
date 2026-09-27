@@ -2310,6 +2310,36 @@ namespace newui {
         return Rect(caretTopLeft.x, caretTopLeft.y, 1.0f, caretHeight);
     }
 
+    void TextController::drawCurrentLineHighlight(BLContext& ctx) const {
+        // Deliberately not gated on caret_.isVisible() - that also factors in the blink phase
+        // (text.h's own comment on it), and this highlight should stay solid throughout the blink
+        // cycle, unlike the caret glyph itself. hitTestPosition() below already no-ops (caretHeight
+        // stays 0) for an invalid/never-set position, which is the only real gate needed here.
+        if (!highlightsCurrentLine_ || !selection_.isEmpty()) {
+            return;
+        }
+        Point caretTopLeft;
+        float caretHeight = 0.0f;
+        layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
+        if (caretHeight <= 0.0f) {
+            return;
+        }
+        const float width = textArea().width();
+        if (width <= 0.0f) {
+            return;
+        }
+        // A neutral, theme-adaptive tint (the same "white on dark, black on light" convention
+        // FindReplaceController's own match highlighting uses) rather than a fixed hardcoded hue -
+        // faint enough (a fraction of the alpha a real selection/match highlight uses) to mark
+        // which line the caret is on without fighting with syntax-highlight colors drawn over it.
+        const Color base = UIColorManager::isDarkMode() ? Color(1.0f, 1.0f, 1.0f) : Color(0.0f, 0.0f, 0.0f);
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        ctx.set_fill_style(Color(base.r, base.g, base.b, 0.06f).toBLRgba32());
+        ctx.fill_rect(BLRect(0.0, static_cast<double>(caretTopLeft.y), static_cast<double>(width), static_cast<double>(caretHeight)));
+        ctx.restore();
+    }
+
     void TextController::drawSelection(BLContext& ctx) const {
         if (selection_.isEmpty()) {
             return;
@@ -3058,6 +3088,7 @@ namespace newui {
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
+        controller_->drawCurrentLineHighlight(ctx);
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),

@@ -1468,6 +1468,14 @@ namespace newui {
         bool showsWhitespace() const { return showsWhitespace_; }
         void setShowsWhitespace(bool shows) { showsWhitespace_ = shows; owner_.style().markDirty(); }
 
+        // Whether the caret's own line gets a faint full-width background tint (VS/VS Code-style
+        // "current line highlight") - see drawCurrentLineHighlight()'s own comment for why this
+        // needs to be a dedicated draw call rather than a TextDecoration (a Background decoration
+        // only ever covers the *text's* own extent on that line, never the full control width, and
+        // this needs to span it regardless of how short the line's actual text is).
+        bool highlightsCurrentLine() const { return highlightsCurrentLine_; }
+        void setHighlightsCurrentLine(bool highlight) { highlightsCurrentLine_ = highlight; owner_.style().markDirty(); }
+
         // Tab stops every tabWidth() characters (default 4; 0: DirectWrite's default).
         std::size_t tabWidth() const { return tabWidth_; }
         void setTabWidth(std::size_t width) { tabWidth_ = width; owner_.style().markDirty(); }
@@ -1536,6 +1544,15 @@ namespace newui {
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
         void drawCaret(BLContext& ctx) const;
+        // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
+        // text's own extent, which is what makes this a dedicated draw call rather than a
+        // Background TextDecoration (see highlightsCurrentLine()'s own comment). A no-op if
+        // highlightsCurrentLine() is off, there's an active selection (matching VS/VS Code, which
+        // both suppress it then too - the selection highlight already marks where you are), or
+        // there's no laid-out caret position yet. Call before drawSelection() (same "chrome first"
+        // ordering every other draw* method here follows) so selection/text/decorations all still
+        // read clearly on top of it.
+        void drawCurrentLineHighlight(BLContext& ctx) const;
         // backgrounds: the Background decorations (drawn under the selection and text); otherwise
         // every other kind (drawn over the text).
         void drawDecorations(BLContext& ctx, bool backgrounds) const;
@@ -1723,6 +1740,7 @@ namespace newui {
         bool overwriteMode_ = false;
         std::size_t tabWidth_ = 4;
         bool showsWhitespace_ = false;
+        bool highlightsCurrentLine_ = false;
     };
 
     // A single-line text editing control - a thin View-integration shim
@@ -1980,6 +1998,10 @@ namespace newui {
         // See TextController::showsWhitespace().
         bool showsWhitespace() const { return controller_->showsWhitespace(); }
         void setShowsWhitespace(bool shows) { controller_->setShowsWhitespace(shows); }
+
+        // See TextController::highlightsCurrentLine().
+        bool highlightsCurrentLine() const { return controller_->highlightsCurrentLine(); }
+        void setHighlightsCurrentLine(bool highlight) { controller_->setHighlightsCurrentLine(highlight); }
 
         // See TextController::tabWidth().
         std::size_t tabWidth() const { return controller_->tabWidth(); }
