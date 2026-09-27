@@ -126,6 +126,20 @@ namespace newui {
 		return Rect(mapTo(target, localRect.pos()), localRect.size());
 	}
 
+	void View::setLayoutIgnored(bool ignored)
+	{
+		if (ignored == layoutIgnored_) {
+			return;
+		}
+		layoutIgnored_ = ignored;
+		// The parent's layout now includes or leaves out this child: re-run it, so the siblings reflow
+		// (and, for a child that stops being ignored, so it gets positioned), and repaint what moved.
+		if (parent_ != nullptr) {
+			parent_->updateLayout();
+			parent_->redraw();
+		}
+	}
+
 	void View::addChild(SubView* child)
 	{
 		childViews_.push_back(child);

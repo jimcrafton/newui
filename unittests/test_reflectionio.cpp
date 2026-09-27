@@ -25,6 +25,7 @@
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
 #include "newui/color.h"
+#include "newui/subview.h"
 #include "newui/uicolormanager.h"
 #include "newui/viewstyle.h"
 
@@ -718,4 +719,34 @@ TEST(ColorStringValue, WriteThenReadRoundTripsExactly) {
     reader.read(&fresh);
 
     EXPECT_EQ(fresh.borderFill(), written.borderFill());
+}
+
+// View::isLayoutIgnored()/setLayoutIgnored() are paired by reflectgen into the real "layoutIgnored"
+// property, so a saved document (and the designer) can carry it.
+TEST(ReflectionIO, ViewLayoutIgnoredIsARealPropertyThatRoundTripsAndDefaultsToFalse) {
+    auto* view = new newui::SubView();
+    view->setLayoutIgnored(true);
+
+    ObjectWriter writer;
+    writer.write(view);
+    const std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("layoutIgnored: true"), std::string::npos) << text;
+
+    ObjectReader reader;
+    ASSERT_FALSE(json5::from_string(text, reader.doc));
+    newui::View* fresh = reader.readNew<newui::View>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->isLayoutIgnored());
+
+    // Omitting the key leaves the default: an existing saved document is unaffected.
+    ObjectReader plain;
+    ASSERT_FALSE(json5::from_string("{ type: \"SubView\" }", plain.doc));
+    newui::View* defaulted = plain.readNew<newui::View>();
+    ASSERT_NE(defaulted, nullptr);
+    EXPECT_FALSE(defaulted->isLayoutIgnored());
+
+    for (newui::View* v : { fresh, defaulted, static_cast<newui::View*>(view) }) {
+        v->destroy();
+        delete v;
+    }
 }

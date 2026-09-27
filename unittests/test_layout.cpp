@@ -982,3 +982,156 @@ TEST(ViewLayout, NullLayoutStopsAutomaticArranging) {
     delete child;
     delete container;
 }
+
+// ---------------------------------------------------------------------
+// View::isLayoutIgnored() - a child that stays in childViews() but that no
+// layout positions, sizes, counts or hides (an overlay floating over the
+// container).
+// ---------------------------------------------------------------------
+
+TEST(LayoutIgnored, IsOffByDefault) {
+    auto* view = new newui::SubView();
+    EXPECT_FALSE(view->isLayoutIgnored());
+    delete view;
+}
+
+TEST(LayoutIgnored, FlexLayoutLeavesTheChildAloneAndDoesNotReserveSpaceForIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 400));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+
+    auto* first = NewChild(container, newui::Rect(0, 0, 50, 20));
+    auto* overlay = NewChild(container, newui::Rect(10, 10, 80, 80));
+    auto* second = NewChild(container, newui::Rect(0, 0, 50, 30));
+
+    // Counted like any child at first: the overlay's own 80 sits between the two.
+    EXPECT_EQ(second->bounds().top(), 100.0f);
+
+    // Flagging stops the layout touching it; whatever bounds it has then are its own, so the owner places it.
+    overlay->setLayoutIgnored(true);
+    overlay->setBounds(newui::Rect(10, 10, 80, 80));
+    EXPECT_EQ(first->bounds().top(), 0.0f);
+    EXPECT_EQ(second->bounds().top(), 20.0f);   // the siblings closed up: no space is reserved for it
+
+    // Still an ordinary child otherwise: in childViews(), in order, visible.
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[1], overlay);
+    EXPECT_TRUE(overlay->isVisible());
+
+    // A resize re-runs the layout and still leaves it where it is.
+    container->setBounds(newui::Rect(0, 0, 300, 500));
+    EXPECT_EQ(overlay->bounds(), newui::Rect(10, 10, 80, 80));
+
+    // Turning it back off puts it back in the flow.
+    overlay->setLayoutIgnored(false);
+    EXPECT_EQ(second->bounds().top(), 100.0f);
+
+    delete first;
+    delete overlay;
+    delete second;
+    delete container;
+}
+
+TEST(LayoutIgnored, AnchorLayoutDoesNotApplyItsAnchorsToTheChild) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 100));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+
+    auto* overlay = NewChild(container, newui::Rect(20, 30, 40, 50));
+    auto params = std::make_unique<newui::AnchorLayoutParams>(
+        newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Right | newui::Anchor::Bottom);
+    overlay->setLayoutParams(std::move(params));
+    container->updateLayout();
+    EXPECT_EQ(overlay->bounds(), newui::Rect(0, 0, 200, 100));   // stretched by its anchors
+
+    overlay->setLayoutIgnored(true);
+    overlay->setBounds(newui::Rect(20, 30, 40, 50));
+    container->setBounds(newui::Rect(0, 0, 300, 150));           // re-arranges
+    EXPECT_EQ(overlay->bounds(), newui::Rect(20, 30, 40, 50));   // the anchors no longer apply
+
+    delete overlay;
+    delete container;
+}
+
+TEST(LayoutIgnored, GridLayoutDoesNotSizeAutoTracksFromItOrPlaceIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 300, 200));
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addAutoColumn();
+    grid->addAutoRow();
+    container->setLayout(std::move(grid));
+
+    auto* cell = NewChild(container, newui::Rect(0, 0, 40, 20));
+    cell->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 0));
+    auto* overlay = NewChild(container, newui::Rect(5, 5, 250, 180));
+    overlay->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 0));
+    overlay->setLayoutIgnored(true);
+    container->updateLayout();
+
+    EXPECT_EQ(cell->bounds(), newui::Rect(0, 0, 40, 20));       // the auto track is the cell's, not the overlay's 250x180
+    EXPECT_EQ(overlay->bounds(), newui::Rect(5, 5, 250, 180));  // and the overlay wasn't moved into the cell
+
+    delete cell;
+    delete overlay;
+    delete container;
+}
+
+TEST(LayoutIgnored, CardLayoutDoesNotCountShowOrHideIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 100));
+    auto card = std::make_unique<newui::CardLayout>();
+    newui::CardLayout* cards = card.get();
+    container->setLayout(std::move(card));
+
+    auto* page0 = NewChild(container, newui::Rect());
+    auto* overlay = NewChild(container, newui::Rect(10, 10, 30, 30));
+    auto* page1 = NewChild(container, newui::Rect());
+    overlay->setLayoutIgnored(true);   // (the layout had already hidden it as a non-active card: the owner shows and places it)
+    overlay->setVisible(true);
+    overlay->setBounds(newui::Rect(10, 10, 30, 30));
+
+    cards->show(1);   // the second CARD, not the second child
+    EXPECT_FALSE(page0->isVisible());
+    EXPECT_TRUE(page1->isVisible());
+    EXPECT_TRUE(overlay->isVisible());                          // never hidden by the layout
+    EXPECT_EQ(overlay->bounds(), newui::Rect(10, 10, 30, 30));  // never resized to fill the card area
+
+    cards->next();   // two cards: wraps to the first
+    EXPECT_TRUE(page0->isVisible());
+    EXPECT_FALSE(page1->isVisible());
+    EXPECT_TRUE(overlay->isVisible());
+
+    delete page0;
+    delete overlay;
+    delete page1;
+    delete container;
+}
+
+TEST(LayoutIgnored, TogglingOnAViewWithNoParentIsHarmless) {
+    auto* view = new newui::SubView();
+    view->setLayoutIgnored(true);
+    EXPECT_TRUE(view->isLayoutIgnored());
+    view->setLayoutIgnored(true);   // no change: nothing to do
+    view->setLayoutIgnored(false);
+    EXPECT_FALSE(view->isLayoutIgnored());
+    delete view;
+}
+
+TEST(LayoutIgnored, StillHitTestsByItsOwnBoundsOverTheLaidOutSiblings) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 200));
+    container->setVisible(true);
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    auto* under = NewChild(container, newui::Rect(0, 0, 200, 200));
+    auto* overlay = NewChild(container, newui::Rect(50, 50, 60, 60));
+    overlay->setLayoutIgnored(true);   // added last: on top
+    overlay->setBounds(newui::Rect(50, 50, 60, 60));
+
+    newui::Point local;
+    EXPECT_EQ(container->hitTestChildren(newui::Point(70, 70), local), overlay);
+    EXPECT_EQ(container->hitTestChildren(newui::Point(150, 150), local), under);
+
+    delete under;
+    delete overlay;
+    delete container;
+}

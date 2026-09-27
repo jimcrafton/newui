@@ -52,6 +52,12 @@ namespace newui {
         // how most modern layout systems treat a hidden widget.
         // CardLayout is the exception: it owns visibility itself (see
         // its class comment), so it doesn't pre-filter by it.
+        //
+        // Every layout also leaves out a child that is layout-ignored
+        // (View::isLayoutIgnored()): it is never positioned, sized, counted (flex
+        // lines, grid tracks, card pages) or shown/hidden - it keeps whatever
+        // bounds and visibility it was given. That is what an overlay floating
+        // over the container wants.
         virtual void arrange(View& container) = 0;
     };
 
@@ -359,7 +365,9 @@ namespace newui {
     // Java AWT's CardLayout; useful for wizard steps, tabbed content
     // panes, or any single-active-view stack. Children keep their place
     // in container.childViews() (index-based); show()'s by-name overload
-    // matches against SubView::getName().
+    // matches against SubView::getName(). A layout-ignored child
+    // (View::isLayoutIgnored()) is not a card: indices count only the
+    // others, and it is never shown or hidden.
     //
     // Unlike AnchorLayout/FlexLayout, CardLayout remembers the last
     // container arrange() ran on, so show()/next()/previous() can

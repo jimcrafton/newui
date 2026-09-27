@@ -101,6 +101,19 @@ namespace newui {
             visible_ = visible;
         }
 
+        // Whether the layout of this View's parent leaves it out entirely. An ignored child stays
+        // in childViews() - so it is painted in child order (add it last to have it on top) and
+        // hit-tested by its own bounds like any other child - but no Layout positions it, sizes it,
+        // counts it (flex lines, grid tracks, card pages) or hides it: it just sits at exactly the
+        // bounds it was given. For an overlay that floats over a laid-out area (a find bar over an
+        // editor), placed by whoever owns it. Off by default. Changing it re-runs the parent's
+        // layout, so the other children reflow to fill (or give up) the space. A reflected property,
+        // so a saved document and the designer can set it.
+        bool isLayoutIgnored() const {
+            return layoutIgnored_;
+        }
+        void setLayoutIgnored(bool ignored);
+
         // If this View is already attached to a RootView (rootView() !=
         // nullptr) and name is non-empty, reserves it in that RootView's
         // NameManager (rootView()->nameManager()) so a later auto-
@@ -713,6 +726,8 @@ namespace newui {
     protected:
         Rect bounds_;
         bool visible_ = false;
+        // Backs isLayoutIgnored()/setLayoutIgnored() above.
+        bool layoutIgnored_ = false;
 
         std::optional<Size> desiredSizeOverride_;
 

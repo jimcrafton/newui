@@ -151,7 +151,7 @@ namespace newui {
         const Size containerSize = clientBounds.size();
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
@@ -218,7 +218,7 @@ namespace newui {
         entries.reserve(container.childViews().size());
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
@@ -322,10 +322,24 @@ namespace newui {
         }
     }
 
+    namespace {
+        // The children a card layout pages through: all but those that opted out of layout
+        // (View::isLayoutIgnored()), which are never counted, shown or hidden.
+        std::vector<SubView*> cardChildren(const View& container) {
+            std::vector<SubView*> children;
+            for (SubView* child : container.childViews()) {
+                if (!child->isLayoutIgnored()) {
+                    children.push_back(child);
+                }
+            }
+            return children;
+        }
+    }
+
     void CardLayout::arrange(View& container) {
         container_ = &container;
 
-        const auto& children = container.childViews();
+        const std::vector<SubView*> children = cardChildren(container);
         if (children.empty()) {
             return;
         }
@@ -358,7 +372,7 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
+        const std::vector<SubView*> children = cardChildren(*container_);
         for (std::size_t i = 0; i < children.size(); ++i) {
             if (children[i]->name() == name) {
                 show(i);
@@ -372,12 +386,12 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
-        if (children.empty()) {
+        const std::size_t count = cardChildren(*container_).size();
+        if (count == 0) {
             return;
         }
 
-        show((activeIndex_ + 1) % children.size());
+        show((activeIndex_ + 1) % count);
     }
 
     void CardLayout::previous() {
@@ -385,12 +399,12 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
-        if (children.empty()) {
+        const std::size_t count = cardChildren(*container_).size();
+        if (count == 0) {
             return;
         }
 
-        show((activeIndex_ + children.size() - 1) % children.size());
+        show((activeIndex_ + count - 1) % count);
     }
 
     namespace {
@@ -470,7 +484,7 @@ namespace newui {
         std::vector<float> autoColumnSizes(columns_.size(), 0.0f);
         std::vector<float> autoRowSizes(rows_.size(), 0.0f);
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
             auto* params = dynamic_cast<GridLayoutParams*>(child->layoutParams());
@@ -510,7 +524,7 @@ namespace newui {
         const std::vector<float>& rowOffsets = geometry.rows.offsets;
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
