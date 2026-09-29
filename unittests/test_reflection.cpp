@@ -747,3 +747,76 @@ TEST(Reflection, AnchorEnumIsRegisteredAsFlags) {
     EXPECT_NE(std::find(names.begin(), names.end(), "Left"), names.end());
     EXPECT_NE(std::find(names.begin(), names.end(), "Top"), names.end());
 }
+
+// ---------------------------------------------------------------------
+// C++ type spelling - detail::cppTypeSpelling<T>() and the spellings recorded on a Delegate's
+// sender/arguments. typeid drops const and references, so these are what a generated handler
+// signature can actually be written from.
+// ---------------------------------------------------------------------
+
+TEST(TypeSpelling, KeepsConstReferencesAndPointersThatTypeidDrops) {
+    using detail::cppTypeSpelling;
+    EXPECT_EQ(cppTypeSpelling<int>(), "int");
+    EXPECT_EQ(cppTypeSpelling<unsigned int>(), "unsigned int");
+    EXPECT_EQ(cppTypeSpelling<bool>(), "bool");
+    EXPECT_EQ(cppTypeSpelling<newui::Size>(), "newui::Size");
+    EXPECT_EQ(cppTypeSpelling<const newui::Size&>(), "const newui::Size&");
+    EXPECT_EQ(cppTypeSpelling<newui::Size&>(), "newui::Size&");
+    EXPECT_EQ(cppTypeSpelling<newui::Size&&>(), "newui::Size&&");
+    EXPECT_EQ(cppTypeSpelling<const char*>(), "const char*");
+    EXPECT_EQ(cppTypeSpelling<const newui::View*>(), "const newui::View*");
+    EXPECT_EQ(cppTypeSpelling<newui::View* const>(), "newui::View* const");
+    EXPECT_EQ(cppTypeSpelling<const newui::View* const&>(), "const newui::View* const&");
+}
+
+TEST(TypeSpelling, ADelegatesSenderAndArgumentsAreSpelledExactly) {
+    const Class* subView = classinfo(std::string("SubView"));
+    ASSERT_NE(subView, nullptr);
+    std::vector<const Delegate*> delegates;
+    subView->allDelegates(delegates);
+
+    auto find = [&](const char* name) -> const Delegate* {
+        for (const Delegate* d : delegates) {
+            if (d->name() == name) {
+                return d;
+            }
+        }
+        return nullptr;
+    };
+
+    const Delegate* sizeChanged = find("onSizeChanged");  // Delegate<View, const Size&>
+    ASSERT_NE(sizeChanged, nullptr);
+    EXPECT_EQ(sizeChanged->senderSpelling(), "newui::View");
+    ASSERT_EQ(sizeChanged->arguments().size(), 1u);
+    EXPECT_EQ(sizeChanged->arguments()[0].spelling, "const newui::Size&");
+
+    const Delegate* mouseDown = find("onMouseDown");  // Delegate<View, const Point&, uint32_t, uint32_t>
+    ASSERT_NE(mouseDown, nullptr);
+    ASSERT_EQ(mouseDown->arguments().size(), 3u);
+    EXPECT_EQ(mouseDown->arguments()[0].spelling, "const newui::Point&");
+    EXPECT_EQ(mouseDown->arguments()[1].spelling, "unsigned int");
+
+    // typeid alone drops the const and the reference - that is why the spelling exists.
+    EXPECT_TRUE(sizeChanged->arguments()[0].type == std::type_index(typeid(newui::Size)));
+
+    // A delegate with a NON-const reference argument (Delegate<View, Size&>) isn't reflectable as a
+    // Delegate at all (reflectgen registers it as a plain field), so it is never offered for wiring.
+    EXPECT_EQ(find("onQueryContentSize"), nullptr);
+}
+
+TEST(TypeSpelling, EveryRegisteredControlDelegateHasASpelling) {
+    for (const char* name : { "Button", "SubView", "Toggle", "Label" }) {
+        const Class* clazz = classinfo(std::string(name));
+        if (clazz == nullptr) {
+            continue;
+        }
+        std::vector<const Delegate*> delegates;
+        clazz->allDelegates(delegates);
+        for (const Delegate* delegate : delegates) {
+            EXPECT_FALSE(delegate->senderSpelling().empty()) << name << "." << delegate->name();
+            for (const Argument& argument : delegate->arguments()) {
+                EXPECT_FALSE(argument.spelling.empty()) << name << "." << delegate->name();
+            }
+        }
+    }
+}

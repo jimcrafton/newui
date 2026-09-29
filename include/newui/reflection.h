@@ -254,6 +254,50 @@ namespace newui::reflection {
         struct AccessThief {
             friend constexpr auto accessThiefGet(Tag) { return Member; }
         };
+
+        // typeid's name with only MSVC's leading "class "/"struct "/"enum "/"union " removed - the
+        // namespace stays (unlike demangleTypeName(), which drops it).
+        inline std::string qualifiedTypeName(const std::type_info& info) {
+            std::string name = info.name();
+            for (const char* prefix : { "class ", "struct ", "enum ", "union " }) {
+                const std::size_t length = std::char_traits<char>::length(prefix);
+                if (name.compare(0, length, prefix) == 0) {
+                    name.erase(0, length);
+                    break;
+                }
+            }
+            return name;
+        }
+
+        // T as C++ source spells it, minus references: "const newui::Size", "int*", "const View* const".
+        template<typename T>
+        std::string cppValueSpelling() {
+            if constexpr (std::is_pointer_v<T>) {
+                std::string spelling = cppValueSpelling<std::remove_pointer_t<T>>() + "*";
+                if constexpr (std::is_const_v<T>) {
+                    spelling += " const";
+                }
+                return spelling;
+            } else {
+                std::string spelling = qualifiedTypeName(typeid(std::remove_cv_t<T>));
+                if constexpr (std::is_const_v<T>) {
+                    spelling = "const " + spelling;
+                }
+                return spelling;
+            }
+        }
+
+        // T exactly as it would be written in a signature, references included.
+        template<typename T>
+        std::string cppTypeSpelling() {
+            std::string spelling = cppValueSpelling<std::remove_reference_t<T>>();
+            if constexpr (std::is_lvalue_reference_v<T>) {
+                spelling += "&";
+            } else if constexpr (std::is_rvalue_reference_v<T>) {
+                spelling += "&&";
+            }
+            return spelling;
+        }
     }
 
     // True when T has a callable, no-argument .destroy() member - used
@@ -446,6 +490,11 @@ namespace newui::reflection {
     struct Argument {
         std::string name;
         std::type_index type;
+        // The argument's type as C++ source spells it, qualifiers included ("const newui::Size&"):
+        // `type` is a typeid, which drops const and references, so it can't be used to write a
+        // signature that matches. Only filled in where it is known at compile time (a delegate's
+        // Args...); empty otherwise.
+        std::string spelling;
     };
 
     // A member variable reached via direct storage access - a real
@@ -2028,6 +2077,8 @@ namespace newui::reflection {
         const std::string& name() const { return name_; }
         Scope scope() const { return scope_; }
         std::type_index senderType() const { return senderType_; }
+        // The sender type as C++ source spells it ("newui::Control"); empty for a hand-built Delegate.
+        const std::string& senderSpelling() const { return senderSpelling_; }
         const std::vector<Argument>& arguments() const { return arguments_; }
 
         // From "@reflect tags=..." on the delegate member (reflectgen.py) -
@@ -2081,6 +2132,9 @@ namespace newui::reflection {
             return false;
         }
 
+    protected:
+        void setSenderSpelling(std::string spelling) { senderSpelling_ = std::move(spelling); }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -2089,6 +2143,7 @@ namespace newui::reflection {
 
         std::string name_;
         Scope scope_;
+        std::string senderSpelling_;
         std::type_index senderType_;
         std::vector<Argument> arguments_;
         AddressFn address_;
@@ -2108,8 +2163,11 @@ namespace newui::reflection {
         using MemberPtr = newui::Delegate<SourceT, Args...> SourceT::*;
 
         TypedDelegate(std::string name, Scope scope, MemberPtr member)
-            : Delegate(std::move(name), scope, typeid(SourceT), { Argument{"", typeid(Args)}... }, nullptr, nullptr),
-              member_(member) {}
+            : Delegate(std::move(name), scope, typeid(SourceT),
+                       { Argument{"", typeid(Args), detail::cppTypeSpelling<Args>()}... }, nullptr, nullptr),
+              member_(member) {
+            setSenderSpelling(detail::cppTypeSpelling<SourceT>());
+        }
 
         void* address(void* instance) const override {
             return &(static_cast<SourceT*>(instance)->*member_);
