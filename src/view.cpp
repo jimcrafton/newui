@@ -12,6 +12,17 @@ namespace newui {
 
 	bool View::initialize()
 	{
+		return Component::initialize();
+	}
+
+	bool View::internal_init()
+	{
+		if (!Component::internal_init()) {
+			return false;
+		}
+		for (SubView* child : childViews_) {
+			child->initialize();
+		}
 		return true;
 	}
 

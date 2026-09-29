@@ -58,6 +58,10 @@ void SubView::addChild(SubView* child) {
 	// descendant in it needs to pick up this rootView() too, not just
 	// child itself.
 	child->propagateRootView(rootView());
+	// initialize() is idempotent (Component::initialize()) - needed here for a child attached
+	// to an already-initialized live parent, which View::internal_init()'s own childViews_
+	// cascade can't reach on its own (nothing re-triggers that cascade after the fact).
+	child->initialize();
 }
 
 void SubView::removeChild(SubView* child) {
@@ -81,7 +85,7 @@ void SubView::removeChild(SubView* child) {
 
 bool SubView::initialize()
 {
-    return true;
+    return View::initialize();
 }
 
 void SubView::destroy()

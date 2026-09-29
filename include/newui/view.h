@@ -624,6 +624,18 @@ namespace newui {
         virtual bool initialize();
         virtual void destroy();
 
+    protected:
+        // Cascades the Component::initialize() dispatch this override chains into (see
+        // view.cpp) onto every existing child, so a subtree several levels deep - not just this
+        // View itself - gets initialize()'d in one call. Covers RootView's own directly-attached
+        // children too (this lives once on View, not duplicated onto SubView/RootView
+        // separately), unlike SubView::addChild()/RootView::addChild()'s own explicit
+        // child->initialize() call (needed for a child attached to an already-initialized live
+        // parent, which this loop alone can't reach since nothing re-triggers it then).
+        bool internal_init() override;
+
+    public:
+
         // Non-owning upward back-reference (RootView::addChild()/
         // propagateRootView() set it, never this View) - reachable downward
         // from the real owner already (RootView/SubView's own childViews),

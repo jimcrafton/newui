@@ -580,6 +580,9 @@ namespace newui {
 		// SubView::addChild()'s own comment (subview.cpp) for why not setParent().
 		child->internal_setParent(this);
 		View::addChild(child);
+		// See SubView::addChild()'s own comment (subview.cpp) for why this is needed even
+		// though View::internal_init() already cascades initialize() over childViews_.
+		child->initialize();
 
 	}
 
@@ -1654,7 +1657,7 @@ namespace newui {
 		::ShowWindow(viewHwnd_, SW_SHOW);
 		::SetFocus(viewHwnd_);
 
-		return true;
+		return View::initialize();
 	}
 
 	void RootView::postCreate()

@@ -45,11 +45,17 @@ namespace newui {
         // Being torn down (set on a whole subtree before any of it is detached): layout and
         // resize work is skipped, so listeners whose owners are already gone never run.
         Destroying = 1,
+        // Set for the duration of internal_init() (see Component::initialize()) - lets
+        // internal_init() itself (or anything it calls) tell "already fully initialized" apart
+        // from "initialization is running right now" via componentState(), rather than only
+        // ever seeing the pre- or post-state.
+        Initializing = 2,
+        // initialize() has already run internal_init() to completion once - isInitialized() below.
+        Initialized = 3,
     };
 
     // Common base for anything nameable/design-time-aware: View, Model,
     // Controller. Not a Delphi TComponent - just a name and the design-time flags.
-    // Non-virtual: no call site needs polymorphic dispatch here.
     class Component {
     public:
         virtual ~Component() = default;
@@ -105,7 +111,39 @@ namespace newui {
         //@reflect ignore=true
         void setDestroying() { componentState_ = ComponentState::Destroying; }
 
+        //@reflect ignore=true
+        bool isInitialized() const { return componentState_ == ComponentState::Initialized; }
+
+        // Idempotent - a no-op returning true once already initialized, so any caller (a
+        // subtree cascade, a second explicit call, ...) can call this freely without tracking
+        // who's already run it. internal_init() below is the real customization point - override
+        // that, not this, so the guard here always applies regardless of what a subclass does.
+        // RootView/SubView (view.h) still each declare their own initialize() too (matching how
+        // Frame - an unrelated hierarchy - already spells this name), chaining to this one at
+        // whatever point their own real setup succeeds.
+        //@reflect ignore=true
+        virtual bool initialize() {
+            if (isInitialized()) {
+                return true;
+            }
+            componentState_ = ComponentState::Initializing;
+            bool result = internal_init();
+            componentState_ = result ? ComponentState::Initialized : ComponentState::None;
+            return result;
+        }
+
     protected:
+        // The standard place to wire this object's own delegates to handler methods (e.g.
+        // saveButton_->onClick.add(this, &MyDialog::onSaveButtonClicked);) - guaranteed to run
+        // exactly once, after construction, regardless of which concrete initialize() override
+        // actually triggers it. Exists specifically so generated code (cpp_codetools's delegate-
+        // wiring codegen, cpptools_codegen) has one predictable override to emit such a call
+        // into, instead of guessing at a constructor or some other ad hoc spot. Always call
+        // Component::internal_init() from an override, same as any other base-chaining override
+        // in this codebase (see SubView::destroy()) - base is a no-op today but that's not
+        // guaranteed to stay true.
+        virtual bool internal_init() { return true; }
+
         std::string name_;
         DesignTimeFlags designTimeFlags_ = DesignTimeFlags::None;
         ComponentState componentState_ = ComponentState::None;
