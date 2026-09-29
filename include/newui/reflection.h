@@ -243,6 +243,17 @@ namespace newui::reflection {
     // own name).
     namespace detail {
         template<typename T> struct ClassAccess;
+
+        // Reaches a private/protected data member without a friend
+        // declaration: explicit instantiation ignores access checks, so
+        // reflectgen emits `template struct AccessThief<Tag, &C::m_>;` and
+        // reads the pointer back through accessThiefGet(Tag). Used only for
+        // members marked "//@reflect connect=true" in a class that has no
+        // NEWUI_REFLECT_PRIVATE().
+        template<typename Tag, auto Member>
+        struct AccessThief {
+            friend constexpr auto accessThiefGet(Tag) { return Member; }
+        };
     }
 
     // True when T has a callable, no-argument .destroy() member - used
@@ -263,6 +274,14 @@ namespace newui::reflection {
         struct has_destroy_method<T, std::void_t<decltype(std::declval<T&>().destroy())>> : std::true_type {};
         template<typename T>
         inline constexpr bool has_destroy_method_v = has_destroy_method<T>::value;
+
+        // True when T is a complete type (typeid(T) is ill-formed otherwise).
+        template<typename T, typename = void>
+        struct is_complete : std::false_type {};
+        template<typename T>
+        struct is_complete<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
+        template<typename T>
+        inline constexpr bool is_complete_v = is_complete<T>::value;
     }
 
     // container_traits<ContainerT> - one specialization per STL container
@@ -475,6 +494,21 @@ namespace newui::reflection {
         // TypedFieldCollection (a real pointer-to-data-member, needs one).
         bool isStatic() const { return (flags_ & PropertyFlags::Static) != PropertyFlags::None; }
 
+        // For a raw pointer-to-class field (e.g. `ProgressBar* progressBar_`)
+        // the pointee's type; typeid(void) otherwise. type() keeps the
+        // pointer type itself verbatim. Only TypedMemberField fills it in.
+        std::type_index pointeeType() const { return pointeeType_; }
+        bool isPointer() const { return pointeeType_ != std::type_index(typeid(void)); }
+        // The pointee's registered Class, or nullptr if this isn't a
+        // pointer field or the pointee was never registered. Resolved on
+        // each call - the pointee may register after this field does.
+        const Class* pointeeClass() const;
+
+        // From "//@reflect connect=true" on the member (reflectgen), or
+        // ClassBuilder::connect() - marks a pointer-to-View field that
+        // RootController::initialize() should bind by name.
+        bool needsConnection() const { return connect_; }
+
         virtual void* address(void* instance) const { return address_; }
         virtual std::any get(void* instance) const { return get_ ? get_() : std::any(); }
         virtual void set(void* instance, const std::any& value) const { if (set_) set_(value); }
@@ -494,6 +528,9 @@ namespace newui::reflection {
         // no-op for now, out of scope for this pass.
         virtual void write(void* instancePtr, ClassWriter* writer) const {}
         virtual void read(void* instancePtr, ClassReader* reader) const {}
+    protected:
+        void setPointeeType(std::type_index pointee) { pointeeType_ = pointee; }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -502,6 +539,8 @@ namespace newui::reflection {
 
         std::string name_;
         std::type_index type_;
+        std::type_index pointeeType_ = typeid(void);
+        bool connect_ = false;
         Scope scope_;
         PropertyFlags flags_;
         void* address_;
@@ -546,7 +585,16 @@ namespace newui::reflection {
         using MemberPtr = ValueT SourceT::*;
 
         TypedMemberField(std::string name, Scope scope, MemberPtr member)
-            : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr), member_(member) {}
+            : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr), member_(member) {
+            if constexpr (std::is_pointer_v<ValueT>) {
+                using PointeeT = std::remove_cv_t<std::remove_pointer_t<ValueT>>;
+                // typeid() needs a complete type; a forward-declared pointee
+                // just isn't recorded.
+                if constexpr (std::is_class_v<PointeeT> && detail::is_complete_v<PointeeT>) {
+                    setPointeeType(typeid(PointeeT));
+                }
+            }
+        }
 
         void* address(void* instance) const override {
             return &(static_cast<SourceT*>(instance)->*member_);
@@ -3399,6 +3447,16 @@ namespace newui::reflection {
             return *this;
         }
 
+        // Marks the most recently added field as needing a connection
+        // (Field::needsConnection()).
+        ClassBuilder& connect() {
+            if (class_->fields_.empty()) {
+                throw std::runtime_error("ClassBuilder::connect: no field registered yet");
+            }
+            class_->fields_.back()->connect_ = true;
+            return *this;
+        }
+
         // A static class variable - see TypedField's own comment.
         template<typename ValueT>
         ClassBuilder& field(std::string name, Scope scope, ValueT* address) {
@@ -3650,8 +3708,12 @@ namespace newui::reflection {
     }
 
     
-    inline const Class* classinfo(std::type_index type) {        
+    inline const Class* classinfo(std::type_index type) {
         const Class* found = ReflectionRegistry::getClass(type);
         return found;
+    }
+
+    inline const Class* Field::pointeeClass() const {
+        return isPointer() ? classinfo(pointeeType_) : nullptr;
     }
 }

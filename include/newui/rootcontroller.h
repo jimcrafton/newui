@@ -3,7 +3,11 @@
 #include <newui/controllers.h>
 #include <newui/rootview.h>
 
+#include <newui/reflection.h>
+
 #include <string>
+#include <typeindex>
+#include <vector>
 
 namespace newui {
 
@@ -25,6 +29,18 @@ public:
 
     RootView* view() const { return view_; }
 
+    // Before the first internal_init(), auto-binds every field of the most-derived class marked
+    // `//@reflect connect=true` (e.g. `ProgressBar* progressBar_;`, private is fine) to the child
+    // view named after it minus a trailing underscore (`"progressBar"`). Done here rather than in internal_init()
+    // so it also happens when a subclass's override chains to Component::internal_init() directly,
+    // and so the fields are already set when that override wires delegates.
+    bool initialize() override {
+        if (!isInitialized()) {
+            bindViewFields();
+        }
+        return Controller::initialize();
+    }
+
 protected:
     // Named-lookup + cast, in one call instead of every subclass repeating
     // static_cast<T*>(view_->findView(name)) once per resolved field. Returns nullptr if this
@@ -35,6 +51,43 @@ protected:
     }
 
 private:
+    void bindViewFields() {
+        if (view_ == nullptr) {
+            return;
+        }
+        const reflection::Class* clazz = reflection::classinfo(std::type_index(typeid(*this)));
+        const reflection::Class* viewClass = reflection::classinfo(std::type_index(typeid(View)));
+        if (clazz == nullptr || viewClass == nullptr) {
+            return;
+        }
+        std::vector<const reflection::Field*> fields;
+        clazz->allFields(fields);
+        for (const reflection::Field* field : fields) {
+            if (!field->needsConnection()) {
+                continue;
+            }
+            const reflection::Class* pointee = field->pointeeClass();
+            if (pointee == nullptr || !pointee->isOrDerivesFrom(viewClass)) {
+                continue;
+            }
+            std::string lookup = field->name();
+            if (!lookup.empty() && lookup.back() == '_') {
+                lookup.pop_back();
+            }
+            View* found = view_->findView(lookup);
+            if (found == nullptr) {
+                continue;
+            }
+            const reflection::Class* foundClass = reflection::classinfo(std::type_index(typeid(*found)));
+            if (foundClass == nullptr || !foundClass->isOrDerivesFrom(pointee)) {
+                continue;
+            }
+            // View has a single-inheritance chain, so the View* and the derived pointer share an
+            // address; writing through the field's own storage avoids needing its static type.
+            *static_cast<void**>(field->address(dynamic_cast<void*>(this))) = found;
+        }
+    }
+
     RootView* view_ = nullptr;
 };
 

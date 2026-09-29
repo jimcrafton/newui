@@ -90,7 +90,115 @@ protected:
     }
 };
 
+// Reflected pointer fields for RootController's auto-binding. Registered by hand (what reflectgen
+// emits for a real class), lazily, once.
+class AutoBoundController : public RootController {
+public:
+    using RootController::RootController;
+
+    SubView* child_ = nullptr;         // bound: a SubView named "child"
+    Button* wrongType_ = nullptr;      // stays null: "wrongType" exists but is a plain SubView
+    SubView* missing_ = nullptr;       // stays null: no view named "missing"
+    int notAPointer_ = 0;
+    SubView* unflagged_ = nullptr;     // stays null: matching view exists but no connect=true
+    SubView* seenInInit = nullptr;     // child_ as observed inside internal_init()
+
+protected:
+    bool internal_init() override {
+        seenInInit = child_;
+        return Component::internal_init();
+    }
+};
+
+void registerAutoBoundController() {
+    static const bool registered = [] {
+        using namespace newui::reflection;
+        ClassBuilder<AutoBoundController> builder;
+        builder.clazz()
+            .field("child_", Scope::Public, &AutoBoundController::child_).connect()
+            .field("wrongType_", Scope::Public, &AutoBoundController::wrongType_).connect()
+            .field("missing_", Scope::Public, &AutoBoundController::missing_).connect()
+            .field("notAPointer_", Scope::Public, &AutoBoundController::notAPointer_)
+            .field("unflagged_", Scope::Public, &AutoBoundController::unflagged_);
+        ReflectionRegistry::registerClass(builder);
+        return true;
+    }();
+    (void)registered;
+}
+
+// A private connect field with no friend/macro, reached exactly the way reflectgen emits it
+// (detail::AccessThief) - proves the whole private path binds at runtime.
+class PrivateFieldController : public RootController {
+public:
+    using RootController::RootController;
+    SubView* panel() const { return panel_; }
+
+private:
+    SubView* panel_ = nullptr;
+};
+
 }  // namespace
+
+namespace newui::reflection::detail {
+struct AccessThiefTag_PrivateFieldController_panel_ {
+    friend constexpr auto accessThiefGet(AccessThiefTag_PrivateFieldController_panel_);
+};
+}
+template struct newui::reflection::detail::AccessThief<
+    newui::reflection::detail::AccessThiefTag_PrivateFieldController_panel_, &PrivateFieldController::panel_>;
+
+namespace {
+
+void registerPrivateFieldController() {
+    static const bool registered = [] {
+        using namespace newui::reflection;
+        ClassBuilder<PrivateFieldController> builder;
+        builder.clazz()
+            .field("panel_", Scope::Private,
+                   accessThiefGet(newui::reflection::detail::AccessThiefTag_PrivateFieldController_panel_{}))
+            .connect();
+        ReflectionRegistry::registerClass(builder);
+        return true;
+    }();
+    (void)registered;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------
+// Field::pointeeClass()
+// ---------------------------------------------------------------------
+
+TEST(FieldPointee, PointerFieldReportsItsPointeeClass) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    ASSERT_NE(clazz, nullptr);
+
+    const auto* child = clazz->field("child_");
+    ASSERT_NE(child, nullptr);
+    EXPECT_TRUE(child->isPointer());
+    EXPECT_TRUE(child->pointeeType() == std::type_index(typeid(SubView)));
+    EXPECT_EQ(child->pointeeClass(), newui::reflection::classinfo(std::type_index(typeid(SubView))));
+    // type() is still the pointer type itself
+    EXPECT_TRUE(child->type() == std::type_index(typeid(SubView*)));
+}
+
+TEST(FieldPointee, NonPointerFieldHasNoPointee) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    const auto* plain = clazz->field("notAPointer_");
+    ASSERT_NE(plain, nullptr);
+    EXPECT_FALSE(plain->isPointer());
+    EXPECT_EQ(plain->pointeeClass(), nullptr);
+}
+
+TEST(FieldPointee, ConnectFlagIsOnlySetWhereMarked) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    EXPECT_TRUE(clazz->field("child_")->needsConnection());
+    EXPECT_FALSE(clazz->field("unflagged_")->needsConnection());
+    EXPECT_FALSE(clazz->field("notAPointer_")->needsConnection());
+}
 
 // ---------------------------------------------------------------------
 // Model
@@ -538,6 +646,46 @@ TEST(RootController, ResolveReturnsNullptrWithNoView) {
     EXPECT_TRUE(controller.initialize());
 
     EXPECT_EQ(controller.resolvedChild, nullptr);
+}
+
+TEST(RootController, InitializeAutoBindsReflectedViewFieldsByName) {
+    registerAutoBoundController();
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child");
+    root.addChild(child);
+    auto* other = new SubView();
+    other->setName("wrongType");
+    root.addChild(other);
+    auto* third = new SubView();
+    third->setName("unflagged");
+    root.addChild(third);
+
+    AutoBoundController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.unflagged_, nullptr);  // no connect=true, so never touched
+    EXPECT_EQ(controller.child_, child);
+    EXPECT_EQ(controller.wrongType_, nullptr);  // found view isn't a Button
+    EXPECT_EQ(controller.missing_, nullptr);
+    EXPECT_EQ(controller.seenInInit, child);    // bound before internal_init() ran
+
+    root.destroy();
+}
+
+TEST(RootController, AutoBindsAPrivateFieldWithoutAFriendMacro) {
+    registerPrivateFieldController();
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* panel = new SubView();
+    panel->setName("panel");
+    root.addChild(panel);
+
+    PrivateFieldController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.panel(), panel);
+
+    root.destroy();
 }
 
 TEST(RootController, InitializeIsIdempotent) {

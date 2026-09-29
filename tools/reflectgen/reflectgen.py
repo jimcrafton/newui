@@ -557,10 +557,15 @@ def is_reflect_string_value(cursor):
 
 
 class Field:
-    def __init__(self, name, scope, is_static):
+    def __init__(self, name, scope, is_static, connect=False, via_thief=False):
         self.name = name
         self.scope = scope
         self.is_static = is_static
+        # From "//@reflect connect=true" - see Field::needsConnection().
+        self.connect = connect
+        # A non-public connect field in a class with no NEWUI_REFLECT_PRIVATE():
+        # reached through detail::AccessThief instead of a friend ClassAccess.
+        self.via_thief = via_thief
 
 
 class DelegateField:
@@ -1397,8 +1402,15 @@ def collect_class(cursor):
         access = child.access_specifier
 
         if kind == CursorKind.FIELD_DECL:
-            if access != AccessSpecifier.PUBLIC and not info.has_friend:
+            connect = reflect_annotations(child).get("connect", "").lower() == "true"
+            if access != AccessSpecifier.PUBLIC and not info.has_friend and not connect:
                 continue
+            via_thief = connect and access != AccessSpecifier.PUBLIC and not info.has_friend
+            if connect and not is_pointer_to_class(child.type):
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' is marked connect=true but isn't a "
+                    "pointer to a class; RootController won't bind it.\n"
+                )
             if child.type.is_const_qualified():
                 # ClassBuilder::field()'s ValueT T::* overload (reflection.h)
                 # always builds a TypedMemberField<T, ValueT> - unconditionally
@@ -1461,7 +1473,8 @@ def collect_class(cursor):
                 # Delegate-specific connect/invoke API.
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
             else:
-                info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
+                info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False,
+                                         connect=connect, via_thief=via_thief))
 
         elif kind == CursorKind.VAR_DECL and child.semantic_parent == cursor:
             if access == AccessSpecifier.PUBLIC or info.has_friend:
@@ -1676,13 +1689,35 @@ def find_declarations(tu, valid_paths):
     return results
 
 
+def is_pointer_to_class(clang_type):
+    canonical = clang_type.get_canonical()
+    if canonical.kind != cindex.TypeKind.POINTER:
+        return False
+    return canonical.get_pointee().get_canonical().kind == cindex.TypeKind.RECORD
+
+
+def thief_tag(info, m):
+    return "AccessThiefTag_" + re.sub(r"\W", "_", info.name) + "_" + m.name
+
+
 def emit_class_access(info):
     private_members = [m for m in (info.fields + info.delegates) if m.scope != "Scope::Public"]
     if not private_members:
         return ""
-    lines = [f"template<> struct newui::reflection::detail::ClassAccess<{info.name}> {{"]
+    lines = []
+    # Explicit instantiation ignores access checks - see detail::AccessThief.
     for m in private_members:
-        lines.append(f"    static constexpr auto {m.name}() {{ return &{info.name}::{m.name}; }}")
+        if getattr(m, "via_thief", False):
+            tag = thief_tag(info, m)
+            # The tag must live in the same namespace as AccessThief's friend definition.
+            lines.append(f"namespace newui::reflection::detail {{ struct {tag} {{ friend constexpr auto accessThiefGet({tag}); }}; }}")
+            lines.append(f"template struct newui::reflection::detail::AccessThief<newui::reflection::detail::{tag}, &{info.name}::{m.name}>;")
+    lines.append(f"template<> struct newui::reflection::detail::ClassAccess<{info.name}> {{")
+    for m in private_members:
+        if getattr(m, "via_thief", False):
+            lines.append(f"    static constexpr auto {m.name}() {{ return accessThiefGet(newui::reflection::detail::{thief_tag(info, m)}{{}}); }}")
+        else:
+            lines.append(f"    static constexpr auto {m.name}() {{ return &{info.name}::{m.name}; }}")
     lines.append("};")
     return "\n".join(lines) + "\n\n"
 
@@ -1821,6 +1856,8 @@ def emit_register_function(info,function_listing):
             chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
         else:
             chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
+        if f.connect:
+            chain.append(".connect()")
 
     for d in info.delegates:
         delegate_ref = f"&{info.name}::{d.name}" if d.scope == "Scope::Public" else f"detail::ClassAccess<{info.name}>::{d.name}()"
