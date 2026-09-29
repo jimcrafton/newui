@@ -43,6 +43,7 @@ pairs can share one annotation (`@reflect property=title tags=filepath`).
 | `@reflect proxy=ClassName` | a class | Names that class's design-time stand-in (`Class::proxy()`), e.g. `Frame` → `FrameProxy`. |
 | `@reflect proxyfor=ClassName` | a class (the proxy itself) | Inverse of `proxy=` - names the real class this one stands in for (`Class::proxyFor()`). |
 | `@reflect flags` | an `enum`/`enum class` | Opts the enum into array-of-decomposed-flag-names read/write treatment (`Enum::isFlags()`), always explicit, never guessed. |
+| `@reflect connect=true` | a pointer-to-class data member (private is fine) | Registers the field with `Field::needsConnection()` set, so `RootController::initialize()` binds it to the child view named after it minus a trailing `_` (`progressBar_` → `"progressBar"`). Works without `NEWUI_REFLECT_PRIVATE()` - see "Private members" below. Warns if the member isn't a pointer to a class. |
 | `@reflect stringvalue` | a class/struct | Opts the class into single-compact-string read/write treatment (`Class::isStringValue()`) instead of a nested keyed object of its own properties/fields - requires a matching `fromString()`/`toString()` pair (see below), always explicit, never guessed. |
 
 Each is covered in more detail, with a full example, below.
@@ -424,9 +425,31 @@ header that really is on the path you passed. Fix is either quoting
 (`-Id:/code/newui/include`, which Clang accepts natively and PowerShell
 doesn't mangle).
 
+### Private members
+
 Only classes with a `NEWUI_REFLECT_PRIVATE()` in their body get their
 private/protected members reflected; classes without it are still
 scanned, but only their public members are emitted.
+
+The one exception is a member marked `@reflect connect=true`: it is
+reflected even when private, in a class with no `NEWUI_REFLECT_PRIVATE()`.
+Nothing else in that class's private section is reflected.
+
+```cpp
+class SaveDialogController : public newui::RootController {
+private:
+    //@reflect connect=true
+    newui::Button* saveButton_ = nullptr;   // bound to the child named "saveButton"
+    int notReflected_ = 0;                  // private, unmarked: left alone
+};
+```
+
+Since `&Class::privateMember` is an access error outside the class,
+reflectgen reaches such a member with `detail::AccessThief` (reflection.h):
+an explicit template instantiation, which the standard exempts from access
+checks. The generated tag struct has to sit in `newui::reflection::detail`
+(where the thief's friend function is defined), which reflectgen does for
+you; a hand-written registration needs to do the same.
 
 A class/struct can opt out of generation entirely with a `// @reflect
 ignore=true` comment directly above its declaration:
