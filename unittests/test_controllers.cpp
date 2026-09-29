@@ -1,6 +1,8 @@
 #include "newui/controllers.h"
 #include "newui/controls.h"
 #include "newui/models.h"
+#include "newui/rootcontroller.h"
+#include "newui/rootview.h"
 #include "newui/subview.h"
 
 #include <string>
@@ -63,6 +65,29 @@ protected:
     void viewDidAppear() override { if (log) log->push_back("viewDidAppear"); }
     void viewWillDisappear() override { if (log) log->push_back("viewWillDisappear"); }
     void viewDidDisappear() override { if (log) log->push_back("viewDidDisappear"); }
+};
+
+// ---------------------------------------------------------------------
+// RootController test fixture - resolves a named child in internal_init(),
+// same shape a generated delegate-wiring Controller subclass would use.
+// ---------------------------------------------------------------------
+
+class RecordingRootController : public RootController {
+public:
+    using RootController::RootController;
+
+    SubView* resolvedChild = nullptr;
+    bool internalInitCalled = false;
+
+protected:
+    bool internal_init() override {
+        if (!Component::internal_init()) {
+            return false;
+        }
+        internalInitCalled = true;
+        resolvedChild = resolve<SubView>("child_");
+        return true;
+    }
 };
 
 }  // namespace
@@ -460,4 +485,73 @@ TEST(ViewController, RemoveFromParentControllerClearsContainment) {
     EXPECT_EQ(child.parentController(), nullptr);
     EXPECT_TRUE(parent.childControllers().empty());
     EXPECT_TRUE(parent.view()->childViews().empty());
+}
+
+// ---------------------------------------------------------------------
+// RootController
+// ---------------------------------------------------------------------
+
+TEST(RootController, ViewReturnsTheConstructorArgument) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    RootController controller(&root);
+
+    EXPECT_EQ(controller.view(), &root);
+
+    root.destroy();
+}
+
+TEST(RootController, ViewIsNullWhenConstructedWithNullptr) {
+    RootController controller(nullptr);
+
+    EXPECT_EQ(controller.view(), nullptr);
+}
+
+TEST(RootController, ResolveFindsANamedChildAndCastsIt) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child_");
+    root.addChild(child);
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_TRUE(controller.internalInitCalled);
+    EXPECT_EQ(controller.resolvedChild, child);
+
+    root.destroy();
+}
+
+TEST(RootController, ResolveReturnsNullptrForAMissingName) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.resolvedChild, nullptr);
+
+    root.destroy();
+}
+
+TEST(RootController, ResolveReturnsNullptrWithNoView) {
+    RecordingRootController controller(nullptr);
+
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.resolvedChild, nullptr);
+}
+
+TEST(RootController, InitializeIsIdempotent) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child_");
+    root.addChild(child);
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+    controller.internalInitCalled = false;
+
+    EXPECT_TRUE(controller.initialize());
+    EXPECT_FALSE(controller.internalInitCalled);  // second call is a no-op, per Component::initialize()
+
+    root.destroy();
 }

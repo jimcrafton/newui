@@ -134,6 +134,7 @@ add_library(newui STATIC
     "include/newui/models.h" "src/models.cpp"
     "include/newui/items.h" "src/items.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
+    "include/newui/rootcontroller.h"
     "include/newui/controls.h" "src/controls.cpp"
     "include/newui/shapes.h" "src/shapes.cpp"
     "include/newui/themedata.h"
