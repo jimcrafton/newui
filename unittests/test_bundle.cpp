@@ -1267,3 +1267,101 @@ TEST(BundleText, LoadRootViewFromTextNeedsARootViewObject) {
     EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), "{ title: \"x\" }", false, &error));
     EXPECT_NE(error.find("rootView"), std::string::npos);
 }
+
+// A design-time load keeps an event's recorded target (the "delegates" block) as a descriptor-only
+// listener, so the designer can show it and a save writes it back. The target object (e.g. a
+// controller) doesn't exist in the designer's process, so nothing is actually connected.
+namespace {
+    const newui::reflection::Delegate* findDelegate(const char* className, const char* delegateName,
+                                                    std::vector<const newui::reflection::Delegate*>& storage) {
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(std::string(className));
+        if (clazz == nullptr) {
+            return nullptr;
+        }
+        clazz->allDelegates(storage);
+        for (const newui::reflection::Delegate* d : storage) {
+            if (d->name() == delegateName) {
+                return d;
+            }
+        }
+        return nullptr;
+    }
+
+    std::vector<std::string> onClickListeners(newui::Button& button) {
+        std::vector<const newui::reflection::Delegate*> storage;
+        const newui::reflection::Delegate* d = findDelegate("Button", "onClick", storage);
+        return d != nullptr ? d->describedListeners(&button) : std::vector<std::string>{};
+    }
+
+    const char* kDescriptor = "this@SaveDialogController.onOkClick";
+}
+
+TEST(DelegateDescriptorRoundTrip, AddDescriptorListenerRecordsItOnceAndConnectsNothing) {
+    newui::Button button;
+    std::vector<const newui::reflection::Delegate*> storage;
+    const newui::reflection::Delegate* onClick = findDelegate("Button", "onClick", storage);
+    ASSERT_NE(onClick, nullptr);
+
+    EXPECT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));
+    EXPECT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));  // already there: no duplicate
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{kDescriptor});
+
+    EXPECT_FALSE(onClick->addDescriptorListener(&button, ""));
+    EXPECT_FALSE(onClick->addDescriptorListener(nullptr, kDescriptor));
+}
+
+TEST(DelegateDescriptorRoundTrip, ADesignLoadKeepsTheRecordedTargetAndASaveWritesItBack) {
+    newui::Frame frame;
+    frame.setName("RoundTripFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    frame.rootView().addChild(button);
+    std::vector<const newui::reflection::Delegate*> storage;
+    ASSERT_TRUE(findDelegate("Button", "onClick", storage)->addDescriptorListener(button, kDescriptor));
+
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), "{}");
+    ASSERT_NE(text.find(kDescriptor), std::string::npos) << text;
+
+    // Design-mode load: the descriptor comes back as a listener...
+    newui::Frame reloaded;
+    reloaded.setName("RoundTripFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, true, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(onClickListeners(*loaded), std::vector<std::string>{kDescriptor});
+
+    // ...so saving again keeps it (this is what used to be lost on every designer save).
+    const std::string saved = newui::Bundle::instance().writeRootViewToText(reloaded.rootView(), "{}");
+    EXPECT_NE(saved.find(kDescriptor), std::string::npos) << saved;
+}
+
+TEST(DelegateDescriptorRoundTrip, ARuntimeLoadDoesNotAttachRecordedTargets) {
+    newui::Frame frame;
+    frame.setName("RoundTripFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    frame.rootView().addChild(button);
+    std::vector<const newui::reflection::Delegate*> storage;
+    ASSERT_TRUE(findDelegate("Button", "onClick", storage)->addDescriptorListener(button, kDescriptor));
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), "{}");
+
+    newui::Frame reloaded;
+    reloaded.setName("RoundTripFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, false, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_TRUE(onClickListeners(*loaded).empty()) << "only the designer keeps them";
+}
+
+TEST(DelegateDescriptorRoundTrip, AnEntryForAnUnknownDelegateIsIgnored) {
+    const std::string text =
+        R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "b", delegates: { onNoSuchEvent: ["x@Y.z"] } } ] } })";
+    newui::Frame frame;
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), text, true, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(frame.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_TRUE(onClickListeners(*loaded).empty());
+}

@@ -434,7 +434,15 @@ namespace newui::reflection {
                 if (obj.is_valid()) {
                     for (auto [key, node] : obj) {
                         std::string name(key);
-                        if (name == "type" || name == "meta" || name == "delegates") {
+                        if (name == "delegates") {
+                            // Real reconnection is readObjects()'s job; a design-time load only
+                            // keeps what the file recorded, so a save writes it back.
+                            if (designMode_) {
+                                readDesignDelegates(clazz, instancePtr);
+                            }
+                            continue;
+                        }
+                        if (name == "type" || name == "meta") {
                             continue;
                         }
                         if (const Property* property = clazz->property(name); property != nullptr) {
@@ -448,6 +456,24 @@ namespace newui::reflection {
                 }
                 exitInstance(clazz, instancePtr);
             }
+        }
+
+        // The current object's "delegates" block, kept as descriptor-only listeners (see
+        // Delegate::addDescriptorListener()) - design mode only.
+        void readDesignDelegates(const Class* clazz, void* instancePtr) {
+            beginObject("delegates");
+            std::vector<const Delegate*> delegates;
+            clazz->allDelegates(delegates);
+            for (const Delegate* d : delegates) {
+                std::size_t n = beginCollection(d->name());
+                for (std::size_t i = 0; i < n; ++i) {
+                    std::string descriptor;
+                    readString("", descriptor);
+                    d->addDescriptorListener(instancePtr, descriptor);
+                }
+                endCollection(d->name());
+            }
+            endObject("delegates", nullptr);
         }
 
         void endObject(const std::string&, const Class*) override {

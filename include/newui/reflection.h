@@ -2132,6 +2132,16 @@ namespace newui::reflection {
             return false;
         }
 
+        // Records `descriptor` as a listener on senderInstance's delegate WITHOUT connecting it to
+        // anything: a no-op callback that only carries the descriptor, so describedListeners()
+        // reports it and a save writes it back out. This is what a design-time load uses to keep
+        // an event's recorded target (e.g. "this@SaveDialogController.onSaveButtonClick") alive
+        // when the target object doesn't exist in the designer's process. Already present ->
+        // nothing added. False if this base Delegate can't (only TypedDelegate can).
+        virtual bool addDescriptorListener(void* senderInstance, const std::string& descriptor) const {
+            return false;
+        }
+
     protected:
         void setSenderSpelling(std::string spelling) { senderSpelling_ = std::move(spelling); }
 
@@ -2180,6 +2190,22 @@ namespace newui::reflection {
         std::vector<std::string> describedListeners(void* instance) const override {
             SourceT* self = static_cast<SourceT*>(instance);
             return (self->*member_).describedListeners();
+        }
+
+        bool addDescriptorListener(void* senderInstance, const std::string& descriptor) const override {
+            if (senderInstance == nullptr || descriptor.empty()) {
+                return false;
+            }
+            newui::Delegate<SourceT, Args...>& delegate = static_cast<SourceT*>(senderInstance)->*member_;
+            for (const std::string& existing : delegate.describedListeners()) {
+                if (existing == descriptor) {
+                    return true;
+                }
+            }
+            delegate.add(descriptor, [](typename newui::Delegate<SourceT, Args...>::SenderRefT, Args...) {
+                return SyncReturn::Ignored;
+            });
+            return true;
         }
 
         // See Delegate::connectListener()'s own comment for the signature
