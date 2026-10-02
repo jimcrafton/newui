@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <string>
 #include <typeinfo>
 
 namespace newui {

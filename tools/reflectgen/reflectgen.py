@@ -557,7 +557,7 @@ def is_reflect_string_value(cursor):
 
 
 class Field:
-    def __init__(self, name, scope, is_static, connect=False, via_thief=False):
+    def __init__(self, name, scope, is_static, connect=False, via_thief=False, defVal=None):
         self.name = name
         self.scope = scope
         self.is_static = is_static
@@ -566,6 +566,7 @@ class Field:
         # A non-public connect field in a class with no NEWUI_REFLECT_PRIVATE():
         # reached through detail::AccessThief instead of a friend ClassAccess.
         self.via_thief = via_thief
+        self.defVal = defVal
 
 
 class DelegateField:
@@ -696,6 +697,9 @@ class ClassInfo:
         # "absent means empty, not None" convention self.tags already uses.
         self.proxy = ""
         self.proxy_for = ""
+        # The file the class is defined in, and (set by generate()) how a file includes it.
+        self.header_file = ""
+        self.header = ""
         # From "@reflect stringvalue" directly above the class declaration -
         # see Class::isStringValue()'s own comment (reflection.h) and
         # is_reflect_string_value()'s own comment above.
@@ -1360,6 +1364,52 @@ def collect_collection_accessors(method_cursors_by_name, consumed, class_name):
 
     return accessors
 
+def get_initializer_string(cursor):
+    """
+    Extracts the source tokens for the initialization part of a field,
+    ignoring NamespaceRef, TypeRef, and TemplateRef children.
+    """
+    tokens = list(cursor.get_tokens())
+    children = list(cursor.get_children())
+    
+    if not children:
+        return None
+
+    # Filter out type/namespace reference nodes to find the actual expression
+    ignored_kinds = {
+        CursorKind.NAMESPACE_REF,
+        CursorKind.TYPE_REF,
+        CursorKind.TEMPLATE_REF
+    }
+    
+    # The initializer expression is typically the last child, 
+    # or the first child that isn't a type/namespace reference.
+    expr_child = None
+    for child in children:
+        if child.kind not in ignored_kinds:
+            expr_child = child
+            break
+
+    if not expr_child:
+        return None
+
+    # Get the source range of the actual initializer expression
+    init_range = expr_child.extent
+    
+    # Extract only the tokens that fall within the initializer's range
+    init_tokens = []
+    for token in tokens:
+        if token.extent.start.offset >= init_range.start.offset and \
+           token.extent.end.offset <= init_range.end.offset:
+            init_tokens.append(token.spelling.strip())
+            
+    # Clean up formatting for brace initializers if needed
+    result = "".join(init_tokens)
+    # Simple formatting cleanup for braced/assignment init
+    result = result.replace("{ ", "{").replace(" }", "}").strip()
+    
+    return result
+
 
 def collect_class(cursor):
     name = qualified_name(cursor)
@@ -1369,6 +1419,7 @@ def collect_class(cursor):
     info.categories = [c for c in reflect_annotations(cursor).get("category", "").split(",") if c]
     info.proxy = reflect_annotations(cursor).get("proxy", "")
     info.proxy_for = reflect_annotations(cursor).get("proxyfor", "")
+    info.header_file = cursor.location.file.name if cursor.location.file else ""
     info.string_value = is_reflect_string_value(cursor)
 
     method_name_counts = {}
@@ -1473,8 +1524,12 @@ def collect_class(cursor):
                 # Delegate-specific connect/invoke API.
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
             else:
+                defaultval = get_initializer_string(child)
+                if defaultval is not None:
+                    sys.stderr.write(f"'{name}.{child.spelling}' default val: {defaultval}\n");
+
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False,
-                                         connect=connect, via_thief=via_thief))
+                                         connect=connect, via_thief=via_thief, defVal=defaultval))
 
         elif kind == CursorKind.VAR_DECL and child.semantic_parent == cursor:
             if access == AccessSpecifier.PUBLIC or info.has_friend:
@@ -1488,6 +1543,7 @@ def collect_class(cursor):
                         "ClassBuilder::field() has no read-only variant; not registered.\n"
                     )
                     continue
+
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=True))
 
         elif kind == CursorKind.CXX_METHOD and child in method_cursors:
@@ -1838,6 +1894,8 @@ def emit_register_function(info,function_listing):
         chain.append(f'.proxy("{info.proxy}")')
     if info.proxy_for:
         chain.append(f'.proxyFor("{info.proxy_for}")')
+    if info.header:
+        chain.append(f'.header("{info.header}")')
 
     if info.string_value:
         chain.append(".stringValue()")
@@ -1852,10 +1910,16 @@ def emit_register_function(info,function_listing):
     # anymore, only is_static's value (kept on Field for anyone reading
     # collect_class()'s output, unused in codegen past this point).
     for f in info.fields:
-        if f.scope == "Scope::Public":
-            chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+        if f.defVal is None:
+            if f.scope == "Scope::Public":
+                chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+            else:
+                chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
         else:
-            chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
+            if f.scope == "Scope::Public":
+                chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+            else:
+                chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
         if f.connect:
             chain.append(".connect()")
 
@@ -1994,7 +2058,30 @@ def enclosing_namespace(qualified_name_str):
     return qualified_name_str.rsplit("::", 1)[0]
 
 
-def generate(classes, enums, sources, extra_includes, register_function_name=DEFAULT_REGISTER_FUNCTION_NAME):
+def include_spelling(header_file, include_dirs):
+    """How a file includes header_file: its path relative to the deepest of include_dirs (the -I
+    directories) that contains it, in angle brackets - "<newui/controls.h>". "" if it is under none of
+    them (no honest spelling exists then). The path keeps its own case; only the comparison ignores it."""
+    if not header_file:
+        return ""
+    target = os.path.abspath(header_file)
+    target_key = os.path.normcase(target)
+    best = None
+    for directory in include_dirs:
+        base_key = os.path.normcase(os.path.abspath(directory)) + os.sep
+        if target_key.startswith(base_key):
+            relative = target[len(base_key):]
+            if best is None or len(relative) < len(best):
+                best = relative
+    if best is None:
+        return ""
+    return "<" + best.replace(os.sep, "/") + ">"
+
+
+def generate(classes, enums, sources, extra_includes, register_function_name=DEFAULT_REGISTER_FUNCTION_NAME,
+             include_dirs=()):
+    for info in classes:
+        info.header = include_spelling(info.header_file, include_dirs)
     out = []
     out.append("// Generated by reflectgen (tools/reflectgen) - see tools/reflectgen/README.md.")
     out.append("// Source: " + ", ".join(sources))
@@ -2430,7 +2517,8 @@ def main():
     # regardless of how many inputs (files or directories) were scanned.
     # The "Source:" comment lists what was passed on the command line
     # (args.inputs), not the (possibly much longer) expanded file list.
-    output = generate(all_classes, all_enums, args.inputs, args.include, args.register_function)
+    include_dirs = [a[2:] for a in clang_args if a.startswith("-I") and len(a) > 2]
+    output = generate(all_classes, all_enums, args.inputs, args.include, args.register_function, include_dirs)
 
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(output)

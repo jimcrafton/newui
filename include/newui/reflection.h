@@ -526,9 +526,10 @@ namespace newui::reflection {
     public:
         Field(std::string name, std::type_index type, Scope scope, void* address,
                std::any (*get)(), void (*set)(const std::any&),
-               PropertyFlags flags = PropertyFlags::None)
+               PropertyFlags flags = PropertyFlags::None,
+                std::any defVal = std::any{} )
             : name_(std::move(name)), type_(type), scope_(scope), flags_(flags),
-              address_(address), get_(get), set_(set) {}
+              address_(address), get_(get), set_(set), defaultVal_(std::move(defVal)) {}
 
         virtual ~Field() = default;
 
@@ -570,6 +571,16 @@ namespace newui::reflection {
             return std::any_cast<T>(get(instance));
         }
 
+        //returns the default value for the field, might be empty
+        //otherwise should contain the default value
+        //might require more advanced parsing in reflectgen 
+        std::any defaultVal() const { return defaultVal_; }
+
+        void setDefaultVal(const std::any& val) {
+            defaultVal_ = val;
+        }
+
+
         // Base defaults are no-ops (same "every method has a do-nothing
         // default" idiom Property/PropertyCollection already use) -
         // TypedMemberField below is the one that actually does something;
@@ -595,6 +606,7 @@ namespace newui::reflection {
         void* address_;
         GetFn get_;
         SetFn set_;
+        std::any defaultVal_;
     };
 
     // T-aware TypedField<ValueT> - a static class variable. The address is
@@ -608,7 +620,7 @@ namespace newui::reflection {
     template<typename ValueT>
     class TypedField : public Field {
     public:
-        TypedField(std::string name, Scope scope, ValueT* address)
+        TypedField(std::string name, Scope scope, ValueT* address, std::any defaultVal = std::any{})
             : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr, PropertyFlags::Static),
               address_(address) {}
 
@@ -837,6 +849,10 @@ namespace newui::reflection {
         virtual std::any get(void* instance) const = 0;
         virtual void set(void* instance, const std::any& value) const = 0;
 
+        virtual std::any defaultVal() const = 0;
+
+        virtual void setDefaultVal(const std::any& val) = 0;
+
         // false for a by-value getter/setter property - the only case
         // where address() throws rather than returning something real
         // (see TypedProperty/TypedPropertyCollection's own address()
@@ -900,6 +916,10 @@ namespace newui::reflection {
             return std::any_cast<T>(get(instance));
         }
 
+
+        
+
+
         virtual void write(void* instancePtr, ClassWriter* writer) const = 0;
 
         virtual void read(void* instancePtr, ClassReader* reader) const = 0;
@@ -915,6 +935,7 @@ namespace newui::reflection {
         Scope scope_;
         PropertyFlags flags_;
         std::vector<std::string> tags_;
+        
     };
 
     // T-aware TypedProperty<SourceT,ValueT> - the one place a void* instance
@@ -1181,6 +1202,15 @@ namespace newui::reflection {
         }
         void setTyped(SourceT& instance, const ValueT& value) const {
             set(&instance, std::any(value));
+        }
+
+
+        virtual std::any defaultVal() const {
+            return std::any();
+        }
+
+        virtual void setDefaultVal(const std::any& val) {
+
         }
 
         // When type() resolves to another registered Class, this recurses
@@ -1694,6 +1724,14 @@ namespace newui::reflection {
             } else {
                 return nullptr;
             }
+        }
+
+        virtual std::any defaultVal() const {
+            return std::any();
+        }
+
+        virtual void setDefaultVal(const std::any& val) {
+
         }
 
         // boxedInstance is the whole container (built once by
@@ -2623,6 +2661,14 @@ namespace newui::reflection {
         const std::string& proxy() const { return proxy_; }
         void setProxy(std::string proxyClassName) { proxy_ = std::move(proxyClassName); }
 
+        // The header that defines this class, spelled the way a file includes it, delimiters and
+        // all - "<newui/controls.h>" - so `"#include " + header()` is a valid line. Set by reflectgen
+        // (the source file's path relative to the -I directory it sits under) or ClassBuilder::header();
+        // empty when unknown (a hand-registered class, or a source outside every -I directory). What a
+        // code generator adds to a file that names this class (see cpp_codetools' IncludeManager).
+        const std::string& header() const { return header_; }
+        void setHeader(std::string include) { header_ = std::move(include); }
+
         // The inverse relationship - from "@reflect proxyfor=<ClassName>"
         // on the proxy class itself (e.g. FrameProxy's proxyFor() is
         // "Frame"). ObjectWriter consults this in design mode to write the
@@ -2912,6 +2958,7 @@ namespace newui::reflection {
         std::vector<std::string> tags_;
         std::vector<std::string> categories_;
         std::string proxy_;
+        std::string header_;
         std::string proxyFor_;
         FromStringFn fromString_ = nullptr;
         ToStringFn toString_ = nullptr;
@@ -3190,6 +3237,9 @@ namespace newui::reflection {
 
         // See Class::proxy()/proxyFor()'s own comments.
         ClassBuilder& proxy(std::string proxyClassName) { class_->setProxy(std::move(proxyClassName)); return *this; }
+
+        // See Class::header().
+        ClassBuilder& header(std::string include) { class_->setHeader(std::move(include)); return *this; }
         ClassBuilder& proxyFor(std::string realClassName) { class_->setProxyFor(std::move(realClassName)); return *this; }
 
         // See Class::isStringValue()'s own comment - opts T into "string
@@ -3526,7 +3576,7 @@ namespace newui::reflection {
         }
 
         ClassBuilder& field(std::string name, std::type_index type, Scope scope, void* address,
-                                 Field::GetFn get, Field::SetFn set) {
+                            Field::GetFn get, Field::SetFn set, std::any defaultVal = std::any{}) {
             class_->fields_.push_back(new Field(std::move(name), type, scope, address, get, set, PropertyFlags::Static));
             return *this;
         }
@@ -3543,7 +3593,7 @@ namespace newui::reflection {
 
         // A static class variable - see TypedField's own comment.
         template<typename ValueT>
-        ClassBuilder& field(std::string name, Scope scope, ValueT* address) {
+        ClassBuilder& field(std::string name, Scope scope, ValueT* address, std::any defaultVal = std::any{}) {
             class_->fields_.push_back(new TypedField<ValueT>(std::move(name), scope, address));
             return *this;
         }
@@ -3561,7 +3611,7 @@ namespace newui::reflection {
         // registers as a TypedFieldCollection instead of a plain
         // TypedMemberField.
         template<typename ValueT, typename = std::enable_if_t<!std::is_function_v<ValueT>>>
-        ClassBuilder& field(std::string name, Scope scope, ValueT T::* member) {
+        ClassBuilder& field(std::string name, Scope scope, ValueT T::* member, std::any defaultVal = std::any{}) {
             if constexpr (detail::is_reflectable_collection_v<ValueT>) {
                 class_->fields_.push_back(new TypedFieldCollection<T, ValueT>(std::move(name), scope, member));
             } else {

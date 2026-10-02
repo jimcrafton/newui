@@ -36,6 +36,28 @@ rg.configure_libclang()
 # Pure string-logic helpers - no clang objects involved at all.
 # ---------------------------------------------------------------------------
 
+class IncludeSpellingTest(unittest.TestCase):
+    def test_is_the_path_under_the_include_dir_in_angle_brackets(self):
+        self.assertEqual(rg.include_spelling(os.path.join("C:/proj/include", "newui", "controls.h"), ["C:/proj/include"]),
+                         "<newui/controls.h>")
+
+    def test_uses_the_deepest_include_dir_that_contains_the_file(self):
+        self.assertEqual(rg.include_spelling("C:/proj/include/newui/controls.h", ["C:/proj", "C:/proj/include"]),
+                         "<newui/controls.h>")
+
+    def test_keeps_the_files_own_case_even_though_the_comparison_ignores_it(self):
+        self.assertEqual(rg.include_spelling("C:/Proj/Include/NewUI/MyControl.h", ["c:/proj/include"]),
+                         "<NewUI/MyControl.h>")
+
+    def test_is_empty_when_the_file_is_under_no_include_dir_or_unknown(self):
+        self.assertEqual(rg.include_spelling("C:/elsewhere/x.h", ["C:/proj/include"]), "")
+        self.assertEqual(rg.include_spelling("", ["C:/proj/include"]), "")
+        self.assertEqual(rg.include_spelling("C:/proj/include/x.h", []), "")
+
+    def test_a_sibling_directory_with_the_same_prefix_is_not_under_it(self):
+        self.assertEqual(rg.include_spelling("C:/proj/include2/x.h", ["C:/proj/include"]), "")
+
+
 class StripAccessorPrefixTest(unittest.TestCase):
     def test_camel_case_boundary(self):
         self.assertEqual(rg.strip_accessor_prefix("getTitle", "get"), ("Title", True))

@@ -820,3 +820,28 @@ TEST(TypeSpelling, EveryRegisteredControlDelegateHasASpelling) {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// Class::header() - the header that defines a class, as a file includes it (set by reflectgen).
+// ---------------------------------------------------------------------
+
+TEST(ClassHeader, AGeneratedClassKnowsItsDefiningHeader) {
+    const Class* button = classinfo(std::string("Button"));
+    const Class* control = classinfo(std::string("Control"));
+    ASSERT_NE(button, nullptr);
+    ASSERT_NE(control, nullptr);
+    EXPECT_EQ(button->header(), "<newui/controls.h>");
+    EXPECT_EQ(control->header(), "<newui/controls.h>");
+}
+
+TEST(ClassHeader, EveryGeneratedClassHasOneAndItIsAnAngleBracketedNewuiPath) {
+    for (const char* name : { "SubView", "RootView", "Label", "Toggle", "Rect", "Size", "Point" }) {
+        const Class* clazz = classinfo(std::string(name));
+        ASSERT_NE(clazz, nullptr) << name;
+        const std::string& header = clazz->header();
+        ASSERT_GT(header.size(), 9u) << name;
+        EXPECT_EQ(header.rfind("<newui/", 0), 0u) << name << ": " << header;
+        EXPECT_EQ(header.back(), '>') << name;
+        EXPECT_NE(header.find(".h"), std::string::npos) << name;
+    }
+}
