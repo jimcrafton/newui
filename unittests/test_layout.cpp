@@ -63,6 +63,32 @@ TEST(AnchorLayout, SkipsInvisibleChildren) {
     delete container;
 }
 
+TEST(AnchorLayout, ShowingAChildAfterLayoutPositionsItAndHidingItReflowsTheOthers) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 100));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+
+    auto* child = new newui::SubView();   // starts invisible
+    container->addChild(child);
+    auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
+    params->setRightMargin(10.0f);
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
+    child->setLayoutParams(std::move(params));
+    container->updateLayout();
+    EXPECT_NE(child->bounds().left(), 150.0f) << "an invisible child isn't laid out";
+
+    child->setVisible(true);
+    EXPECT_EQ(child->bounds(), newui::Rect(150, 0, 40, 20));
+
+    // Moving the container re-runs layout as before; the child stays right-anchored.
+    container->setBounds(newui::Rect(0, 0, 300, 100));
+    EXPECT_EQ(child->bounds().left(), 250.0f);
+
+    delete child;
+    delete container;
+}
+
 TEST(AnchorLayout, LeftTopPositionsAtMarginWithOwnSize) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));

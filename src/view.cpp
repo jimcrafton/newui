@@ -249,6 +249,7 @@ namespace newui {
 		if (isDestroying()) {
 			return;
 		}
+		LayoutPass pass(*this);
 		if (layout_) {
 			layout_->arrange(*this);
 		}

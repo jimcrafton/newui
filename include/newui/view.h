@@ -188,6 +188,32 @@ namespace newui {
         // it's called - through a View& included.
         virtual void updateLayout();
 
+        // True while this View's updateLayout() is running. A child's setVisible() re-runs its parent's
+        // layout (a hidden child is left out of it), but not from inside a pass that is already
+        // positioning it - Layout::arrange() implementations (CardLayout) and ScrollView toggle child
+        // visibility as part of the pass itself.
+        bool isLayingOut() const {
+            return layingOut_;
+        }
+
+        // Marks `view` as laying out for its scope. Every updateLayout() that does real work holds one
+        // (the base one, and ScrollView's override).
+        class LayoutPass {
+        public:
+            explicit LayoutPass(View& view) : view_(view), outer_(view.layingOut_) {
+                view_.layingOut_ = true;
+            }
+            ~LayoutPass() {
+                view_.layingOut_ = outer_;
+            }
+            LayoutPass(const LayoutPass&) = delete;
+            LayoutPass& operator=(const LayoutPass&) = delete;
+
+        private:
+            View& view_;
+            bool outer_;
+        };
+
         // Marks this View and every descendant Destroying (Component::isDestroying()) - destroy()
         // does this first, so tearing the tree down never lays out or resizes what is going away.
         void markDestroying();
@@ -751,6 +777,8 @@ namespace newui {
         bool visible_ = false;
         // Backs isLayoutIgnored()/setLayoutIgnored() above.
         bool layoutIgnored_ = false;
+        // Backs isLayingOut().
+        bool layingOut_ = false;
 
         std::optional<Size> desiredSizeOverride_;
 

@@ -34,6 +34,13 @@ void SubView::setVisible(bool visible) {
 
     visible_ = visible;
     onVisibilityChanged(*this);
+    // Layout skips invisible children, so showing or hiding one changes where its siblings go and
+    // where it goes itself - without this a child shown after the last layout kept stale bounds
+    // (confirmed: a right-anchored status-bar label that appeared after layout sat at x = 0). Not from
+    // inside the parent's own pass (CardLayout/ScrollView toggle visibility as part of it).
+    if (parent_ != nullptr && !parent_->isLayingOut()) {
+        parent_->updateLayout();
+    }
     // Same real, confirmed live bug (and same fix) as View::addChild()/
     // removeChild()/reorderChild() (view.cpp) - a real caller (CardLayout::
     // arrange(), layout.cpp, switching which page is the active tab)

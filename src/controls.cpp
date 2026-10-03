@@ -1729,6 +1729,7 @@ namespace newui {
         if (viewport_ == nullptr || vBar_ == nullptr || hBar_ == nullptr || isDestroying()) {
             return;
         }
+        LayoutPass pass(*this);
         SubView* soleChild = viewport_->childViews().size() == 1 ? viewport_->childViews().front() : nullptr;
         SubView* virtualizedChild = virtualizedContentChild();
 
