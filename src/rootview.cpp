@@ -1372,7 +1372,12 @@ namespace newui {
 
 			case WM_MOUSEWHEEL:
 			{
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				// Unlike the other mouse messages, lParam here is in *screen* coordinates (and signed - a
+				// second monitor to the left/above gives negatives): convert, or the hit test only lands
+				// right when this window happens to sit at the screen's origin.
+				POINT screenPt = { static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
+				::ScreenToClient(viewHwnd_, &screenPt);
+				Point pt(static_cast<float>(screenPt.x), static_cast<float>(screenPt.y));
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
 				short mouseDelta = (short)HIWORD(wParam);   // wheel rotation

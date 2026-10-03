@@ -1004,6 +1004,15 @@ namespace newui {
         int wheelLines() const { return wheelLines_; }
         void setWheelLines(int lines) { wheelLines_ = lines; }
 
+        // What one "line" of vertical scrolling is, in pixels - a wheel notch scrolls wheelLines() of
+        // them and an arrow-button click one. Unless set here it follows the content: the row height
+        // of a ListView/TreeView, else kDefaultLineStep.
+        static constexpr float kDefaultLineStep = 20.0f;
+        void setLineStep(float lineStep) {
+            lineStepOverridden_ = true;
+            vBar_->setLineStep(lineStep);
+        }
+
         // Still reflectgen-registered (both) - same reasoning as Slider::
         // thumb()'s own comment: the write-time dedup (reflection.h), not
         // an ignore annotation, keeps vBar_/hBar_ (also real childViews
@@ -1119,6 +1128,7 @@ namespace newui {
         // value just happened to match."
         bool contentSizeOverridden_ = false;
         int wheelLines_ = 3;
+        bool lineStepOverridden_ = false;
 
         // Real content lives here, not directly under this ScrollView -
         // origin() (View's own scroll-offset primitive - see its doc

@@ -731,6 +731,54 @@ TEST(ScrollView, BarsShownAndRangedWhenContentExceedsViewport) {
     delete view;
 }
 
+TEST(ScrollView, AWheelNotchScrollsThreeRowsOfAListView) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    auto* list = new ListView();
+    list->setVisible(true);
+    auto model = std::make_unique<StringListModel>();
+    for (int i = 0; i < 50; ++i) {
+        model->addItem("row " + std::to_string(i));
+    }
+    list->setModel(std::move(model));
+    list->setRowHeight(30.0f);
+    view->addChild(list);
+    view->updateLayout();
+    ASSERT_TRUE(view->vBar()->isVisible());
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), 30.0f);
+    view->onMouseWheel(*view, Point(10, 10), -120.0f);   // one notch toward the user
+    EXPECT_FLOAT_EQ(view->vBar()->value(), 90.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, AnExplicitLineStepWinsOverTheContentsRowHeight) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    view->setContentSize(Size(200.0f, 800.0f));
+    view->setLineStep(7.0f);
+    view->updateLayout();
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), 7.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, PlainContentFallsBackToTheDefaultLineStep) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    view->setContentSize(Size(200.0f, 800.0f));
+    view->updateLayout();
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), ScrollView::kDefaultLineStep);
+
+    view->destroy();
+    delete view;
+}
+
 TEST(ScrollView, BarValueChangesUpdateContentOrigin) {
     auto* view = new ScrollView();
     view->setBounds(Rect(0, 0, 200, 200));

@@ -1814,6 +1814,18 @@ namespace newui {
             }
         }
 
+        // One "line" is a row for a list/tree, else a fixed step - the bar's own default of 1 made a
+        // wheel notch (wheelLines_ lines) and an arrow-button click move a few pixels.
+        if (!lineStepOverridden_) {
+            float step = kDefaultLineStep;
+            if (auto* list = dynamic_cast<ListView*>(virtualizedChild)) {
+                step = list->rowHeight();
+            } else if (auto* tree = dynamic_cast<TreeView*>(virtualizedChild)) {
+                step = tree->rowHeight();
+            }
+            vBar_->setLineStep(step);
+        }
+
         vBar_->setVisible(needV);
         if (needV) {
             vBar_->setBounds(Rect(client.left() + viewportWidth, client.top(), vBarWidth, viewportHeight));
