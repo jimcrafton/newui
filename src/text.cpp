@@ -877,6 +877,7 @@ namespace newui::text {
             std::size_t textLine = 0;    // the line of the text it starts on
             std::size_t textLines = 1;   // how many lines of the text it shows (a collapsed fold joins several)
             float baseline = 0.0f;       // its first row's, from top
+            float width = 0.0f;          // its widest row, trailing whitespace included
             float top = 0.0f;
             float height = 0.0f;
             std::wstring text;           // what's laid out: the visible text with placeholders
@@ -1260,6 +1261,7 @@ namespace newui::text {
                 DWRITE_TEXT_METRICS metrics{};
                 layout->GetMetrics(&metrics);
                 line.height = metrics.height;
+                line.width = metrics.widthIncludingTrailingWhitespace;
                 if (line.height <= 0.0f) {
                     if (emptyLineHeight <= 0.0f) {
                         IDWriteTextLayoutPtr space;
@@ -1397,6 +1399,14 @@ namespace newui::text {
 
     float TextLayoutEngine::contentHeight() const {
         return impl_->lines.empty() ? 0.0f : impl_->lines.back().top + impl_->lines.back().height;
+    }
+
+    float TextLayoutEngine::contentWidth() const {
+        float widest = 0.0f;
+        for (const Impl::Line& line : impl_->lines) {
+            widest = line.width > widest ? line.width : widest;
+        }
+        return widest;
     }
 
     std::vector<Rect> TextLayoutEngine::placeholderRects(float top, float bottom) const {

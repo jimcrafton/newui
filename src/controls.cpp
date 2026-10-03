@@ -2297,13 +2297,28 @@ namespace newui {
 
     Point TextController::toLayoutSpace(const Point& localPt) const {
         Rect clientBounds = textArea();
-        return Point(localPt.x - clientBounds.left(), localPt.y - clientBounds.top() + scrollOffsetY_);
+        return Point(localPt.x - clientBounds.left() + scrollOffsetX_, localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = textArea();
-        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_, fontRuns_,
-            layoutFolds(), tabWidth_);
+        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
+            multiline_ && wordWrap_, fontRuns_, layoutFolds(), tabWidth_);
+    }
+
+    void TextController::setWordWrap(bool wrap) {
+        if (wordWrap_ == wrap) {
+            return;
+        }
+        wordWrap_ = wrap;
+        scrollOffsetX_ = 0.0f;
+        owner_.style().markDirty();
+        owner_.onContentSizeChanged(owner_);   // the content is a different width now
+    }
+
+    void TextController::setScrollOffsetX(float x) {
+        scrollOffsetX_ = x > 0.0f ? x : 0.0f;
+        owner_.style().markDirty();
     }
 
     const std::vector<text::TextFold>& TextController::layoutFolds() const {
@@ -3211,6 +3226,11 @@ namespace newui {
         // back to the caret on the very next paint(), so a user could
         // never actually scroll away from it to look at other text.
         Rect caretRect = controller_->caretDocumentRect();
+        if (!controller_->wordWrap()) {
+            // The text scrolls sideways under a fixed gutter: ask for room for the gutter's width past
+            // the caret too, so it is kept clear of the view's far edge, not left under or beyond it.
+            caretRect = Rect(caretRect.left(), caretRect.top(), caretRect.width() + clientBounds.left(), caretRect.height());
+        }
         if (caretRect.height() > 0.0f && caretRect != lastScrolledIntoViewCaretRect_) {
             onRequestScrollIntoView(*this, caretRect);
         }
@@ -3220,11 +3240,16 @@ namespace newui {
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
+        // Scrolled sideways, the text must not spill left over what's beside the text area (a gutter):
+        // clip first, then shift everything drawn below - selection, caret and all - by the offset.
+        ctx.clip_to_rect(BLRect(0.0, 0.0, clientBounds.width(), clientBounds.height()));
+        ctx.translate(-controller_->scrollOffsetX(), 0.0f);
         controller_->drawCurrentLineHighlight(ctx);
         controller_->drawLineBackgrounds(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
-        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+        renderer_.render(ctx, static_cast<int>(clientBounds.width() + controller_->scrollOffsetX()),
+            static_cast<int>(clientBounds.height()),
             controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
         controller_->drawLineAnnotations(ctx, clientBounds.width(), clientBounds.height());
@@ -3235,12 +3260,21 @@ namespace newui {
 
     SyncReturn TextControl::handleQueryContentSize(View& /*sender*/, Size& outSize) {
         controller_->ensureLayoutUpToDate();
-        outSize = Size(getClientBounds().width(), controller_->contentHeight());
+        float width = getClientBounds().width();
+        if (!controller_->wordWrap()) {
+            // Sideways scrolling: as wide as the longest line (plus the gutter beside the text area, and
+            // a little room for the caret past it) - never narrower than the view.
+            const float gutter = width - controller_->textArea().width();
+            const float needed = gutter + controller_->layoutEngine().contentWidth() + kNoWrapRightMargin;
+            width = needed > width ? needed : width;
+        }
+        outSize = Size(width, controller_->contentHeight());
         return SyncReturn::Handled;
     }
 
     SyncReturn TextControl::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
         controller_->setScrollOffsetY(offset.y);
+        controller_->setScrollOffsetX(controller_->wordWrap() ? 0.0f : offset.x);
         return SyncReturn::Handled;
     }
 

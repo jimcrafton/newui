@@ -997,6 +997,11 @@ namespace newui::text {
         // no layout has been built yet.
         float contentHeight() const;
 
+        // The width of the widest line (a wrapped line is at most maxWidth wide; with wordWrap off, a
+        // long line is as wide as its text) - what a horizontally scrolling view sizes its content to.
+        // 0.0f if no layout has been built yet.
+        float contentWidth() const;
+
         // The text is laid out one visual line (split at "\n", "\r\n" or a lone '\r') per layout,
         // so an edit re-lays out only the lines it touched and drawing covers only visible lines.
         // A collapsed fold joins the lines it spans into one. Always at least one line once

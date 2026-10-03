@@ -4207,6 +4207,134 @@ TEST(TextControlLineAnnotations, AnnotationsMoveWithEditsBeforeThem) {
 }
 
 namespace {
+    // The leftmost column with dark text pixels in a 300x40 render of textControl (-1: none).
+    int leftmostInk(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        for (int x = 0; x < 300; ++x) {
+            for (int y = 0; y < 40; ++y) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if (int((row[x] >> 16) & 0xFF) < 100) {
+                    return x;
+                }
+            }
+        }
+        return -1;
+    }
+
+    // A 300x40 render of textControl on white, as 300 * 40 pixels.
+    std::vector<std::uint32_t> renderPixels(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            pixels.insert(pixels.end(), row, row + 300);
+        }
+        return pixels;
+    }
+
+    const std::wstring kLongLine = L"a long line of text that is a good deal wider than a hundred pixel control could ever show";
+}
+
+TEST(TextControlWordWrap, WrappingIsTheDefaultAndTheContentIsNeverWiderThanTheView) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 100, 40));
+    textControl.setText(kLongLine);
+
+    EXPECT_TRUE(textControl.wordWrap());
+    EXPECT_FLOAT_EQ(textControl.contentSize().width, 100.0f);
+    EXPECT_GT(textControl.contentSize().height, 40.0f) << "it wrapped onto several rows";
+}
+
+TEST(TextControlWordWrap, WithWrappingOffTheContentIsAsWideAsTheLongestLine) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 100, 40));
+    textControl.setText(kLongLine);
+    textControl.setWordWrap(false);
+
+    EXPECT_FALSE(textControl.wordWrap());
+    EXPECT_GT(textControl.contentSize().width, 300.0f) << "wide enough to scroll sideways";
+    EXPECT_LT(textControl.contentSize().height, 40.0f) << "a single row now";
+}
+
+TEST(TextControlWordWrap, ShortTextWithWrappingOffIsNeverNarrowerThanTheView) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"abc");
+    textControl.setWordWrap(false);
+
+    EXPECT_FLOAT_EQ(textControl.contentSize().width, 300.0f);
+}
+
+TEST(TextControlWordWrap, TheTextIsDrawnShiftedBySidewaysScrolling) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    textControl.setWordWrap(false);
+
+    const std::vector<std::uint32_t> before = renderPixels(textControl);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));   // what a ScrollView's hBar sends
+    const std::vector<std::uint32_t> after = renderPixels(textControl);
+    ASSERT_EQ(textControl.controller().scrollOffsetX(), 60.0f);
+    ASSERT_GE(leftmostInk(textControl), 0) << "the text continues past the left edge";
+
+    // Scrolling 60px right is the same picture moved 60px left. Glyph rasterization isn't bit-identical
+    // when moved, so look for the shift that matches best: it must be 60.
+    int bestShift = -1;
+    std::size_t fewestDiffering = static_cast<std::size_t>(-1);
+    for (int shift = 0; shift <= 100; ++shift) {
+        std::size_t differing = 0;
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 0; x < 190; ++x) {
+                differing += after[y * 300 + x] != before[y * 300 + x + shift] ? 1 : 0;
+            }
+        }
+        if (differing < fewestDiffering) {
+            fewestDiffering = differing;
+            bestShift = shift;
+        }
+    }
+    EXPECT_EQ(bestShift, 60);
+}
+
+TEST(TextControlWordWrap, WrappedTextIgnoresASidewaysOffset) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));
+
+    EXPECT_EQ(textControl.controller().scrollOffsetX(), 0.0f);
+}
+
+TEST(TextControlWordWrap, TurningWrappingBackOnClearsTheSidewaysScroll) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.setWordWrap(false);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));
+    ASSERT_EQ(textControl.controller().scrollOffsetX(), 60.0f);
+
+    textControl.setWordWrap(true);
+    EXPECT_EQ(textControl.controller().scrollOffsetX(), 0.0f);
+}
+
+namespace {
     struct InkScan {
         int rightmostInk = -1;      // rightmost column with dark text pixels
         std::size_t ink = 0;        // dark pixels

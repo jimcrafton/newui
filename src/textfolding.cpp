@@ -209,7 +209,7 @@ namespace newui {
             return;
         }
         ctx.save();
-        ctx.translate(0.0f, -scrollOffsetY());
+        ctx.translate(-scrollOffsetX(), -scrollOffsetY());
         ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32());
         ctx.set_stroke_width(1.0);
         for (const Rect& r : rects) {
@@ -389,6 +389,7 @@ namespace newui {
         if (area.width() > 0.0f && area.height() > 0.0f) {
             ctx.save();
             ctx.translate(area.left(), area.top());
+            ctx.clip_to_rect(BLRect(0.0, 0.0, area.width(), area.height()));   // not over the gutter, scrolled sideways
             folding->drawFoldPlaceholders(ctx, area.height());
             ctx.restore();
         }

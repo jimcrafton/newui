@@ -1501,6 +1501,12 @@ namespace newui {
         bool isMultiline() const { return multiline_; }
         void setMultiline(bool value) { multiline_ = value; }
 
+        // Whether a multiline text wraps at the control's width (the default). Off, each line stays on
+        // one row however long it is, and the view scrolls sideways (scrollOffsetX()) - a code editor's
+        // way. Meaningless for a single-line control, which never wraps.
+        bool wordWrap() const { return wordWrap_; }
+        void setWordWrap(bool wrap);
+
         // Rebuilds layoutEngine_ against the owner's own current
         // getClientBounds() (width/height) and multiline_ (wordWrap) if
         // anything actually changed since the last call - a cheap no-op
@@ -1534,6 +1540,10 @@ namespace newui {
         // is a plain member here, and setScrollOffsetY() below for the
         // only place it's ever written.
         float scrollOffsetY() const { return scrollOffsetY_; }
+        // How far the text is scrolled sideways (only ever non-zero with wordWrap() off): the layout
+        // keeps its own coordinates and the whole text area is drawn this far to the left.
+        float scrollOffsetX() const { return scrollOffsetX_; }
+        void setScrollOffsetX(float x);
         void setScrollOffsetY(float y);
 
         // caret_'s own current on-screen rect, in layoutEngine_'s native
@@ -1730,6 +1740,8 @@ namespace newui {
 
         Control& owner_;
         bool multiline_ = false;
+        bool wordWrap_ = true;
+        float scrollOffsetX_ = 0.0f;
 
         // This control's own current scroll position, in document
         // (unscrolled, layoutEngine_-native) coordinates - see this
@@ -2075,6 +2087,14 @@ namespace newui {
         const std::vector<text::LineAnnotation>& lineAnnotations() const { return controller_->lineAnnotations(); }
         //@reflect ignore=true
         void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { controller_->setLineAnnotations(std::move(annotations)); }
+
+        // Wrapping at the control's width (the default), or - off - one row per line with the view
+        // scrolling sideways when hosted in a ScrollView: it reports the longest line's width as its
+        // content width, and draws itself shifted by the horizontal scroll offset it is given. See
+        // TextController::setWordWrap().
+        static constexpr float kNoWrapRightMargin = 24.0f;   // room past the longest line for the caret
+        bool wordWrap() const { return controller_->wordWrap(); }
+        void setWordWrap(bool wrap) { controller_->setWordWrap(wrap); }
 
         // Draws into getClientBounds(): selection_'s highlight, then
         // this control's own word-wrapped text (renderer_.render(),
