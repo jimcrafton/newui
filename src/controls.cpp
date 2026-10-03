@@ -2399,6 +2399,111 @@ namespace newui {
         ctx.restore();
     }
 
+    void TextController::drawLineBackgrounds(BLContext& ctx, float visibleWidth, float visibleHeight) const {
+        if (lineAnnotations_.empty()) {
+            return;
+        }
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> tintedLineEnds;
+
+        ctx.save();
+        ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::LineAnnotation& annotation : lineAnnotations_) {
+            if (annotation.offset > length || annotation.lineBackground.isNull()) {
+                continue;
+            }
+            std::size_t lineStart = annotation.offset;
+            while (lineStart > 0 && storage.at(lineStart - 1) != L'\n' && storage.at(lineStart - 1) != L'\r') {
+                --lineStart;
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+                ++lineEnd;
+            }
+            if (std::find(tintedLineEnds.begin(), tintedLineEnds.end(), lineEnd) != tintedLineEnds.end()) {
+                continue;   // one per line
+            }
+
+            // From the line's first row to its last (a wrapped line covers several).
+            Point firstTopLeft;
+            float firstHeight = 0.0f;
+            Point lastTopLeft;
+            float lastHeight = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineStart), firstTopLeft, firstHeight);
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), lastTopLeft, lastHeight);
+            if (firstHeight <= 0.0f || lastHeight <= 0.0f) {
+                continue;
+            }
+            const float top = firstTopLeft.y;
+            const float bottom = lastTopLeft.y + lastHeight;
+            if (bottom < scrollOffsetY_ || top > scrollOffsetY_ + visibleHeight) {
+                continue;
+            }
+            ctx.set_fill_style(annotation.lineBackground.toBLRgba32());
+            ctx.fill_rect(BLRect(0.0, top, visibleWidth, bottom - top));
+            tintedLineEnds.push_back(lineEnd);
+        }
+        ctx.restore();
+    }
+
+    void TextController::drawLineAnnotations(BLContext& ctx, float visibleWidth, float visibleHeight) const {
+        if (lineAnnotations_.empty()) {
+            return;
+        }
+        Font font(font_.name(), font_.size() * kAnnotationFontScale);
+        font.setItalic(true);
+        if (font.blFont() == nullptr) {
+            font.setItalic(false);   // a face with no italic of its own
+        }
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+        const BLFontMetrics& metrics = blFont->metrics();
+        const double textHeight = metrics.ascent + metrics.descent;
+
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> drawnLineEnds;
+
+        ctx.save();
+        ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::LineAnnotation& annotation : lineAnnotations_) {
+            if (annotation.offset > length || annotation.text.empty()) {
+                continue;   // stale, or nothing to say
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+                ++lineEnd;
+            }
+            if (std::find(drawnLineEnds.begin(), drawnLineEnds.end(), lineEnd) != drawnLineEnds.end()) {
+                continue;   // one per line
+            }
+
+            Point topLeft;
+            float height = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), topLeft, height);
+            if (height <= 0.0f || topLeft.y + height < scrollOffsetY_ || topLeft.y > scrollOffsetY_ + visibleHeight) {
+                continue;
+            }
+            const double x = topLeft.x + kAnnotationGap;
+            if (x >= visibleWidth) {
+                continue;
+            }
+            const std::size_t newline = annotation.text.find('\n');
+            const std::string shown = newline == std::string::npos ? annotation.text : annotation.text.substr(0, newline);
+            const Color color = annotation.color.isNull() ? textColor() : annotation.color;
+            ctx.set_fill_style(color.toBLRgba32());
+            ctx.fill_utf8_text(BLPoint(x, topLeft.y + (height - textHeight) * 0.5 + metrics.ascent), *blFont,
+                               shown.c_str(), shown.size());
+            drawnLineEnds.push_back(lineEnd);
+        }
+        ctx.restore();
+    }
+
     void TextController::drawCaret(BLContext& ctx) const {
         if (!caret_.isVisible()) {
             return;
@@ -2512,6 +2617,12 @@ namespace newui {
         adjustForEdit(colorRuns_, start, removed, inserted);
         adjustForEdit(fontRuns_, start, removed, inserted);
         adjustForEdit(decorations_, start, removed, inserted);
+        // An annotation is a point, not a range: it moves with the text and is never dropped.
+        const std::size_t editEnd = start + removed;
+        for (text::LineAnnotation& annotation : lineAnnotations_) {
+            const std::size_t p = annotation.offset;
+            annotation.offset = p < start ? p : p >= editEnd ? p - removed + inserted : start + inserted;
+        }
     }
 
     SyncReturn TextController::handleModelAfterChar(text::TextModel& /*sender*/, size_t offset, wchar_t /*ch*/, text::CharChangeKind kind) {
@@ -3080,6 +3191,7 @@ namespace newui {
         setColorRuns(std::move(expanded.colorRuns));
         setFontRuns(std::move(expanded.fontRuns));
         setDecorations(std::move(expanded.decorations));
+        setLineAnnotations(std::move(expanded.annotations));
     }
 
     void TextControl::paint(BLContext& ctx) {
@@ -3109,11 +3221,13 @@ namespace newui {
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         controller_->drawCurrentLineHighlight(ctx);
+        controller_->drawLineBackgrounds(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
         renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
             controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
+        controller_->drawLineAnnotations(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawWhitespace(ctx, clientBounds.height());
         controller_->drawCaret(ctx);
         ctx.restore();

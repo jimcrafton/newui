@@ -4144,6 +4144,68 @@ TEST(TextControlDecorations, ARangePastTheEndIsClampedNotDropped) {
     EXPECT_GT(colorPixels(textControl, 0), 5u);
 }
 
+TEST(TextControlLineAnnotations, AMessageIsDrawnAfterItsLineInItsColor) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;   // anywhere on the line
+    annotation.text = "oops, a mistake";
+    annotation.color = Color(1.0f, 0.0f, 0.0f, 1.0f);
+    textControl.setLineAnnotations({ annotation });
+    EXPECT_GT(colorPixels(textControl, 0), 20u);
+}
+
+TEST(TextControlLineAnnotations, WithNoMessageAndNoTintNothingColoredIsDrawn) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.color = Color(1.0f, 0.0f, 0.0f, 1.0f);   // a color but no text
+    textControl.setLineAnnotations({ annotation });
+    for (int channel = 0; channel < 3; ++channel) {
+        EXPECT_EQ(colorPixels(textControl, channel), 0u) << channel;
+    }
+}
+
+TEST(TextControlLineAnnotations, ATintFillsTheWholeLineNotJustItsText) {
+    TextControl textControl;
+    decoratedText(textControl);   // "alpha beta gamma" in a 300px-wide control
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.lineBackground = Color(0.0f, 1.0f, 0.0f, 1.0f);
+    textControl.setLineAnnotations({ annotation });
+    // The text is a small part of the width: only a full-width fill reaches this many pixels.
+    EXPECT_GT(colorPixels(textControl, 1), 3000u);
+}
+
+TEST(TextControlLineAnnotations, TwoOnOneLineDrawOneTint) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation first;
+    first.offset = 3;
+    first.lineBackground = Color(0.0f, 1.0f, 0.0f, 1.0f);
+    text::LineAnnotation second = first;
+    second.offset = 9;
+
+    textControl.setLineAnnotations({ first });
+    const std::size_t one = colorPixels(textControl, 1);
+    textControl.setLineAnnotations({ first, second });
+    EXPECT_EQ(colorPixels(textControl, 1), one);
+}
+
+TEST(TextControlLineAnnotations, AnnotationsMoveWithEditsBeforeThem) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 6;
+    annotation.text = "x";
+    textControl.setLineAnnotations({ annotation });
+
+    textControl.model().insert(0, L"abc ");
+    ASSERT_EQ(textControl.lineAnnotations().size(), 1u);
+    EXPECT_EQ(textControl.lineAnnotations()[0].offset, 10u);
+}
+
 namespace {
     struct InkScan {
         int rightmostInk = -1;      // rightmost column with dark text pixels
@@ -4294,6 +4356,32 @@ TEST(TextStyles, ExpandTurnsEachStyleIntoRunsAndDecorations) {
     EXPECT_EQ(out.decorations[0].start, 5u);
     EXPECT_EQ(out.decorations[1].kind, text::TextDecorationKind::Squiggle);
     EXPECT_EQ(out.decorations[1].start, 12u);
+}
+
+TEST(TextStyles, ARangesAnnotationBecomesALineAnnotationInTheStylesColor) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    text::TextStyleRange range;
+    range.start = 12;
+    range.length = 3;
+    range.style = "error";
+    range.annotation = "'x' was not declared";
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { range, { 0, 4, "keyword" } });
+
+    ASSERT_EQ(out.annotations.size(), 1u) << "only the range that has a message";
+    EXPECT_EQ(out.annotations[0].offset, 12u);
+    EXPECT_EQ(out.annotations[0].text, "'x' was not declared");
+    EXPECT_EQ(out.annotations[0].color, Color(1.0f, 0.0f, 0.0f, 1.0f)) << "the style's decoration color";
+    EXPECT_TRUE(out.annotations[0].lineBackground.isNull());
+}
+
+TEST(TextStyles, AStyleWithALineBackgroundTintsItsLineEvenWithoutAMessage) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    sheet->style("error")->setLineBackgroundColor(Color(1.0f, 0.0f, 0.0f, 0.2f));
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 12, 3, "error" }, { 0, 4, "keyword" } });
+
+    ASSERT_EQ(out.annotations.size(), 1u);
+    EXPECT_TRUE(out.annotations[0].text.empty());
+    EXPECT_EQ(out.annotations[0].lineBackground, Color(1.0f, 0.0f, 0.0f, 0.2f));
 }
 
 TEST(TextStyles, ATextControlStylesItsRangesAndRestylesWhenTheSheetChanges) {

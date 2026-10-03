@@ -1474,6 +1474,14 @@ namespace newui {
         //@reflect ignore=true
         void setDecorations(std::vector<text::TextDecoration> decorations) { decorations_ = std::move(decorations); owner_.style().markDirty(); }
 
+        // Messages after, and tints behind, the lines holding each one's offset (text::LineAnnotation)
+        // - same keep-in-step contract as setDecorations(): the offsets move with edits. One of each is
+        // drawn per line (the first listed that has one).
+        //@reflect ignore=true
+        const std::vector<text::LineAnnotation>& lineAnnotations() const { return lineAnnotations_; }
+        //@reflect ignore=true
+        void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { lineAnnotations_ = std::move(annotations); owner_.style().markDirty(); }
+
         // Whether spaces (a dot), tabs (an arrow) and line endings (CR / LF / CRLF) are marked.
         bool showsWhitespace() const { return showsWhitespace_; }
         void setShowsWhitespace(bool shows) { showsWhitespace_ = shows; owner_.style().markDirty(); }
@@ -1566,6 +1574,14 @@ namespace newui {
         // backgrounds: the Background decorations (drawn under the selection and text); otherwise
         // every other kind (drawn over the text).
         void drawDecorations(BLContext& ctx, bool backgrounds) const;
+        // lineAnnotations()' tints: the whole line, behind the text (before the selection too).
+        void drawLineBackgrounds(BLContext& ctx, float visibleWidth, float visibleHeight) const;
+        // lineAnnotations()' messages: each in a smaller italic after its line's last character, over
+        // the text.
+        // visibleWidth/visibleHeight: the text area, to skip what's off it.
+        static constexpr float kAnnotationGap = 24.0f;       // between the line's text and its annotation
+        static constexpr float kAnnotationFontScale = 0.9f;  // of the control's font size
+        void drawLineAnnotations(BLContext& ctx, float visibleWidth, float visibleHeight) const;
         // Marks for spaces, tabs and line endings (showsWhitespace()), faintly over the text.
         void drawWhitespace(BLContext& ctx, float visibleHeight) const;
 
@@ -1747,6 +1763,7 @@ namespace newui {
         std::vector<text::TextColorRun> colorRuns_;
         std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
+        std::vector<text::LineAnnotation> lineAnnotations_;
         bool overwriteMode_ = false;
         std::size_t tabWidth_ = 4;
         bool showsWhitespace_ = false;
@@ -2051,6 +2068,13 @@ namespace newui {
         const std::vector<text::TextDecoration>& decorations() const { return controller_->decorations(); }
         //@reflect ignore=true
         void setDecorations(std::vector<text::TextDecoration> decorations) { controller_->setDecorations(std::move(decorations)); }
+
+        // See TextController::setLineAnnotations(); setStyledRanges() fills them from the ranges'
+        // annotations.
+        //@reflect ignore=true
+        const std::vector<text::LineAnnotation>& lineAnnotations() const { return controller_->lineAnnotations(); }
+        //@reflect ignore=true
+        void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { controller_->setLineAnnotations(std::move(annotations)); }
 
         // Draws into getClientBounds(): selection_'s highlight, then
         // this control's own word-wrapped text (renderer_.render(),

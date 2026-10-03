@@ -52,6 +52,11 @@ namespace newui {
         const Color& decorationColor() const { return decorationColor_; }
         void setDecorationColor(const Color& color) { decorationColor_ = color; }
 
+        // Null: nothing. Else the whole line a range of this style starts on is tinted this color
+        // (text::LineAnnotation::lineBackground) - how an error line stands out.
+        const Color& lineBackgroundColor() const { return lineBackgroundColor_; }
+        void setLineBackgroundColor(const Color& color) { lineBackgroundColor_ = color; }
+
     private:
         std::string fontName_;
         float fontSize_ = 0.0f;
@@ -63,6 +68,7 @@ namespace newui {
         Color backgroundColor_ = Color::null();
         text::TextDecorationKind decoration_ = text::TextDecorationKind::None;
         Color decorationColor_ = Color::null();
+        Color lineBackgroundColor_ = Color::null();
     };
 
     // Named TextStyles - a theme, say ("keyword", "string", "comment", ...). Owns its styles the
@@ -90,11 +96,15 @@ namespace newui {
 
     namespace text {
 
-        // A range of text and the name of the TextStyle it's drawn in.
+        // A range of text and the name of the TextStyle it's drawn in. A non-empty annotation is also
+        // shown after the end of the line the range starts on (see LineAnnotation), in the style's
+        // decoration color - or its text color when it has none. A style with a lineBackgroundColor()
+        // tints that line too, annotation or not.
         struct TextStyleRange {
             std::size_t start = 0;
             std::size_t length = 0;
             std::string style;
+            std::string annotation;
         };
 
         // What a TextControl draws for a set of styled ranges.
@@ -102,6 +112,7 @@ namespace newui {
             std::vector<TextColorRun> colorRuns;
             std::vector<TextFontRun> fontRuns;
             std::vector<TextDecoration> decorations;
+            std::vector<LineAnnotation> annotations;
         };
 
         // Resolves each range's style in sheet (ranges naming no style are skipped) into color runs,

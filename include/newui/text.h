@@ -769,6 +769,18 @@ namespace newui::text {
     // hit-testing), in the same space as those rects.
     void drawTextDecoration(BLContext& ctx, const TextDecoration& decoration, const std::vector<Rect>& rects);
 
+    // Something shown for the whole line that contains offset - an "error lens": a diagnostic's
+    // message after the code it is about, and/or a tint behind the line. Painted over (the text) or
+    // under (the tint) the laid-out text and never part of the layout, so it moves nothing (a long
+    // message is clipped at the control's right edge). offset is a UTF-16 code unit offset, like
+    // TextDecoration::start.
+    struct LineAnnotation {
+        std::size_t offset = 0;
+        std::string text;      // UTF-8; only its first line is shown. Empty: no message
+        Color color;           // the message's color; null: the control's own text color
+        Color lineBackground;  // null: no tint; else the whole line (every row it wraps to) is filled with it
+    };
+
     // A foldable region of the text (outlining). Collapsed, [start, start + length) is hidden and
     // placeholder is shown in its place, inline: the text before and after it stays put, so a
     // block's "{ ... }" joins its first and last lines.

@@ -81,6 +81,14 @@ namespace newui {
                     decoration.color = style->decorationColor();
                     out.decorations.push_back(decoration);
                 }
+                if (!range.annotation.empty() || !style->lineBackgroundColor().isNull()) {
+                    LineAnnotation annotation;
+                    annotation.offset = range.start;
+                    annotation.text = range.annotation;
+                    annotation.color = !style->decorationColor().isNull() ? style->decorationColor() : style->color();
+                    annotation.lineBackground = style->lineBackgroundColor();
+                    out.annotations.push_back(std::move(annotation));
+                }
             }
             return out;
         }
