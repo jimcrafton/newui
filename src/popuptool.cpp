@@ -7,7 +7,7 @@
 namespace newui {
 
     PopupTool::PopupTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
-        : RootView(ownerHwnd, instanceHandle, bounds, name) {
+        : RootView(ownerHwnd, instanceHandle, bounds, name), ownerHwnd_(ownerHwnd) {
         // A layered popup is presented via UpdateLayeredWindow() (present()), which a flip-model
         // swap chain can't do - so whatever the process-wide default is, this stays GDI.
         setPresentBackend(PresentBackend::Gdi);
@@ -143,6 +143,7 @@ namespace newui {
 
     SyncReturn PopupTool::onRootLostFocus(View& /*sender*/) {
         if (dismissOnFocusLost_) {
+            dismissedByFocusLoss_ = true;
             dismiss();
         }
         return SyncReturn::Handled;
@@ -169,6 +170,16 @@ namespace newui {
 
     void PopupTool::dismissNow() {
         onDismissed(*this);
+
+        // In-app dismissal: give OS keyboard focus back to the owner, but only if this popup
+        // (or nothing) still holds it - never pull it from another window the user went to.
+        if (!dismissedByFocusLoss_ && ownerHwnd_ != nullptr && ::IsWindow(ownerHwnd_)) {
+            HWND focused = ::GetFocus();
+            if (focused == nullptr || focused == windowHandle()) {
+                ::SetFocus(ownerHwnd_);
+            }
+        }
+
         destroy();
         delete this;
     }
