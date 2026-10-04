@@ -2486,8 +2486,7 @@ namespace newui {
                 continue;
             }
             std::size_t lineEnd = annotation.offset;
-            while (lineEnd < length && storage.at(lineEnd) != L'
-' && storage.at(lineEnd) != L'') {
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
                 ++lineEnd;
             }
             if (std::find(seenLineEnds.begin(), seenLineEnds.end(), lineEnd) != seenLineEnds.end()) {
@@ -2501,8 +2500,7 @@ namespace newui {
             if (height <= 0.0f || pt.y < topLeft.y || pt.y >= topLeft.y + height) {
                 continue;
             }
-            const std::size_t newline = annotation.text.find('
-');
+            const std::size_t newline = annotation.text.find('\n');
             const std::string shown = newline == std::string::npos ? annotation.text : annotation.text.substr(0, newline);
             BLGlyphBuffer glyphs;
             glyphs.set_utf8_text(shown.c_str(), shown.size());
