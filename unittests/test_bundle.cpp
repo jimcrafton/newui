@@ -1310,6 +1310,23 @@ TEST(DelegateDescriptorRoundTrip, AddDescriptorListenerRecordsItOnceAndConnectsN
     EXPECT_FALSE(onClick->addDescriptorListener(nullptr, kDescriptor));
 }
 
+TEST(DelegateDescriptorRoundTrip, RemoveDescriptorListenerDropsOnlyThatOne) {
+    newui::Button button;
+    std::vector<const newui::reflection::Delegate*> storage;
+    const newui::reflection::Delegate* onClick = findDelegate("Button", "onClick", storage);
+    ASSERT_NE(onClick, nullptr);
+    const std::string other = "this@SaveDialogController.onCancelClick";
+    ASSERT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));
+    ASSERT_TRUE(onClick->addDescriptorListener(&button, other));
+
+    EXPECT_TRUE(onClick->removeDescriptorListener(&button, kDescriptor));
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{other});
+
+    EXPECT_TRUE(onClick->removeDescriptorListener(&button, kDescriptor));   // already gone: nothing to do
+    EXPECT_FALSE(onClick->removeDescriptorListener(&button, ""));
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{other});
+}
+
 TEST(DelegateDescriptorRoundTrip, ADesignLoadKeepsTheRecordedTargetAndASaveWritesItBack) {
     newui::Frame frame;
     frame.setName("RoundTripFrame");

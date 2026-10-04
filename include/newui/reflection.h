@@ -2180,6 +2180,12 @@ namespace newui::reflection {
             return false;
         }
 
+        // Undoes addDescriptorListener(): drops every listener on senderInstance's delegate carrying
+        // `descriptor`. False if this base Delegate can't (only TypedDelegate can).
+        virtual bool removeDescriptorListener(void* senderInstance, const std::string& descriptor) const {
+            return false;
+        }
+
     protected:
         void setSenderSpelling(std::string spelling) { senderSpelling_ = std::move(spelling); }
 
@@ -2243,6 +2249,14 @@ namespace newui::reflection {
             delegate.add(descriptor, [](typename newui::Delegate<SourceT, Args...>::SenderRefT, Args...) {
                 return SyncReturn::Ignored;
             });
+            return true;
+        }
+
+        bool removeDescriptorListener(void* senderInstance, const std::string& descriptor) const override {
+            if (senderInstance == nullptr || descriptor.empty()) {
+                return false;
+            }
+            (static_cast<SourceT*>(senderInstance)->*member_).removeDescribed(descriptor);
             return true;
         }
 

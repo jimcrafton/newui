@@ -292,6 +292,14 @@ public:
         removeSlot(connection.id_);
     }
 
+    // Disconnects every listener tagged with descriptor (see add(descriptor, Callback)). An empty
+    // descriptor removes nothing - undescribed listeners can't be told apart.
+    void removeDescribed(const std::string& descriptor) {
+        if (!descriptor.empty()) {
+            removeSlotsDescribedAs(descriptor);
+        }
+    }
+
     void syncCall(SenderRefT sender, Args... args) const {
         std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
         for (const Slot& slot : *snapshot) {
@@ -400,6 +408,18 @@ private:
     }
 
     // Same retry-on-conflict scheme as addSlot - see the comment there.
+    void removeSlotsDescribedAs(const std::string& descriptor) {
+        std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots_);
+        std::shared_ptr<const SlotList> newList;
+        do {
+            auto updated = std::make_shared<SlotList>(*oldList);
+            updated->erase(std::remove_if(updated->begin(), updated->end(),
+                                           [&descriptor](const Slot& slot) { return slot.descriptor == descriptor; }),
+                           updated->end());
+            newList = std::move(updated);
+        } while (!std::atomic_compare_exchange_weak(&slots_, &oldList, newList));
+    }
+
     void removeSlot(std::uint64_t id) {
         std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots_);
         std::shared_ptr<const SlotList> newList;
