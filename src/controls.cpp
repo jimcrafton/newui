@@ -2463,6 +2463,61 @@ namespace newui {
         ctx.restore();
     }
 
+    std::size_t TextController::annotationAt(const Point& localPt) const {
+        if (lineAnnotations_.empty()) {
+            return npos;
+        }
+        Font font(font_.name(), font_.size() * kAnnotationFontScale);
+        font.setItalic(true);
+        if (font.blFont() == nullptr) {
+            font.setItalic(false);
+        }
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return npos;
+        }
+        const Point pt = toLayoutSpace(localPt);
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> seenLineEnds;
+        for (std::size_t i = 0; i < lineAnnotations_.size(); ++i) {
+            const text::LineAnnotation& annotation = lineAnnotations_[i];
+            if (annotation.offset > length || annotation.text.empty()) {
+                continue;
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'
+' && storage.at(lineEnd) != L'') {
+                ++lineEnd;
+            }
+            if (std::find(seenLineEnds.begin(), seenLineEnds.end(), lineEnd) != seenLineEnds.end()) {
+                continue;
+            }
+            seenLineEnds.push_back(lineEnd);
+
+            Point topLeft;
+            float height = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), topLeft, height);
+            if (height <= 0.0f || pt.y < topLeft.y || pt.y >= topLeft.y + height) {
+                continue;
+            }
+            const std::size_t newline = annotation.text.find('
+');
+            const std::string shown = newline == std::string::npos ? annotation.text : annotation.text.substr(0, newline);
+            BLGlyphBuffer glyphs;
+            glyphs.set_utf8_text(shown.c_str(), shown.size());
+            blFont->shape(glyphs);
+            BLTextMetrics textMetrics;
+            blFont->get_text_metrics(glyphs, textMetrics);
+            const double x = topLeft.x + kAnnotationGap;
+            const double width = textMetrics.advance.x;
+            if (pt.x >= x && pt.x < x + width) {
+                return i;
+            }
+        }
+        return npos;
+    }
+
     void TextController::drawLineAnnotations(BLContext& ctx, float visibleWidth, float visibleHeight) const {
         if (lineAnnotations_.empty()) {
             return;
@@ -2857,6 +2912,11 @@ namespace newui {
     }
 
     SyncReturn TextController::handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        const std::size_t annotation = annotationAt(pt);
+        if (annotation != npos) {
+            onAnnotationClicked(*this, annotation);
+            return SyncReturn::Handled;
+        }
         text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
         if (!hitPos.isValid()) {
             return SyncReturn::Ignored;
@@ -2898,6 +2958,11 @@ namespace newui {
 
     SyncReturn TextController::handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
         if (!dragging_) {
+            const std::size_t annotation = annotationAt(pt);
+            if (annotation != hoveredAnnotation_) {
+                hoveredAnnotation_ = annotation;
+                onAnnotationHovered(*this, annotation);
+            }
             return SyncReturn::Ignored;
         }
         text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
@@ -2906,6 +2971,14 @@ namespace newui {
         }
         moveCaret(hitPos.offset(), true);
         return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleMouseLeft(const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (hoveredAnnotation_ != npos) {
+            hoveredAnnotation_ = npos;
+            onAnnotationHovered(*this, npos);
+        }
+        return SyncReturn::Ignored;
     }
 
     SyncReturn TextController::handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
@@ -3186,6 +3259,7 @@ namespace newui {
         onMouseDown.add(this, &TextControl::handleMouseDown);
         onMouseMove.add(this, &TextControl::handleMouseMove);
         onMouseUp.add(this, &TextControl::handleMouseUp);
+        onMouseLeft.add(this, &TextControl::handleMouseLeft);
         onMouseDblClick.add(this, &TextControl::handleMouseDblClick);
         onKeyPress.add(this, &TextControl::handleKeyPress);
         onKeyDown.add(this, &TextControl::handleKeyDown);

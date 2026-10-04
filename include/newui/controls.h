@@ -1482,6 +1482,17 @@ namespace newui {
         //@reflect ignore=true
         void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { lineAnnotations_ = std::move(annotations); owner_.style().markDirty(); }
 
+        // The index into lineAnnotations() of the message shown under localPt (this control's own
+        // coordinates), or npos. Same one-per-line rule as drawLineAnnotations().
+        static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+        std::size_t annotationAt(const Point& localPt) const;
+
+        // A click on a message (it doesn't move the caret), and the pointer entering one / leaving it
+        // (npos): the index into lineAnnotations().
+        typedef Delegate<TextController, std::size_t> AnnotationDelegate;
+        AnnotationDelegate onAnnotationClicked;
+        AnnotationDelegate onAnnotationHovered;
+
         // Whether spaces (a dot), tabs (an arrow) and line endings (CR / LF / CRLF) are marked.
         bool showsWhitespace() const { return showsWhitespace_; }
         void setShowsWhitespace(bool shows) { showsWhitespace_ = shows; owner_.style().markDirty(); }
@@ -1611,6 +1622,7 @@ namespace newui {
         virtual SyncReturn handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         virtual SyncReturn handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         virtual SyncReturn handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        virtual SyncReturn handleMouseLeft(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         // Windows has no triple-click message of its own (WM_LBUTTONDBLCLK
         // only ever covers a *second* click) - handleMouseDown() tracks
         // clickCount_/lastClickTime_/lastClickPos_ itself (using
@@ -1776,6 +1788,7 @@ namespace newui {
         std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
         std::vector<text::LineAnnotation> lineAnnotations_;
+        std::size_t hoveredAnnotation_ = npos;
         bool overwriteMode_ = false;
         std::size_t tabWidth_ = 4;
         bool showsWhitespace_ = false;
@@ -2114,6 +2127,7 @@ namespace newui {
         SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDown(pt, btnMask, keyMask); }
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseMove(pt, btnMask, keyMask); }
         SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseUp(pt, btnMask, keyMask); }
+        SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseLeft(pt, btnMask, keyMask); }
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode); }

@@ -4155,6 +4155,26 @@ TEST(TextControlLineAnnotations, AMessageIsDrawnAfterItsLineInItsColor) {
     EXPECT_GT(colorPixels(textControl, 0), 20u);
 }
 
+TEST(TextControlLineAnnotations, AnnotationAtFindsTheMessageNotTheCodeBesideIt) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.text = "oops, a mistake";
+    textControl.setLineAnnotations({ annotation });
+    colorPixels(textControl, 0);   // paints, so the layout is current
+
+    Point lineEnd;
+    float height = 0.0f;
+    textControl.controller().layoutEngine().hitTestPosition(text::TextPosition(16), lineEnd, height);
+    const float y = lineEnd.y + height * 0.5f;
+    const Point inMessage(lineEnd.x + TextController::kAnnotationGap + 10.0f, y);
+    EXPECT_EQ(textControl.controller().annotationAt(inMessage), 0u);
+    EXPECT_EQ(textControl.controller().annotationAt(Point(2.0f, y)), TextController::npos);
+    EXPECT_EQ(textControl.controller().annotationAt(Point(lineEnd.x + 5.0f, y)), TextController::npos);   // the gap
+    EXPECT_EQ(textControl.controller().annotationAt(Point(inMessage.x, y + height * 3.0f)), TextController::npos);
+}
+
 TEST(TextControlLineAnnotations, WithNoMessageAndNoTintNothingColoredIsDrawn) {
     TextControl textControl;
     decoratedText(textControl);
