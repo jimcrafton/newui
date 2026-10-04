@@ -319,9 +319,38 @@ bool Dialog::initialize()
     DWORD dialogStyle = WS_POPUPWINDOW | WS_CAPTION | WS_CLIPSIBLINGS | DS_MODALFRAME;
     DWORD dwExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CONTROLPARENT;
 
+    // Modal over an owner: centered on it (kept on its monitor), not wherever the layout file put it.
+    int x = static_cast<int>(bounds_.left());
+    int y = static_cast<int>(bounds_.top());
+    const int width = static_cast<int>(bounds_.size().width);
+    const int height = static_cast<int>(bounds_.size().height);
+    RECT ownerRect;
+    if (modalOwner_ != nullptr && ::GetWindowRect(modalOwner_, &ownerRect)) {
+        x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
+        y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
+
+        MONITORINFO monitor = {};
+        monitor.cbSize = sizeof(monitor);
+        if (::GetMonitorInfo(::MonitorFromWindow(modalOwner_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const RECT& area = monitor.rcWork;
+            if (x + width > area.right) {
+                x = area.right - width;
+            }
+            if (y + height > area.bottom) {
+                y = area.bottom - height;
+            }
+            if (x < area.left) {
+                x = area.left;
+            }
+            if (y < area.top) {
+                y = area.top;
+            }
+        }
+    }
+
     auto hwnd = ::CreateWindowExA(
         dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
-        bounds_.left(), bounds_.top(), bounds_.size().width, bounds_.size().height,
+        x, y, width, height,
         modalOwner_,
         NULL,
          ::GetModuleHandleA(nullptr),

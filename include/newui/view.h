@@ -165,6 +165,17 @@ namespace newui {
         View* findView(const std::string& name);
         const View* findView(const std::string& name) const;
 
+        // findView() and a dynamic_cast in one call: nullptr if nothing is named name or the
+        // match isn't a T.
+        template<typename T>
+        T* findView(const std::string& name) {
+            return dynamic_cast<T*>(findView(name));
+        }
+        template<typename T>
+        const T* findView(const std::string& name) const {
+            return dynamic_cast<const T*>(findView(name));
+        }
+
         Layout* layout() const {
             return layout_.get();
         }

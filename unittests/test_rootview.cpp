@@ -2197,6 +2197,20 @@ TEST(ViewFindView, FindsANestedDescendantByName) {
     delete root;
 }
 
+TEST(ViewFindView, TypedLookupCastsAndReturnsNullForTheWrongType) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* button = new newui::Button();
+    root->addChild(button);
+
+    EXPECT_EQ(root->findView<newui::Button>("button1"), button);
+    EXPECT_EQ(root->findView<newui::Label>("button1"), nullptr);
+    EXPECT_EQ(root->findView<newui::Button>("noSuchView"), nullptr);
+
+    root->destroy();
+    delete root;
+}
+
 TEST(ViewFindView, ReturnsNullWhenNoMatchExists) {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
 
