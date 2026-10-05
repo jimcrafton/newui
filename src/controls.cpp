@@ -2422,6 +2422,8 @@ namespace newui {
         const std::size_t length = storage.length();
         std::vector<std::size_t> tintedLineEnds;
 
+        // Drawn in layout space, already shifted left by the sideways scroll: reach as far past the view's width.
+        visibleWidth += scrollOffsetX_;
         ctx.save();
         ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2536,6 +2538,7 @@ namespace newui {
         const std::size_t length = storage.length();
         std::vector<std::size_t> drawnLineEnds;
 
+        visibleWidth += scrollOffsetX_;   // layout space, as in drawLineBackgrounds
         ctx.save();
         ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
         ctx.translate(0.0f, -scrollOffsetY_);
