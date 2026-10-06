@@ -3,7 +3,9 @@
 #include "newui/newui.h"
 #include "newui/bundle.h"
 
+#include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <unordered_map>
 
 namespace newui {
@@ -83,13 +85,24 @@ void enumerateRegistryFonts(HKEY rootKey, const std::string& fontsDir, std::vect
     ::RegCloseKey(fontsKey);
 }
 
-struct FontIndex {
-    std::vector<SystemFontInfo> fonts;
-    std::unordered_map<std::string, std::string> pathByLowerName;
+// Where a name's font is: installed in Windows, registered by the application, or both. A registered one is used.
+struct FontEntry {
+    std::string systemPath;
+    std::string bundledPath;
+
+    const std::string& path() const { return bundledPath.empty() ? systemPath : bundledPath; }
 };
 
-const FontIndex& fontIndex() {
-    static const FontIndex index = [] {
+struct FontIndex {
+    std::vector<SystemFontInfo> fonts;
+    std::unordered_map<std::string, FontEntry> byLowerName;
+};
+
+// Fonts are read memory-mapped: only the tables blend2d touches are paged in, so scanning hundreds of files is cheap.
+constexpr BLFileReadFlags kReadFlags = BL_FILE_READ_MMAP_ENABLED;
+
+FontIndex& fontIndex() {
+    static FontIndex index = [] {
         FontIndex idx;
 
         std::string fontsDir = getFontsDirectory();
@@ -102,11 +115,11 @@ const FontIndex& fontIndex() {
             // The actual TrueType/OpenType filter: only keep entries
             // blend2d can load. See FontManager::listFonts()'s doc comment.
             BLFontFace face;
-            if (face.create_from_file(candidate.filePath.c_str()) != BL_SUCCESS) {
+            if (face.create_from_file(candidate.filePath.c_str(), kReadFlags) != BL_SUCCESS) {
                 continue;
             }
 
-            idx.pathByLowerName.emplace(toLowerAscii(candidate.name), candidate.filePath);
+            idx.byLowerName.emplace(toLowerAscii(candidate.name), FontEntry{ candidate.filePath, std::string() });
             idx.fonts.push_back(candidate);
         }
 
@@ -116,21 +129,71 @@ const FontIndex& fontIndex() {
     return index;
 }
 
-// The file for a family name - also as "<name> Regular", which is how Windows registers some
-// families (Cascadia Mono) whose name DirectWrite knows without it. Null if not installed.
-const std::string* findFontPath(const std::string& name) {
+// The entry for a family name - also as "<name> Regular", which is how Windows registers some
+// families (Cascadia Mono) whose name DirectWrite knows without it. Null if there is none.
+const FontEntry* findFont(const std::string& name) {
     const FontIndex& idx = fontIndex();
-    auto it = idx.pathByLowerName.find(toLowerAscii(name));
-    if (it == idx.pathByLowerName.end()) {
-        it = idx.pathByLowerName.find(toLowerAscii(name + " Regular"));
+    auto it = idx.byLowerName.find(toLowerAscii(name));
+    if (it == idx.byLowerName.end()) {
+        it = idx.byLowerName.find(toLowerAscii(name + " Regular"));
     }
-    return it != idx.pathByLowerName.end() ? &it->second : nullptr;
+    return it != idx.byLowerName.end() ? &it->second : nullptr;
+}
+
+bool hasFontExtension(const std::filesystem::path& path) {
+    std::string ext = toLowerAscii(path.extension().string());
+    return ext == ".ttf" || ext == ".otf";
 }
 
 }  // namespace
 
 bool FontManager::isInstalled(const std::string& name) {
-    return findFontPath(name) != nullptr;
+    const FontEntry* entry = findFont(name);
+    return entry != nullptr && !entry->systemPath.empty();
+}
+
+bool FontManager::addFontFile(const std::string& path) {
+    FontIndex& idx = fontIndex();
+    BLFontFace face;
+    if (face.create_from_file(path.c_str(), kReadFlags) != BL_SUCCESS) {
+        return false;
+    }
+
+    const std::string family = face.family_name().data();
+    const std::string style = face.subfamily_name().data();
+    std::string fullName = face.full_name().data();
+    if (fullName.empty()) {
+        fullName = style.empty() ? family : family + " " + style;
+    }
+
+    auto add = [&](const std::string& name) {
+        if (!name.empty()) {
+            idx.byLowerName[toLowerAscii(name)].bundledPath = path;
+        }
+    };
+    add(fullName);
+    if (!family.empty()) {
+        if (!style.empty()) {
+            add(family + " " + style);
+        }
+        if (style.empty() || toLowerAscii(style) == "regular") {
+            add(family);
+        }
+    }
+    idx.fonts.push_back(SystemFontInfo{ fullName, path, true });
+    return true;
+}
+
+std::size_t FontManager::addFontDirectory(const std::string& directory) {
+    std::error_code ec;
+    std::size_t added = 0;
+    std::filesystem::recursive_directory_iterator it(directory, std::filesystem::directory_options::skip_permission_denied, ec);
+    for (; !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (it->is_regular_file(ec) && hasFontExtension(it->path()) && addFontFile(it->path().string())) {
+            ++added;
+        }
+    }
+    return added;
 }
 
 Font FontManager::monospaceFont(float size) {
@@ -148,16 +211,16 @@ const std::vector<SystemFontInfo>& FontManager::listFonts() {
 }
 
 bool FontManager::createFont(const std::string& nameOrPath, float size, BLFont& outFont) {
-    const std::string* installed = findFontPath(nameOrPath);
-    const std::string& path = installed != nullptr ? *installed : nameOrPath;
+    const FontEntry* known = findFont(nameOrPath);
+    const std::string& path = known != nullptr ? known->path() : nameOrPath;
 
     BLFontFace face;
-    if (face.create_from_file(path.c_str()) != BL_SUCCESS) {
+    if (face.create_from_file(path.c_str(), kReadFlags) != BL_SUCCESS) {
         // Neither a known system font name nor a directly-loadable path -
         // last resort, try it as a Bundle-relative resource
         // (Resources/Fonts/<nameOrPath>).
         std::string bundlePath = Bundle::instance().resourcePath("Fonts/" + nameOrPath);
-        if (bundlePath.empty() || face.create_from_file(bundlePath.c_str()) != BL_SUCCESS) {
+        if (bundlePath.empty() || face.create_from_file(bundlePath.c_str(), kReadFlags) != BL_SUCCESS) {
             return false;
         }
     }

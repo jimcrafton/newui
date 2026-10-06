@@ -2,6 +2,7 @@
 #include "newui/animation.h"
 #include "newui/application.h"
 #include "newui/dialogs.h"
+#include "newui/fontmanager.h"
 #include "newui/frame.h"
 #include "newui/reflectionio.h"
 #include "newui/rootview.h"
@@ -553,6 +554,15 @@ namespace newui {
     std::string Bundle::resourcePath(const std::string& relativePath) const {
         std::string path = resourcesDir_ + "\\" + relativePath;
         return fileExists(path) ? path : std::string();
+    }
+
+    std::size_t Bundle::loadFonts(const std::string& relativeDir) const {
+        const std::string directory = resourcesDir_ + "\\" + relativeDir;
+        const DWORD attrs = ::GetFileAttributesA(directory.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            return 0;
+        }
+        return FontManager::addFontDirectory(directory);
     }
 
     bool Bundle::loadImage(const std::string& relativePath, BLImage& outImage) const {

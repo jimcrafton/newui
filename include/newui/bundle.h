@@ -77,6 +77,12 @@ namespace newui {
         // exceptions.
         std::string resourcePath(const std::string& relativePath) const;
 
+        // Registers every .ttf / .otf under resourcesDir() + "\" + relativeDir (subfolders too) with
+        // FontManager::addFontDirectory(), so text drawn by blend2d finds them by name - how an application
+        // ships its own fonts. Returns how many it registered; 0 if the folder does not exist. Call it once at
+        // startup, before text is drawn; see FontManager::addFontFile() for what sees them.
+        std::size_t loadFonts(const std::string& relativeDir = "Fonts") const;
+
         // Loads relativePath (resolved via resourcePath()) as a BLImage.
         // BMP/JPEG/PNG/QOI all work out of the box - blend2d builds those
         // codecs in unconditionally. A ".svg" path is instead rasterized

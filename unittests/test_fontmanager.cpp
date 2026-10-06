@@ -82,3 +82,32 @@ TEST(FontManager, ListedFontsAreOpenTypeOrTrueType) {
         EXPECT_EQ(face.face_type(), BL_FONT_FACE_TYPE_OPENTYPE) << info.name;
     }
 }
+
+TEST(FontManager, AddFontFileRegistersAFontByItsNamesAndItWinsOverTheSystemOne) {
+    const std::vector<newui::SystemFontInfo>& system = newui::FontManager::listFonts();
+    ASSERT_GT(system.size(), 0u);
+    const std::string path = system[0].filePath;   // any loadable file stands in for a shipped font
+
+    ASSERT_TRUE(newui::FontManager::addFontFile(path));
+    const newui::SystemFontInfo& added = newui::FontManager::listFonts().back();
+    EXPECT_TRUE(added.bundled);
+    EXPECT_EQ(added.filePath, path);
+
+    BLFont font;
+    EXPECT_TRUE(newui::FontManager::createFont(added.name, 12.0f, font)) << "found by the registered full name";
+    EXPECT_FALSE(newui::FontManager::addFontFile("C:\\no\\such\\font.ttf"));
+}
+
+TEST(FontManager, AddFontDirectoryOnAMissingFolderRegistersNothing) {
+    EXPECT_EQ(newui::FontManager::addFontDirectory("C:\\no\\such\\folder"), 0u);
+}
+
+TEST(FontManager, RegisteringAFontDoesNotMakeAnInstalledOneLookMissing) {
+    const std::vector<newui::SystemFontInfo>& fonts = newui::FontManager::listFonts();
+    ASSERT_GT(fonts.size(), 0u);
+    const std::string name = fonts[0].name;
+    ASSERT_TRUE(newui::FontManager::isInstalled(name));
+
+    ASSERT_TRUE(newui::FontManager::addFontFile(fonts[0].filePath));
+    EXPECT_TRUE(newui::FontManager::isInstalled(name)) << "DirectWrite still finds it";
+}
