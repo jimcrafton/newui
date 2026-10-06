@@ -40,6 +40,7 @@
 // safe to use as a reference/pointer return type below.
 struct ID2D1Factory;
 struct IDWriteFactory;
+struct IDWriteFontCollection;
 struct IWICImagingFactory;
 struct IDWriteTextLayout;
 
@@ -654,6 +655,13 @@ namespace newui::text {
         // null-dereferencing instead.
         static ID2D1Factory& d2dFactory();
         static IDWriteFactory& dwriteFactory();
+
+        // The fonts a text format resolves family names against: the system's plus every file
+        // FontManager::addFontFile() registered, or null (the system's own) while none is. Built on first use
+        // after the registered set changes (FontManager::registeredFontVersion()), so register fonts before the
+        // first text is drawn; a format already created keeps the collection it had. Null too if this Windows
+        // has no IDWriteFactory5 (before Windows 10 1703). Owned here; do not release.
+        static IDWriteFontCollection* fontCollection();
 
         // WIC (Windows Imaging Component) - what TextRenderer uses to
         // create an IWICBitmap a D2D render target can draw directly

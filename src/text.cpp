@@ -1,10 +1,12 @@
 #include "newui/text.h"
+#include "newui/fontmanager.h"
 
 #include "newui/uicolormanager.h"
 #include "newui/utils.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwrite_3.h>
 #include <wincodec.h>
 
 #include <comdef.h>
@@ -37,6 +39,12 @@ namespace newui::text {
         _COM_SMARTPTR_TYPEDEF(ID2D1RenderTarget, __uuidof(ID2D1RenderTarget));
         _COM_SMARTPTR_TYPEDEF(ID2D1SolidColorBrush, __uuidof(ID2D1SolidColorBrush));
         _COM_SMARTPTR_TYPEDEF(IDWriteFactory, __uuidof(IDWriteFactory));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFactory5, __uuidof(IDWriteFactory5));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFontCollection, __uuidof(IDWriteFontCollection));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFontCollection1, __uuidof(IDWriteFontCollection1));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFontSet, __uuidof(IDWriteFontSet));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFontSetBuilder1, __uuidof(IDWriteFontSetBuilder1));
+        _COM_SMARTPTR_TYPEDEF(IDWriteFontFile, __uuidof(IDWriteFontFile));
         _COM_SMARTPTR_TYPEDEF(IDWriteTextFormat, __uuidof(IDWriteTextFormat));
         _COM_SMARTPTR_TYPEDEF(IDWriteTextLayout, __uuidof(IDWriteTextLayout));
         _COM_SMARTPTR_TYPEDEF(IWICImagingFactory, __uuidof(IWICImagingFactory));
@@ -60,7 +68,8 @@ namespace newui::text {
             // changed just now.
             IDWriteTextFormat* resolve(const Font& font) {
                 if (format_ != nullptr && lastName_ == font.name() && lastSize_ == font.size()
-                    && lastBold_ == font.bold() && lastItalic_ == font.italic()) {
+                    && lastBold_ == font.bold() && lastItalic_ == font.italic()
+                    && lastFontVersion_ == FontManager::registeredFontVersion()) {
                     return format_.GetInterfacePtr();
                 }
 
@@ -74,7 +83,7 @@ namespace newui::text {
                 }
 
                 HRESULT hr = DirectWriteResources::dwriteFactory().CreateTextFormat(
-                    fontName.c_str(), nullptr, weight, style, DWRITE_FONT_STRETCH_NORMAL,
+                    fontName.c_str(), DirectWriteResources::fontCollection(), weight, style, DWRITE_FONT_STRETCH_NORMAL,
                     font.size(), L"en-us", &format_);
                 if (FAILED(hr)) {
                     return nullptr;
@@ -84,6 +93,7 @@ namespace newui::text {
                 lastSize_ = font.size();
                 lastBold_ = font.bold();
                 lastItalic_ = font.italic();
+                lastFontVersion_ = FontManager::registeredFontVersion();
                 return format_.GetInterfacePtr();
             }
 
@@ -93,6 +103,7 @@ namespace newui::text {
             float lastSize_ = 0.0f;
             bool lastBold_ = false;
             bool lastItalic_ = false;
+            unsigned lastFontVersion_ = 0;
         };
 
     }  // namespace
@@ -441,6 +452,8 @@ namespace newui::text {
         ID2D1FactoryPtr d2dFactory;
         IDWriteFactoryPtr dwriteFactory;
         IWICImagingFactoryPtr wicFactory;
+        IDWriteFontCollectionPtr fontCollection;   // system + registered fonts; null while none is registered
+        unsigned fontCollectionVersion = 0;        // FontManager::registeredFontVersion() it was built for
     };
 
     DirectWriteResources::DirectWriteResources() : impl_(std::make_unique<Impl>()) {
@@ -502,6 +515,46 @@ namespace newui::text {
             throw std::runtime_error("newui::text::DirectWriteResources::dwriteFactory: DWriteCreateFactory failed");
         }
         return *factory;
+    }
+
+    IDWriteFontCollection* DirectWriteResources::fontCollection() {
+        Impl& impl = *instance().impl_;
+        const unsigned version = FontManager::registeredFontVersion();
+        if (impl.fontCollectionVersion == version) {
+            return impl.fontCollection.GetInterfacePtr();
+        }
+        impl.fontCollectionVersion = version;
+        impl.fontCollection = nullptr;
+        if (FontManager::registeredFontFiles().empty() || impl.dwriteFactory == nullptr) {
+            return nullptr;
+        }
+
+        IDWriteFactory5Ptr factory5;
+        if (FAILED(impl.dwriteFactory->QueryInterface(__uuidof(IDWriteFactory5), reinterpret_cast<void**>(&factory5)))) {
+            return nullptr;
+        }
+        IDWriteFontSetBuilder1Ptr builder;
+        if (FAILED(factory5->CreateFontSetBuilder(&builder))) {
+            return nullptr;
+        }
+        // what is installed, then each registered file (one that will not load is left out)
+        IDWriteFontSetPtr system;
+        if (SUCCEEDED(factory5->GetSystemFontSet(&system))) {
+            builder->AddFontSet(system);
+        }
+        for (const std::string& path : FontManager::registeredFontFiles()) {
+            IDWriteFontFilePtr file;
+            if (SUCCEEDED(factory5->CreateFontFileReference(utf8ToWide(path).c_str(), nullptr, &file))) {
+                builder->AddFontFile(file);
+            }
+        }
+        IDWriteFontSetPtr set;
+        IDWriteFontCollection1Ptr collection;
+        if (FAILED(builder->CreateFontSet(&set)) || FAILED(factory5->CreateFontCollectionFromFontSet(set, &collection))) {
+            return nullptr;
+        }
+        impl.fontCollection = collection;
+        return impl.fontCollection.GetInterfacePtr();
     }
 
     IWICImagingFactory& DirectWriteResources::wicFactory() {

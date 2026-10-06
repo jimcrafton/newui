@@ -101,6 +101,16 @@ struct FontIndex {
 // Fonts are read memory-mapped: only the tables blend2d touches are paged in, so scanning hundreds of files is cheap.
 constexpr BLFileReadFlags kReadFlags = BL_FILE_READ_MMAP_ENABLED;
 
+std::vector<std::string>& registeredFiles() {
+    static std::vector<std::string> files;
+    return files;
+}
+
+unsigned& registeredVersion() {
+    static unsigned version = 0;
+    return version;
+}
+
 FontIndex& fontIndex() {
     static FontIndex index = [] {
         FontIndex idx;
@@ -152,6 +162,18 @@ bool FontManager::isInstalled(const std::string& name) {
     return entry != nullptr && !entry->systemPath.empty();
 }
 
+bool FontManager::isAvailable(const std::string& name) {
+    return findFont(name) != nullptr;
+}
+
+const std::vector<std::string>& FontManager::registeredFontFiles() {
+    return registeredFiles();
+}
+
+unsigned FontManager::registeredFontVersion() {
+    return registeredVersion();
+}
+
 bool FontManager::addFontFile(const std::string& path) {
     FontIndex& idx = fontIndex();
     BLFontFace face;
@@ -181,6 +203,8 @@ bool FontManager::addFontFile(const std::string& path) {
         }
     }
     idx.fonts.push_back(SystemFontInfo{ fullName, path, true });
+    registeredFiles().push_back(path);
+    ++registeredVersion();
     return true;
 }
 
@@ -199,7 +223,7 @@ std::size_t FontManager::addFontDirectory(const std::string& directory) {
 Font FontManager::monospaceFont(float size) {
     static const char* const kPreferred[] = { "Cascadia Mono", "Consolas", "Lucida Console", "Courier New" };
     for (const char* name : kPreferred) {
-        if (isInstalled(name)) {
+        if (isAvailable(name)) {
             return Font(name, size);
         }
     }
