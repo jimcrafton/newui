@@ -4688,3 +4688,75 @@ TEST(TextController, EditStateChangesAreReported) {
     control.controller().setOverwriteMode(true);
     EXPECT_EQ(changes, 3) << "unchanged";
 }
+
+TEST(TextStyles, CompositeBlendsTwoColorsTheWayTheOperatorSays) {
+    const Color red(1.0f, 0.0f, 0.0f, 1.0f);
+    const Color halfWhite(1.0f, 1.0f, 1.0f, 0.5f);
+    const Color gray(0.5f, 0.5f, 0.5f, 1.0f);
+
+    const Color faded = composite(halfWhite, red, CompositeMode::SrcOver);
+    EXPECT_NEAR(faded.r, 1.0f, 1e-5f);
+    EXPECT_NEAR(faded.g, 0.5f, 1e-5f);
+    EXPECT_NEAR(faded.b, 0.5f, 1e-5f);
+    EXPECT_NEAR(faded.a, 1.0f, 1e-5f);
+
+    EXPECT_EQ(composite(halfWhite, red, CompositeMode::Src), halfWhite);
+    const Color product = composite(Color(0.5f, 0.5f, 0.5f, 1.0f), red, CompositeMode::Multiply);
+    EXPECT_NEAR(product.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(product.g, 0.0f, 1e-5f);
+    const Color lighter = composite(gray, Color(0.2f, 0.8f, 0.4f, 1.0f), CompositeMode::Lighten);
+    EXPECT_NEAR(lighter.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(lighter.g, 0.8f, 1e-5f);
+    const Color screened = composite(gray, gray, CompositeMode::Screen);
+    EXPECT_NEAR(screened.r, 0.75f, 1e-5f);
+    const Color summed = composite(Color(0.7f, 0.0f, 0.0f, 1.0f), Color(0.6f, 0.0f, 0.0f, 1.0f), CompositeMode::Plus);
+    EXPECT_NEAR(summed.r, 1.0f, 1e-5f) << "clamped";
+}
+
+TEST(TextStyles, AnOverlayFadesTheColorTheTextAlreadyHas) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(1.0f, 1.0f, 1.0f, 0.5f));
+    sheet->addStyle(dim);
+
+    // keyword blue over 0..4; dim over 2..8: blue faded where they meet, the base color (black) faded after
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 4, "keyword" }, { 2, 6, "dim" } },
+                                                          Color(0.0f, 0.0f, 0.0f, 1.0f));
+    ASSERT_EQ(out.colorRuns.size(), 3u) << "the keyword, then the faded part of it and the faded rest";
+    EXPECT_EQ(out.colorRuns[0].color, Color(0.0f, 0.0f, 1.0f, 1.0f));
+    EXPECT_EQ(out.colorRuns[1].start, 2u);
+    EXPECT_EQ(out.colorRuns[1].length, 2u);
+    EXPECT_NEAR(out.colorRuns[1].color.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(out.colorRuns[1].color.b, 1.0f, 1e-5f);
+    EXPECT_EQ(out.colorRuns[2].start, 4u);
+    EXPECT_EQ(out.colorRuns[2].length, 4u);
+    EXPECT_NEAR(out.colorRuns[2].color.r, 0.5f, 1e-5f) << "black faded toward white";
+    EXPECT_NEAR(out.colorRuns[2].color.b, 0.5f, 1e-5f);
+}
+
+TEST(TextStyles, AnOverlayWithNoBaseColorLeavesUncoloredTextAlone) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(1.0f, 1.0f, 1.0f, 0.5f));
+    sheet->addStyle(dim);
+
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 4, "keyword" }, { 2, 6, "dim" } });
+    ASSERT_EQ(out.colorRuns.size(), 2u) << "only the keyword's part is faded";
+    EXPECT_EQ(out.colorRuns[1].start, 2u);
+    EXPECT_EQ(out.colorRuns[1].length, 2u);
+}
+
+TEST(TextStyles, ALaterRunWinsAsTheBackdropOfAnOverlay) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* green = new TextStyle("green");
+    green->setColor(Color(0.0f, 1.0f, 0.0f, 1.0f));
+    sheet->addStyle(green);
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    dim->setOverlayComposite(CompositeMode::Multiply);
+    sheet->addStyle(dim);
+
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 6, "keyword" }, { 0, 6, "green" }, { 0, 6, "dim" } });
+    ASSERT_EQ(out.colorRuns.size(), 3u);
+    EXPECT_EQ(out.colorRuns[2].color, Color(0.0f, 0.0f, 0.0f, 1.0f)) << "green times black";
+}

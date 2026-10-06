@@ -10,6 +10,21 @@
 
 namespace newui {
 
+    // How one color is laid over another (the separable operators Blend2D's BLCompOp has, by the same names), source
+    // being the overlay and backdrop the color already there. See composite().
+    enum class CompositeMode {
+        SrcOver,    // the source at its own alpha over the backdrop: a plain fade
+        Src,        // the source replaces the backdrop
+        Multiply,   // darkens: channels multiplied
+        Screen,     // lightens: the inverse of Multiply on the inverses
+        Darken,     // the darker channel
+        Lighten,    // the lighter channel
+        Plus,       // channels added, clamped
+    };
+
+    // `source` composited over `backdrop` with `mode`, in straight (not premultiplied) alpha, the way a color is held here.
+    Color composite(const Color& source, const Color& backdrop, CompositeMode mode);
+
     // A reusable look for ranges of text - ViewStyle's counterpart for text, the way a CSS class
     // is. A TextControl's styled ranges name a style; the style says how those ranges look.
     // Every property that isn't set leaves the control's own value alone: an empty fontName, a
@@ -57,6 +72,17 @@ namespace newui {
         const Color& lineBackgroundColor() const { return lineBackgroundColor_; }
         void setLineBackgroundColor(const Color& color) { lineBackgroundColor_ = color; }
 
+        // Null: nothing. Else the text in a range of this style is drawn in this color composited (overlayComposite())
+        // over the color it would have had without it - the color of the range's own style, or of another range
+        // there, or the control's text color. A translucent background color in SrcOver fades the text toward the
+        // background and keeps its hue, which a plain `color` cannot do. Where two overlays cover the same text the
+        // later one wins.
+        const Color& overlayColor() const { return overlayColor_; }
+        void setOverlayColor(const Color& color) { overlayColor_ = color; }
+
+        CompositeMode overlayComposite() const { return overlayComposite_; }
+        void setOverlayComposite(CompositeMode mode) { overlayComposite_ = mode; }
+
     private:
         std::string fontName_;
         float fontSize_ = 0.0f;
@@ -69,6 +95,8 @@ namespace newui {
         text::TextDecorationKind decoration_ = text::TextDecorationKind::None;
         Color decorationColor_ = Color::null();
         Color lineBackgroundColor_ = Color::null();
+        Color overlayColor_ = Color::null();
+        CompositeMode overlayComposite_ = CompositeMode::SrcOver;
     };
 
     // Named TextStyles - a theme, say ("keyword", "string", "comment", ...). Owns its styles the
@@ -117,6 +145,9 @@ namespace newui {
 
         // Resolves each range's style in sheet (ranges naming no style are skipped) into color runs,
         // font runs and decorations - a background color becomes a Background decoration.
-        ExpandedTextStyles expandTextStyles(const TextStyleSheet& sheet, const std::vector<TextStyleRange>& ranges);
+        // `baseColor` is the color text has where no range colors it (the control's text color); with it null, an
+        // overlay (TextStyle::overlayColor()) has nothing to composite over there and leaves that text alone.
+        ExpandedTextStyles expandTextStyles(const TextStyleSheet& sheet, const std::vector<TextStyleRange>& ranges,
+                                            const Color& baseColor = Color::null());
     }
 }

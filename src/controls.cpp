@@ -3277,7 +3277,7 @@ namespace newui {
         if (styleSheet_ == nullptr) {
             return;
         }
-        text::ExpandedTextStyles expanded = text::expandTextStyles(*styleSheet_, styledRanges_);
+        text::ExpandedTextStyles expanded = text::expandTextStyles(*styleSheet_, styledRanges_, controller_->textColor());
         setColorRuns(std::move(expanded.colorRuns));
         setFontRuns(std::move(expanded.fontRuns));
         setDecorations(std::move(expanded.decorations));
