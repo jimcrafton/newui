@@ -34,6 +34,24 @@ namespace newui {
 		return result;
 	}
 
+	std::string normalizePath(std::string path)
+	{
+		for (char& c : path) {
+			if (c == '\\') c = '/';
+		}
+		while (path.size() > 1 && path.back() == '/') path.pop_back();
+		return path;
+	}
+
+	std::string toLowerCase(const std::string& text)
+	{
+		std::wstring wide = utf8ToWide(text);
+		if (!wide.empty()) {
+			::CharLowerBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+		}
+		return wideToUtf8(wide);
+	}
+
 	std::string extractNamespace(const std::type_info& info)
 	{
 		std::string result = "";

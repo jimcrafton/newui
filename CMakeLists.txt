@@ -124,6 +124,7 @@ add_library(newui STATIC
     "include/newui/bundle.h" "src/bundle.cpp"
     "include/newui/viewpath.h" "src/viewpath.cpp"
     "include/newui/namemanager.h" "src/namemanager.cpp"
+    "include/newui/filewatcher.h" "src/filewatcher.cpp"
     "include/newui/reflection.h" "src/reflection.cpp"
     "include/newui/cursor.h" "src/cursor.cpp"
     "include/newui/graphics.h" "src/graphics.cpp"

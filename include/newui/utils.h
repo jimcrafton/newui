@@ -29,6 +29,14 @@ namespace newui {
 	std::wstring utf8ToWide(const std::string& text);
 	std::string wideToUtf8(const std::wstring& text);
 
+	// A path with '\' turned into '/' and any trailing '/' dropped (a lone "/" stays), so paths
+	// from different sources compare and join the same way.
+	std::string normalizePath(std::string path);
+
+	// text lower-cased with Windows' own case rules (full Unicode, not just ASCII), for comparing
+	// paths and names case-insensitively.
+	std::string toLowerCase(const std::string& text);
+
 
 	struct KeyboardEventInfo {
 		int scanCode = 0;

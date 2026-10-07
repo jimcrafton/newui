@@ -25,6 +25,8 @@ add_executable(newui_tests
     test_bundle.cpp
     test_viewpath.cpp
     test_namemanager.cpp
+    test_filewatcher.cpp
+    test_utils.cpp
     test_reflection.cpp
     test_reflectionio.cpp
     test_delegateserialization.cpp
