@@ -37,6 +37,29 @@ namespace newui {
 	// paths and names case-insensitively.
 	std::string toLowerCase(const std::string& text);
 
+	// Windows' per-user and shared folders, so app code asks the system instead of reading environment
+	// variables. Stateless: every call asks the system, so there is nothing to construct or configure.
+	// Each path is UTF-8 with '/' separators and no trailing one (see normalizePath), or an empty string
+	// when the system has none to give. None of these creates a folder.
+	class SpecialFolders {
+	public:
+		static std::string home();             // the user's profile folder
+		static std::string desktop();
+		static std::string documents();
+		static std::string downloads();
+		static std::string localAppData();     // %LOCALAPPDATA%: this user's data on this machine, not roamed
+		static std::string roamingAppData();   // %APPDATA%: this user's data that roams
+		static std::string programData();      // %PROGRAMDATA%: shared by every user of the machine
+		static std::string programFiles();
+		static std::string temp();             // the temporary folder (GetTempPath), which honours TMP/TEMP
+
+		// A new, empty file in temp() with a unique name (prefix: up to three characters of it are used);
+		// returns its path, or an empty string if it could not be made. The caller deletes it.
+		static std::string createTempFile(const std::string& prefix = std::string());
+
+		SpecialFolders() = delete;
+	};
+
 
 	struct KeyboardEventInfo {
 		int scanCode = 0;
