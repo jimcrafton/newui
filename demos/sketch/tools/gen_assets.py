@@ -125,7 +125,7 @@ def halo_markup(inner):
 
 def icon_svg(inner):
     return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" '
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="1 1 22 22" '
         'fill="none" stroke="%s" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
         "%s%s</svg>\n" % (INK, halo_markup(inner), inner)
     )

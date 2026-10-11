@@ -1222,6 +1222,10 @@ namespace newui {
         const std::string& icon() const { return icon_; }
         void setIcon(const std::string& resourceName);
 
+        // Icon edge length in pixels; defaults to kIconSize. Smaller values suit dense toolbars.
+        float iconSize() const { return iconSize_; }
+        void setIconSize(float size);
+
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
 
@@ -1246,6 +1250,7 @@ namespace newui {
         std::string text_;
         BLVar textColor_;
         std::string icon_;
+        float iconSize_ = kIconSize;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;

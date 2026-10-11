@@ -128,6 +128,8 @@ def tbtn(name, icon, checked=False, toggle=False, s=28):
         extra["toggleButton"] = True
     if checked:
         extra["checked"] = True
+    # Icon edge is ~60% of the button (the SVG viewBox is already trimmed to the glyph area).
+    extra["iconSize"] = 20 if s >= 32 else 17 if s >= 28 else 16 if s >= 26 else 15
     return node("ToolbarButton", name, w=s, h=s, icon="icons/%s.svg" % icon, **extra)
 
 
@@ -151,8 +153,9 @@ def toolbar(name, orientation, children, w=None, h=None, weight=None):
 
 
 def dropdown(name, items, w=None, h=24, selected=0, weight=None):
-    return node("DropDownList", name, w=w, h=h, weight=weight, selectedIndex=selected,
-                model={"type": "StringListModel", "items": items})
+    # `model` must be read before `selectedIndex` - an index into a not-yet-loaded model is dropped.
+    return node("DropDownList", name, w=w, h=h, weight=weight,
+                model={"type": "StringListModel", "items": items}, selectedIndex=selected)
 
 
 def segmented(name, segments, selected=0, h=24, w=None):
@@ -186,13 +189,30 @@ def color_well(name, color, w=18, h=18):
         "backgroundFill": {"type": "Fill", "kind": "Color", "color": color}})
 
 
+def divider(name):
+    """A 1 px rule with breathing room above it, set between sidebar panels."""
+    gap = node("SubView", name + "Gap", h=8, visible=True)
+    line = node("SubView", name, h=1, visible=True, style={
+        "type": "ViewStyle", "backgroundFill": {"type": "Fill", "kind": "Color", "color": "ControlBorder"}})
+    return [gap, line]
+
+
 def spacer(weight=1):
     return node("SubView", None, weight=weight, visible=True)
 
 
+HEADER_BG = "#e6e6e6"   # the mockup's --face-2: a notch darker than the panel body, like a title bar
+
+
 def panel(name, title, body_children, spacing=ROW_GAP, header_right=None):
-    header = label(title, h=22, name=name + "Header", bold=True)
-    header["style"]["backgroundFill"] = {"type": "Fill", "kind": "Color", "color": "ControlBackground"}
+    """A section: a darker title bar (title left, optional status text right) over the body."""
+    inset = lambda tag: node("SubView", name + tag, w=6, h=1, visible=True)
+    kids = [inset("HeaderPadL"), label(title, h=22, name=name + "Header", bold=True, weight=1)]
+    if header_right:
+        kids.append(label(header_right, w=int(len(header_right) * 6.5) + 8, h=22, name=name + "HeaderInfo", align="Right"))
+    kids.append(inset("HeaderPadR"))
+    header = hbox(name + "HeaderBar", kids, h=22)
+    header["style"] = {"type": "ViewStyle", "backgroundFill": {"type": "Fill", "kind": "Color", "color": HEADER_BG}}
     body = vbox(name + "Body", body_children, spacing=spacing, padding=BODY_PAD)
     return vbox(name, [header, body], w=PANEL_W)
 
@@ -227,7 +247,7 @@ MENUS = [
     mi("Object", children=[
         mi("Group", "Ctrl+G"), mi("Ungroup", "Ctrl+Shift+G"), SEP,
         mi("Lock", "Ctrl+2"), mi("Unlock All"), mi("Hide", "Ctrl+3"), mi("Show All"), SEP,
-        mi("Transform", children=[mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical")]),
+        mi("Transform", children=[mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
         mi("Path", children=[mi("Join"), mi("Reverse Direction"), mi("Simplify"), mi("Outline Stroke")]),
         mi("Expand Appearance")]),
     mi("Arrange", children=[
@@ -316,7 +336,7 @@ def color_panel():
         hbox("hexRow", [label("Hex", w=32), field("hexField", "#E8452C", w=96)]),
         node("SwatchGrid", "swatchGrid", h=22, columns=12, gap=3, swatches=SWATCHES, selectedIndex=4),
     ]
-    return panel("colorPanel", "Color", body)
+    return panel("colorPanel", "Color", body, header_right="Fill ●   Stroke ○")
 
 
 def stroke_panel():
@@ -351,12 +371,12 @@ def stroke_panel():
             field("dashField", "12", w=36), field("gapField", "6", w=36),
             field("dash2Field", "", w=36), field("gap2Field", "", w=36)]),
         hbox("arrowRow", [
-            label("Arrows", w=44),
-            dropdown("arrowStartCombo", ["None", "Simple", "Filled", "Dot"], w=64),
-            dropdown("arrowEndCombo", ["None", "Simple", "Filled", "Dot"], w=64, selected=2),
-            label("Scale", w=34), field("arrowScaleField", "100%", w=48)]),
+            label("Arrows", w=40),
+            dropdown("arrowStartCombo", ["None", "Simple", "Filled", "Dot"], w=52),
+            dropdown("arrowEndCombo", ["None", "Simple", "Filled", "Dot"], w=52, selected=2),
+            label("Scale", w=30), field("arrowScaleField", "100%", w=44)]),
     ]
-    return panel("strokePanel", "Stroke", body)
+    return panel("strokePanel", "Stroke", body, header_right="selected: Stroke 1")
 
 
 APPEARANCE_ROWS = [
@@ -380,7 +400,7 @@ def appearance_panel():
         hbox("blendRow", [label("Blend", w=44), dropdown("blendModeCombo", BLEND_MODES, weight=1, selected=1)]),
         hbox("groupOpacityRow", [toggle("groupOpacityToggle"), label("Group opacity", w=100)], h=22),
     ]
-    return panel("appearancePanel", "Appearance", body)
+    return panel("appearancePanel", "Appearance", body, header_right="Path: Rounded Rectangle")
 
 
 def styles_panel():
@@ -414,7 +434,11 @@ def sidebar():
     thumb is not duplicated on every load). So the file's childViews[0] IS the viewport - a plain
     SubView - and the real content goes inside it. Putting the content directly in childViews[0]
     would merge it into the viewport (it then gets resized to the viewport on every layout)."""
-    panels = [color_panel(), stroke_panel(), appearance_panel(), styles_panel(), layers_panel()]
+    panels = []
+    for i, p in enumerate([color_panel(), stroke_panel(), appearance_panel(), styles_panel(), layers_panel()]):
+        if i:
+            panels += divider("panelDivider%d" % i)
+        panels.append(p)
     content = vbox("sidebarContent", panels, w=PANEL_W)
     content["bounds"] = rect(0, 0, PANEL_W, content["_h"])
     # bounds must be read before layout/childViews (adding the panels re-lays the content out).

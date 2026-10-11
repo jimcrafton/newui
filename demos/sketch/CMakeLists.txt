@@ -6,6 +6,9 @@ add_executable(sketch
     gradientbar.h gradientbar.cpp
     swatchgrid.h swatchgrid.cpp
     pagepreview.h pagepreview.cpp
+    sketchcolor.h sketchcolor.cpp
+    sketchobject.h sketchobject.cpp
+    sketchdocument.h sketchdocument.cpp
 )
 
 target_link_libraries(sketch PRIVATE newui)
@@ -22,3 +25,13 @@ newui_add_reflectgen_output(sketch
 # Resources/ (sketch.newui, icons/*.svg, cursors/*.svg) is copied next to sketch.exe, where
 # Bundle looks for it.
 newui_add_resources(sketch "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
+
+# Headless tests of the model layer (color, objects, document). Run: sketch_tests.exe
+add_executable(sketch_tests
+    tests/test_sketch_model.cpp
+    sketchcolor.cpp
+    sketchobject.cpp
+    sketchdocument.cpp
+)
+target_link_libraries(sketch_tests PRIVATE newui GTest::gtest_main)
+target_include_directories(sketch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

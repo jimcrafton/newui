@@ -82,7 +82,9 @@
                   { type: "MenuItem", text: "Rotate 90 CW" },
                   { type: "MenuItem", text: "Rotate 90 CCW" },
                   { type: "MenuItem", text: "Flip Horizontal" },
-                  { type: "MenuItem", text: "Flip Vertical" }
+                  { type: "MenuItem", text: "Flip Vertical" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Reset Bounding Box", shortcutText: "Ctrl+Shift+B" }
                 ]
               },
               {
@@ -160,21 +162,24 @@
             name: "newButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/new.svg"
+            icon: "icons/new.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "openButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/open.svg"
+            icon: "icons/open.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "saveButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/save.svg"
+            icon: "icons/save.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -187,14 +192,16 @@
             name: "undoButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/undo.svg"
+            icon: "icons/undo.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "redoButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/redo.svg"
+            icon: "icons/redo.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -207,28 +214,32 @@
             name: "cutButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/cut.svg"
+            icon: "icons/cut.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "copyButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/copy.svg"
+            icon: "icons/copy.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "pasteButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/paste.svg"
+            icon: "icons/paste.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "deleteButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/delete.svg"
+            icon: "icons/delete.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -241,14 +252,16 @@
             name: "groupButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/group.svg"
+            icon: "icons/group.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "ungroupButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/ungroup.svg"
+            icon: "icons/ungroup.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -261,14 +274,16 @@
             name: "bringToFrontButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/bring-to-front.svg"
+            icon: "icons/bring-to-front.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "sendToBackButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/send-to-back.svg"
+            icon: "icons/send-to-back.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -281,21 +296,24 @@
             name: "alignLeftButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/align-left.svg"
+            icon: "icons/align-left.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "alignCenterButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/align-center.svg"
+            icon: "icons/align-center.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarButton",
             name: "alignRightButton",
             desiredSize: { type: "Size", width: 28, height: 28 },
             desiredSizeOverride: true,
-            icon: "icons/align-right.svg"
+            icon: "icons/align-right.svg",
+            iconSize: 17
           },
           {
             type: "ToolbarSeparator",
@@ -310,7 +328,8 @@
             desiredSizeOverride: true,
             icon: "icons/snap-to-grid.svg",
             toggleButton: true,
-            checked: true
+            checked: true,
+            iconSize: 17
           },
           {
             type: "SubView",
@@ -331,11 +350,11 @@
             name: "zoomCombo",
             desiredSize: { type: "Size", width: 84, height: 24 },
             desiredSizeOverride: true,
-            selectedIndex: 2,
             model: {
               type: "StringListModel",
               items: ["25%", "50%", "100%", "200%", "400%", "Fit page"]
-            }
+            },
+            selectedIndex: 2
           }
         ]
       },
@@ -362,7 +381,8 @@
                 desiredSizeOverride: true,
                 icon: "icons/tool-select.svg",
                 toggleButton: true,
-                checked: true
+                checked: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -370,7 +390,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-direct-select.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarSeparator",
@@ -384,7 +405,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-rectangle.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -392,7 +414,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-ellipse.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -400,7 +423,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-line.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -408,7 +432,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-pen.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -416,7 +441,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-pencil.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -424,7 +450,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-text.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -432,7 +459,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-gradient.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarSeparator",
@@ -446,7 +474,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-hand.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "ToolbarButton",
@@ -454,7 +483,8 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-zoom.svg",
-                toggleButton: true
+                toggleButton: true,
+                iconSize: 20
               },
               {
                 type: "SubView",
@@ -497,7 +527,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1202 },
+            contentSize: { type: "Size", width: 268, height: 1238 },
             childViews: [
               {
                 type: "SubView",
@@ -511,9 +541,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1202 }
+                      size: { type: "Size", width: 268, height: 1238 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1202 },
+                    desiredSize: { type: "Size", width: 268, height: 1238 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -526,18 +556,55 @@
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
                           {
-                            type: "Label",
-                            name: "colorPanelHeader",
+                            type: "SubView",
+                            name: "colorPanelHeaderBar",
+                            visible: true,
                             desiredSize: { type: "Size", width: 0, height: 22 },
                             desiredSizeOverride: true,
-                            text: "Color",
-                            textAlignment: "Left",
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "colorPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "colorPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Color",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Color",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "Label",
+                                name: "colorPanelHeaderInfo",
+                                desiredSize: { type: "Size", width: 118, height: 22 },
+                                desiredSizeOverride: true,
+                                text: "Fill ●   Stroke ○",
+                                textAlignment: "Right",
+                                style: { type: "LabelStyle", text: "Fill ●   Stroke ○", textAlignment: "Right" }
+                              },
+                              {
+                                type: "SubView",
+                                name: "colorPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
                             style: {
-                              type: "LabelStyle",
-                              text: "Color",
-                              textAlignment: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true },
-                              backgroundFill: { type: "Fill", kind: "Color", color: "ControlBackground" }
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
                             }
                           },
                           {
@@ -563,7 +630,8 @@
                                     desiredSize: { type: "Size", width: 28, height: 28 },
                                     desiredSizeOverride: true,
                                     icon: "icons/fill-none.svg",
-                                    toggleButton: true
+                                    toggleButton: true,
+                                    iconSize: 17
                                   },
                                   {
                                     type: "ToolbarButton",
@@ -571,7 +639,8 @@
                                     desiredSize: { type: "Size", width: 28, height: 28 },
                                     desiredSizeOverride: true,
                                     icon: "icons/fill-solid.svg",
-                                    toggleButton: true
+                                    toggleButton: true,
+                                    iconSize: 17
                                   },
                                   {
                                     type: "ToolbarButton",
@@ -580,7 +649,8 @@
                                     desiredSizeOverride: true,
                                     icon: "icons/fill-linear.svg",
                                     toggleButton: true,
-                                    checked: true
+                                    checked: true,
+                                    iconSize: 17
                                   },
                                   {
                                     type: "ToolbarButton",
@@ -588,7 +658,8 @@
                                     desiredSize: { type: "Size", width: 28, height: 28 },
                                     desiredSizeOverride: true,
                                     icon: "icons/fill-radial.svg",
-                                    toggleButton: true
+                                    toggleButton: true,
+                                    iconSize: 17
                                   }
                                 ]
                               },
@@ -643,21 +714,24 @@
                                     name: "addStopButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/stop-add.svg"
+                                    icon: "icons/stop-add.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "deleteStopButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/stop-delete.svg"
+                                    icon: "icons/stop-delete.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "reverseGradientButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/gradient-reverse.svg"
+                                    icon: "icons/gradient-reverse.svg",
+                                    iconSize: 15
                                   }
                                 ]
                               },
@@ -700,11 +774,11 @@
                                     desiredSize: { type: "Size", width: 0, height: 24 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
-                                    selectedIndex: 0,
                                     model: {
                                       type: "StringListModel",
                                       items: ["Pad", "Repeat", "Reflect"]
-                                    }
+                                    },
+                                    selectedIndex: 0
                                   }
                                 ]
                               },
@@ -901,6 +975,24 @@
                       },
                       {
                         type: "SubView",
+                        name: "panelDivider1Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider1",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "strokePanel",
                         visible: true,
                         desiredSize: { type: "Size", width: 268, height: 194 },
@@ -908,18 +1000,55 @@
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
                           {
-                            type: "Label",
-                            name: "strokePanelHeader",
+                            type: "SubView",
+                            name: "strokePanelHeaderBar",
+                            visible: true,
                             desiredSize: { type: "Size", width: 0, height: 22 },
                             desiredSizeOverride: true,
-                            text: "Stroke",
-                            textAlignment: "Left",
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "strokePanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "strokePanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Stroke",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Stroke",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "Label",
+                                name: "strokePanelHeaderInfo",
+                                desiredSize: { type: "Size", width: 125, height: 22 },
+                                desiredSizeOverride: true,
+                                text: "selected: Stroke 1",
+                                textAlignment: "Right",
+                                style: { type: "LabelStyle", text: "selected: Stroke 1", textAlignment: "Right" }
+                              },
+                              {
+                                type: "SubView",
+                                name: "strokePanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
                             style: {
-                              type: "LabelStyle",
-                              text: "Stroke",
-                              textAlignment: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true },
-                              backgroundFill: { type: "Fill", kind: "Color", color: "ControlBackground" }
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
                             }
                           },
                           {
@@ -1002,7 +1131,8 @@
                                         desiredSizeOverride: true,
                                         icon: "icons/cap-butt.svg",
                                         toggleButton: true,
-                                        checked: true
+                                        checked: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1010,7 +1140,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/cap-round.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1018,7 +1149,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/cap-square.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       }
                                     ]
                                   },
@@ -1046,7 +1178,8 @@
                                         desiredSizeOverride: true,
                                         icon: "icons/join-miter.svg",
                                         toggleButton: true,
-                                        checked: true
+                                        checked: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1054,7 +1187,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/join-round.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1062,7 +1196,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/join-bevel.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       }
                                     ]
                                   }
@@ -1100,7 +1235,8 @@
                                         desiredSizeOverride: true,
                                         icon: "icons/align-stroke-center.svg",
                                         toggleButton: true,
-                                        checked: true
+                                        checked: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1108,7 +1244,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/align-stroke-inside.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1116,7 +1253,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/align-stroke-outside.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       }
                                     ]
                                   },
@@ -1144,7 +1282,8 @@
                                         desiredSizeOverride: true,
                                         icon: "icons/profile-uniform.svg",
                                         toggleButton: true,
-                                        checked: true
+                                        checked: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1152,7 +1291,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/profile-taper.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       },
                                       {
                                         type: "ToolbarButton",
@@ -1160,7 +1300,8 @@
                                         desiredSize: { type: "Size", width: 26, height: 26 },
                                         desiredSizeOverride: true,
                                         icon: "icons/profile-bulge.svg",
-                                        toggleButton: true
+                                        toggleButton: true,
+                                        iconSize: 16
                                       }
                                     ]
                                   }
@@ -1229,7 +1370,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
-                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSize: { type: "Size", width: 40, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Arrows",
                                     textAlignment: "Left",
@@ -1238,28 +1379,28 @@
                                   {
                                     type: "DropDownList",
                                     name: "arrowStartCombo",
-                                    desiredSize: { type: "Size", width: 64, height: 24 },
+                                    desiredSize: { type: "Size", width: 52, height: 24 },
                                     desiredSizeOverride: true,
-                                    selectedIndex: 0,
                                     model: {
                                       type: "StringListModel",
                                       items: ["None", "Simple", "Filled", "Dot"]
-                                    }
+                                    },
+                                    selectedIndex: 0
                                   },
                                   {
                                     type: "DropDownList",
                                     name: "arrowEndCombo",
-                                    desiredSize: { type: "Size", width: 64, height: 24 },
+                                    desiredSize: { type: "Size", width: 52, height: 24 },
                                     desiredSizeOverride: true,
-                                    selectedIndex: 2,
                                     model: {
                                       type: "StringListModel",
                                       items: ["None", "Simple", "Filled", "Dot"]
-                                    }
+                                    },
+                                    selectedIndex: 2
                                   },
                                   {
                                     type: "Label",
-                                    desiredSize: { type: "Size", width: 34, height: 20 },
+                                    desiredSize: { type: "Size", width: 30, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Scale",
                                     textAlignment: "Left",
@@ -1268,7 +1409,7 @@
                                   {
                                     type: "TextField",
                                     name: "arrowScaleField",
-                                    desiredSize: { type: "Size", width: 48, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 24 },
                                     desiredSizeOverride: true,
                                     text: "100%"
                                   }
@@ -1280,6 +1421,24 @@
                       },
                       {
                         type: "SubView",
+                        name: "panelDivider2Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider2",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "appearancePanel",
                         visible: true,
                         desiredSize: { type: "Size", width: 268, height: 298 },
@@ -1287,18 +1446,55 @@
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
                           {
-                            type: "Label",
-                            name: "appearancePanelHeader",
+                            type: "SubView",
+                            name: "appearancePanelHeaderBar",
+                            visible: true,
                             desiredSize: { type: "Size", width: 0, height: 22 },
                             desiredSizeOverride: true,
-                            text: "Appearance",
-                            textAlignment: "Left",
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "appearancePanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "appearancePanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Appearance",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Appearance",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "Label",
+                                name: "appearancePanelHeaderInfo",
+                                desiredSize: { type: "Size", width: 157, height: 22 },
+                                desiredSizeOverride: true,
+                                text: "Path: Rounded Rectangle",
+                                textAlignment: "Right",
+                                style: { type: "LabelStyle", text: "Path: Rounded Rectangle", textAlignment: "Right" }
+                              },
+                              {
+                                type: "SubView",
+                                name: "appearancePanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
                             style: {
-                              type: "LabelStyle",
-                              text: "Appearance",
-                              textAlignment: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true },
-                              backgroundFill: { type: "Fill", kind: "Color", color: "ControlBackground" }
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
                             }
                           },
                           {
@@ -1335,21 +1531,24 @@
                                     name: "newStrokeButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/new-stroke.svg"
+                                    icon: "icons/new-stroke.svg",
+                                    iconSize: 16
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "newFillButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/new-fill.svg"
+                                    icon: "icons/new-fill.svg",
+                                    iconSize: 16
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "newEffectButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/fx.svg"
+                                    icon: "icons/fx.svg",
+                                    iconSize: 16
                                   },
                                   {
                                     type: "ToolbarSeparator",
@@ -1362,21 +1561,24 @@
                                     name: "clearAppearanceButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/clear-appearance.svg"
+                                    icon: "icons/clear-appearance.svg",
+                                    iconSize: 16
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "duplicateItemButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/duplicate-item.svg"
+                                    icon: "icons/duplicate-item.svg",
+                                    iconSize: 16
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "deleteItemButton",
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/delete.svg"
+                                    icon: "icons/delete.svg",
+                                    iconSize: 16
                                   }
                                 ]
                               },
@@ -1438,11 +1640,11 @@
                                     desiredSize: { type: "Size", width: 0, height: 24 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
-                                    selectedIndex: 1,
                                     model: {
                                       type: "StringListModel",
                                       items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion"]
-                                    }
+                                    },
+                                    selectedIndex: 1
                                   }
                                 ]
                               },
@@ -1476,6 +1678,24 @@
                       },
                       {
                         type: "SubView",
+                        name: "panelDivider3Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider3",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "stylesPanel",
                         visible: true,
                         desiredSize: { type: "Size", width: 268, height: 110 },
@@ -1483,18 +1703,46 @@
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
                           {
-                            type: "Label",
-                            name: "stylesPanelHeader",
+                            type: "SubView",
+                            name: "stylesPanelHeaderBar",
+                            visible: true,
                             desiredSize: { type: "Size", width: 0, height: 22 },
                             desiredSizeOverride: true,
-                            text: "Graphic Styles",
-                            textAlignment: "Left",
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "stylesPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "stylesPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Graphic Styles",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Graphic Styles",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "stylesPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
                             style: {
-                              type: "LabelStyle",
-                              text: "Graphic Styles",
-                              textAlignment: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true },
-                              backgroundFill: { type: "Fill", kind: "Color", color: "ControlBackground" }
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
                             }
                           },
                           {
@@ -1518,14 +1766,16 @@
                                     name: "newGraphicStyleButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/graphic-style-new.svg"
+                                    icon: "icons/graphic-style-new.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "deleteGraphicStyleButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/delete.svg"
+                                    icon: "icons/delete.svg",
+                                    iconSize: 15
                                   }
                                 ]
                               },
@@ -1545,6 +1795,24 @@
                       },
                       {
                         type: "SubView",
+                        name: "panelDivider4Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider4",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "layersPanel",
                         visible: true,
                         desiredSize: { type: "Size", width: 268, height: 228 },
@@ -1552,18 +1820,46 @@
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
                           {
-                            type: "Label",
-                            name: "layersPanelHeader",
+                            type: "SubView",
+                            name: "layersPanelHeaderBar",
+                            visible: true,
                             desiredSize: { type: "Size", width: 0, height: 22 },
                             desiredSizeOverride: true,
-                            text: "Layers",
-                            textAlignment: "Left",
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "layersPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "layersPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Layers",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Layers",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "layersPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
                             style: {
-                              type: "LabelStyle",
-                              text: "Layers",
-                              textAlignment: "Left",
-                              font: { type: "Font", name: "Segoe UI", size: 12, bold: true },
-                              backgroundFill: { type: "Fill", kind: "Color", color: "ControlBackground" }
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
                             }
                           },
                           {
@@ -1587,28 +1883,32 @@
                                     name: "addLayerButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/layer-add.svg"
+                                    icon: "icons/layer-add.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "deleteLayerButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/layer-delete.svg"
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "toggleVisibilityButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/eye.svg"
+                                    icon: "icons/eye.svg",
+                                    iconSize: 15
                                   },
                                   {
                                     type: "ToolbarButton",
                                     name: "toggleLockButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/lock.svg"
+                                    icon: "icons/lock.svg",
+                                    iconSize: 15
                                   }
                                 ]
                               },

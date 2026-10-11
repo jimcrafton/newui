@@ -2038,6 +2038,14 @@ namespace newui {
         style().markDirty();
     }
 
+    void ToolbarButton::setIconSize(float size) {
+        if (size <= 0.0f) {
+            throw std::runtime_error("ToolbarButton::setIconSize: size must be positive");
+        }
+        iconSize_ = size;
+        style().markDirty();
+    }
+
     void ToolbarButton::setChecked(bool value) {
         if (checked_ == value) {
             return;
@@ -2137,7 +2145,7 @@ namespace newui {
         // Icon + text painted as one centered block - assumes the icon
         // paints successfully (a missing icon file leaves a small,
         // accepted gap rather than re-centering after the fact).
-        double iconWidth = hasIcon ? (kIconSize + kIconGap) : 0.0;
+        double iconWidth = hasIcon ? (iconSize_ + kIconGap) : 0.0;
         double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
 
@@ -2154,7 +2162,7 @@ namespace newui {
             if (!enabled) {
                 ctx.set_global_alpha(0.4);
             }
-            x += Item::paintItemIcon(ctx, x, centerY, icon_, kIconSize, kIconGap);
+            x += Item::paintItemIcon(ctx, x, centerY, icon_, iconSize_, kIconGap);
             ctx.restore();
         }
 

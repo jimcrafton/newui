@@ -143,11 +143,11 @@
                     desiredSize: { type: "Size", width: 0, height: 24 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
-                    selectedIndex: 4,
                     model: {
                       type: "StringListModel",
                       items: ["Points", "Pixels", "Millimeters", "Centimeters", "Inches", "Picas"]
-                    }
+                    },
+                    selectedIndex: 4
                   }
                 ]
               },
@@ -181,7 +181,8 @@
                     desiredSize: { type: "Size", width: 26, height: 26 },
                     desiredSizeOverride: true,
                     icon: "icons/link-aspect.svg",
-                    toggleButton: true
+                    toggleButton: true,
+                    iconSize: 16
                   }
                 ]
               },
@@ -218,7 +219,8 @@
                         desiredSizeOverride: true,
                         icon: "icons/orientation-portrait.svg",
                         toggleButton: true,
-                        checked: true
+                        checked: true,
+                        iconSize: 16
                       },
                       {
                         type: "ToolbarButton",
@@ -226,7 +228,8 @@
                         desiredSize: { type: "Size", width: 26, height: 26 },
                         desiredSizeOverride: true,
                         icon: "icons/orientation-landscape.svg",
-                        toggleButton: true
+                        toggleButton: true,
+                        iconSize: 16
                       }
                     ]
                   }
@@ -289,11 +292,11 @@
                     desiredSize: { type: "Size", width: 0, height: 24 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
-                    selectedIndex: 3,
                     model: {
                       type: "StringListModel",
                       items: ["72 ppi (screen)", "96 ppi (Windows)", "150 ppi (draft)", "300 ppi (print)", "600 ppi (fine print)"]
-                    }
+                    },
+                    selectedIndex: 3
                   }
                 ]
               },
@@ -320,11 +323,11 @@
                     desiredSize: { type: "Size", width: 0, height: 24 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
-                    selectedIndex: 0,
                     model: {
                       type: "StringListModel",
                       items: ["White", "Transparent", "Current fill color"]
-                    }
+                    },
+                    selectedIndex: 0
                   }
                 ]
               },
