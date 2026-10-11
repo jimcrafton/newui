@@ -1,0 +1,179 @@
+#pragma once
+
+#include "sketchobject.h"
+
+#include <newui/delegate.h>
+#include <newui/models.h>
+#include <newui/undostack.h>
+
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <vector>
+
+namespace sketch {
+
+    // An object's outline and frame angle at one moment - what undo of a move/resize/rotate restores.
+    // @reflect ignore=true
+    struct GeometryState {
+        std::size_t id = 0;
+        BLPath path;
+        double angle = 0.0;
+    };
+
+    // Four world-space corners (TL, TR, BR, BL) of a possibly distorted frame, with the projective map
+    // between the unit square and the quad.
+    // @reflect ignore=true
+    struct QuadFrame {
+        BLPoint p[4];
+
+        BLPoint map(double u, double v) const;
+        // Inverse of map(); false when the quad is degenerate.
+        bool unmap(const BLPoint& world, double& u, double& v) const;
+        QuadFrame transformed(const BLMatrix2D& matrix) const;
+    };
+
+    // The oriented box around the selection: `local` is measured in a frame turned by `angle`
+    // (local = R(-angle) * world), so handles follow a rotated shape the way Illustrator's do.
+    // @reflect ignore=true
+    struct SelectionFrame {
+        double angle = 0.0;
+        BLBox local = BLBox(0, 0, 0, 0);
+
+        BLPoint toWorld(double lx, double ly) const;
+        BLPoint toLocal(const BLPoint& world) const;
+        BLPoint center() const { return toWorld((local.x0 + local.x1) * 0.5, (local.y0 + local.y1) * 0.5); }
+
+        // Set after a warp: the frame is then this quad instead of the rectangle above.
+        std::optional<QuadFrame> quad;
+
+        // The four corners as a quad (the rectangle's, or the warped one).
+        QuadFrame asQuad() const;
+        // World point at fraction (u, v) of the frame (0,0 = top-left, 1,1 = bottom-right) and its inverse.
+        BLPoint pointAt(double u, double v) const { return asQuad().map(u, v); }
+        bool unmapPoint(const BLPoint& world, double& u, double& v) const { return asQuad().unmap(world, u, v); }
+    };
+
+    // The selection-level frame state that an undo step must restore along with the outlines.
+    // @reflect ignore=true
+    struct FrameState {
+        std::optional<double> groupAngle;
+        std::optional<QuadFrame> quad;
+    };
+
+    // The document: a page (size in points) and a flat, back-to-front list of objects. Layers and
+    // groups arrive with S3b; undoable commands with S2 - until then the mutators below are called
+    // directly and each ends with changed(), which marks the document modified and repaints its views.
+    // File I/O is SVG and lands with S4, so readFromFile/writeToFile report failure for now.
+    class SketchDocument : public newui::Document {
+    public:
+        SketchDocument() = default;
+
+        // Page size in points (1/72 in), and the pixel density used when exporting/previewing.
+        float pageWidth() const { return pageWidth_; }
+        float pageHeight() const { return pageHeight_; }
+        void setPageSize(float width, float height);
+        float ppi() const { return ppi_; }
+        void setPpi(float ppi);
+
+        std::size_t objectCount() const { return objects_.size(); }
+        // Back-to-front: index 0 is painted first. Throws std::runtime_error when out of range.
+        SketchObject& object(std::size_t index) const;
+
+        // Takes ownership, assigns a fresh id, appends on top. Returns the object for chaining.
+        SketchObject& add(SketchObject* object);
+        // Removes and destroys the object with this id; false if there is none.
+        bool remove(std::size_t id);
+        SketchObject* findById(std::size_t id) const;
+
+        // Topmost visible, unlocked object under point (document units), or nullptr.
+        SketchObject* hitTest(const BLPoint& point, double tolerance) const;
+
+        // ---- Selection (ids, in selection order; a removed object drops out) ----
+        const std::vector<std::size_t>& selection() const { return selection_; }
+        bool isSelected(std::size_t id) const;
+        void setSelection(const std::vector<std::size_t>& ids);
+        void selectAll();
+        void clearSelection() { setSelection({}); }
+        // Union of the selected objects' geometryBounds(); false when nothing is selected.
+        bool selectionBounds(BLBox& out) const;
+        // The oriented frame. One object: its own frame angle. Several: their shared angle when they all
+        // agree, else the group angle (set when the group is rotated - Illustrator keeps a rotated group
+        // frame even when its members are turned differently), else upright.
+        // The group angle is dropped whenever the selection changes.
+        std::optional<double> groupAngle() const { return groupAngle_; }
+        void setGroupAngle(std::optional<double> angle) { groupAngle_ = angle; }
+        // The warped frame (set by a perspective warp; the selection frame becomes this quad). Dropped
+        // with the group angle when the selection changes.
+        std::optional<QuadFrame> quadFrame() const { return quadFrame_; }
+        void setQuadFrame(const std::optional<QuadFrame>& quad) { quadFrame_ = quad; }
+        FrameState frameState() const { return FrameState{groupAngle_, quadFrame_}; }
+        bool selectionFrame(SelectionFrame& out) const;
+        // The transform origin (rotate/shear pivot): kept as a fraction of the frame's box so it rides along
+        // with moves, resizes and rotations; back to the center whenever the selection changes. View state - not undoable.
+        BLPoint selectionOrigin(const SelectionFrame& frame) const;
+        void setSelectionOrigin(const SelectionFrame& frame, const BLPoint& world);
+        typedef newui::Delegate<SketchDocument> SelectionChangedDelegate;
+        SelectionChangedDelegate onSelectionChanged;
+
+        // ---- Undoable edits (each pushes one step on undoStack()) ----
+        newui::UndoStack& undoStack() { return undoStack_; }
+        // Adds on top and selects it.
+        SketchObject& addUndoable(SketchObject* object, const std::string& description);
+        // Deletes the selection.
+        void deleteSelection();
+        // Duplicates the selection, offset by (dx, dy); the copies become the selection.
+        void duplicateSelection(double dx, double dy);
+        // Records an edit that has already been applied live (a drag): `before` holds each edited
+        // object's pre-edit outline, the objects' current outlines are the "after".
+        void commitGeometry(const std::vector<GeometryState>& before, const std::string& description,
+            const FrameState& frameBefore = FrameState());
+        // Applies `matrix` to the given objects as one undo step.
+        void transformObjects(const std::vector<std::size_t>& ids, const BLMatrix2D& matrix, const std::string& description);
+        // Selected objects' ids and current outlines - the `before` for a drag.
+        std::vector<GeometryState> snapshotSelection() const;
+        // Redraw after an edit made directly on an object (drag preview).
+        void touch() { changed(); }
+
+        // Straightens the selection frame: drops the warped quad and the group angle and sets every selected
+        // object's frame angle to 0, so the handles wrap the outlines in an upright box again. Undoable.
+        // False when nothing changed (no selection, or the frame was already upright).
+        bool resetBoundingBox();
+
+        // Back to an empty page (size and ppi kept), not modified.
+        void clearObjects();
+
+        // The hard-coded scene S1 paints so the renderer has something to show - replaced by
+        // real documents once tools (S2) and SVG (S4) exist.
+        void buildDemoScene();
+
+        void paint(BLContext& ctx) const;
+
+        bool empty() const override { return objects_.empty(); }
+        std::size_t size() const override { return objects_.size(); }
+
+    protected:
+        bool readFromFile(const std::string& path) override;
+        bool writeToFile(const std::string& path) override;
+
+    private:
+        void changed();
+        // Removes and returns the object (its index is stored in *index); null if not found.
+        std::unique_ptr<SketchObject> detach(std::size_t id, std::size_t* index);
+        void attach(std::unique_ptr<SketchObject> object, std::size_t index);
+        void pruneSelection();
+
+        float pageWidth_ = 612.0f;
+        float pageHeight_ = 792.0f;
+        float ppi_ = 72.0f;
+        std::vector<std::unique_ptr<SketchObject>> objects_;
+        std::size_t nextId_ = 1;
+        std::vector<std::size_t> selection_;
+        std::optional<double> groupAngle_;
+        std::optional<QuadFrame> quadFrame_;
+        double originU_ = 0.5;
+        double originV_ = 0.5;
+        newui::UndoStack undoStack_;
+    };
+
+}
