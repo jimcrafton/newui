@@ -2,6 +2,7 @@
 #include "newui/controllers.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "newui/animation.h"
 #include "newui/application.h"
@@ -423,6 +424,64 @@ namespace newui
 
     TableItem* TableController::createItem(std::size_t /*row*/, std::size_t /*col*/) {
         return static_cast<TableItem*>(takeFromPoolOrInstantiate(defaultItemClassName()));
+    }
+
+    float TableController::columnWidth(std::size_t column) const {
+        auto it = columnWidths_.find(column);
+        return it != columnWidths_.end() ? it->second : defaultColumnWidth_;
+    }
+
+    void TableController::setColumnWidth(std::size_t column, float width) {
+        if (width <= 0.0f) {
+            throw std::runtime_error("TableController::setColumnWidth: width must be positive");
+        }
+        columnWidths_[column] = width;
+        onDataChanged(*this);
+    }
+
+    // The column loops below are O(columnCount()) - a table's column count is small by nature
+    // (rows are what scale), unlike ListController's O(itemCount()) row loops.
+    float TableController::totalWidth() const {
+        float total = 0.0f;
+        std::size_t count = columnCount();
+        for (std::size_t c = 0; c < count; ++c) {
+            total += columnWidth(c);
+        }
+        return total;
+    }
+
+    float TableController::columnOffset(std::size_t column) const {
+        float offset = 0.0f;
+        std::size_t count = columnCount();
+        std::size_t last = column < count ? column : count;
+        for (std::size_t c = 0; c < last; ++c) {
+            offset += columnWidth(c);
+        }
+        return offset;
+    }
+
+    std::size_t TableController::columnAt(float contentX) const {
+        std::size_t count = columnCount();
+        if (contentX < 0.0f) {
+            return count;
+        }
+        float offset = 0.0f;
+        for (std::size_t c = 0; c < count; ++c) {
+            offset += columnWidth(c);
+            if (contentX < offset) {
+                return c;
+            }
+        }
+        return count;
+    }
+
+    std::size_t TableController::rowAt(float contentY) const {
+        std::size_t count = rowCount();
+        if (contentY < 0.0f || rowHeight_ <= 0.0f) {
+            return count;
+        }
+        double row = std::floor(double(contentY) / double(rowHeight_));
+        return row < double(count) ? std::size_t(row) : count;
     }
 
 } // namespace newui

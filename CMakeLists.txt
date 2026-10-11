@@ -254,6 +254,7 @@ add_executable(newui_app
 target_link_libraries(newui_app PRIVATE newui)
 
 add_subdirectory(examples)
+add_subdirectory(demos)
 
 # GoogleTest - Testing Framework
 # ==============================

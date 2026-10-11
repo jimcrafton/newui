@@ -2218,6 +2218,115 @@ namespace newui {
     }
 
     // -----------------------------------------------------------------
+    // StatusPane
+    // -----------------------------------------------------------------
+
+    StatusPane::StatusPane() {
+        setName("StatusPane");
+        setVisible(true);
+
+        auto paneStyle = std::make_unique<ThemedStatusPaneStyle>();
+        paneStyle->setFont(FontManager::getSystemFont(SystemUIFont::Status));
+        setStyle(std::move(paneStyle));
+
+        textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+    }
+
+    void StatusPane::setText(const std::string& text) {
+        if (text_ == text) {
+            return;
+        }
+        text_ = text;
+        style().markDirty();
+    }
+
+    void StatusPane::setTextColor(BLRgba32 color) {
+        textColor_ = color;
+        style().markDirty();
+    }
+
+    void StatusPane::paint(BLContext& ctx) {
+        if (text_.empty() || textColor_.is_null()) {
+            return;
+        }
+
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
+            return;
+        }
+
+        // See Button::paint()'s own comment on why an unresolved font degrades to "draw nothing".
+        BLFont* blFont = style().font().blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+
+        const BLFontMetrics& fontMetrics = blFont->metrics();
+        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+        double x = clientBounds.left() + kTextPadding;
+        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+
+        // Long text is clipped to the pane rather than spilling into the neighbor.
+        ctx.save();
+        ctx.clip_to_rect(BLRect(clientBounds.left(), clientBounds.top(), clientBounds.size().width, clientBounds.size().height));
+        ctx.set_comp_op(toBLCompOp(style().compositingOp()));
+        ctx.set_fill_style(BLRgba32(textColor_.as<BLRgba32>()));
+        ctx.set_fill_alpha(style().opacity());
+        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
+    // StatusBar
+    // -----------------------------------------------------------------
+
+    StatusBar::StatusBar() {
+        setName("StatusBar");
+        setVisible(true);
+        setLayout(std::make_unique<FlexLayout>(Orientation::Horizontal));
+        setDesiredSize(Size(0.0f, kDefaultHeight));
+    }
+
+    StatusPane& StatusBar::paneAt(std::size_t index) const {
+        if (index >= childViews().size()) {
+            throw std::runtime_error("StatusBar::paneAt: pane index out of range");
+        }
+        StatusPane* pane = dynamic_cast<StatusPane*>(childViews()[index]);
+        if (pane == nullptr) {
+            throw std::runtime_error("StatusBar::paneAt: child is not a StatusPane");
+        }
+        return *pane;
+    }
+
+    std::size_t StatusBar::addPane(const std::string& text, float width) {
+        auto* pane = new StatusPane();
+        pane->setText(text);
+        addChild(pane);
+        std::size_t index = childViews().size() - 1;
+        setPaneWidth(index, width);
+        return index;
+    }
+
+    const std::string& StatusBar::paneText(std::size_t index) const {
+        return paneAt(index).text();
+    }
+
+    void StatusBar::setPaneText(std::size_t index, const std::string& text) {
+        paneAt(index).setText(text);
+    }
+
+    void StatusBar::setPaneWidth(std::size_t index, float width) {
+        StatusPane& pane = paneAt(index);
+        if (width > 0.0f) {
+            pane.setDesiredSize(Size(width, 0.0f));
+            pane.setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
+        } else {
+            pane.setDesiredSize(Size(0.0f, 0.0f));
+            pane.setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+        }
+    }
+
+    // -----------------------------------------------------------------
     // TextController
     // -----------------------------------------------------------------
 
@@ -4279,6 +4388,689 @@ namespace newui {
     }
 
     SyncReturn TreeView::handleDataChanged(TreeController& /*sender*/) {
+        onContentSizeChanged(*this);
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    // -----------------------------------------------------------------
+    // TableView
+    // -----------------------------------------------------------------
+
+    namespace {
+        // Spreadsheet-style column label: 0 -> "A", 25 -> "Z", 26 -> "AA", ...
+        std::string spreadsheetColumnLabel(std::size_t column) {
+            std::string label;
+            std::size_t n = column + 1;
+            while (n > 0) {
+                std::size_t rem = (n - 1) % 26;
+                label.insert(label.begin(), char('A' + rem));
+                n = (n - 1) / 26;
+            }
+            return label;
+        }
+
+        // Draws text left-aligned (or centered) and vertically centered in rect - the same
+        // BLFont/glyph-buffer idiom as the other controls here, clipped to rect so a long label
+        // can't bleed into a neighboring header cell.
+        void paintTableText(BLContext& ctx, const Rect& rect, const std::string& text, BLRgba32 color, bool centered) {
+            if (text.empty() || rect.size().width <= 0.0f || rect.size().height <= 0.0f) {
+                return;
+            }
+
+            Font font = FontManager::getSystemFont(SystemUIFont::Message);
+            BLFont* blFont = font.blFont();
+            if (blFont == nullptr || !blFont->is_valid()) {
+                return;
+            }
+
+            BLGlyphBuffer glyphBuffer;
+            glyphBuffer.set_utf8_text(text.c_str(), text.size());
+            blFont->shape(glyphBuffer);
+
+            BLTextMetrics textMetrics;
+            blFont->get_text_metrics(glyphBuffer, textMetrics);
+            const BLFontMetrics& fontMetrics = blFont->metrics();
+            double textHeight = fontMetrics.ascent + fontMetrics.descent;
+
+            double x = rect.left() + 4.0;
+            if (centered) {
+                x = rect.left() + (rect.size().width - textMetrics.advance.x) * 0.5;
+            }
+            double y = rect.top() + (rect.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+
+            ctx.save();
+            ctx.clip_to_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
+            ctx.set_fill_style(color);
+            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
+            ctx.restore();
+        }
+    }
+
+    TableView::TableView() : controller_(std::make_shared<TableController>()) {
+        setVisible(true);
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
+
+        onMouseDown.add(this, &TableView::handleMouseDown);
+        onMouseMove.add(this, &TableView::handleMouseMove);
+        onMouseUp.add(this, &TableView::handleMouseUp);
+        onKeyDown.add(this, &TableView::handleKeyDown);
+        onQueryContentSize.add(this, &TableView::handleQueryContentSize);
+        onScrollOffsetChanged.add(this, &TableView::handleScrollOffsetChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TableView::handleDataChanged);
+    }
+
+    TableView::~TableView() {
+        // controller_ may be shared and outlive this view - never leave it a dangling subscriber.
+        controller_->onDataChanged.remove(dataChangedConnection_);
+    }
+
+    void TableView::setController(std::shared_ptr<TableController> controller) {
+        if (controller == nullptr) {
+            throw std::runtime_error("TableView::setController: controller must not be null");
+        }
+        controller_->onDataChanged.remove(dataChangedConnection_);
+        controller_ = std::move(controller);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TableView::handleDataChanged);
+        activeRow_.reset();
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void TableView::setModel(std::unique_ptr<TableModel> model) {
+        controller_->setModel(std::move(model));
+        activeRow_.reset();
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    void TableView::setHeadersVisible(bool value) {
+        if (headersVisible_ == value) {
+            return;
+        }
+        headersVisible_ = value;
+        onContentSizeChanged(*this);
+        style().markDirty();
+    }
+
+    float TableView::gutterWidth() const {
+        return headersVisible_ ? controller_->rowHeaderWidth() : 0.0f;
+    }
+
+    float TableView::headerHeight() const {
+        return headersVisible_ ? controller_->headerHeight() : 0.0f;
+    }
+
+    std::size_t TableView::activeRow() const {
+        if (!activeRow_.has_value()) {
+            throw std::runtime_error("TableView::activeRow: no active cell");
+        }
+        return *activeRow_;
+    }
+
+    std::size_t TableView::activeColumn() const {
+        if (!activeRow_.has_value()) {
+            throw std::runtime_error("TableView::activeColumn: no active cell");
+        }
+        return activeColumn_;
+    }
+
+    std::optional<CellRange> TableView::selectedRange() const {
+        if (!activeRow_.has_value()) {
+            return std::nullopt;
+        }
+        std::size_t rows = controller_->rowCount();
+        std::size_t columns = controller_->columnCount();
+        if (rows == 0 || columns == 0) {
+            return std::nullopt;
+        }
+
+        CellRange range;
+        range.firstRow = anchorRow_ < *activeRow_ ? anchorRow_ : *activeRow_;
+        range.lastRow = anchorRow_ < *activeRow_ ? *activeRow_ : anchorRow_;
+        range.firstColumn = anchorColumn_ < activeColumn_ ? anchorColumn_ : activeColumn_;
+        range.lastColumn = anchorColumn_ < activeColumn_ ? activeColumn_ : anchorColumn_;
+        if (columnSelection_) {
+            range.firstRow = 0;
+            range.lastRow = rows - 1;
+        }
+        if (rowSelection_) {
+            range.firstColumn = 0;
+            range.lastColumn = columns - 1;
+        }
+        return range;
+    }
+
+    bool TableView::isCellSelected(std::size_t row, std::size_t column) const {
+        std::optional<CellRange> range = selectedRange();
+        return range.has_value() && range->contains(row, column);
+    }
+
+    void TableView::setActiveCell(std::size_t row, std::size_t column, bool extend) {
+        std::size_t rows = controller_->rowCount();
+        std::size_t columns = controller_->columnCount();
+        if (rows == 0 || columns == 0) {
+            return;
+        }
+        row = row < rows ? row : rows - 1;
+        column = column < columns ? column : columns - 1;
+
+        std::optional<CellRange> before = selectedRange();
+        std::optional<std::size_t> beforeRow = activeRow_;
+        std::size_t beforeColumn = activeColumn_;
+
+        if (!extend || !activeRow_.has_value()) {
+            anchorRow_ = row;
+            anchorColumn_ = column;
+            columnSelection_ = false;
+            rowSelection_ = false;
+        }
+        activeRow_ = row;
+        activeColumn_ = column;
+
+        std::optional<CellRange> after = selectedRange();
+        bool rangeChanged = before.has_value() != after.has_value()
+            || (before.has_value() && (before->firstRow != after->firstRow || before->lastRow != after->lastRow
+                || before->firstColumn != after->firstColumn || before->lastColumn != after->lastColumn));
+
+        requestCellVisible(row, column);
+        style().markDirty();
+        if (rangeChanged || beforeRow != activeRow_ || beforeColumn != activeColumn_) {
+            onSelectionChanged(*this);
+        }
+    }
+
+    void TableView::selectColumn(std::size_t column, bool extend) {
+        setActiveCell(0, column, extend);
+        if (!extend) {
+            columnSelection_ = true;
+            rowSelection_ = false;
+        }
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    void TableView::selectRow(std::size_t row, bool extend) {
+        setActiveCell(row, 0, extend);
+        if (!extend) {
+            rowSelection_ = true;
+            columnSelection_ = false;
+        }
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    void TableView::selectAll() {
+        std::size_t rows = controller_->rowCount();
+        std::size_t columns = controller_->columnCount();
+        if (rows == 0 || columns == 0) {
+            return;
+        }
+        anchorRow_ = 0;
+        anchorColumn_ = 0;
+        activeRow_ = rows - 1;
+        activeColumn_ = columns - 1;
+        columnSelection_ = false;
+        rowSelection_ = false;
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    void TableView::clearSelection() {
+        if (!activeRow_.has_value()) {
+            return;
+        }
+        activeRow_.reset();
+        columnSelection_ = false;
+        rowSelection_ = false;
+        style().markDirty();
+        onSelectionChanged(*this);
+    }
+
+    // The rect handed to onRequestScrollIntoView is in content coordinates (the ScrollView
+    // viewport's own space, which includes the pinned header strip and gutter), grown up/left by
+    // the header/gutter size so a cell is never "scrolled into view" underneath them.
+    void TableView::requestCellVisible(std::size_t row, std::size_t column) {
+        float gutter = gutterWidth();
+        float header = headerHeight();
+        float cellLeft = gutter + controller_->columnOffset(column);
+        float cellTop = header + controller_->rowOffset(row);
+        Rect cellRect(cellLeft - gutter, cellTop - header,
+            controller_->columnWidth(column) + gutter, controller_->rowHeight() + header);
+        onRequestScrollIntoView(*this, cellRect);
+    }
+
+    TableView::Hit TableView::hitTest(const Point& pt) const {
+        Hit hit;
+        Rect clientBounds = getClientBounds();
+        float x = pt.x - clientBounds.left();
+        float y = pt.y - clientBounds.top();
+        float gutter = gutterWidth();
+        float header = headerHeight();
+        if (x < 0.0f || y < 0.0f) {
+            return hit;
+        }
+
+        std::size_t columns = controller_->columnCount();
+        std::size_t rows = controller_->rowCount();
+
+        if (y < header) {
+            if (x < gutter) {
+                hit.kind = HitKind::Corner;
+                return hit;
+            }
+            float contentX = x - gutter + scrollOffset_.x;
+            std::size_t column = controller_->columnAt(contentX);
+            if (column >= columns) {
+                return hit;
+            }
+            constexpr float kGrip = 3.0f;
+            float left = controller_->columnOffset(column);
+            float right = left + controller_->columnWidth(column);
+            if (right - contentX <= kGrip) {
+                hit.kind = HitKind::ColumnBorder;
+                hit.column = column;
+            } else if (contentX - left <= kGrip && column > 0) {
+                hit.kind = HitKind::ColumnBorder;
+                hit.column = column - 1;
+            } else {
+                hit.kind = HitKind::ColumnHeader;
+                hit.column = column;
+            }
+            return hit;
+        }
+
+        std::size_t row = controller_->rowAt(y - header + scrollOffset_.y);
+        if (row >= rows) {
+            return hit;
+        }
+        hit.row = row;
+        if (x < gutter) {
+            hit.kind = HitKind::RowHeader;
+            return hit;
+        }
+        std::size_t column = controller_->columnAt(x - gutter + scrollOffset_.x);
+        if (column >= columns) {
+            return hit;
+        }
+        hit.kind = HitKind::Cell;
+        hit.column = column;
+        return hit;
+    }
+
+    void TableView::paint(BLContext& ctx) {
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
+
+        std::size_t rows = controller_->rowCount();
+        std::size_t columns = controller_->columnCount();
+        float gutter = gutterWidth();
+        float header = headerHeight();
+        float rowHeight = controller_->rowHeight();
+        if (rowHeight <= 0.0f) {
+            throw std::runtime_error("TableView::paint: TableController::rowHeight() must be positive");
+        }
+
+        float viewWidth = clientBounds.width();
+        float viewHeight = clientBounds.height();
+        BLRgba32 gridColor = UIColorManager::colorFor(UIColorRole::ControlBorder).toBLRgba32();
+        BLRgba32 textColor = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+        BLRgba32 headerColor = UIColorManager::colorFor(UIColorRole::ControlBackground).toBLRgba32();
+        BLRgba32 accentColor = UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32();
+
+        ctx.save();
+        ctx.translate(clientBounds.left(), clientBounds.top());
+        ctx.clip_to_rect(BLRect(0.0, 0.0, viewWidth, viewHeight));
+
+        std::optional<CellRange> range = selectedRange();
+
+        // ---- Cells: only the visible rows x columns are ever touched. ----
+        if (rows > 0 && columns > 0) {
+            ctx.save();
+            ctx.clip_to_rect(BLRect(gutter, header, viewWidth - gutter, viewHeight - header));
+
+            // Derived from the offset each frame (never accumulated) - see the class comment on
+            // float scroll-offset precision.
+            std::size_t firstRow = std::size_t(std::floor(double(scrollOffset_.y) / double(rowHeight)));
+            std::size_t firstColumn = controller_->columnAt(scrollOffset_.x);
+            if (firstRow >= rows) {
+                firstRow = rows - 1;
+            }
+            if (firstColumn >= columns) {
+                firstColumn = columns - 1;
+            }
+
+            float firstColumnLeft = gutter + controller_->columnOffset(firstColumn) - scrollOffset_.x;
+            for (std::size_t r = firstRow; r < rows; ++r) {
+                float y = header + float(double(r) * double(rowHeight) - double(scrollOffset_.y));
+                if (y >= viewHeight) {
+                    break;
+                }
+
+                float x = firstColumnLeft;
+                for (std::size_t c = firstColumn; c < columns && x < viewWidth; ++c) {
+                    float width = controller_->columnWidth(c);
+
+                    // createItem() never returns nullptr - it throws instead (see
+                    // ItemController::instantiateItem()). Item isn't a View, so it needs its
+                    // style pointed at this one by hand - see ListView::paint()'s comment.
+                    TableItem* item = controller_->createItem(r, c);
+                    item->style().setView(this);
+
+                    bool isActive = activeRow_.has_value() && *activeRow_ == r && activeColumn_ == c;
+                    // As in a spreadsheet, the active cell stays unfilled inside a tinted range.
+                    item->setSelected(!isActive && range.has_value() && range->contains(r, c));
+                    item->setHighlighted(false);
+                    item->setEnabled(isEnabled());
+
+                    item->paint(ctx, Rect(x, y, width, rowHeight), r, c, *controller_);
+                    controller_->releaseItem(item);
+                    x += width;
+                }
+            }
+
+            // Grid lines, one stroked path for all of them.
+            float contentRight = gutter + controller_->totalWidth() - scrollOffset_.x;
+            float contentBottom = header + controller_->totalHeight() - scrollOffset_.y;
+            float gridRight = contentRight < viewWidth ? contentRight : viewWidth;
+            float gridBottom = contentBottom < viewHeight ? contentBottom : viewHeight;
+
+            BLPath grid;
+            float x = firstColumnLeft;
+            for (std::size_t c = firstColumn; c < columns && x < viewWidth; ++c) {
+                x += controller_->columnWidth(c);
+                double px = std::floor(x) - 0.5;
+                grid.move_to(px, header);
+                grid.line_to(px, gridBottom);
+            }
+            for (std::size_t r = firstRow; r < rows; ++r) {
+                float y = header + float(double(r + 1) * double(rowHeight) - double(scrollOffset_.y));
+                if (y - rowHeight >= viewHeight) {
+                    break;
+                }
+                double py = std::floor(y) - 0.5;
+                grid.move_to(gutter, py);
+                grid.line_to(gridRight, py);
+            }
+            ctx.set_stroke_style(gridColor);
+            ctx.set_stroke_width(1.0);
+            ctx.stroke_path(grid);
+
+            // Active cell: a heavier accent border drawn over the grid.
+            if (activeRow_.has_value()) {
+                double ax = gutter + controller_->columnOffset(activeColumn_) - scrollOffset_.x;
+                double ay = header + double(*activeRow_) * double(rowHeight) - double(scrollOffset_.y);
+                ctx.set_stroke_style(accentColor);
+                ctx.set_stroke_width(2.0);
+                ctx.stroke_rect(BLRect(ax, ay, controller_->columnWidth(activeColumn_), rowHeight));
+            }
+            ctx.restore();
+        }
+
+        // ---- Pinned headers, painted over the cells. ----
+        if (headersVisible_) {
+            ctx.save();
+            ctx.set_fill_style(headerColor);
+            ctx.fill_rect(BLRect(0.0, 0.0, viewWidth, header));
+            ctx.fill_rect(BLRect(0.0, header, gutter, viewHeight - header));
+
+            ctx.save();
+            ctx.clip_to_rect(BLRect(gutter, 0.0, viewWidth - gutter, header));
+            std::size_t firstColumn = columns > 0 ? controller_->columnAt(scrollOffset_.x) : 0;
+            if (firstColumn >= columns) {
+                firstColumn = columns > 0 ? columns - 1 : 0;
+            }
+            float x = gutter + controller_->columnOffset(firstColumn) - scrollOffset_.x;
+            for (std::size_t c = firstColumn; c < columns && x < viewWidth; ++c) {
+                float width = controller_->columnWidth(c);
+                std::string title = controller_->model() != nullptr ? controller_->model()->columnTitle(c) : std::string();
+                if (title.empty()) {
+                    title = spreadsheetColumnLabel(c);
+                }
+                bool inSelection = range.has_value() && c >= range->firstColumn && c <= range->lastColumn;
+                if (inSelection) {
+                    ctx.set_fill_style(accentColor);
+                    ctx.set_fill_alpha(0.35);
+                    ctx.fill_rect(BLRect(x, 0.0, width, header));
+                    ctx.set_fill_alpha(1.0);
+                }
+                paintTableText(ctx, Rect(x, 0.0f, width, header), title, textColor, true);
+                x += width;
+            }
+            ctx.restore();
+
+            ctx.save();
+            ctx.clip_to_rect(BLRect(0.0, header, gutter, viewHeight - header));
+            if (rows > 0) {
+                std::size_t firstRow = std::size_t(std::floor(double(scrollOffset_.y) / double(rowHeight)));
+                if (firstRow >= rows) {
+                    firstRow = rows - 1;
+                }
+                for (std::size_t r = firstRow; r < rows; ++r) {
+                    float y = header + float(double(r) * double(rowHeight) - double(scrollOffset_.y));
+                    if (y >= viewHeight) {
+                        break;
+                    }
+                    bool inSelection = range.has_value() && r >= range->firstRow && r <= range->lastRow;
+                    if (inSelection) {
+                        ctx.set_fill_style(accentColor);
+                        ctx.set_fill_alpha(0.35);
+                        ctx.fill_rect(BLRect(0.0, y, gutter, rowHeight));
+                        ctx.set_fill_alpha(1.0);
+                    }
+                    paintTableText(ctx, Rect(0.0f, y, gutter, rowHeight), std::to_string(r + 1), textColor, true);
+                }
+            }
+            ctx.restore();
+
+            // Header borders.
+            BLPath borders;
+            borders.move_to(0.0, std::floor(header) - 0.5);
+            borders.line_to(viewWidth, std::floor(header) - 0.5);
+            borders.move_to(std::floor(gutter) - 0.5, 0.0);
+            borders.line_to(std::floor(gutter) - 0.5, viewHeight);
+            x = gutter + controller_->columnOffset(firstColumn) - scrollOffset_.x;
+            for (std::size_t c = firstColumn; c < columns && x < viewWidth; ++c) {
+                x += controller_->columnWidth(c);
+                if (x > gutter) {
+                    borders.move_to(std::floor(x) - 0.5, 0.0);
+                    borders.line_to(std::floor(x) - 0.5, header);
+                }
+            }
+            ctx.set_stroke_style(gridColor);
+            ctx.set_stroke_width(1.0);
+            ctx.stroke_path(borders);
+            ctx.restore();
+        }
+
+        ctx.restore();
+    }
+
+    SyncReturn TableView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
+        bool shift = (keyMask & kmShift) != 0;
+        Hit hit = hitTest(pt);
+        switch (hit.kind) {
+            case HitKind::Cell:
+                setActiveCell(hit.row, hit.column, shift);
+                selecting_ = true;
+                return SyncReturn::Handled;
+            case HitKind::ColumnHeader:
+                selectColumn(hit.column, shift);
+                return SyncReturn::Handled;
+            case HitKind::RowHeader:
+                selectRow(hit.row, shift);
+                return SyncReturn::Handled;
+            case HitKind::Corner:
+                selectAll();
+                return SyncReturn::Handled;
+            case HitKind::ColumnBorder:
+                resizingColumn_ = hit.column;
+                resizeStartX_ = pt.x;
+                resizeStartWidth_ = controller_->columnWidth(hit.column);
+                return SyncReturn::Handled;
+            case HitKind::None:
+                break;
+        }
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn TableView::handleMouseMove(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (resizingColumn_.has_value()) {
+            float width = resizeStartWidth_ + (pt.x - resizeStartX_);
+            constexpr float kMinColumnWidth = 20.0f;
+            if (width < kMinColumnWidth) {
+                width = kMinColumnWidth;
+            }
+            if (width != controller_->columnWidth(*resizingColumn_)) {
+                controller_->setColumnWidth(*resizingColumn_, width);
+                onColumnResized(*this, *resizingColumn_);
+            }
+            return SyncReturn::Handled;
+        }
+
+        if (selecting_) {
+            // While dragging, a position outside the cell area still extends the range - clamp
+            // into the table instead of requiring the pointer to stay over a real cell.
+            Rect clientBounds = getClientBounds();
+            float x = pt.x - clientBounds.left() - gutterWidth() + scrollOffset_.x;
+            float y = pt.y - clientBounds.top() - headerHeight() + scrollOffset_.y;
+            std::size_t rows = controller_->rowCount();
+            std::size_t columns = controller_->columnCount();
+            std::size_t row = y < 0.0f ? 0 : controller_->rowAt(y);
+            std::size_t column = x < 0.0f ? 0 : controller_->columnAt(x);
+            if (row >= rows) {
+                row = rows > 0 ? rows - 1 : 0;
+            }
+            if (column >= columns) {
+                column = columns > 0 ? columns - 1 : 0;
+            }
+            setActiveCell(row, column, true);
+            return SyncReturn::Handled;
+        }
+
+        bool onBorder = hitTest(pt).kind == HitKind::ColumnBorder;
+        if (onBorder != overColumnBorder_) {
+            overColumnBorder_ = onBorder;
+            setCursor(Cursor(onBorder ? CursorKind::SizeWE : CursorKind::Arrow));
+        }
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn TableView::handleMouseUp(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        selecting_ = false;
+        resizingColumn_.reset();
+        return SyncReturn::Ignored;
+    }
+
+    void TableView::moveActiveCell(std::size_t row, std::size_t column, bool extend) {
+        setActiveCell(row, column, extend);
+    }
+
+    SyncReturn TableView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t rows = controller_->rowCount();
+        std::size_t columns = controller_->columnCount();
+        if (rows == 0 || columns == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (ctrl && VKeyCode == vkLetterA) {
+            selectAll();
+            return SyncReturn::Handled;
+        }
+
+        // The cell navigation moves from: the active cell (the moving edge when extending).
+        std::size_t row = activeRow_.has_value() ? *activeRow_ : 0;
+        std::size_t column = activeRow_.has_value() ? activeColumn_ : 0;
+        float pageHeight = getClientBounds().height() - headerHeight();
+        std::size_t pageRows = pageHeight > controller_->rowHeight() ? std::size_t(pageHeight / controller_->rowHeight()) : 1;
+
+        switch (VKeyCode) {
+            case vkUpArrow:
+                row = ctrl ? 0 : (row > 0 ? row - 1 : 0);
+                break;
+            case vkDownArrow:
+                row = ctrl ? rows - 1 : (row + 1 < rows ? row + 1 : rows - 1);
+                break;
+            case vkLeftArrow:
+                column = ctrl ? 0 : (column > 0 ? column - 1 : 0);
+                break;
+            case vkRightArrow:
+                column = ctrl ? columns - 1 : (column + 1 < columns ? column + 1 : columns - 1);
+                break;
+            case vkPgUp:
+                row = row > pageRows ? row - pageRows : 0;
+                break;
+            case vkPgDown:
+                row = row + pageRows < rows ? row + pageRows : rows - 1;
+                break;
+            case vkHome:
+                column = 0;
+                if (ctrl) {
+                    row = 0;
+                }
+                break;
+            case vkEnd:
+                column = columns - 1;
+                if (ctrl) {
+                    row = rows - 1;
+                }
+                break;
+            case vkTab:
+                // Wraps to the next/previous row, like a spreadsheet; never extends a range.
+                if (shift) {
+                    if (column > 0) {
+                        --column;
+                    } else if (row > 0) {
+                        --row;
+                        column = columns - 1;
+                    }
+                } else {
+                    if (column + 1 < columns) {
+                        ++column;
+                    } else if (row + 1 < rows) {
+                        ++row;
+                        column = 0;
+                    }
+                }
+                shift = false;
+                break;
+            case vkEnter:
+                if (shift) {
+                    row = row > 0 ? row - 1 : 0;
+                } else {
+                    row = row + 1 < rows ? row + 1 : rows - 1;
+                }
+                shift = false;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        moveActiveCell(row, column, shift);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TableView::handleQueryContentSize(View& /*sender*/, Size& outSize) {
+        outSize = Size(gutterWidth() + controller_->totalWidth(), headerHeight() + controller_->totalHeight());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TableView::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
+        scrollOffset_ = offset;
+        style().markDirty();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TableView::handleDataChanged(TableController& /*sender*/) {
         onContentSizeChanged(*this);
         style().markDirty();
         return SyncReturn::Handled;

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -732,6 +733,89 @@ namespace newui {
         // See ListController::iconFor()'s own comment - same reasoning,
         // just keyed by (row, col) instead of a flat index.
         virtual std::optional<std::string> iconFor(std::size_t row, std::size_t col) const { return std::nullopt; }
+
+        // Same narrowing as ListController::model()/setModel() - attached Model must be a
+        // TableModel (models.h), checked with dynamic_cast.
+        TableModel* model() {
+            Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            TableModel* asTableModel = dynamic_cast<TableModel*>(base);
+            if (asTableModel == nullptr) {
+                throw std::runtime_error("TableController::model: attached Model is not a TableModel");
+            }
+            return asTableModel;
+        }
+
+        const TableModel* model() const {
+            const Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            const TableModel* asTableModel = dynamic_cast<const TableModel*>(base);
+            if (asTableModel == nullptr) {
+                throw std::runtime_error("TableController::model: attached Model is not a TableModel");
+            }
+            return asTableModel;
+        }
+
+        void setModel(std::unique_ptr<TableModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
+        }
+
+        std::size_t rowCount() const { return model() != nullptr ? model()->rowCount() : 0; }
+        std::size_t columnCount() const { return model() != nullptr ? model()->columnCount() : 0; }
+
+        // Fired whenever model()'s own onChanged fires - same contract as
+        // ListController::onDataChanged.
+        typedef Delegate<TableController> DataChangedDelegate;
+        DataChangedDelegate onDataChanged;
+
+        // Rows are uniform height, so row <-> y is O(1) arithmetic, never a loop: a table is
+        // expected to hold far more rows than a list (see TableView's own comment), and
+        // ListController's O(n) offset scans would not survive a million of them.
+        float rowHeight() const { return rowHeight_; }
+        void setRowHeight(float height) { rowHeight_ = height; }
+
+        // Header strip above the first row (and the matching gutter width to the left of the
+        // first column, where row numbers are painted). 0 hides either.
+        float headerHeight() const { return headerHeight_; }
+        void setHeaderHeight(float height) { headerHeight_ = height; }
+        float rowHeaderWidth() const { return rowHeaderWidth_; }
+        void setRowHeaderWidth(float width) { rowHeaderWidth_ = width; }
+
+        // Width of one column. Columns without an explicit setColumnWidth() use
+        // defaultColumnWidth().
+        float defaultColumnWidth() const { return defaultColumnWidth_; }
+        void setDefaultColumnWidth(float width) { defaultColumnWidth_ = width; }
+        float columnWidth(std::size_t column) const;
+        void setColumnWidth(std::size_t column, float width);
+
+        // Content-space geometry (header/gutter excluded): total scrollable size, the x of a
+        // column's left edge, and the inverse lookups. columnAt()/rowAt() return columnCount()/
+        // rowCount() (one past the end) when the coordinate is outside the table.
+        float totalWidth() const;
+        float totalHeight() const { return float(double(rowCount()) * double(rowHeight_)); }
+        float columnOffset(std::size_t column) const;
+        std::size_t columnAt(float contentX) const;
+        std::size_t rowAt(float contentY) const;
+        float rowOffset(std::size_t row) const { return float(double(row) * double(rowHeight_)); }
+
+    protected:
+        SyncReturn modelChanged(Model& sender) override {
+            onDataChanged(*this);
+            return SyncReturn::Handled;
+        }
+
+    private:
+        float rowHeight_ = 22.0f;
+        float headerHeight_ = 24.0f;
+        float rowHeaderWidth_ = 56.0f;
+        float defaultColumnWidth_ = 100.0f;
+        // Only columns whose width was explicitly set are stored - a sparse map, so a table with
+        // many columns pays for what's customized only.
+        std::map<std::size_t, float> columnWidths_;
     };
 
 } // namespace newui
