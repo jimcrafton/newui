@@ -133,8 +133,7 @@
                 text: "Color Mode",
                 children: [
                   { type: "MenuItem", text: "RGB", checked: true },
-                  { type: "MenuItem", text: "CMYK" },
-                  { type: "MenuItem", text: "Grayscale" }
+                  { type: "MenuItem", text: "CMYK" }
                 ]
               }
             ]
@@ -527,7 +526,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1238 },
+            contentSize: { type: "Size", width: 268, height: 1268 },
             childViews: [
               {
                 type: "SubView",
@@ -541,9 +540,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1238 }
+                      size: { type: "Size", width: 268, height: 1268 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1238 },
+                    desiredSize: { type: "Size", width: 268, height: 1268 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -551,7 +550,7 @@
                         type: "SubView",
                         name: "colorPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 372 },
+                        desiredSize: { type: "Size", width: 268, height: 402 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -611,7 +610,7 @@
                             type: "SubView",
                             name: "colorPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 350 },
+                            desiredSize: { type: "Size", width: 0, height: 380 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -787,12 +786,12 @@
                                 name: "colorModeControl",
                                 desiredSize: { type: "Size", width: 0, height: 24 },
                                 desiredSizeOverride: true,
-                                selectedIndex: 1,
-                                segments: ["Gray", "RGB", "CMYK", "HSB"]
+                                segments: ["Gray", "RGB", "CMYK", "HSB"],
+                                selectedIndex: 1
                               },
                               {
                                 type: "SubView",
-                                name: "redSliderRow",
+                                name: "comp0SliderRow",
                                 visible: true,
                                 desiredSize: { type: "Size", width: 0, height: 24 },
                                 desiredSizeOverride: true,
@@ -800,7 +799,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
-                                    name: "redSliderCaption",
+                                    name: "comp0SliderCaption",
                                     desiredSize: { type: "Size", width: 16, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "R",
@@ -809,7 +808,7 @@
                                   },
                                   {
                                     type: "Slider",
-                                    name: "redSlider",
+                                    name: "comp0Slider",
                                     desiredSize: { type: "Size", width: 0, height: 24 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
@@ -819,7 +818,7 @@
                                   },
                                   {
                                     type: "TextField",
-                                    name: "redSliderValue",
+                                    name: "comp0SliderValue",
                                     desiredSize: { type: "Size", width: 44, height: 24 },
                                     desiredSizeOverride: true,
                                     text: "232"
@@ -828,7 +827,7 @@
                               },
                               {
                                 type: "SubView",
-                                name: "greenSliderRow",
+                                name: "comp1SliderRow",
                                 visible: true,
                                 desiredSize: { type: "Size", width: 0, height: 24 },
                                 desiredSizeOverride: true,
@@ -836,7 +835,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
-                                    name: "greenSliderCaption",
+                                    name: "comp1SliderCaption",
                                     desiredSize: { type: "Size", width: 16, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "G",
@@ -845,7 +844,7 @@
                                   },
                                   {
                                     type: "Slider",
-                                    name: "greenSlider",
+                                    name: "comp1Slider",
                                     desiredSize: { type: "Size", width: 0, height: 24 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
@@ -855,7 +854,7 @@
                                   },
                                   {
                                     type: "TextField",
-                                    name: "greenSliderValue",
+                                    name: "comp1SliderValue",
                                     desiredSize: { type: "Size", width: 44, height: 24 },
                                     desiredSizeOverride: true,
                                     text: "69"
@@ -864,7 +863,7 @@
                               },
                               {
                                 type: "SubView",
-                                name: "blueSliderRow",
+                                name: "comp2SliderRow",
                                 visible: true,
                                 desiredSize: { type: "Size", width: 0, height: 24 },
                                 desiredSizeOverride: true,
@@ -872,7 +871,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
-                                    name: "blueSliderCaption",
+                                    name: "comp2SliderCaption",
                                     desiredSize: { type: "Size", width: 16, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "B",
@@ -881,7 +880,7 @@
                                   },
                                   {
                                     type: "Slider",
-                                    name: "blueSlider",
+                                    name: "comp2Slider",
                                     desiredSize: { type: "Size", width: 0, height: 24 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
@@ -891,10 +890,46 @@
                                   },
                                   {
                                     type: "TextField",
-                                    name: "blueSliderValue",
+                                    name: "comp2SliderValue",
                                     desiredSize: { type: "Size", width: 44, height: 24 },
                                     desiredSizeOverride: true,
                                     text: "44"
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "comp3SliderRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "comp3SliderCaption",
+                                    desiredSize: { type: "Size", width: 16, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "K",
+                                    textAlignment: "Center",
+                                    style: { type: "LabelStyle", text: "K", textAlignment: "Center" }
+                                  },
+                                  {
+                                    type: "Slider",
+                                    name: "comp3Slider",
+                                    desiredSize: { type: "Size", width: 0, height: 24 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    value: 0,
+                                    integer: true,
+                                    horizontal: true
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "comp3SliderValue",
+                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
                                   }
                                 ]
                               },

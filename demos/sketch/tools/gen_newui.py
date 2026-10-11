@@ -161,7 +161,7 @@ def dropdown(name, items, w=None, h=24, selected=0, weight=None):
 def segmented(name, segments, selected=0, h=24, w=None):
     # In a row that centres its children (cross axis), a SegmentedControl with no explicit width
     # collapses to 0 - it only sizes itself to its text when the layout stretches it.
-    return node("SegmentedControl", name, w=w, h=h, selectedIndex=selected, segments=segments)
+    return node("SegmentedControl", name, w=w, h=h, segments=segments, selectedIndex=selected)
 
 
 def listview(name, items, h, row=22, weight=None, selected=None):
@@ -258,7 +258,7 @@ MENUS = [
         mi("Zoom In", "Ctrl++"), mi("Zoom Out", "Ctrl+-"), mi("Fit Page", "Ctrl+0"), mi("Actual Size", "Ctrl+1"), SEP,
         mi("Show Grid", "Ctrl+'", checked=True), mi("Snap to Grid", "Ctrl+Shift+'", checked=True),
         mi("Show Rulers", "Ctrl+R", checked=True), mi("Smart Guides", checked=True), SEP,
-        mi("Color Mode", children=[mi("RGB", checked=True), mi("CMYK"), mi("Grayscale")])]),
+        mi("Color Mode", children=[mi("RGB", checked=True), mi("CMYK")])]),
     mi("Help", children=[mi("About sketch")]),
 ]
 
@@ -331,8 +331,10 @@ def color_panel():
     body = [
         fill_types, gradient_bar, stop_row, type_row,
         segmented("colorModeControl", ["Gray", "RGB", "CMYK", "HSB"], selected=1),
-        slider_row("redSlider", "R", 232), slider_row("greenSlider", "G", 69),
-        slider_row("blueSlider", "B", 44), slider_row("alphaSlider", "A", 100),
+        # Four component rows (the program sets captions/ranges/visibility per color mode) plus alpha.
+        slider_row("comp0Slider", "R", 232), slider_row("comp1Slider", "G", 69),
+        slider_row("comp2Slider", "B", 44), slider_row("comp3Slider", "K", 0),
+        slider_row("alphaSlider", "A", 100),
         hbox("hexRow", [label("Hex", w=32), field("hexField", "#E8452C", w=96)]),
         node("SwatchGrid", "swatchGrid", h=22, columns=12, gap=3, swatches=SWATCHES, selectedIndex=4),
     ]

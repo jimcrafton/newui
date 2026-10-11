@@ -11,8 +11,8 @@ namespace sketch {
     // A wrapping grid of small color tiles - used for the Color panel's swatch row and (with
     // larger tiles) the Graphic Styles panel. Each swatch is any newui::Color::fromString() text.
     //
-    // S0 scaffold: paints the tiles and tracks which one is selected; applying a swatch to the
-    // selection arrives with S3.
+    // Paints the tiles, tracks which one is selected and fires onSwatchPicked on a click; the style panel
+    // applies the picked color.
     // @reflect category=basic
     class SwatchGrid : public newui::SubView {
     public:
@@ -36,9 +36,14 @@ namespace sketch {
         std::size_t selectedIndex() const { return selectedIndex_; }
         void setSelectedIndex(std::size_t index);
 
+        // Fired when the user clicks a tile (selectedIndex() already points at it).
+        newui::Delegate<SwatchGrid> onSwatchPicked;
+
         void paint(BLContext& ctx) override;
 
     private:
+        newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
+
         std::vector<std::string> swatches_;
         std::size_t columns_ = 12;
         float gap_ = 3.0f;

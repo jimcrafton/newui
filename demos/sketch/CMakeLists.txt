@@ -6,9 +6,12 @@ add_executable(sketch
     gradientbar.h gradientbar.cpp
     swatchgrid.h swatchgrid.cpp
     pagepreview.h pagepreview.cpp
+    stylepanel.h stylepanel.cpp
     sketchcolor.h sketchcolor.cpp
     sketchobject.h sketchobject.cpp
     sketchdocument.h sketchdocument.cpp
+    sketchsvg.h sketchsvg.cpp
+    sketchcontroller.h sketchcontroller.cpp
 )
 
 target_link_libraries(sketch PRIVATE newui)
@@ -32,6 +35,7 @@ add_executable(sketch_tests
     sketchcolor.cpp
     sketchobject.cpp
     sketchdocument.cpp
+    sketchsvg.cpp
 )
 target_link_libraries(sketch_tests PRIVATE newui GTest::gtest_main)
 target_include_directories(sketch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

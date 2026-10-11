@@ -153,3 +153,30 @@ TEST(SegmentedControl, PaintDoesNotCrashWithRealSegments) {
 
     delete control;
 }
+
+TEST(SegmentedControl, AddSegmentAppendsEnabledAndKeepsSelection) {
+    auto* control = new newui::SegmentedControl();
+    control->addSegment("A");
+    control->addSegment("B");
+    control->addSegment("C");
+    EXPECT_EQ(control->segments().size(), 3u);
+    EXPECT_TRUE(control->isSegmentEnabled(2));
+    control->setSelectedIndex(2);
+    control->addSegment("D");
+    EXPECT_EQ(control->selectedIndex(), 2u);
+    delete control;
+}
+
+TEST(SegmentedControl, RemoveSegmentKeepsTheSameSegmentSelected) {
+    auto* control = new newui::SegmentedControl();
+    control->setSegments({"A", "B", "C"});
+    control->setSelectedIndex(2);
+    control->removeSegment("A");  // C is now at index 1
+    EXPECT_EQ(control->segments().size(), 2u);
+    EXPECT_EQ(control->selectedIndex(), 1u);
+    control->removeSegment("C");  // the selected one goes: clamp to the last
+    EXPECT_EQ(control->selectedIndex(), 0u);
+    control->removeSegment("nope");  // unknown label: no-op
+    EXPECT_EQ(control->segments().size(), 1u);
+    delete control;
+}

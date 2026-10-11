@@ -167,8 +167,12 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 		break;
 
 		case WM_CLOSE: {
-			// Handle window close event
-			// You can add custom logic here if needed
+			bool canClose = true;
+			onClosing(*this, canClose);
+			if (!canClose) {
+				result = true;  // vetoed: swallow the close, the window stays
+				break;
+			}
 			onClosed(*this);
 
 			DestroyWindow(frameHandle_);

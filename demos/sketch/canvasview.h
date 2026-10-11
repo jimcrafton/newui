@@ -89,6 +89,10 @@ namespace sketch {
         typedef newui::Delegate<CanvasView> ViewChangedDelegate;
         ViewChangedDelegate onZoomChanged;
 
+        // Ctrl+<key> shortcuts the canvas does not own (File menu: N/O/S); return true when handled.
+        // @reflect ignore=true
+        std::function<bool(std::uint32_t vkCode, bool shift)> onControlKey;
+
         void paint(BLContext& ctx) override;
 
     private:

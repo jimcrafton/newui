@@ -33,6 +33,16 @@ namespace sketch {
         QuadFrame transformed(const BLMatrix2D& matrix) const;
     };
 
+    // An object's appearance at one moment - what undo of a style edit restores.
+    // @reflect ignore=true
+    struct StyleState {
+        std::size_t id = 0;
+        SketchPaint fill;
+        SketchPaint stroke;
+        double strokeWidth = 1.0;
+        double opacity = 1.0;
+    };
+
     // The oriented box around the selection: `local` is measured in a frame turned by `angle`
     // (local = R(-angle) * world), so handles follow a rotated shape the way Illustrator's do.
     // @reflect ignore=true
@@ -64,7 +74,7 @@ namespace sketch {
     // The document: a page (size in points) and a flat, back-to-front list of objects. Layers and
     // groups arrive with S3b; undoable commands with S2 - until then the mutators below are called
     // directly and each ends with changed(), which marks the document modified and repaints its views.
-    // File I/O is SVG and lands with S4, so readFromFile/writeToFile report failure for now.
+    // File I/O is SVG (sketchsvg.h): load()/save() go through readFromFile/writeToFile.
     class SketchDocument : public newui::Document {
     public:
         SketchDocument() = default;
@@ -135,6 +145,42 @@ namespace sketch {
         // Redraw after an edit made directly on an object (drag preview).
         void touch() { changed(); }
 
+        // ---- Style (fill / stroke / weight / opacity) ----
+        // The setters below change the selected objects live, with no undo step - a slider drag calls them
+        // many times; the caller then records one step with commitStyle(). With nothing selected the
+        // panel edits the defaults new shapes are drawn with instead (no undo).
+        std::vector<StyleState> snapshotStyle() const;
+        void setSelectionFill(const SketchPaint& paint);
+        void setSelectionStroke(const SketchPaint& paint);
+        void setSelectionStrokeWidth(double width);
+        void setSelectionOpacity(double opacity);
+        // Pushes one undo step taking the selection from `before` to its current style; false (and no step)
+        // when nothing differs.
+        bool commitStyle(const std::vector<StyleState>& before, const std::string& description);
+
+        const SketchPaint& defaultFill() const { return defaultFill_; }
+        const SketchPaint& defaultStroke() const { return defaultStroke_; }
+        double defaultStrokeWidth() const { return defaultStrokeWidth_; }
+        void setDefaultFill(const SketchPaint& paint);
+        void setDefaultStroke(const SketchPaint& paint);
+        void setDefaultStrokeWidth(double width);
+
+        // ---- Color mode ----
+        // The document's working color model: RGB or CMYK. It decides the space new colors are authored in
+        // (the default fill/stroke, the Color panel's starting mode) and what the status bar shows; a
+        // single object can still carry a color in another space (an RGB swatch in a CMYK document).
+        ColorSpace colorMode() const { return colorMode_; }
+        // Sets the mode and converts the defaults new shapes get; existing objects keep their colors. Not
+        // undoable - used when loading a file and starting a new document. Only RGB and CMYK are document modes.
+        void setColorMode(ColorSpace mode);
+        // Illustrator's Document Color Mode: sets the mode and converts every object's fill, stroke and
+        // gradient stops (and the defaults) into it, as one undo step. False when already in that mode.
+        bool convertToColorMode(ColorSpace mode);
+
+        // Fired after any change to the document (edits, undo/redo, style) - the panels follow it.
+        typedef newui::Delegate<SketchDocument> ChangedDelegate;
+        ChangedDelegate onChanged;
+
         // Straightens the selection frame: drops the warped quad and the group angle and sets every selected
         // object's frame angle to 0, so the handles wrap the outlines in an upright box again. Undoable.
         // False when nothing changed (no selection, or the frame was already upright).
@@ -142,10 +188,6 @@ namespace sketch {
 
         // Back to an empty page (size and ppi kept), not modified.
         void clearObjects();
-
-        // The hard-coded scene S1 paints so the renderer has something to show - replaced by
-        // real documents once tools (S2) and SVG (S4) exist.
-        void buildDemoScene();
 
         void paint(BLContext& ctx) const;
 
@@ -168,6 +210,10 @@ namespace sketch {
         float ppi_ = 72.0f;
         std::vector<std::unique_ptr<SketchObject>> objects_;
         std::size_t nextId_ = 1;
+        SketchPaint defaultFill_ = SketchPaint::solid(SketchColor::fromHex("#d9e6ff"));
+        SketchPaint defaultStroke_ = SketchPaint::solid(SketchColor::fromHex("#2f5fb3"));
+        double defaultStrokeWidth_ = 1.5;
+        ColorSpace colorMode_ = ColorSpace::RGB;
         std::vector<std::size_t> selection_;
         std::optional<double> groupAngle_;
         std::optional<QuadFrame> quadFrame_;

@@ -2,6 +2,8 @@
 #include "newui/fontmanager.h"
 #include "newui/uicolormanager.h"
 
+#include <algorithm>
+
 namespace newui {
 
 namespace {
@@ -42,6 +44,26 @@ void SegmentedControl::setSelectedIndex(std::size_t index) {
     selectedIndex_ = index;
     redraw();
     onSelectionChanged(*this);
+}
+
+void SegmentedControl::addSegment(const std::string& label) {
+    labels_.push_back(label);
+    enabled_.push_back(true);
+    redraw();
+}
+
+void SegmentedControl::removeSegment(const std::string& label) {
+    auto it = std::find(labels_.begin(), labels_.end(), label);
+    if (it == labels_.end()) {
+        return;
+    }
+    std::size_t index = std::size_t(it - labels_.begin());
+    labels_.erase(it);
+    enabled_.erase(enabled_.begin() + std::ptrdiff_t(index));
+    if (index < selectedIndex_ || (selectedIndex_ >= labels_.size() && selectedIndex_ > 0)) {
+        --selectedIndex_;
+    }
+    redraw();
 }
 
 bool SegmentedControl::isSegmentEnabled(std::size_t index) const {

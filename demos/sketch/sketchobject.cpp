@@ -1,5 +1,7 @@
 #include "sketchobject.h"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace sketch {
@@ -9,6 +11,101 @@ namespace sketch {
         paint.kind_ = Kind::Solid;
         paint.color_ = color;
         return paint;
+    }
+
+    SketchPaint SketchPaint::linear(const SketchGradient& gradient) {
+        SketchPaint paint;
+        paint.kind_ = Kind::Linear;
+        paint.gradient_ = gradient;
+        paint.color_ = gradient.stops.empty() ? SketchColor() : gradient.stops.front().color;
+        return paint;
+    }
+
+    SketchPaint SketchPaint::radial(const SketchGradient& gradient) {
+        SketchPaint paint = linear(gradient);
+        paint.kind_ = Kind::Radial;
+        return paint;
+    }
+
+    SketchGradient SketchGradient::fromColor(const SketchColor& color) {
+        SketchGradient gradient;
+        gradient.stops.push_back({0.0, color});
+        gradient.stops.push_back({1.0, SketchColor::rgb(1.0f, 1.0f, 1.0f, color.alpha())});
+        return gradient;
+    }
+
+    void SketchGradient::sortStops() {
+        std::stable_sort(stops.begin(), stops.end(),
+            [](const GradientStop& a, const GradientStop& b) { return a.offset < b.offset; });
+    }
+
+    SketchColor SketchGradient::colorAt(double t) const {
+        if (stops.empty()) {
+            return SketchColor::rgb(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        if (t <= stops.front().offset) {
+            return stops.front().color;
+        }
+        if (t >= stops.back().offset) {
+            return stops.back().color;
+        }
+        for (std::size_t i = 1; i < stops.size(); ++i) {
+            if (t <= stops[i].offset) {
+                const GradientStop& lo = stops[i - 1];
+                const GradientStop& hi = stops[i];
+                double span = hi.offset - lo.offset;
+                float f = span > 1e-12 ? float((t - lo.offset) / span) : 0.0f;
+                BLRgba32 a = lo.color.toRgba32();
+                BLRgba32 b = hi.color.toRgba32();
+                auto mix = [f](std::uint32_t x, std::uint32_t y) { return (float(x) + (float(y) - float(x)) * f) / 255.0f; };
+                return SketchColor::rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()), mix(a.a(), b.a()));
+            }
+        }
+        return stops.back().color;
+    }
+
+    void SketchGradient::reverse() {
+        for (GradientStop& stop : stops) {
+            stop.offset = 1.0 - stop.offset;
+        }
+        std::reverse(stops.begin(), stops.end());
+    }
+
+    namespace {
+        // Applies a paint to ctx as the fill or stroke style over `box` (the object's geometry bounds),
+        // returning false when there is nothing to paint.
+        bool setPaintStyle(BLContext& ctx, const SketchPaint& paint, const BLBox& box, bool asStroke) {
+            if (paint.isNone()) {
+                return false;
+            }
+            double w = box.x1 - box.x0, h = box.y1 - box.y0;
+            if (!paint.isGradient() || paint.gradient().stops.empty() || (w < 1e-6 && h < 1e-6)) {
+                BLRgba32 color = paint.color().toRgba32();
+                if (asStroke) { ctx.set_stroke_style(color); } else { ctx.set_fill_style(color); }
+                return true;
+            }
+
+            const SketchGradient& g = paint.gradient();
+            double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
+            BLGradient gradient;
+            if (paint.kind() == SketchPaint::Kind::Linear) {
+                double angle = g.angleDegrees * 3.14159265358979323846 / 180.0;
+                double dx = std::cos(angle), dy = std::sin(angle);
+                // Half the box's extent along the gradient direction, so 0 and 1 land on the box's edges.
+                double half = (std::fabs(w * dx) + std::fabs(h * dy)) * 0.5;
+                gradient = BLGradient(BLLinearGradientValues(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half));
+            } else {
+                double radius = std::max(w, h) * 0.5;
+                gradient = BLGradient(BLRadialGradientValues(cx, cy, cx, cy, radius > 1e-9 ? radius : 1e-9));
+            }
+            for (const GradientStop& stop : g.stops) {
+                gradient.add_stop(std::min(1.0, std::max(0.0, stop.offset)), stop.color.toRgba32());
+            }
+            gradient.set_extend_mode(g.spread == GradientSpread::Repeat ? BL_EXTEND_MODE_REPEAT
+                : (g.spread == GradientSpread::Reflect ? BL_EXTEND_MODE_REFLECT : BL_EXTEND_MODE_PAD));
+            if (asStroke) { ctx.set_stroke_style(gradient); } else { ctx.set_fill_style(gradient); }
+            return true;
+        }
     }
 
     SketchObject::SketchObject(SketchObjectType type, const BLPath& path) : type_(type), path_(path) {
@@ -66,6 +163,10 @@ namespace sketch {
         SketchObject* object = new SketchObject(SketchObjectType::Polyline, path);
         object->setFill(SketchPaint::none());
         return object;
+    }
+
+    SketchObject* SketchObject::make(SketchObjectType type, const BLPath& path) {
+        return new SketchObject(type, path);
     }
 
     SketchObject* SketchObject::makePath(const BLPath& path) {
@@ -171,13 +272,12 @@ namespace sketch {
             return;
         }
         ctx.save();
-        if (isClosed() && !fill_.isNone()) {
-            ctx.set_fill_style(fill_.color().toRgba32());
+        BLBox box = geometryBounds();
+        if (isClosed() && setPaintStyle(ctx, fill_, box, false)) {
             ctx.set_global_alpha(opacity_);
             ctx.fill_path(path_);
         }
-        if (!stroke_.isNone() && strokeWidth_ > 0.0) {
-            ctx.set_stroke_style(stroke_.color().toRgba32());
+        if (strokeWidth_ > 0.0 && setPaintStyle(ctx, stroke_, box, true)) {
             ctx.set_stroke_width(strokeWidth_);
             ctx.set_global_alpha(opacity_);
             ctx.stroke_path(path_);

@@ -1,7 +1,9 @@
 #include "sketchcolor.h"
 #include "sketchdocument.h"
 #include "sketchobject.h"
+#include "sketchsvg.h"
 
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 
@@ -193,7 +195,8 @@ TEST(SketchDocument, ClearObjectsKeepsPageSettings) {
     SketchDocument doc;
     doc.setPageSize(300, 200);
     doc.setPpi(96);
-    doc.buildDemoScene();
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    doc.add(SketchObject::makeEllipse(5, 5, 3, 3));
     EXPECT_FALSE(doc.empty());
     doc.clearObjects();
     EXPECT_TRUE(doc.empty());
@@ -637,4 +640,418 @@ TEST(SketchQuad, ResetBoundingBoxStraightensTheFrameAndUndoes) {
     EXPECT_DOUBLE_EQ(doc.findById(a)->frameAngle(), 0.5);
     ASSERT_TRUE(doc.groupAngle().has_value());
     EXPECT_TRUE(doc.quadFrame().has_value());
+}
+
+TEST(SketchStyle, LiveEditsThenOneUndoStep) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    SketchPaint original = doc.findById(a)->fill();
+    auto before = doc.snapshotStyle();
+    doc.setSelectionFill(SketchPaint::solid(SketchColor::fromHex("#112233")));
+    doc.setSelectionFill(SketchPaint::solid(SketchColor::fromHex("#445566")));  // a drag: many live changes
+    EXPECT_TRUE(doc.commitStyle(before, "Change Fill"));
+    EXPECT_EQ(doc.findById(a)->fill().color().toHex(), "#445566");
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(a)->fill(), original);
+    EXPECT_FALSE(doc.undoStack().canUndo());
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.findById(a)->fill().color().toHex(), "#445566");
+}
+
+TEST(SketchStyle, CommitWithNoDifferenceRecordsNothing) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    auto before = doc.snapshotStyle();
+    EXPECT_FALSE(doc.commitStyle(before, "Nothing"));
+    EXPECT_FALSE(doc.undoStack().canUndo());
+}
+
+TEST(SketchStyle, StrokeWidthAndOpacityUndo) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    auto before = doc.snapshotStyle();
+    doc.setSelectionStrokeWidth(6.0);
+    doc.setSelectionOpacity(0.25);
+    doc.commitStyle(before, "Style");
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.findById(a)->strokeWidth(), 1.0);
+    EXPECT_DOUBLE_EQ(doc.findById(a)->opacity(), 1.0);
+}
+
+TEST(SketchStyle, DefaultsApplyToNewShapesAndFireChanged) {
+    SketchDocument doc;
+    int changes = 0;
+    doc.onChanged += [&changes](SketchDocument&) { ++changes; return newui::SyncReturn::Handled; };
+    doc.setDefaultFill(SketchPaint::none());
+    doc.setDefaultStrokeWidth(5.0);
+    EXPECT_TRUE(doc.defaultFill().isNone());
+    EXPECT_DOUBLE_EQ(doc.defaultStrokeWidth(), 5.0);
+    EXPECT_EQ(changes, 2);
+}
+
+TEST(SketchStyle, PaintEquality) {
+    EXPECT_EQ(SketchPaint::none(), SketchPaint::none());
+    EXPECT_EQ(SketchPaint::solid(SketchColor::gray(0.5f)), SketchPaint::solid(SketchColor::gray(0.5f)));
+    EXPECT_NE(SketchPaint::none(), SketchPaint::solid(SketchColor::gray(0.5f)));
+}
+
+namespace {
+    // Renders one object onto a transparent w x h image and returns its pixels (0xAARRGGBB, premultiplied).
+    std::vector<std::uint32_t> render(const SketchObject& object, int w, int h) {
+        BLImage image(w, h, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        object.paint(ctx);
+        ctx.end();
+        BLImageData data;
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels(std::size_t(w) * std::size_t(h));
+        for (int y = 0; y < h; ++y) {
+            const std::uint32_t* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride);
+            for (int x = 0; x < w; ++x) {
+                pixels[std::size_t(y) * std::size_t(w) + std::size_t(x)] = row[x];
+            }
+        }
+        return pixels;
+    }
+
+    SketchGradient redToBlue() {
+        SketchGradient gradient;
+        gradient.stops.push_back({0.0, SketchColor::rgb(1, 0, 0)});
+        gradient.stops.push_back({1.0, SketchColor::rgb(0, 0, 1)});
+        return gradient;
+    }
+}
+
+TEST(SketchGradient, ColorAtInterpolatesAndClamps) {
+    SketchGradient gradient = redToBlue();
+    EXPECT_EQ(gradient.colorAt(-1.0).toHex(), "#ff0000");
+    EXPECT_EQ(gradient.colorAt(2.0).toHex(), "#0000ff");
+    SketchColor mid = gradient.colorAt(0.5);
+    EXPECT_NEAR(double(mid.toRgba32().r()), 128.0, 1.5);
+    EXPECT_NEAR(double(mid.toRgba32().b()), 128.0, 1.5);
+}
+
+TEST(SketchGradient, ReverseAndSort) {
+    SketchGradient gradient = redToBlue();
+    gradient.stops.push_back({0.25, SketchColor::rgb(0, 1, 0)});
+    gradient.sortStops();
+    EXPECT_DOUBLE_EQ(gradient.stops[1].offset, 0.25);
+    gradient.reverse();
+    EXPECT_EQ(gradient.stops.front().color.toHex(), "#0000ff");
+    EXPECT_DOUBLE_EQ(gradient.stops[1].offset, 0.75);
+}
+
+TEST(SketchGradient, PaintKindsAndEquality) {
+    SketchPaint linear = SketchPaint::linear(redToBlue());
+    SketchPaint radial = SketchPaint::radial(redToBlue());
+    EXPECT_TRUE(linear.isGradient());
+    EXPECT_FALSE(linear.isNone());
+    EXPECT_EQ(linear.color().toHex(), "#ff0000");  // first stop stands in for color-only callers
+    EXPECT_NE(linear, radial);
+    EXPECT_EQ(linear, SketchPaint::linear(redToBlue()));
+    SketchGradient other = redToBlue();
+    other.angleDegrees = 45.0;
+    EXPECT_NE(linear, SketchPaint::linear(other));
+}
+
+TEST(SketchGradient, LinearGradientRendersLeftToRight) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
+    rect->setStroke(SketchPaint::none());
+    rect->setFill(SketchPaint::linear(redToBlue()));
+    std::vector<std::uint32_t> px = render(*rect, 100, 40);
+    std::uint32_t left = px[20 * 100 + 3], right = px[20 * 100 + 96];
+    EXPECT_GT((left >> 16) & 0xFF, 200u);   // red end
+    EXPECT_LT(left & 0xFF, 40u);
+    EXPECT_GT(right & 0xFF, 200u);          // blue end
+    EXPECT_LT((right >> 16) & 0xFF, 40u);
+}
+
+TEST(SketchGradient, AngleTurnsTheGradient) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 40, 100));
+    rect->setStroke(SketchPaint::none());
+    SketchGradient gradient = redToBlue();
+    gradient.angleDegrees = 90.0;  // top to bottom
+    rect->setFill(SketchPaint::linear(gradient));
+    std::vector<std::uint32_t> px = render(*rect, 40, 100);
+    std::uint32_t top = px[3 * 40 + 20], bottom = px[96 * 40 + 20];
+    EXPECT_GT((top >> 16) & 0xFF, 200u);
+    EXPECT_GT(bottom & 0xFF, 200u);
+}
+
+TEST(SketchGradient, RadialGradientRunsFromCenterOut) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 100));
+    rect->setStroke(SketchPaint::none());
+    rect->setFill(SketchPaint::radial(redToBlue()));
+    std::vector<std::uint32_t> px = render(*rect, 100, 100);
+    std::uint32_t center = px[50 * 100 + 50], edge = px[50 * 100 + 98];
+    EXPECT_GT((center >> 16) & 0xFF, 200u);
+    EXPECT_GT(edge & 0xFF, 200u);
+}
+
+TEST(SketchGradient, GradientFollowsTheObjectWhenItMoves) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
+    rect->setStroke(SketchPaint::none());
+    rect->setFill(SketchPaint::linear(redToBlue()));
+    rect->transform(BLMatrix2D::make_translation(100, 0));
+    std::vector<std::uint32_t> px = render(*rect, 200, 40);
+    EXPECT_GT((px[20 * 200 + 103] >> 16) & 0xFF, 200u);  // still red at its (new) left edge
+    EXPECT_GT(px[20 * 200 + 196] & 0xFF, 200u);
+}
+
+TEST(SketchGradient, GradientEditsUndoLikeAnyStyle) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    auto before = doc.snapshotStyle();
+    doc.setSelectionFill(SketchPaint::linear(redToBlue()));
+    EXPECT_TRUE(doc.commitStyle(before, "Gradient"));
+    EXPECT_TRUE(doc.findById(a)->fill().isGradient());
+    doc.undoStack().undo();
+    EXPECT_FALSE(doc.findById(a)->fill().isGradient());
+}
+
+// ---- SVG round trip -------------------------------------------------------------------------
+
+namespace {
+    SketchDocument roundTrip(const SketchDocument& source) {
+        SketchDocument copy;
+        EXPECT_TRUE(documentFromSvg(svgFromDocument(source), copy));
+        return copy;
+    }
+}
+
+TEST(SketchSvg, PageAndObjectsRoundTrip) {
+    SketchDocument doc;
+    doc.setPageSize(400, 300);
+    doc.setPpi(144);
+    SketchObject& rect = doc.add(SketchObject::makeRoundRect(10, 20, 100, 60, 8));
+    rect.setName("Card & <co>");
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#336699")));
+    rect.setStroke(SketchPaint::none());
+    rect.setOpacity(0.5);
+    rect.setLocked(true);
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 50, 50));
+    line.setVisible(false);
+    line.setStrokeWidth(3.0);
+
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_FLOAT_EQ(copy.pageWidth(), 400.0f);
+    EXPECT_FLOAT_EQ(copy.pageHeight(), 300.0f);
+    EXPECT_FLOAT_EQ(copy.ppi(), 144.0f);
+    ASSERT_EQ(copy.objectCount(), 2u);
+    const SketchObject& a = copy.object(0);
+    EXPECT_EQ(a.type(), SketchObjectType::RoundRect);
+    EXPECT_EQ(a.name(), "Card & <co>");
+    EXPECT_EQ(a.fill().color().toHex(), "#336699");
+    EXPECT_TRUE(a.stroke().isNone());
+    EXPECT_DOUBLE_EQ(a.opacity(), 0.5);
+    EXPECT_TRUE(a.isLocked());
+    EXPECT_NEAR(a.geometryBounds().x0, 10.0, 1e-3);
+    EXPECT_NEAR(a.geometryBounds().x1, 110.0, 1e-3);
+    const SketchObject& b = copy.object(1);
+    EXPECT_EQ(b.type(), SketchObjectType::Line);
+    EXPECT_FALSE(b.isVisible());
+    EXPECT_DOUBLE_EQ(b.strokeWidth(), 3.0);
+}
+
+TEST(SketchSvg, CmykColorsSurviveTheRoundTrip) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    o.setFill(SketchPaint::solid(SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f, 0.75f)));
+    o.setStroke(SketchPaint::solid(SketchColor::gray(0.25f)));
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    const SketchColor& fill = copy.object(0).fill().color();
+    EXPECT_EQ(fill.space(), ColorSpace::CMYK);
+    EXPECT_NEAR(fill.component(0), 0.1f, 1e-4);
+    EXPECT_NEAR(fill.component(3), 0.4f, 1e-4);
+    EXPECT_NEAR(fill.alpha(), 0.75f, 1e-4);
+    EXPECT_EQ(copy.object(0).stroke().color().space(), ColorSpace::Gray);
+}
+
+TEST(SketchSvg, GradientsRoundTrip) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(10, 10, 100, 50));
+    SketchGradient g;
+    g.stops.push_back({0.0, SketchColor::fromHex("#ff0000")});
+    g.stops.push_back({0.4, SketchColor::cmyk(1, 0, 0, 0)});
+    g.stops.push_back({1.0, SketchColor::fromHex("#0000ff80")});
+    g.angleDegrees = 35.0;
+    g.spread = GradientSpread::Reflect;
+    o.setFill(SketchPaint::linear(g));
+    o.setStroke(SketchPaint::radial(g));
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    const SketchPaint& fill = copy.object(0).fill();
+    ASSERT_EQ(fill.kind(), SketchPaint::Kind::Linear);
+    EXPECT_NEAR(fill.gradient().angleDegrees, 35.0, 1e-3);
+    EXPECT_EQ(fill.gradient().spread, GradientSpread::Reflect);
+    ASSERT_EQ(fill.gradient().stops.size(), 3u);
+    EXPECT_NEAR(fill.gradient().stops[1].offset, 0.4, 1e-5);
+    EXPECT_EQ(fill.gradient().stops[1].color.space(), ColorSpace::CMYK);
+    EXPECT_NEAR(fill.gradient().stops[2].color.alpha(), 0.5f, 0.01f);
+    EXPECT_EQ(copy.object(0).stroke().kind(), SketchPaint::Kind::Radial);
+}
+
+TEST(SketchSvg, RotatedObjectsKeepTheirFrameAngle) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 40, 20));
+    o.transform(BLMatrix2D::make_rotation(0.5, 0.0, 0.0));
+    o.setFrameAngle(0.5);
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 1u);
+    EXPECT_NEAR(copy.object(0).frameAngle(), 0.5, 1e-5);
+    EXPECT_NEAR(copy.object(0).geometryBounds().x1, o.geometryBounds().x1, 1e-3);
+}
+
+TEST(SketchSvg, ReadsForeignSvgShapesGroupsAndTransforms) {
+    const char* svg =
+        "<?xml version='1.0'?><!-- hi --><svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0 0 100 50'>"
+        "<defs><linearGradient id='g'><stop offset='0' stop-color='red'/><stop offset='100%' style='stop-color:#00f'/></linearGradient></defs>"
+        "<g fill='#0f0' stroke='black' transform='translate(10,5)'>"
+        "<rect x='0' y='0' width='20' height='10' rx='2'/>"
+        "<circle cx='50' cy='20' r='5' fill='url(#g)'/>"
+        "<path d='M0 0 h10 v10 h-10 z m20 0 l5 5' style='fill:rgb(255,0,0);stroke:none'/>"
+        "<polygon points='0,0 10,0 5,8'/>"
+        "<text>skipped</text>"
+        "</g></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    EXPECT_FLOAT_EQ(doc.pageWidth(), 200.0f);
+    ASSERT_EQ(doc.objectCount(), 4u);
+    EXPECT_EQ(doc.object(0).type(), SketchObjectType::RoundRect);
+    // viewBox scale 2 and translate(10,5): the rect's left edge lands at x = 20.
+    EXPECT_NEAR(doc.object(0).geometryBounds().x0, 20.0, 1e-3);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#00ff00");
+    EXPECT_EQ(doc.object(1).type(), SketchObjectType::Ellipse);
+    EXPECT_EQ(doc.object(1).fill().kind(), SketchPaint::Kind::Linear);
+    EXPECT_EQ(doc.object(1).fill().gradient().stops.size(), 2u);
+    EXPECT_EQ(doc.object(2).fill().color().toHex(), "#ff0000");
+    EXPECT_TRUE(doc.object(2).stroke().isNone());
+    EXPECT_EQ(doc.object(3).type(), SketchObjectType::Polygon);
+}
+
+TEST(SketchSvg, PathCommandsAndArcsParse) {
+    const char* svg = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>"
+        "<path d='M10,10 C 20,0 30,0 40,10 S 60,20 70,10 Q 80,0 90,10 T 95,15 A 5 5 0 0 1 90 20 L 10 20 Z'/></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    BLBox b = doc.object(0).geometryBounds();
+    EXPECT_NEAR(b.x0, 10.0, 1e-3);
+    EXPECT_GE(b.x1, 94.9);
+    EXPECT_GE(b.y1, 19.9);
+}
+
+TEST(SketchSvg, MalformedInputIsRejectedAndLeavesTheDocumentAlone) {
+    SketchDocument doc;
+    doc.add(SketchObject::makeRect(0, 0, 5, 5));
+    EXPECT_FALSE(documentFromSvg("<svg><g></svg>", doc));
+    EXPECT_FALSE(documentFromSvg("not xml at all", doc));
+    EXPECT_FALSE(documentFromSvg("<html></html>", doc));
+    EXPECT_EQ(doc.objectCount(), 1u);
+}
+
+TEST(SketchSvg, SavesAndLoadsThroughTheDocumentFileApi) {
+    std::string path = (std::filesystem::temp_directory_path() / "sketch_test_roundtrip.svg").string();
+    {
+        SketchDocument doc;
+        doc.add(SketchObject::makeEllipse(50, 50, 20, 10));
+        ASSERT_TRUE(doc.save(path));
+        EXPECT_FALSE(doc.isModified());
+    }
+    SketchDocument loaded;
+    ASSERT_TRUE(loaded.load(path));
+    EXPECT_EQ(loaded.objectCount(), 1u);
+    EXPECT_EQ(loaded.filePath(), path);
+    EXPECT_FALSE(loaded.isModified());
+    std::filesystem::remove(path);
+    std::filesystem::remove(path + ".bak");
+    EXPECT_FALSE(loaded.load("Z:/definitely/not/here.svg"));
+}
+
+// ---- Color conversion and the document color mode ---------------------------------------------
+
+TEST(SketchColorConvert, RgbToCmykAndBackIsExact) {
+    SketchColor rgb = SketchColor::rgb(0.2f, 0.4f, 0.6f, 0.5f);
+    SketchColor cmyk = rgb.convertedTo(ColorSpace::CMYK);
+    EXPECT_EQ(cmyk.space(), ColorSpace::CMYK);
+    EXPECT_NEAR(cmyk.component(3), 0.4f, 1e-5);  // K = 1 - max
+    EXPECT_FLOAT_EQ(cmyk.alpha(), 0.5f);
+    SketchColor back = cmyk.convertedTo(ColorSpace::RGB);
+    EXPECT_NEAR(back.component(0), 0.2f, 1e-5);
+    EXPECT_NEAR(back.component(1), 0.4f, 1e-5);
+    EXPECT_NEAR(back.component(2), 0.6f, 1e-5);
+}
+
+TEST(SketchColorConvert, BlackAndWhiteInCmyk) {
+    SketchColor black = SketchColor::rgb(0, 0, 0).convertedTo(ColorSpace::CMYK);
+    EXPECT_FLOAT_EQ(black.component(3), 1.0f);
+    EXPECT_FLOAT_EQ(black.component(0), 0.0f);
+    SketchColor white = SketchColor::rgb(1, 1, 1).convertedTo(ColorSpace::CMYK);
+    EXPECT_FLOAT_EQ(white.component(3), 0.0f);
+}
+
+TEST(SketchColorConvert, HsbAndGrayRoundTripThroughRgb) {
+    SketchColor red = SketchColor::rgb(1, 0, 0).convertedTo(ColorSpace::HSB);
+    EXPECT_NEAR(red.component(0), 0.0f, 1e-5);
+    EXPECT_NEAR(red.component(1), 1.0f, 1e-5);
+    SketchColor teal = SketchColor::rgb(0.1f, 0.6f, 0.5f);
+    SketchColor back = teal.convertedTo(ColorSpace::HSB).convertedTo(ColorSpace::RGB);
+    EXPECT_NEAR(back.component(0), 0.1f, 1e-4);
+    EXPECT_NEAR(back.component(1), 0.6f, 1e-4);
+    EXPECT_NEAR(back.component(2), 0.5f, 1e-4);
+    EXPECT_NEAR(SketchColor::rgb(0.5f, 0.5f, 0.5f).convertedTo(ColorSpace::Gray).component(0), 0.5f, 1e-5);
+    EXPECT_EQ(SketchColor::gray(0.3f).convertedTo(ColorSpace::Gray), SketchColor::gray(0.3f));
+}
+
+TEST(SketchDocument, ColorModeConversionIsOneUndoStep) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    SketchGradient g;
+    g.stops.push_back({0.0, SketchColor::rgb(1, 0, 0)});
+    g.stops.push_back({1.0, SketchColor::rgb(0, 0, 1)});
+    o.setFill(SketchPaint::linear(g));
+    o.setStroke(SketchPaint::solid(SketchColor::rgb(0.2f, 0.4f, 0.6f)));
+    std::size_t id = o.id();
+    doc.undoStack().clear();
+
+    EXPECT_FALSE(doc.convertToColorMode(ColorSpace::RGB));  // already RGB
+    EXPECT_TRUE(doc.convertToColorMode(ColorSpace::CMYK));
+    EXPECT_EQ(doc.colorMode(), ColorSpace::CMYK);
+    EXPECT_EQ(doc.findById(id)->stroke().color().space(), ColorSpace::CMYK);
+    EXPECT_EQ(doc.findById(id)->fill().gradient().stops[1].color.space(), ColorSpace::CMYK);
+    EXPECT_EQ(doc.defaultFill().color().space(), ColorSpace::CMYK);
+
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.colorMode(), ColorSpace::RGB);
+    EXPECT_EQ(doc.findById(id)->stroke().color().space(), ColorSpace::RGB);
+    EXPECT_EQ(doc.defaultFill().color().space(), ColorSpace::RGB);
+    EXPECT_FALSE(doc.undoStack().canUndo());
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.colorMode(), ColorSpace::CMYK);
+}
+
+TEST(SketchDocument, OnlyRgbAndCmykAreDocumentModes) {
+    SketchDocument doc;
+    EXPECT_THROW(doc.setColorMode(ColorSpace::Gray), std::runtime_error);
+    EXPECT_THROW(doc.convertToColorMode(ColorSpace::HSB), std::runtime_error);
+}
+
+TEST(SketchSvg, ColorModeRoundTrips) {
+    SketchDocument doc;
+    doc.setColorMode(ColorSpace::CMYK);
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_EQ(copy.colorMode(), ColorSpace::CMYK);
+    EXPECT_EQ(copy.defaultFill().color().space(), ColorSpace::CMYK);
+    // A file without the attribute is an RGB document, even when loaded over a CMYK one.
+    ASSERT_TRUE(documentFromSvg("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>", copy));
+    EXPECT_EQ(copy.colorMode(), ColorSpace::RGB);
 }

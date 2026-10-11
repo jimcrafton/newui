@@ -243,10 +243,12 @@
           <div class="row"><label style="min-width:34px">Type</label><span>Linear</span><label style="min-width:auto;margin-left:10px">Spread</label><select class="field"><option>Pad</option><option>Repeat</option><option>Reflect</option></select></div>
           <div class="hint2">Drag the dashed handles on the canvas to move the gradient start/end</div>
         </div>
-        <div class="modes" data-newui="SegmentedControl"><button>Gray</button><button class="on">RGB</button><button>CMYK</button><button>HSB</button></div>
-        <div class="slider"><span style="color:#c0392b">R</span><div class="track" style="--v:91%;background:linear-gradient(90deg,#000,#f00)"></div><input class="field" value="232"></div>
-        <div class="slider"><span style="color:#27ae60">G</span><div class="track" style="--v:27%;background:linear-gradient(90deg,#000,#0f0)"></div><input class="field" value="69"></div>
-        <div class="slider"><span style="color:#2980b9">B</span><div class="track" style="--v:17%;background:linear-gradient(90deg,#000,#00f)"></div><input class="field" value="44"></div>
+        <div class="modes" data-newui="SegmentedControl (color mode of the edited color; follows it, click converts it)"><button>Gray</button><button>RGB</button><button class="on">CMYK</button><button>HSB</button></div>
+        <!-- Five rows: comp0..comp3 + alpha. RGB hides the 4th, Gray shows only K, HSB hides the 4th. Ranges: RGB 0-255, CMYK/Gray %, HSB 0-360/%/% -->
+        <div class="slider"><span style="color:#00a3d9">C</span><div class="track" style="--v:0%;background:linear-gradient(90deg,#fff,#00aeef)"></div><input class="field" value="0"></div>
+        <div class="slider"><span style="color:#d6247d">M</span><div class="track" style="--v:70%;background:linear-gradient(90deg,#fff,#ec008c)"></div><input class="field" value="70"></div>
+        <div class="slider"><span style="color:#c9a800">Y</span><div class="track" style="--v:85%;background:linear-gradient(90deg,#fff,#fff200)"></div><input class="field" value="85"></div>
+        <div class="slider"><span style="color:var(--text-dim)">K</span><div class="track" style="--v:5%;background:linear-gradient(90deg,#fff,#000)"></div><input class="field" value="5"></div>
         <div class="slider"><span style="color:var(--text-dim)">A</span><div class="track" style="--v:100%;background:linear-gradient(90deg,transparent,#e8452c),repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/8px 8px"></div><input class="field" value="100%"></div>
         <div class="row"><label>Hex</label><input class="field" value="#E8452C" style="width:84px"></div>
         <div class="swatches" data-newui="Swatch row (custom)">
@@ -334,7 +336,7 @@
   <div class="flex" data-newui="StatusPane (flex)">Rounded Rectangle selected &mdash; drag to move, handles to resize</div>
   <div style="width:130px" data-newui="StatusPane (130)">x 360.0  y 60.0 pt</div>
   <div style="width:110px" data-newui="StatusPane (110)">W 220  H 110</div>
-  <div style="width:90px" data-newui="StatusPane (90)">RGB doc</div>
+  <div style="width:90px" data-newui="StatusPane (90) - document color mode: RGB or CMYK">CMYK doc</div>
   <div style="width:70px;border-right:0" data-newui="StatusPane (70)">100%</div>
 </div>
 

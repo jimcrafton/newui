@@ -1,7 +1,10 @@
 #include "sketchdocument.h"
+#include "sketchsvg.h"
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -79,50 +82,6 @@ namespace sketch {
         selection_.clear();
         undoStack_.clear();
         updateAllViews();
-    }
-
-    void SketchDocument::buildDemoScene() {
-        clearObjects();
-
-        SketchObject& card = add(SketchObject::makeRoundRect(72, 72, 468, 220, 18));
-        card.setName("Card");
-        card.setFill(SketchPaint::solid(SketchColor::fromHex("#e8f0fe")));
-        card.setStroke(SketchPaint::solid(SketchColor::fromHex("#3b6fd4")));
-        card.setStrokeWidth(2.0);
-
-        SketchObject& sun = add(SketchObject::makeEllipse(200, 180, 60, 60));
-        sun.setName("Sun");
-        sun.setFill(SketchPaint::solid(SketchColor::cmyk(0.0f, 0.25f, 0.95f, 0.0f)));
-        sun.setStroke(SketchPaint::none());
-
-        SketchObject& hill = add(SketchObject::makePolygon({
-            BLPoint(260, 292), BLPoint(380, 150), BLPoint(540, 292) }));
-        hill.setName("Hill");
-        hill.setFill(SketchPaint::solid(SketchColor::hsb(0.36f, 0.6f, 0.55f, 0.85f)));
-        hill.setStroke(SketchPaint::none());
-
-        SketchObject& rule = add(SketchObject::makeLine(72, 330, 540, 330));
-        rule.setName("Rule");
-        rule.setStroke(SketchPaint::solid(SketchColor::gray(0.25f)));
-        rule.setStrokeWidth(3.0);
-
-        SketchObject& zig = add(SketchObject::makePolyline({
-            BLPoint(72, 380), BLPoint(130, 350), BLPoint(190, 410), BLPoint(250, 350), BLPoint(310, 410) }));
-        zig.setName("Zigzag");
-        zig.setStroke(SketchPaint::solid(SketchColor::rgb(0.8f, 0.2f, 0.3f)));
-        zig.setStrokeWidth(4.0);
-
-        BLPath curve;
-        curve.move_to(340, 410);
-        curve.cubic_to(380, 330, 460, 490, 540, 380);
-        curve.line_to(540, 430);
-        curve.line_to(340, 430);
-        curve.close();
-        SketchObject& wave = add(SketchObject::makePath(curve));
-        wave.setName("Wave");
-        wave.setFill(SketchPaint::solid(SketchColor::rgb(0.2f, 0.6f, 0.9f, 0.5f)));
-        wave.setStroke(SketchPaint::solid(SketchColor::rgb(0.1f, 0.3f, 0.6f)));
-        wave.setOpacity(0.9);
     }
 
     void SketchDocument::paint(BLContext& ctx) const {
@@ -546,17 +505,199 @@ namespace sketch {
         }
     }
 
-    bool SketchDocument::readFromFile(const std::string& /*path*/) {
-        return false;
+    bool SketchDocument::readFromFile(const std::string& path) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            return false;
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return documentFromSvg(buffer.str(), *this);
     }
 
-    bool SketchDocument::writeToFile(const std::string& /*path*/) {
-        return false;
+    bool SketchDocument::writeToFile(const std::string& path) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return false;
+        }
+        out << svgFromDocument(*this);
+        return static_cast<bool>(out);
     }
 
     void SketchDocument::changed() {
         markModified();
         updateAllViews();
+        onChanged(*this);
+    }
+
+    // ---- Style ----
+
+    std::vector<StyleState> SketchDocument::snapshotStyle() const {
+        std::vector<StyleState> result;
+        for (std::size_t id : selection_) {
+            if (const SketchObject* object = findById(id)) {
+                result.push_back({id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity()});
+            }
+        }
+        return result;
+    }
+
+    void SketchDocument::setSelectionFill(const SketchPaint& paint) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                object->setFill(paint);
+            }
+        }
+        changed();
+    }
+
+    void SketchDocument::setSelectionStroke(const SketchPaint& paint) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                object->setStroke(paint);
+            }
+        }
+        changed();
+    }
+
+    void SketchDocument::setSelectionStrokeWidth(double width) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                object->setStrokeWidth(width);
+            }
+        }
+        changed();
+    }
+
+    void SketchDocument::setSelectionOpacity(double opacity) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                object->setOpacity(opacity);
+            }
+        }
+        changed();
+    }
+
+    bool SketchDocument::commitStyle(const std::vector<StyleState>& before, const std::string& description) {
+        std::vector<StyleState> after;
+        bool differs = false;
+        for (const StyleState& old : before) {
+            const SketchObject* object = findById(old.id);
+            if (object == nullptr) {
+                continue;
+            }
+            StyleState now{old.id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity()};
+            differs = differs || now.fill != old.fill || now.stroke != old.stroke ||
+                now.strokeWidth != old.strokeWidth || now.opacity != old.opacity;
+            after.push_back(now);
+        }
+        if (!differs) {
+            return false;
+        }
+        auto apply = [this](const std::vector<StyleState>& states) {
+            for (const StyleState& state : states) {
+                if (SketchObject* object = findById(state.id)) {
+                    object->setFill(state.fill);
+                    object->setStroke(state.stroke);
+                    object->setStrokeWidth(state.strokeWidth);
+                    object->setOpacity(state.opacity);
+                }
+            }
+            changed();
+        };
+        undoStack_.push({description,
+            [apply, after]() { apply(after); },
+            [apply, before]() { apply(before); }});
+        return true;
+    }
+
+    namespace {
+        SketchPaint paintInSpace(const SketchPaint& paint, ColorSpace space) {
+            if (paint.isNone()) {
+                return paint;
+            }
+            if (!paint.isGradient()) {
+                return SketchPaint::solid(paint.color().convertedTo(space));
+            }
+            SketchGradient gradient = paint.gradient();
+            for (GradientStop& stop : gradient.stops) {
+                stop.color = stop.color.convertedTo(space);
+            }
+            return paint.kind() == SketchPaint::Kind::Radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient);
+        }
+    }
+
+    void SketchDocument::setColorMode(ColorSpace mode) {
+        if (mode != ColorSpace::RGB && mode != ColorSpace::CMYK) {
+            throw std::runtime_error("SketchDocument::setColorMode: a document is RGB or CMYK");
+        }
+        colorMode_ = mode;
+        defaultFill_ = paintInSpace(defaultFill_, mode);
+        defaultStroke_ = paintInSpace(defaultStroke_, mode);
+        changed();
+    }
+
+    bool SketchDocument::convertToColorMode(ColorSpace mode) {
+        if (mode != ColorSpace::RGB && mode != ColorSpace::CMYK) {
+            throw std::runtime_error("SketchDocument::convertToColorMode: a document is RGB or CMYK");
+        }
+        if (mode == colorMode_) {
+            return false;
+        }
+        // Everything the conversion touches, before and after.
+        struct State {
+            ColorSpace mode;
+            SketchPaint defaultFill, defaultStroke;
+            std::vector<StyleState> styles;
+        };
+        auto capture = [this]() {
+            State state{colorMode_, defaultFill_, defaultStroke_, {}};
+            for (const std::unique_ptr<SketchObject>& object : objects_) {
+                state.styles.push_back({object->id(), object->fill(), object->stroke(), object->strokeWidth(), object->opacity()});
+            }
+            return state;
+        };
+        State before = capture();
+        colorMode_ = mode;
+        defaultFill_ = paintInSpace(defaultFill_, mode);
+        defaultStroke_ = paintInSpace(defaultStroke_, mode);
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            object->setFill(paintInSpace(object->fill(), mode));
+            object->setStroke(paintInSpace(object->stroke(), mode));
+        }
+        State after = capture();
+        auto apply = [this](const State& state) {
+            colorMode_ = state.mode;
+            defaultFill_ = state.defaultFill;
+            defaultStroke_ = state.defaultStroke;
+            for (const StyleState& style : state.styles) {
+                if (SketchObject* object = findById(style.id)) {
+                    object->setFill(style.fill);
+                    object->setStroke(style.stroke);
+                }
+            }
+            changed();
+        };
+        undoStack_.push({mode == ColorSpace::CMYK ? "Convert to CMYK" : "Convert to RGB",
+            [apply, after]() { apply(after); },
+            [apply, before]() { apply(before); }});
+        changed();
+        return true;
+    }
+
+    void SketchDocument::setDefaultFill(const SketchPaint& paint) {
+        defaultFill_ = paint;
+        onChanged(*this);
+    }
+
+    void SketchDocument::setDefaultStroke(const SketchPaint& paint) {
+        defaultStroke_ = paint;
+        onChanged(*this);
+    }
+
+    void SketchDocument::setDefaultStrokeWidth(double width) {
+        defaultStrokeWidth_ = width < 0.0 ? 0.0 : width;
+        onChanged(*this);
     }
 
 }

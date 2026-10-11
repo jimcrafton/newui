@@ -467,6 +467,8 @@ namespace sketch {
                     }
                     SketchObject* line = SketchObject::makeLine(a.x, a.y, b.x, b.y);
                     line->setName("Line");
+                    line->setStroke(document_->defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : document_->defaultStroke());
+                    line->setStrokeWidth(document_->defaultStrokeWidth());
                     document_->addUndoable(line, "Draw Line");
                     break;
                 }
@@ -483,9 +485,9 @@ namespace sketch {
                     ? SketchObject::makeEllipse(box.x0 + bw * 0.5, box.y0 + bh * 0.5, bw * 0.5, bh * 0.5)
                     : SketchObject::makeRect(box.x0, box.y0, bw, bh);
                 shape->setName(tool_ == SketchTool::Ellipse ? "Ellipse" : "Rectangle");
-                shape->setFill(SketchPaint::solid(SketchColor::fromHex("#d9e6ff")));
-                shape->setStroke(SketchPaint::solid(SketchColor::fromHex("#2f5fb3")));
-                shape->setStrokeWidth(1.5);
+                shape->setFill(document_->defaultFill());
+                shape->setStroke(document_->defaultStroke());
+                shape->setStrokeWidth(document_->defaultStrokeWidth());
                 document_->addUndoable(shape, tool_ == SketchTool::Ellipse ? "Draw Ellipse" : "Draw Rectangle");
                 break;
             }
@@ -526,6 +528,9 @@ namespace sketch {
         }
         bool ctrl = (keyMask & kmCtrl) != 0;
         bool shift = (keyMask & kmShift) != 0;
+        if (ctrl && onControlKey && onControlKey(vkCode, shift)) {
+            return SyncReturn::Handled;
+        }
         if (ctrl && vkCode == vkLetterZ) {
             document_->undoStack().undo();
             return SyncReturn::Handled;

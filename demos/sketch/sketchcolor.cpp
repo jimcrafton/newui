@@ -1,5 +1,6 @@
 #include "sketchcolor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -94,10 +95,8 @@ namespace sketch {
         alpha_ = clamp01(alpha);
     }
 
-    BLRgba32 SketchColor::toRgba32() const {
-        float r = 0.0f;
-        float g = 0.0f;
-        float b = 0.0f;
+    void SketchColor::toRgb(float& r, float& g, float& b) const {
+        r = g = b = 0.0f;
         switch (space_) {
         case ColorSpace::RGB:
             r = c_[0];
@@ -132,6 +131,54 @@ namespace sketch {
             break;
         }
         }
+    }
+
+    SketchColor SketchColor::convertedTo(ColorSpace space) const {
+        if (space == space_) {
+            return *this;
+        }
+        float r, g, b;
+        toRgb(r, g, b);
+        switch (space) {
+        case ColorSpace::RGB:
+            return rgb(r, g, b, alpha_);
+        case ColorSpace::Gray:
+            return gray(0.299f * r + 0.587f * g + 0.114f * b, alpha_);
+        case ColorSpace::CMYK: {
+            float k = 1.0f - std::max(r, std::max(g, b));
+            if (k >= 1.0f) {
+                return cmyk(0.0f, 0.0f, 0.0f, 1.0f, alpha_);
+            }
+            float inv = 1.0f - k;
+            return cmyk((inv - r) / inv, (inv - g) / inv, (inv - b) / inv, k, alpha_);
+        }
+        case ColorSpace::HSB:
+        default: {
+            float hi = std::max(r, std::max(g, b));
+            float lo = std::min(r, std::min(g, b));
+            float delta = hi - lo;
+            float h = 0.0f;
+            if (delta > 1e-6f) {
+                if (hi == r) {
+                    h = std::fmod((g - b) / delta, 6.0f);
+                } else if (hi == g) {
+                    h = (b - r) / delta + 2.0f;
+                } else {
+                    h = (r - g) / delta + 4.0f;
+                }
+                h /= 6.0f;
+                if (h < 0.0f) {
+                    h += 1.0f;
+                }
+            }
+            return hsb(h, hi > 1e-6f ? delta / hi : 0.0f, hi, alpha_);
+        }
+        }
+    }
+
+    BLRgba32 SketchColor::toRgba32() const {
+        float r, g, b;
+        toRgb(r, g, b);
         return BLRgba32(toByte(r), toByte(g), toByte(b), toByte(alpha_));
     }
 

@@ -195,41 +195,114 @@ namespace newui
             return true;
         }
 
-        UnsavedChangesChoice choice = UnsavedChangesChoice::Cancel;
-        if (unsavedChangesHandler_) {
-            choice = unsavedChangesHandler_(document);
-        } else {
-            DialogResult result = Dialog::showMessageBox(::GetActiveWindow(),
-                "Save changes to " + displayNameFor(document) + "?", "Unsaved changes",
-                MessageBoxButtons::YesNoCancel, MessageBoxIcon::Warning);
-            choice = result == DialogResult::Yes ? UnsavedChangesChoice::Save
-                : result == DialogResult::No ? UnsavedChangesChoice::Discard
-                : UnsavedChangesChoice::Cancel;
-        }
+        UnsavedChangesChoice choice = askUnsavedChanges(document);
 
         switch (choice) {
             case UnsavedChangesChoice::Discard:
                 return true;
-            case UnsavedChangesChoice::Save: {
-                std::string path;
-                if (!document.hasFilePath()) {
-                    if (savePathProvider_) {
-                        path = savePathProvider_(document);
-                    } else {
-                        FileDialogOptions options;
-                        options.title = "Save As";
-                        Dialog::showSaveFile(::GetActiveWindow(), options, path);
-                    }
-                    if (path.empty()) {
-                        return false;  // Save As cancelled
-                    }
-                }
-                return document.save(path);
-            }
+            case UnsavedChangesChoice::Save:
+                return saveDocument(document);
             case UnsavedChangesChoice::Cancel:
             default:
                 return false;
         }
+    }
+
+    UnsavedChangesChoice DocumentController::askUnsavedChanges(Document& document) {
+        if (unsavedChangesHandler_) {
+            return unsavedChangesHandler_(document);
+        }
+        DialogResult result = Dialog::showMessageBox(::GetActiveWindow(),
+            "Save changes to " + displayNameFor(document) + "?", "Unsaved changes",
+            MessageBoxButtons::YesNoCancel, MessageBoxIcon::Warning);
+        return result == DialogResult::Yes ? UnsavedChangesChoice::Save
+            : result == DialogResult::No ? UnsavedChangesChoice::Discard
+            : UnsavedChangesChoice::Cancel;
+    }
+
+    std::string DocumentController::chooseSavePath(Document& document) {
+        if (savePathProvider_) {
+            return savePathProvider_(document);
+        }
+        std::string path;
+        FileDialogOptions options;
+        options.title = "Save As";
+        Dialog::showSaveFile(::GetActiveWindow(), options, path);
+        return path;
+    }
+
+    std::string DocumentController::chooseOpenPath() {
+        if (openPathProvider_) {
+            return openPathProvider_();
+        }
+        std::string path;
+        FileDialogOptions options;
+        options.title = "Open";
+        Dialog::showOpenFile(::GetActiveWindow(), options, path);
+        return path;
+    }
+
+    void DocumentController::reportError(const std::string& message) {
+        if (errorHandler_) {
+            errorHandler_(message);
+        } else {
+            Dialog::showMessageBox(::GetActiveWindow(), message, "Error", MessageBoxButtons::Ok, MessageBoxIcon::Error);
+        }
+    }
+
+    bool DocumentController::saveDocument(Document& document) {
+        if (!document.hasFilePath()) {
+            return saveDocumentAs(document);
+        }
+        if (!document.save()) {
+            std::string message = "Could not save " + document.filePath();
+            reportError(message);
+            return false;
+        }
+        return true;
+    }
+
+    bool DocumentController::saveDocumentAs(Document& document) {
+        std::string path = chooseSavePath(document);
+        if (path.empty()) {
+            return false;  // Save As cancelled
+        }
+        if (!document.save(path)) {
+            std::string message = "Could not save " + path;
+            reportError(message);
+            return false;
+        }
+        return true;
+    }
+
+    bool DocumentController::openInto(Document& document, const std::string& path) {
+        if (!confirmDiscardChanges(document)) {
+            return false;
+        }
+        std::string target = path;
+        if (target.empty()) {
+            target = chooseOpenPath();
+            if (target.empty()) {
+                return false;
+            }
+        }
+        if (!document.load(target)) {
+            std::string message = "Could not open " + target;
+            reportError(message);
+            return false;
+        }
+        return true;
+    }
+
+    bool DocumentController::newInto(Document& document, const std::function<void()>& clearContent) {
+        if (!confirmDiscardChanges(document)) {
+            return false;
+        }
+        if (clearContent) {
+            clearContent();
+        }
+        document.reset();
+        return true;
     }
 
     bool DocumentController::closeDocumentWithPrompt(Document* document) {

@@ -40,8 +40,8 @@
                 name: "categoryControl",
                 desiredSize: { type: "Size", width: 0, height: 28 },
                 desiredSizeOverride: true,
-                selectedIndex: 0,
-                segments: ["Print", "Web", "Mobile", "Art"]
+                segments: ["Print", "Web", "Mobile", "Art"],
+                selectedIndex: 0
               },
               {
                 type: "ListView",
@@ -257,8 +257,8 @@
                     name: "colorModeControl",
                     desiredSize: { type: "Size", width: 160, height: 26 },
                     desiredSizeOverride: true,
-                    selectedIndex: 1,
-                    segments: ["RGB", "CMYK"]
+                    segments: ["RGB", "CMYK"],
+                    selectedIndex: 1
                   }
                 ]
               },

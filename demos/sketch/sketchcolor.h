@@ -31,6 +31,14 @@ namespace sketch {
         float alpha() const { return alpha_; }
         void setAlpha(float alpha);
 
+        // The same color expressed in `space` (alpha kept). Conversions go through RGB with the naive CMYK
+        // formula (no ICC profiles), so RGB -> CMYK -> RGB is exact but CMYK -> RGB -> CMYK normalizes
+        // to full black generation (the K a CMYK color had is not remembered). Gray is luminance
+        // (0.299/0.587/0.114); converting gray to anything else keeps it neutral.
+        SketchColor convertedTo(ColorSpace space) const;
+        // The color's red/green/blue, 0..1.
+        void toRgb(float& r, float& g, float& b) const;
+
         // Display color, alpha included.
         BLRgba32 toRgba32() const;
         // Display color as "#rrggbb" (alpha excluded - SVG carries it as fill-opacity).

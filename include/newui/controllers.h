@@ -246,6 +246,37 @@ namespace newui {
         void setUnsavedChangesHandler(UnsavedChangesHandler handler) { unsavedChangesHandler_ = std::move(handler); }
         void setSavePathProvider(SavePathProvider provider) { savePathProvider_ = std::move(provider); }
 
+        // Returns the path to open, or "" if the user cancelled. Default: the native Open dialog.
+        typedef std::function<std::string()> OpenPathProvider;
+        void setOpenPathProvider(OpenPathProvider provider) { openPathProvider_ = std::move(provider); }
+        // Told when a load/save fails (message is already worded, e.g. "Could not save C:\x.svg").
+        // Default: an error message box.
+        typedef std::function<void(const std::string& message)> ErrorHandler;
+        void setErrorHandler(ErrorHandler handler) { errorHandler_ = std::move(handler); }
+
+        // The UI hooks the commands below go through. Defaults use the handlers set above, else the native
+        // dialogs / message boxes; a derived controller overrides them to supply its own file filters, owner
+        // window and error reporting.
+        virtual UnsavedChangesChoice askUnsavedChanges(Document& document);
+        virtual std::string chooseSavePath(Document& document);  // "" = cancelled
+        virtual std::string chooseOpenPath();                    // "" = cancelled
+        virtual void reportError(const std::string& message);
+
+        // ---- File commands on one Document (single-document apps keep reusing theirs; none of these
+        // touch documents() - they work on a Document that was never addDocument()'d too) ----
+
+        // Save: writes to filePath(), or goes to saveDocumentAs() when the document has none yet.
+        // False on cancel or failure (failures are reported through the error handler).
+        bool saveDocument(Document& document);
+        // Save As: asks for a path (SavePathProvider) and saves there.
+        bool saveDocumentAs(Document& document);
+        // Open: confirmDiscardChanges(), then asks for a path (OpenPathProvider) unless `path` is given and
+        // loads it into the document. False on cancel/failure; on a failed load the document keeps its content.
+        bool openInto(Document& document, const std::string& path = std::string());
+        // New: confirmDiscardChanges(), then clearContent() (the caller empties its own data) and
+        // Document::reset(). False if the user cancelled.
+        bool newInto(Document& document, const std::function<void()>& clearContent);
+
         // True if it's fine to proceed with throwing document's current state away: it isn't
         // modified, or the user chose Discard, or chose Save and the save succeeded. False if the
         // user cancelled, cancelled the Save As picker, or the save failed (the document is left
@@ -317,6 +348,8 @@ namespace newui {
         Document* activeDocument_ = nullptr;
         UnsavedChangesHandler unsavedChangesHandler_;
         SavePathProvider savePathProvider_;
+        OpenPathProvider openPathProvider_;
+        ErrorHandler errorHandler_;
     };
 
     // Owns/recycles Item instances (items.h) for a widget walking a

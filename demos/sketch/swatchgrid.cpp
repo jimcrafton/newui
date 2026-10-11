@@ -1,9 +1,11 @@
 #include "swatchgrid.h"
 
 #include <newui/color.h>
+#include <newui/mouse_constants.h>
 #include <newui/uicolormanager.h>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace sketch {
@@ -14,6 +16,31 @@ namespace sketch {
         setName("SwatchGrid");
         setVisible(true);
         selectedIndex_ = 0;
+        onMouseDown.add(this, &SwatchGrid::handleMouseDown);
+    }
+
+    SyncReturn SwatchGrid::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t buttons, std::uint32_t /*keys*/) {
+        if ((buttons & mbmLeftButton) == 0 || swatches_.empty()) {
+            return SyncReturn::Ignored;
+        }
+        Rect client = getClientBounds();
+        double tile = (double(client.width()) - double(gap_) * double(columns_ - 1)) / double(columns_);
+        if (tile < 2.0) {
+            return SyncReturn::Ignored;
+        }
+        double stride = tile + double(gap_);
+        double col = std::floor((double(pt.x) - client.left()) / stride);
+        double row = std::floor((double(pt.y) - client.top()) / stride);
+        if (col < 0 || row < 0 || col >= double(columns_)) {
+            return SyncReturn::Ignored;
+        }
+        std::size_t index = std::size_t(row) * columns_ + std::size_t(col);
+        if (index >= swatches_.size()) {
+            return SyncReturn::Ignored;
+        }
+        setSelectedIndex(index);
+        onSwatchPicked(*this);
+        return SyncReturn::Handled;
     }
 
     void SwatchGrid::addSwatch(const std::string& color) {

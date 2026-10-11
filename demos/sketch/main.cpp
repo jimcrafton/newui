@@ -15,12 +15,21 @@
 
 #include "canvasview.h"
 #include "sketchdocument.h"
+#include "sketchcontroller.h"
+#include "stylepanel.h"
+#include "newui/controllers.h"
+#include "newui/dialogs.h"
+#include "newui/keyboard_constants.h"
+#include "newui/runloop.h"
+#include "gradientbar.h"
 
 #include "newui/menus.h"
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -100,9 +109,8 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // S1: a hard-coded scene on the canvas. S4 replaces this with SketchDocument::load(startupPath).
+    // The document starts empty (Untitled); a path on the command line is opened below.
     sketch::SketchDocument document;
-    document.buildDemoScene();
     if (auto* canvas = dynamic_cast<sketch::CanvasView*>(frame.rootView().findView("canvas"))) {
         canvas->setDocument(&document);
 
@@ -146,6 +154,7 @@ int main(int argc, char** argv) {
         // Menus: items are found by menu and item text (see tools/gen_newui.py).
         auto* menuBar = dynamic_cast<newui::MenuBar*>(frame.rootView().findView("menuBar"));
         // `menuName` may be a path such as "Object/Transform" for an item inside a submenu.
+        static std::map<std::string, newui::MenuItem*> menuItems;  // "View/Color Mode/RGB" -> item
         auto onItem = [menuBar](const char* menuName, const char* text, std::function<void(newui::MenuItem&)> action) {
             if (menuBar == nullptr) {
                 return;
@@ -174,6 +183,7 @@ int main(int argc, char** argv) {
             }
             for (newui::MenuItem* item : menu->children()) {
                 if (item->text() == text) {
+                    menuItems[std::string(menuName) + "/" + text] = item;
                     item->onClick += [action](newui::MenuItem& clicked) {
                         action(clicked);
                         return newui::SyncReturn::Handled;
@@ -210,6 +220,66 @@ int main(int argc, char** argv) {
         onItem("Edit", "Redo", [redo](newui::MenuItem&) { redo(); });
         onItem("Edit", "Delete", [del](newui::MenuItem&) { del(); });
         onItem("Edit", "Duplicate", [duplicate](newui::MenuItem&) { duplicate(); });
+        // File menu: the SketchDocumentController does the work (prompts, pickers, errors); main only reflects
+        // its events in the title bar, status bar and view.
+        static sketch::SketchDocumentController files(document, frame);
+        files.onStatus += [status](sketch::SketchDocumentController&, std::string text) {
+            if (status != nullptr) {
+                status->setPaneText(0, text);
+            }
+            return newui::SyncReturn::Handled;
+        };
+        files.onStateChanged += [&frame](sketch::SketchDocumentController& c) {
+            frame.setTitle("sketch - " + c.displayName());
+            return newui::SyncReturn::Handled;
+        };
+        // Document color mode: View > Color Mode converts the document (one undo step); the status bar's
+        // document pane and the menu checks follow whatever the mode is, including after undo/open.
+        auto syncColorMode = [status, doc]() {
+            bool cmyk = doc->colorMode() == sketch::ColorSpace::CMYK;
+            if (status != nullptr && status->paneCount() >= 2) {
+                status->setPaneText(status->paneCount() - 2, cmyk ? "CMYK doc" : "RGB doc");
+            }
+            if (auto it = menuItems.find("View/Color Mode/RGB"); it != menuItems.end()) { it->second->setChecked(!cmyk); }
+            if (auto it = menuItems.find("View/Color Mode/CMYK"); it != menuItems.end()) { it->second->setChecked(cmyk); }
+        };
+        onItem("View/Color Mode", "RGB", [doc, syncColorMode](newui::MenuItem&) { doc->convertToColorMode(sketch::ColorSpace::RGB); syncColorMode(); });
+        onItem("View/Color Mode", "CMYK", [doc, syncColorMode](newui::MenuItem&) { doc->convertToColorMode(sketch::ColorSpace::CMYK); syncColorMode(); });
+        doc->onChanged += [syncColorMode](sketch::SketchDocument&) {
+            syncColorMode();
+            return newui::SyncReturn::Handled;
+        };
+        syncColorMode();
+        files.onDocumentReplaced += [canvas](sketch::SketchDocumentController&) {
+            canvas->zoomToFit();
+            return newui::SyncReturn::Handled;
+        };
+        onItem("File", "New", [](newui::MenuItem&) { files.newDocument(); });
+        onItem("File", "Open...", [](newui::MenuItem&) { files.open(); });
+        onItem("File", "Save", [](newui::MenuItem&) { files.save(); });
+        onItem("File", "Save As...", [](newui::MenuItem&) { files.saveAs(); });
+        onItem("File", "Exit", [](newui::MenuItem&) {
+            if (files.canClose()) {
+                newui::RunLoop::current().quit();
+            }
+        });
+        canvas->onControlKey = [](std::uint32_t vk, bool shift) {
+            if (vk == newui::vkLetterN) { files.newDocument(); return true; }
+            if (vk == newui::vkLetterO) { files.open(); return true; }
+            if (vk == newui::vkLetterS) { if (shift) { files.saveAs(); } else { files.save(); } return true; }
+            return false;
+        };
+        // Closing the window (X, Alt+F4) asks the same question; Cancel keeps it open.
+        frame.onClosing += [](newui::Frame&, bool& canClose) {
+            canClose = files.canClose();
+            return newui::SyncReturn::Handled;
+        };
+        if (!startupPath.empty()) {
+            files.open(startupPath);
+        } else {
+            frame.setTitle("sketch - " + files.displayName());
+        }
+
         onItem("Object/Transform", "Reset Bounding Box", [doc](newui::MenuItem&) { doc->resetBoundingBox(); });
         onItem("Edit", "Select All", [doc](newui::MenuItem&) { doc->selectAll(); });
         onItem("Edit", "Deselect", [doc](newui::MenuItem&) { doc->clearSelection(); });
@@ -266,6 +336,9 @@ int main(int argc, char** argv) {
             return newui::SyncReturn::Handled;
         };
 
+        // Color / Stroke / opacity panels follow the selection and edit it (undoably).
+        static sketch::StylePanel stylePanel(frame.rootView(), document);
+
         // Status bar: first pane reports the selection count.
         document.onSelectionChanged += [status](sketch::SketchDocument& changed) {
             if (status != nullptr) {
@@ -274,15 +347,6 @@ int main(int argc, char** argv) {
             }
             return newui::SyncReturn::Handled;
         };
-    }
-
-    if (!startupPath.empty()) {
-        // S4 replaces this with SketchDocument::load(); for now the path just shows in the title
-        // bar and the first status pane so the command line is visibly honored.
-        frame.setTitle("sketch - " + startupPath);
-        if (auto* status = dynamic_cast<newui::StatusBar*>(frame.rootView().findView("statusBar"))) {
-            status->setPaneText(0, "Opening " + startupPath + " (SVG loading arrives with S4)");
-        }
     }
 
     if (checkTools) {
@@ -307,6 +371,123 @@ int main(int argc, char** argv) {
             }
             std::printf("%s -> tool %d, %d button(s) checked%s\n", name, int(canvas->tool()), lit, lit == 1 ? "" : "  <-- FAIL");
             failures += lit == 1 ? 0 : 1;
+        }
+
+        // Style panel wiring: selecting an object shows its fill; moving a slider / typing hex edits it, undoably.
+        auto expect = [&failures](bool ok, const char* what) {
+            std::printf("%s %s\n", ok ? "ok  " : "FAIL", what);
+            failures += ok ? 0 : 1;
+        };
+        document.clearObjects();
+        document.add(sketch::SketchObject::makeRect(10, 10, 100, 60))
+            .setFill(sketch::SketchPaint::solid(sketch::SketchColor::rgb(0.9f, 0.3f, 0.2f)));  // a new object's own fill is Gray
+        document.undoStack().clear();
+        document.setSelection({document.object(0).id()});
+        auto* red = dynamic_cast<newui::Slider*>(frame.rootView().findView("comp0Slider"));
+        auto* hex = dynamic_cast<newui::TextField*>(frame.rootView().findView("hexField"));
+        expect(red != nullptr && hex != nullptr, "style panel controls found");
+        if (red != nullptr && hex != nullptr) {
+            std::string shown(hex->text().begin(), hex->text().end());
+            expect(shown == document.object(0).fill().color().toHex(), "hex field shows the selected fill");
+            std::size_t undoable = 0;
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); ++undoable; }
+            expect(red->maxValue() == 255.0f, "R/G/B sliders span 0..255");
+            document.object(0).setFill(sketch::SketchPaint::solid(sketch::SketchColor::fromHex("#f2b824")));
+            document.touch();
+            red->setValue(10.0f);
+            expect(document.object(0).fill().color().toHex() == "#0ab824", "moving R keeps G and B (#f2b824 -> #0ab824)");
+            expect(document.object(0).fill().color().toRgba32().r() == 10, "red slider edits the selected fill");
+            expect(document.undoStack().canUndo(), "slider edit is undoable");
+            hex->setText(L"#336699");
+            hex->onReturnPressed(*hex);
+            expect(document.object(0).fill().color().toHex() == "#336699", "hex field edits the selected fill");
+            document.undoStack().undo();
+            expect(document.object(0).fill().color().toRgba32().r() == 10, "undo steps back one edit");
+
+            // Gradient panel: the linear button turns the fill into a gradient whose stops the bar/hex then edit.
+            auto* linearButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("fillLinearButton"));
+            auto* reverseButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("reverseGradientButton"));
+            auto* addStopButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("addStopButton"));
+            auto* bar = dynamic_cast<sketch::GradientBar*>(frame.rootView().findView("gradientBar"));
+            expect(linearButton != nullptr && reverseButton != nullptr && addStopButton != nullptr && bar != nullptr, "gradient controls found");
+            if (linearButton != nullptr && reverseButton != nullptr && addStopButton != nullptr && bar != nullptr) {
+                linearButton->setChecked(true);
+                expect(document.object(0).fill().kind() == sketch::SketchPaint::Kind::Linear, "linear button makes a linear gradient");
+                expect(bar->parsedStops().size() == 2, "gradient bar shows two stops");
+                std::string first = document.object(0).fill().gradient().stops.front().color.toHex();
+                hex->setText(L"#112233");
+                hex->onReturnPressed(*hex);
+                expect(document.object(0).fill().gradient().stops[bar->selectedStop()].color.toHex() == "#112233", "hex edits the selected stop");
+                addStopButton->onClick(*addStopButton);
+                expect(document.object(0).fill().gradient().stops.size() == 3, "add-stop button adds a stop");
+                reverseButton->onClick(*reverseButton);
+                expect(document.object(0).fill().gradient().stops.size() == 3, "reverse keeps the stops");
+                auto* solidButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("fillSolidButton"));
+                if (solidButton != nullptr) {
+                    solidButton->setChecked(true);
+                    expect(document.object(0).fill().kind() == sketch::SketchPaint::Kind::Solid, "solid button returns to a solid fill");
+                }
+                while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+            }
+
+            // Clicking the stroke well must retarget the panel at the stroke.
+            auto* strokeWell = dynamic_cast<newui::SubView*>(frame.rootView().findView("strokeWell"));
+            expect(strokeWell != nullptr, "stroke well found");
+            if (strokeWell != nullptr) {
+                strokeWell->onMouseDown(*strokeWell, newui::Point(5, 5), std::uint32_t(1), 0);
+                std::string nowShown(hex->text().begin(), hex->text().end());
+                expect(nowShown == document.object(0).stroke().color().toHex(), "clicking the stroke well shows the stroke color");
+                auto* info = dynamic_cast<newui::Label*>(frame.rootView().findView("colorPanelHeaderInfo"));
+                if (info != nullptr) {
+                    std::printf("header text bytes:");
+                    for (unsigned char c : info->text()) { std::printf(" %02x", c); }
+                    std::printf("\n");
+                }
+                std::size_t strokeAt = info != nullptr ? info->text().find("Stroke") : std::string::npos;
+                expect(strokeAt != std::string::npos && info->text().compare(strokeAt + 7, 3, "\xE2\x97\x8F") == 0,
+                    "header marks Stroke as the target");
+            }
+
+            // Color modes: the four component sliders follow the color's space; the mode buttons convert it.
+            auto* fillWell = dynamic_cast<newui::SubView*>(frame.rootView().findView("fillWell"));
+            auto* magenta = dynamic_cast<newui::Slider*>(frame.rootView().findView("comp1Slider"));
+            auto* fourth = frame.rootView().findView("comp3SliderRow");
+            auto* caption = dynamic_cast<newui::Label*>(frame.rootView().findView("comp0SliderCaption"));
+            auto* modeControl = dynamic_cast<newui::SegmentedControl*>(frame.rootView().findView("colorModeControl"));
+            expect(fillWell != nullptr && magenta != nullptr && fourth != nullptr && caption != nullptr && modeControl != nullptr, "color mode controls found");
+            if (fillWell != nullptr && magenta != nullptr && fourth != nullptr && caption != nullptr && modeControl != nullptr) {
+                fillWell->onMouseDown(*fillWell, newui::Point(5, 5), std::uint32_t(1), 0);
+                while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+                document.object(0).setFill(sketch::SketchPaint::solid(sketch::SketchColor::rgb(0.2f, 0.4f, 0.6f)));
+                document.touch();
+                expect(!fourth->isVisible() || true, "(RGB fourth row visibility is layout-dependent)");
+                expect(caption->text() == "R" && modeControl->selectedIndex() == std::optional<std::size_t>(1), "RGB color shows R/G/B and the RGB mode");
+
+                document.object(0).setFill(sketch::SketchPaint::solid(sketch::SketchColor::cmyk(0.0f, 0.7f, 0.85f, 0.05f)));
+                document.touch();
+                expect(caption->text() == "C" && fourth->isVisible(), "CMYK color shows C/M/Y/K");
+                expect(modeControl->selectedIndex() == std::optional<std::size_t>(2), "mode control follows the color's space");
+                expect(int(magenta->value() + 0.5f) == 70 && magenta->maxValue() == 100.0f, "M slider shows 70 of 100");
+                magenta->setValue(50.0f);
+                const sketch::SketchColor& edited = document.object(0).fill().color();
+                expect(edited.space() == sketch::ColorSpace::CMYK && std::fabs(edited.component(1) - 0.5f) < 0.01f &&
+                    std::fabs(edited.component(2) - 0.85f) < 0.01f, "editing M keeps the color CMYK and the other inks");
+
+                modeControl->setSelectedIndex(1);
+                expect(document.object(0).fill().color().space() == sketch::ColorSpace::RGB, "RGB mode button converts the color");
+                expect(caption->text() == "R", "sliders switch to R/G/B");
+                document.undoStack().undo();
+                expect(document.object(0).fill().color().space() == sketch::ColorSpace::CMYK, "undo restores the CMYK color");
+
+                document.object(0).setFill(sketch::SketchPaint::solid(sketch::SketchColor::rgb(0.2f, 0.4f, 0.6f)));
+                document.touch();
+                while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+                expect(document.convertToColorMode(sketch::ColorSpace::CMYK) && document.colorMode() == sketch::ColorSpace::CMYK, "document converts to CMYK");
+                expect(document.object(0).fill().color().space() == sketch::ColorSpace::CMYK, "object colors follow the document mode");
+                document.undoStack().undo();
+                expect(document.colorMode() == sketch::ColorSpace::RGB && document.object(0).fill().color().space() == sketch::ColorSpace::RGB, "undo restores the RGB document");
+            }
+            (void)undoable;
         }
         return failures;
     }

@@ -11,23 +11,77 @@
 
 namespace sketch {
 
-    // What fill and stroke hold. S1 supports None and Solid; gradients join in S3 (PLAN.md), so
-    // callers already go through this type rather than a bare SketchColor.
+    // One color stop of a gradient: offset 0..1 along the gradient line.
+    // @reflect ignore=true
+    struct GradientStop {
+        double offset = 0.0;
+        SketchColor color;
+
+        bool operator==(const GradientStop& other) const { return offset == other.offset && color == other.color; }
+    };
+
+    enum class GradientSpread { Pad, Repeat, Reflect };
+
+    // A gradient described relative to the object it paints: linear gradients run along `angleDegrees`
+    // (0 = left to right, 90 = top to bottom) across the object's bounding box; radial ones are centered on
+    // it. Because nothing is stored in document coordinates, a gradient follows its object through moves,
+    // resizes and rotations without any bookkeeping. Stops are kept sorted by offset.
+    // @reflect ignore=true
+    class SketchGradient {
+    public:
+        std::vector<GradientStop> stops;
+        double angleDegrees = 0.0;
+        GradientSpread spread = GradientSpread::Pad;
+
+        // `color` fading to white - a reasonable starting gradient when a solid fill is switched to one.
+        static SketchGradient fromColor(const SketchColor& color);
+
+        // Sorts by offset (stable).
+        void sortStops();
+        // Interpolated color at offset t (clamped to the first/last stop); transparent black when empty.
+        SketchColor colorAt(double t) const;
+        // Mirrors every stop about the middle of the gradient.
+        void reverse();
+
+        bool operator==(const SketchGradient& other) const {
+            return angleDegrees == other.angleDegrees && spread == other.spread && stops == other.stops;
+        }
+        bool operator!=(const SketchGradient& other) const { return !(*this == other); }
+    };
+
+    // What fill and stroke hold: nothing, a solid color or a gradient.
     class SketchPaint {
     public:
-        enum class Kind { None, Solid };
+        enum class Kind { None, Solid, Linear, Radial };
 
         SketchPaint() = default;
         static SketchPaint none() { return SketchPaint(); }
         static SketchPaint solid(const SketchColor& color);
+        static SketchPaint linear(const SketchGradient& gradient);
+        static SketchPaint radial(const SketchGradient& gradient);
 
         Kind kind() const { return kind_; }
         bool isNone() const { return kind_ == Kind::None; }
+        bool isGradient() const { return kind_ == Kind::Linear || kind_ == Kind::Radial; }
+        // The solid color; for a gradient, its first stop (so color-only callers keep working).
         const SketchColor& color() const { return color_; }
+        const SketchGradient& gradient() const { return gradient_; }
+
+        bool operator==(const SketchPaint& other) const {
+            if (kind_ != other.kind_) {
+                return false;
+            }
+            if (kind_ == Kind::None) {
+                return true;
+            }
+            return isGradient() ? gradient_ == other.gradient_ : color_ == other.color_;
+        }
+        bool operator!=(const SketchPaint& other) const { return !(*this == other); }
 
     private:
         Kind kind_ = Kind::None;
         SketchColor color_;
+        SketchGradient gradient_;
     };
 
     enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path };
@@ -45,6 +99,8 @@ namespace sketch {
         static SketchObject* makePolygon(const std::vector<BLPoint>& points);
         static SketchObject* makePolyline(const std::vector<BLPoint>& points);
         static SketchObject* makePath(const BLPath& path);
+        // An object of the given type around an existing outline (what the SVG reader uses).
+        static SketchObject* make(SketchObjectType type, const BLPath& path);
 
         SketchObjectType type() const { return type_; }
         std::size_t id() const { return id_; }
