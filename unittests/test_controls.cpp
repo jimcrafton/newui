@@ -4,6 +4,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <typeinfo>
+#include <vector>
+
 // ScrollBar/ScrollView's pure logic (range/value/pageSize clamping,
 // region-driven click behavior) is fully headless-testable via direct
 // onMouseDown()/onMouseMove()/onMouseUp() invocation, same
@@ -362,6 +366,327 @@ TEST(Stepper, ClickOutsideBoundsIsIgnored) {
 }
 
 // ---------------------------------------------------------------------
+// GroupBox - a bordered frame with a caption straddling the top border,
+// drawn by paint() itself on top of style()'s own chrome (ThemedGroupBoxStyle
+// by default) - same "chrome vs. content" split as Button's own text.
+// ---------------------------------------------------------------------
+
+TEST(GroupBox, DefaultConstructedIsVisibleWithThemedGroupBoxStyle) {
+    auto* box = new GroupBox();
+
+    EXPECT_TRUE(box->isVisible());
+    EXPECT_TRUE(box->text().empty());
+    EXPECT_NE(dynamic_cast<ThemedGroupBoxStyle*>(&box->style()), nullptr);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, DefaultConstructedHasAResolvableFontForItsOwnCaption) {
+    // A real, live-caught bug this guards against: GroupBox::Groupbox()
+    // originally never called setFont() on its own style, the same gap
+    // Button::Button()'s own comment documents - paint() (controls.cpp)
+    // silently skips drawing the caption with an unresolved font, so the
+    // caption never appeared at all despite text()/textColor_ both being
+    // set correctly. Caught live via a temporary debug print, not by any
+    // existing test - this one exists so it can't regress silently again.
+    auto* box = new GroupBox();
+
+    BLFont* blFont = box->style().font().blFont();
+    ASSERT_NE(blFont, nullptr);
+    EXPECT_TRUE(blFont->is_valid());
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SetTextChangesTheStoredValue) {
+    auto* box = new GroupBox();
+
+    box->setText("Options");
+    EXPECT_EQ(box->text(), "Options");
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* box = new GroupBox();
+    auto& groupBoxStyle = dynamic_cast<ThemedGroupBoxStyle&>(box->style());
+    ASSERT_TRUE(groupBoxStyle.enabled);
+
+    box->setEnabled(false);
+    EXPECT_FALSE(groupBoxStyle.enabled);
+
+    box->setEnabled(true);
+    EXPECT_TRUE(groupBoxStyle.enabled);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, PaintDoesNotCrashWithOrWithoutACaption) {
+    auto* box = new GroupBox();
+    box->setBounds(Rect(0, 0, 200, 100));
+
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    // No caption yet - paint()'s own early-return (text_.empty()) is
+    // what this exercises.
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    box->setText("Options");
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    box->setEnabled(false);
+    EXPECT_NO_THROW(box->paint(ctx));
+
+    ctx.end();
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, PaintToleratesAZeroSize) {
+    auto* box = new GroupBox();
+    box->setText("Options");
+    box->setBounds(Rect(0, 0, 0, 0));
+
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(box->paint(ctx));
+    ctx.end();
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SwappingToFluentGroupBoxStyleStaysSafe) {
+    auto* box = new GroupBox();
+    box->setBounds(Rect(0, 0, 200, 100));
+    box->setText("Options");
+    box->setStyle(std::make_unique<FluentGroupBoxStyle>());
+
+    EXPECT_NO_THROW(box->setEnabled(false));
+    EXPECT_NO_THROW(box->setEnabled(true));
+
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(box->paint(ctx));
+    ctx.end();
+
+    box->destroy();
+    delete box;
+}
+
+TEST(GroupBox, SwappingToAnIncompatibleViewStyleFailsLoudNotSilently) {
+    auto* box = new GroupBox();
+    box->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(box->setEnabled(false), std::bad_cast);
+
+    box->destroy();
+    delete box;
+}
+
+TEST(FluentGroupBoxStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentGroupBoxStyle style;
+    Size size(200.0f, 100.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 200.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 100.0f);
+}
+
+TEST(FluentGroupBoxStyle, PaintDoesNotThrowEnabledOrDisabled) {
+    BLImage image(200, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        FluentGroupBoxStyle style;
+        style.enabled = enabled;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 100.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+// ---------------------------------------------------------------------
+// Slider/Progress - style()/thumb()/fill() no longer cache a typed
+// ThemedTrackbarTrackStyle*/ThemedTrackbarThumbStyle*/
+// ThemedProgressBarTrackStyle*/ThemedProgressBarFillStyle* member -
+// each derives it live via dynamic_cast on every use, same "style() can
+// be swapped out from under this Control" reasoning Button/Toggle/
+// ToolbarButton already went through (see the comment block above
+// Button.SwappingToADifferentThemedButtonStyleSubclassStaysSafe).
+// ---------------------------------------------------------------------
+
+TEST(Slider, SwappingToFluentTrackAndThumbStyleStaysSafe) {
+    auto* slider = new Slider();
+    slider->setBounds(Rect(0, 0, 200, 20));
+    slider->setStyle(std::make_unique<FluentTrackbarTrackStyle>());
+    slider->thumb()->setStyle(std::make_unique<FluentTrackbarThumbStyle>());
+
+    EXPECT_NO_THROW(slider->setValue(50.0f));
+    EXPECT_NO_THROW(slider->setHorizontal(false));
+    EXPECT_NO_THROW(slider->setEnabled(false));
+    EXPECT_NO_THROW(slider->setEnabled(true));
+
+    BLImage image(200, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(slider->paint(ctx));
+    ctx.end();
+
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Slider, SwappingToAnIncompatibleTrackStyleFailsLoudNotSilently) {
+    auto* slider = new Slider();
+    slider->setBounds(Rect(0, 0, 200, 20));
+    // A real ViewStyle, but not a ThemedTrackbarTrackStyle at all - no
+    // .horizontal field, same shape as Button's own equivalent test.
+    slider->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(slider->setHorizontal(false), std::bad_cast);
+
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Progress, SwappingToFluentTrackAndFillStyleStaysSafe) {
+    auto* progress = new Progress();
+    progress->setBounds(Rect(0, 0, 200, 12));
+    progress->setStyle(std::make_unique<FluentProgressBarTrackStyle>());
+    progress->fill()->setStyle(std::make_unique<FluentProgressBarFillStyle>());
+
+    EXPECT_NO_THROW(progress->setValue(0.5f));
+    EXPECT_NO_THROW(progress->setHorizontal(false));
+    EXPECT_NO_THROW(progress->setFillState(ThemedProgressBarFillStyle::FillState::Error));
+    EXPECT_EQ(progress->fillState(), ThemedProgressBarFillStyle::FillState::Error);
+
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(progress->paint(ctx));
+    ctx.end();
+
+    progress->destroy();
+    delete progress;
+}
+
+TEST(Progress, FillStateAccessorsThrowWhenFillStyleIsIncompatible) {
+    auto* progress = new Progress();
+    progress->fill()->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(progress->fillState(), std::runtime_error);
+    EXPECT_THROW(progress->setFillState(ThemedProgressBarFillStyle::FillState::Paused), std::runtime_error);
+
+    progress->destroy();
+    delete progress;
+}
+
+TEST(FluentTrackbarTrackStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentTrackbarTrackStyle style;
+    Size size(200.0f, 20.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 200.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 20.0f);
+}
+
+TEST(FluentTrackbarTrackStyle, PaintDoesNotThrowForEitherOrientation) {
+    BLImage image(200, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool horizontal : { true, false }) {
+        FluentTrackbarTrackStyle style;
+        style.horizontal = horizontal;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 20.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+TEST(FluentTrackbarThumbStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool pressed : { true, false }) {
+            for (bool highlighted : { true, false }) {
+                FluentTrackbarThumbStyle style;
+                style.enabled = enabled;
+                style.pressed = pressed;
+                Rect clientBounds;
+                EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentTrackbarThumbStyle, PaintToleratesAZeroOrSubPixelSize) {
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentTrackbarThumbStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(1.0f, 1.0f), false, clientBounds));
+    EXPECT_NO_THROW(style.paint(ctx, Size(0.0f, 0.0f), false, clientBounds));
+
+    ctx.end();
+}
+
+TEST(FluentProgressBarTrackStyle, PaintDoesNotThrowForEitherOrientation) {
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool horizontal : { true, false }) {
+        FluentProgressBarTrackStyle style;
+        style.horizontal = horizontal;
+        Rect clientBounds;
+        EXPECT_NO_THROW(style.paint(ctx, Size(200.0f, 12.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+TEST(FluentProgressBarFillStyle, PaintDoesNotThrowAcrossEveryFillState) {
+    BLImage image(200, 12, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (auto state : { ThemedProgressBarFillStyle::FillState::Normal,
+            ThemedProgressBarFillStyle::FillState::Error,
+            ThemedProgressBarFillStyle::FillState::Paused }) {
+        FluentProgressBarFillStyle style;
+        style.state = state;
+        Rect clientBounds;
+        // Also covers a fill narrower than it is tall (a low value()) -
+        // radius = shortSide/2 has to stay sane even when shortSide is
+        // the *width*, not just the more common height case.
+        EXPECT_NO_THROW(style.paint(ctx, Size(5.0f, 12.0f), false, clientBounds));
+    }
+
+    ctx.end();
+}
+
+// ---------------------------------------------------------------------
 // ScrollView - bar visibility/sizing and origin() wiring
 // ---------------------------------------------------------------------
 
@@ -373,6 +698,16 @@ TEST(ScrollView, BarsHiddenWhenContentFitsViewport) {
     EXPECT_FALSE(view->vBar()->isVisible());
     EXPECT_FALSE(view->hBar()->isVisible());
 
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, AcceptsFocusByDefault) {
+    // Lets keyboard users Tab into a scrollable region that hosts no
+    // focusable content of its own (e.g. read-only text) and page/arrow
+    // through it - see UIInputManager::moveFocus() (uiinputmanager.h).
+    auto* view = new ScrollView();
+    EXPECT_TRUE(view->acceptsFocus());
     view->destroy();
     delete view;
 }
@@ -391,6 +726,54 @@ TEST(ScrollView, BarsShownAndRangedWhenContentExceedsViewport) {
     // *other* bar reserves some of it.
     EXPECT_GT(view->vBar()->pageSize(), 0.0f);
     EXPECT_LT(view->vBar()->pageSize(), 200.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, AWheelNotchScrollsThreeRowsOfAListView) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    auto* list = new ListView();
+    list->setVisible(true);
+    auto model = std::make_unique<StringListModel>();
+    for (int i = 0; i < 50; ++i) {
+        model->addItem("row " + std::to_string(i));
+    }
+    list->setModel(std::move(model));
+    list->setRowHeight(30.0f);
+    view->addChild(list);
+    view->updateLayout();
+    ASSERT_TRUE(view->vBar()->isVisible());
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), 30.0f);
+    view->onMouseWheel(*view, Point(10, 10), -120.0f);   // one notch toward the user
+    EXPECT_FLOAT_EQ(view->vBar()->value(), 90.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, AnExplicitLineStepWinsOverTheContentsRowHeight) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    view->setContentSize(Size(200.0f, 800.0f));
+    view->setLineStep(7.0f);
+    view->updateLayout();
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), 7.0f);
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, PlainContentFallsBackToTheDefaultLineStep) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 100));
+    view->setContentSize(Size(200.0f, 800.0f));
+    view->updateLayout();
+
+    EXPECT_FLOAT_EQ(view->vBar()->lineStep(), ScrollView::kDefaultLineStep);
 
     view->destroy();
     delete view;
@@ -426,6 +809,35 @@ TEST(ScrollView, AddChildDoesNotBecomeADirectChildOfScrollViewItself) {
     // (controls.h) for why that distinction matters (keeps vBar()/hBar()
     // pinned in place regardless of scroll position).
     EXPECT_NE(content->parent(), static_cast<View*>(view));
+
+    view->destroy();
+    delete view;
+}
+
+TEST(ScrollView, ReorderChildRedirectsIntoTheViewportLikeAddChildDoes) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* a = new SubView();
+    a->setVisible(true);
+    auto* b = new SubView();
+    b->setVisible(true);
+    view->addChild(a);
+    view->addChild(b);
+
+    // Real content lives in viewport_, not view's own childViews() - see
+    // AddChildDoesNotBecomeADirectChildOfScrollViewItself above - so a
+    // naive base-class reorderChild() searching view's own childViews()
+    // would silently no-op. Confirmed correct by checking the parent's
+    // (viewport_'s) own child order changed.
+    View* viewport = a->parent();
+    ASSERT_EQ(viewport->childViews()[0], a);
+    ASSERT_EQ(viewport->childViews()[1], b);
+
+    view->reorderChild(b, 0);
+
+    EXPECT_EQ(viewport->childViews()[0], b);
+    EXPECT_EQ(viewport->childViews()[1], a);
 
     view->destroy();
     delete view;
@@ -534,6 +946,322 @@ TEST(ScrollView, VirtualizedChildIsPinnedToViewportSizeAndToldItsScrollOffsetDir
     delete view;
 }
 
+// Real, live-reported bug: expanding a TreeView row (or any other in-place content growth -
+// more text typed, a different font, ...) grows the content child's own contentSize() answer,
+// but nothing told this ScrollView so until some unrelated event (a resize) happened to call
+// updateLayout() again - handleContentChildContentSizeChanged() (controls.h) was declared and
+// documented but never actually implemented or subscribed in addChild(), so onContentSizeChanged
+// firing on a content child was a complete no-op as far as the ScrollView hosting it was
+// concerned.
+TEST(ScrollView, ContentChildAnnouncingAGrownContentSizeUpdatesBarsWithoutAnExternalTrigger) {
+    auto* view = new ScrollView();
+    view->setBounds(Rect(0, 0, 200, 200));
+
+    auto* content = new SubView();
+    content->setVisible(true);
+    Size reportedSize(100.0f, 100.0f);
+    content->onQueryContentSize.add([&reportedSize](View&, Size& outSize) -> SyncReturn {
+        outSize = reportedSize;
+        return SyncReturn::Handled;
+    });
+    view->addChild(content);
+
+    ASSERT_FALSE(view->vBar()->isVisible()) << "100x100 content fits a 200x200 viewport";
+
+    // content itself now answers a taller size and announces it via onContentSizeChanged -
+    // this ScrollView is never resized, and setContentSize()/addChild() are never called again.
+    reportedSize = Size(100.0f, 800.0f);
+    content->onContentSizeChanged(*content);
+
+    EXPECT_EQ(view->contentSize(), Size(100.0f, 800.0f));
+    EXPECT_TRUE(view->vBar()->isVisible());
+
+    view->destroy();
+    delete view;
+}
+
+// ---------------------------------------------------------------------
+// Button - disabled-state visuals (same gap ToolbarButton had - see
+// feedback_paint_state_tests_dont_prove_visual_correctness memory)
+// ---------------------------------------------------------------------
+
+TEST(Button, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* button = new Button();
+    auto* style = dynamic_cast<ThemedButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    EXPECT_TRUE(style->enabled);
+
+    button->setEnabled(false);
+    EXPECT_FALSE(style->enabled);
+
+    button->setEnabled(true);
+    EXPECT_TRUE(style->enabled);
+
+    button->destroy();
+    delete button;
+}
+
+// Real pixel-level check, not just internal state - see ToolbarButton's
+// own identical test above for why a style-field-only assertion isn't
+// enough (the native BUTTON chrome here does visibly change for
+// PBS_DISABLED, but the text drawn on top of it needs its own dimming
+// too, and that's what this actually proves).
+TEST(Button, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
+    auto renderButton = [](bool enabled) {
+        auto* button = new Button();
+        button->setBounds(Rect(0, 0, 80, 24));
+        button->setText("Click Me");
+        button->setEnabled(enabled);
+
+        BLImage image(80, 24, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        button->paint(ctx);
+        ctx.end();
+
+        BLImageData data;
+        image.get_data(&data);
+        std::vector<uint8_t> pixels(
+            static_cast<const uint8_t*>(data.pixel_data),
+            static_cast<const uint8_t*>(data.pixel_data) + data.stride * 24);
+
+        button->destroy();
+        delete button;
+        return pixels;
+    };
+
+    EXPECT_NE(renderButton(true), renderButton(false));
+}
+
+// Real, live-reported crash: ViewStyle::font()/setFont() (now a real, Properties-panel-editable
+// property, not just a plain field - see FontPropertyEditor, cpp_codetools) lets a user pick any
+// font name and independently tick "bold" - a combination Font::blFont() has no guarantee will
+// resolve. The exact combination reported live: "Trebuchet MS Bold" is itself a real, separately
+// installed face name (not "Trebuchet MS" + a synthesized bold variant), so picking it as the
+// font *name* and also ticking "bold" makes blFont() look up "Trebuchet MS Bold Bold", which
+// doesn't exist. Button::paint() used to treat "didn't resolve" as a "shouldn't happen" invariant
+// and threw, crashing the whole app the moment this now-reachable combination came up - it must
+// degrade gracefully (skip drawing the text) instead, same as LabelStyle::paint() already does
+// for its own now-editable font.
+TEST(Button, PaintWithAnUnresolvedFontDoesNotThrowAndSkipsDrawingText) {
+    // Skips (rather than failing) if this machine has no such face installed at all - the point
+    // is the "name alone resolves, but name+bold together doesn't" combination, not this exact
+    // family.
+    const std::vector<SystemFontInfo>& fonts = FontManager::listFonts();
+    bool hasTrebuchetBold = std::any_of(fonts.begin(), fonts.end(),
+        [](const SystemFontInfo& info) { return info.name == "Trebuchet MS Bold"; });
+    if (!hasTrebuchetBold) {
+        GTEST_SKIP() << "this machine has no 'Trebuchet MS Bold' font face installed";
+    }
+
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+    button->setText("Click Me");
+
+    auto* style = dynamic_cast<ThemedButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    Font font = style->font();
+    font.setName("Trebuchet MS Bold");
+    font.setBold(true);
+    style->setFont(font);
+    ASSERT_EQ(font.blFont(), nullptr) << "test assumption: 'Trebuchet MS Bold Bold' must not resolve";
+
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
+}
+
+// ---------------------------------------------------------------------
+// Button/ToolbarButton no longer cache a typed ThemedButtonStyle*/
+// ThemedToolbarButtonStyle* member - each derives it live via
+// dynamic_cast<...&>(style()) on every use instead (Button::
+// updatePressedVisual()'s own comment, controls.cpp, has the full
+// reasoning). These prove the actual safety property that refactor
+// exists for: setStyle() (public on View) can be called on an already-
+// constructed Button at any time, and it must never dangle or silently
+// misbehave against the wrong layout - it must keep working (a
+// compatible ThemedButtonStyle subclass) or fail loud (std::bad_cast on
+// an incompatible one), never corrupt silently.
+// ---------------------------------------------------------------------
+
+TEST(Button, SwappingToADifferentThemedButtonStyleSubclassStaysSafe) {
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+    button->setText("Click Me");
+
+    button->setStyle(std::make_unique<FluentButtonStyle>());
+
+    // Both read style() live (dynamic_cast) - neither should dangle into
+    // the ThemedButtonStyle the constructor originally installed, now
+    // long destroyed.
+    EXPECT_NO_THROW(button->setEnabled(false));
+    EXPECT_NO_THROW(button->setEnabled(true));
+
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
+}
+
+TEST(Button, SwappingToAnIncompatibleViewStyleFailsLoudNotSilently) {
+    auto* button = new Button();
+    button->setBounds(Rect(0, 0, 80, 24));
+
+    // ButtonStyle (viewstyle.h) - a real ViewStyle, but not a
+    // ThemedButtonStyle at all, so it has no .pressed/.enabled fields.
+    // setStyle() itself (View::, view.h) accepts any ViewStyle
+    // subclass - nothing at compile time stops this.
+    button->setStyle(std::make_unique<ButtonStyle>());
+
+    EXPECT_THROW(button->setEnabled(false), std::bad_cast);
+
+    button->destroy();
+    delete button;
+}
+
+TEST(FluentButtonStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentButtonStyle style;
+    Size size(100.0f, 30.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 100.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 30.0f);
+}
+
+TEST(FluentButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(80, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool pressed : { true, false }) {
+            for (bool highlighted : { true, false }) {
+                FluentButtonStyle style;
+                style.enabled = enabled;
+                style.pressed = pressed;
+                Rect clientBounds;
+                EXPECT_NO_THROW(style.paint(ctx, Size(80.0f, 24.0f), highlighted, clientBounds));
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(Toggle, SwappingToFluentCheckBoxOrRadioStyleStaysSafe) {
+    for (bool radioStyle : { false, true }) {
+        auto* toggle = new Toggle();
+        toggle->setBounds(Rect(0, 0, 20, 20));
+        toggle->setRadioStyle(radioStyle);
+
+        // rebuildStyle() (Toggle::) always installs the native
+        // ThemedCheckBoxStyle/ThemedRadioButtonStyle pair itself - this
+        // swaps in the Fluent subclass by hand, same opt-in shape as
+        // Button/FluentButtonStyle above.
+        if (radioStyle) {
+            toggle->setStyle(std::make_unique<FluentRadioButtonStyle>());
+        } else {
+            toggle->setStyle(std::make_unique<FluentCheckBoxStyle>());
+        }
+
+        EXPECT_NO_THROW(toggle->setChecked(true));
+        EXPECT_NO_THROW(toggle->setEnabled(false));
+        EXPECT_NO_THROW(toggle->setEnabled(true));
+
+        BLImage image(20, 20, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        EXPECT_NO_THROW(toggle->paint(ctx));
+        ctx.end();
+
+        toggle->destroy();
+        delete toggle;
+    }
+}
+
+TEST(FluentCheckBoxStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentCheckBoxStyle style;
+    Size size(20.0f, 20.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 20.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 20.0f);
+}
+
+TEST(FluentCheckBoxStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentCheckBoxStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentRadioButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentRadioButtonStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(20.0f, 20.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(FluentRadioButtonStyle, PaintToleratesAZeroOrSubPixelSize) {
+    // outerR = minDim*0.5f - 1.0f can go negative/zero for a tiny size -
+    // the early-return guard (paint(), viewstyle.cpp) is what this
+    // catches; without it, add_circle() with a negative radius is the
+    // real thing under test here.
+    BLImage image(4, 4, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentRadioButtonStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(1.0f, 1.0f), false, clientBounds));
+    EXPECT_NO_THROW(style.paint(ctx, Size(0.0f, 0.0f), false, clientBounds));
+
+    ctx.end();
+}
+
 // ---------------------------------------------------------------------
 // ToolbarButton - same momentary-vs-toggle click gesture as Button,
 // just checked via ThemedToolbarButtonStyle instead
@@ -602,6 +1330,173 @@ TEST(ToolbarButton, OnCheckedChangedFiresOnlyOnActualChange) {
 
     button->destroy();
     delete button;
+}
+
+// Real bug: ThemedToolbarButtonStyle::enabled (a separate field from
+// Control::isEnabled(), used only to pick the native theme part state -
+// see its own stateId()) was never synced from setEnabled() at all, so a
+// disabled ToolbarButton's background never actually painted as disabled.
+TEST(ToolbarButton, SetEnabledSyncsTheThemedStylesOwnEnabledFlag) {
+    auto* button = new ToolbarButton();
+    auto* style = dynamic_cast<ThemedToolbarButtonStyle*>(&button->style());
+    ASSERT_NE(style, nullptr);
+    EXPECT_TRUE(style->enabled);
+
+    button->setEnabled(false);
+    EXPECT_FALSE(style->enabled);
+
+    button->setEnabled(true);
+    EXPECT_TRUE(style->enabled);
+
+    button->destroy();
+    delete button;
+}
+
+// Real pixel-level check, not just internal state - style->enabled alone
+// (see SetEnabledSyncsTheThemedStylesOwnEnabledFlag above) doesn't prove
+// anything visually differs, since a flat toolbar button shows no visible
+// border/fill at rest either way; the text/icon dimming in paint() is what
+// actually has to differ. Same isPixelPainted-style verify-by-rendering
+// idiom test_rootviewproxy.cpp already established, extended to a full
+// buffer comparison since dimming shows up as a color difference across
+// many pixels, not a single painted/unpainted one.
+TEST(ToolbarButton, DisabledButtonRendersVisiblyDifferentPixelsThanEnabled) {
+    auto renderButton = [](bool enabled) {
+        auto* button = new ToolbarButton();
+        button->setBounds(Rect(0, 0, 50, 24));
+        button->setText("New");
+        button->setEnabled(enabled);
+
+        BLImage image(50, 24, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        button->paint(ctx);
+        ctx.end();
+
+        BLImageData data;
+        image.get_data(&data);
+        std::vector<uint8_t> pixels(
+            static_cast<const uint8_t*>(data.pixel_data),
+            static_cast<const uint8_t*>(data.pixel_data) + data.stride * 24);
+
+        button->destroy();
+        delete button;
+        return pixels;
+    };
+
+    EXPECT_NE(renderButton(true), renderButton(false));
+}
+
+TEST(ToolbarButton, IconDefaultsToEmpty) {
+    ToolbarButton button;
+    EXPECT_TRUE(button.icon().empty());
+}
+
+TEST(ToolbarButton, AcceptsFocusByDefault) {
+    ToolbarButton button;
+    EXPECT_TRUE(button.acceptsFocus());
+}
+
+TEST(ToolbarButton, SetIconChangesTheStoredValue) {
+    ToolbarButton button;
+    button.setIcon("Images/icons/toolbar/new.svg");
+    EXPECT_EQ(button.icon(), "Images/icons/toolbar/new.svg");
+}
+
+TEST(ToolbarButton, PaintWithAnIconAndTextDoesNotCrash) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 50, 24));
+    button->setText("New");
+    button->setIcon("Images/icons/toolbar/new.svg");  // resolves to nothing in this test binary - exercises the "icon failed to load" path, not a real blit
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    button->paint(ctx);
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, PaintWithOnlyAnIconAndNoTextDoesNotCrash) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 24, 24));
+    button->setIcon("Images/icons/toolbar/new.svg");
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    button->paint(ctx);
+
+    button->destroy();
+    delete button;
+}
+
+TEST(ToolbarButton, SwappingToFluentToolbarButtonStyleStaysSafe) {
+    auto* button = new ToolbarButton();
+    button->setBounds(Rect(0, 0, 24, 24));
+    button->setStyle(std::make_unique<FluentToolbarButtonStyle>());
+
+    EXPECT_NO_THROW(button->setToggleButton(true));
+    EXPECT_NO_THROW(button->setChecked(true));
+    EXPECT_NO_THROW(button->setEnabled(false));
+    EXPECT_NO_THROW(button->setEnabled(true));
+
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(button->paint(ctx));
+    ctx.end();
+
+    button->destroy();
+    delete button;
+}
+
+TEST(FluentToolbarButtonStyle, ComputeClientBoundsIsUnclippedNoNativeChromeToDeflateFor) {
+    FluentToolbarButtonStyle style;
+    Size size(24.0f, 24.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    EXPECT_FLOAT_EQ(clientBounds.size().width, 24.0f);
+    EXPECT_FLOAT_EQ(clientBounds.size().height, 24.0f);
+}
+
+TEST(FluentToolbarButtonStyle, FlatAtRestPaintsNothingButStillDoesNotThrow) {
+    // Matches the native TS_NORMAL "no visible border/fill at rest"
+    // look this style replaces (see class comment, viewstyle.h) - the
+    // real thing under test is paint()'s own early-return when neither
+    // baseAlpha nor overlayAlpha is > 0, not a pixel-level assertion.
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    FluentToolbarButtonStyle style;
+    Rect clientBounds;
+    EXPECT_NO_THROW(style.paint(ctx, Size(24.0f, 24.0f), false, clientBounds));
+
+    ctx.end();
+}
+
+TEST(FluentToolbarButtonStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(24, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool checked : { true, false }) {
+            for (bool pressed : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentToolbarButtonStyle style;
+                    style.enabled = enabled;
+                    style.checked = checked;
+                    style.pressed = pressed;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(24.0f, 24.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
 }
 
 // ---------------------------------------------------------------------
@@ -831,6 +1726,158 @@ TEST(TextField, SetControllerWithNullptrDoesNotCrashOrReplaceTheExistingOne) {
     delete field;
 }
 
+// ---------------------------------------------------------------------------
+// Keeping ThemedEditStyle::focused (viewstyle.h) in sync with real
+// onGotFocus/onLostFocus - drives the real native ETS_FOCUSED border, and
+// (see ThemedEditStyle::postPaint()) is why these controls suppress
+// View's generic dashed focus ring rather than drawing both. Fired directly
+// on the delegate (field->onGotFocus(*field), not through a real RootView -
+// same "no live HWND/RunLoop needed" pattern
+// SetControllerReplacesTheControllerAndReachesASubclassOverride above
+// already uses; RunLoop::current() is null in this headless test process,
+// so TextController::handleGotFocus()'s own caret_.start() call is
+// naturally skipped, same as that test's own comment describes.
+// ---------------------------------------------------------------------------
+
+TEST(TextField, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* field = new TextField();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(field->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    field->onGotFocus(*field);
+    EXPECT_TRUE(editStyle.focused);
+
+    field->onLostFocus(*field);
+    EXPECT_FALSE(editStyle.focused);
+
+    field->destroy();
+    delete field;
+}
+
+TEST(TextField, SwappingToFluentEditStyleStaysSafe) {
+    auto* field = new TextField();
+    field->setBounds(Rect(0, 0, 120, 24));
+    field->setStyle(std::make_unique<FluentEditStyle>());
+
+    // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+    // dynamic_cast style() to ThemedEditStyle* - FluentEditStyle still
+    // satisfies that, same opt-in shape as every other Fluent* style.
+    field->onGotFocus(*field);
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(field->style());
+    EXPECT_TRUE(editStyle.focused);
+    field->onLostFocus(*field);
+    EXPECT_FALSE(editStyle.focused);
+
+    BLImage image(120, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    EXPECT_NO_THROW(field->paint(ctx));
+    ctx.end();
+
+    field->destroy();
+    delete field;
+}
+
+TEST(FluentEditStyle, ComputeClientBoundsDeflatesForBorderAndFocusUnderline) {
+    FluentEditStyle style;
+    Size size(120.0f, 24.0f);
+
+    Rect clientBounds = style.computeClientBounds(size);
+
+    // Unlike FluentButtonStyle (no native chrome to deflate for at all),
+    // this one reserves real room for its own border/underline - just
+    // asserting it's strictly smaller than the full size, not pinned to
+    // an exact inset, so the test doesn't need updating every time the
+    // padding constants get tuned.
+    EXPECT_LT(clientBounds.size().width, size.width);
+    EXPECT_LT(clientBounds.size().height, size.height);
+    EXPECT_GT(clientBounds.size().width, 0.0f);
+    EXPECT_GT(clientBounds.size().height, 0.0f);
+}
+
+TEST(FluentEditStyle, PaintDoesNotThrowAcrossEveryState) {
+    BLImage image(120, 24, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+
+    for (bool enabled : { true, false }) {
+        for (bool focused : { true, false }) {
+            for (bool readOnly : { true, false }) {
+                for (bool highlighted : { true, false }) {
+                    FluentEditStyle style;
+                    style.enabled = enabled;
+                    style.focused = focused;
+                    style.readOnly = readOnly;
+                    Rect clientBounds;
+                    EXPECT_NO_THROW(style.paint(ctx, Size(120.0f, 24.0f), highlighted, clientBounds));
+                }
+            }
+        }
+    }
+
+    ctx.end();
+}
+
+TEST(TextControl, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* control = new TextControl();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(control->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    control->onGotFocus(*control);
+    EXPECT_TRUE(editStyle.focused);
+
+    control->onLostFocus(*control);
+    EXPECT_FALSE(editStyle.focused);
+
+    control->destroy();
+    delete control;
+}
+
+TEST(ListView, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* list = new ListView();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(list->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    list->onGotFocus(*list);
+    EXPECT_TRUE(editStyle.focused);
+
+    list->onLostFocus(*list);
+    EXPECT_FALSE(editStyle.focused);
+
+    list->destroy();
+    delete list;
+}
+
+TEST(TreeView, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* tree = new TreeView();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(tree->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    tree->onGotFocus(*tree);
+    EXPECT_TRUE(editStyle.focused);
+
+    tree->onLostFocus(*tree);
+    EXPECT_FALSE(editStyle.focused);
+
+    tree->destroy();
+    delete tree;
+}
+
+TEST(DropDownList, GotAndLostFocusToggleThemedEditStyleFocused) {
+    auto* dropDown = new DropDownList();
+    auto& editStyle = dynamic_cast<ThemedEditStyle&>(dropDown->style());
+    ASSERT_FALSE(editStyle.focused);
+
+    dropDown->onGotFocus(*dropDown);
+    EXPECT_TRUE(editStyle.focused);
+
+    dropDown->onLostFocus(*dropDown);
+    EXPECT_FALSE(editStyle.focused);
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
 TEST(TextField, SetModelReplacesTheModelAndReflectsItsContent) {
     auto* field = new TextField();
     field->setText(L"original");
@@ -955,12 +2002,21 @@ TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     textControl->setText(kManyLines);
     scrollView->addChild(textControl);
 
-    // No scrollbar of its own, and pinned to the (much smaller) viewport
-    // rather than grown to its true content height - the whole point of
-    // being hosted rather than standalone.
+    // No scrollbar of its own, and pinned to the viewport's own height
+    // rather than grown to its true (much larger) content height - the
+    // whole point of being hosted rather than standalone. No horizontal
+    // bar either: TextControl's reported content width is always exactly
+    // whatever width it's given (self-referential, wraps to fit), so it
+    // never legitimately wants more horizontal space than its viewport -
+    // a regression guard for a real bug where ScrollView::updateLayout()
+    // mistook that self-referential width for "wants a horizontal bar"
+    // any time a vertical bar was needed at all, silently stealing height
+    // from every vertically-scrolling virtualized child.
     EXPECT_TRUE(textControl->childViews().empty());
     ASSERT_TRUE(scrollView->vBar()->isVisible());
-    EXPECT_LT(textControl->bounds().size().height, 60.0f);
+    EXPECT_FALSE(scrollView->hBar()->isVisible());
+    EXPECT_FLOAT_EQ(textControl->bounds().size().height, 60.0f);
+    EXPECT_LT(textControl->bounds().size().height, textControl->contentSize().height);
 
     BLImage image(100, 60, BL_FORMAT_PRGB32);
     BLContext ctx(image);
@@ -974,6 +2030,52 @@ TEST(TextControl, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     // small, unchanged bounds.
     scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
     textControl->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// Real, live-reported bug, same class as ListView's own (see
+// ListView.ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNextPaint
+// above): TextControl::paint() used to fire onRequestScrollIntoView() for
+// the caret unconditionally every single call, so dragging the hosting
+// ScrollView's own scrollbar away from the caret - which itself triggers a
+// repaint - immediately snapped straight back to it on the very next
+// paint(). A user could never scroll away from the caret to look at other
+// text at all.
+TEST(TextControl, ManuallyScrollingAwayFromTheCaretIsNotForciblyUndoneByTheNextPaint) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* textControl = new TextControl();
+    textControl->setText(kManyLines);
+    scrollView->addChild(textControl);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    textControl->paint(ctx);  // establishes real vBar range/pageSize, layout
+
+    // Moves the caret to the very end of kManyLines - many lines down,
+    // requiring the ScrollView to scroll to reveal it.
+    textControl->caret().setPosition(text::TextPosition(kManyLines.size()));
+    textControl->paint(ctx);  // paint() is what fires onRequestScrollIntoView
+
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f)
+        << "test assumption: the caret at the end of many lines required scrolling down";
+
+    // Simulates the user dragging the scrollbar thumb back to the top,
+    // away from the still-blinking caret - same handleVBarValueChanged()
+    // path a real drag goes through.
+    scrollView->vBar()->setValue(0.0f);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    // A second, unrelated repaint must NOT snap back to the caret just
+    // because it's still there - nothing about the caret's own position
+    // changed.
+    textControl->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "an unrelated repaint must not re-fire onRequestScrollIntoView() for a caret that hasn't moved";
 
     scrollView->destroy();
     delete scrollView;
@@ -1004,7 +2106,47 @@ public:
     std::size_t size() const override { return rows.size(); }
 };
 
+// Records which row indices a ListView actually asks to be painted -
+// used to prove a given paint() call's own visible rows, not just the
+// resulting vBar value, land at the corrected scroll offset. See
+// ListView::paint()'s own comment (controls.cpp) for the bug this guards
+// against: onRequestScrollIntoView() firing after (rather than before)
+// scrollOffsetY_ is read for the row loop meant the *value* was already
+// correct after one paint() but that same paint()'s actual pixels were
+// still drawn one frame stale.
+class SpyListController : public ListController {
+public:
+    std::vector<std::size_t> paintedIndices;
+
+    ListItem* createItem(std::size_t index) override {
+        paintedIndices.push_back(index);
+        return ListController::createItem(index);
+    }
+};
+
 }  // namespace
+
+TEST(ListView, SetModelHandsOwnershipToTheControllerSoItOutlivesTheCallersPointer) {
+    auto* listView = new ListView();
+    auto model = std::make_unique<StringListModel>();
+    model->items() = { "a", "b", "c" };
+    StringListModel* raw = model.get();
+
+    listView->setModel(std::move(model));
+
+    EXPECT_EQ(listView->model(), raw);
+    EXPECT_EQ(listView->controller().itemCount(), 3u);
+
+    raw->addItem("d");   // a change through the model reaches the view's controller
+    EXPECT_EQ(listView->controller().itemCount(), 4u);
+
+    listView->setModel(nullptr);   // detaches and destroys it
+    EXPECT_EQ(listView->model(), nullptr);
+    EXPECT_EQ(listView->controller().itemCount(), 0u);
+
+    listView->destroy();
+    delete listView;
+}
 
 TEST(ListView, DefaultConstructedHasZeroItemCountAndNoSelection) {
     auto* listView = new ListView();
@@ -1016,13 +2158,128 @@ TEST(ListView, DefaultConstructedHasZeroItemCountAndNoSelection) {
     delete listView;
 }
 
+TEST(StringListModelTest, ItemsChangeThroughTheModelAndFireOnChanged) {
+    StringListModel model;
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.addItem("one");
+    model.addItem("two");
+    EXPECT_EQ(model.size(), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.valueAt(1)), "two");
+
+    model.setValueAt(0, std::string("uno"));
+    EXPECT_EQ(std::any_cast<std::string>(model.valueAt(0)), "uno");
+
+    model.removeItem(0);
+    model.removeItem(99);   // out of range: no-op, no notification
+    EXPECT_EQ(model.size(), 1u);
+    EXPECT_EQ(changes, 4);
+
+    EXPECT_FALSE(model.valueAt(5).has_value());
+    model.clear();
+    EXPECT_TRUE(model.empty());
+}
+
+TEST(StringTreeModelTest, FlatDepthListResolvesIntoARealTreeByPath) {
+    StringTreeModel model;
+    model.rows() = {
+        { 0, "Fruits" }, { 1, "Apple" }, { 1, "Banana" },
+        { 0, "Vegetables" }, { 1, "Carrot" },
+    };
+
+    EXPECT_EQ(model.childCount({}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0})), "Fruits");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{1})), "Vegetables");
+
+    EXPECT_EQ(model.childCount({0}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0})), "Apple");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 1})), "Banana");
+    EXPECT_EQ(model.childCount({0, 0}), 0u);
+
+    EXPECT_EQ(model.childCount({1}), 1u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{1, 0})), "Carrot");
+
+    // Out of range at every level: no crash, no value.
+    EXPECT_EQ(model.childCount({5}), 0u);
+    EXPECT_FALSE(model.value(std::vector<std::size_t>{5}).has_value());
+    EXPECT_FALSE(model.value(std::vector<std::size_t>{0, 5}).has_value());
+}
+
+TEST(StringTreeModelTest, ADeeperRowThanItsParentPlusOneIsAGrandchildNotSkippedEntirely) {
+    // Depth jumps by more than one (2 right after a depth-0 row) - Banana is still Apple's child,
+    // not Fruits', even though nothing at depth 1 separates them.
+    StringTreeModel model;
+    model.rows() = { { 0, "Fruits" }, { 1, "Apple" }, { 2, "Gala" }, { 2, "Fuji" } };
+
+    EXPECT_EQ(model.childCount({}), 1u);
+    EXPECT_EQ(model.childCount({0}), 1u);
+    ASSERT_EQ(model.childCount({0, 0}), 2u);
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0, 0})), "Gala");
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0, 1})), "Fuji");
+}
+
+TEST(StringTreeModelTest, AddItemAppendsARootRowRemoveLastItemDropsTheLastRowRegardlessOfDepthAndFiresOnChanged) {
+    StringTreeModel model;
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.addItem("Fruits");
+    model.rows().push_back(TreeRow{ 1, "Apple" });   // a child, added directly (addItem() is root-only)
+    EXPECT_EQ(model.childCount({0}), 1u);
+    EXPECT_EQ(changes, 1);
+
+    model.removeLastItem();   // drops "Apple", a depth-1 row - not required to be a root row
+    EXPECT_EQ(model.childCount({0}), 0u);
+    EXPECT_EQ(changes, 2);
+
+    model.removeLastItem();
+    EXPECT_TRUE(model.empty());
+    model.removeLastItem();   // empty: no-op, no notification
+    EXPECT_EQ(changes, 3);
+}
+
+TEST(StringTreeModelTest, SetValueWritesTheTextAtAPathAndFiresOnChanged) {
+    StringTreeModel model;
+    model.rows() = { { 0, "Fruits" }, { 1, "Apple" } };
+    int changes = 0;
+    model.onChanged.add([&changes](Model&) { ++changes; return SyncReturn::Handled; });
+
+    model.setValue(std::string("Pear"), std::vector<std::size_t>{0, 0});
+    EXPECT_EQ(model.rows()[1].text, "Pear");
+    EXPECT_EQ(changes, 1);
+
+    model.setValue(std::string("nope"), std::vector<std::size_t>{9});   // out of range: rows untouched
+    EXPECT_EQ(model.rows()[1].text, "Pear");
+    EXPECT_EQ(changes, 2);   // still fires - same "notify regardless" contract as the base Model::setValue()
+}
+
+TEST(TreeView, SetModelHandsOwnershipToTheControllerSoItOutlivesTheCallersPointer) {
+    auto* treeView = new TreeView();
+    auto model = std::make_unique<StringTreeModel>();
+    model->rows() = { { 0, "a" }, { 1, "b" } };
+    StringTreeModel* raw = model.get();
+
+    treeView->setModel(std::move(model));
+
+    EXPECT_EQ(treeView->model(), raw);
+    EXPECT_EQ(treeView->controller().visibleCount(), 1u);   // "a" only - "b" starts collapsed
+
+    treeView->setModel(nullptr);   // detaches and destroys it
+    EXPECT_EQ(treeView->model(), nullptr);
+
+    treeView->destroy();
+    delete treeView;
+}
+
 TEST(ListView, ContentSizeIsItemCountTimesRowHeight) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     Size reported = listView->contentSize();
 
@@ -1052,9 +2309,10 @@ TEST(ListView, RespectsACustomizedControllersPerRowItemHeight) {
     listView->setBounds(Rect(0, 0, 100, 200));
     listView->setController(std::make_unique<VariableHeightController>());
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "short", "tall", "short again" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     // 20 (row 0) + 50 (row 1) + 20 (row 2) = 90, not 3 * rowHeight().
     Size reported = listView->contentSize();
@@ -1103,9 +2361,10 @@ TEST(ListView, MouseDownSelectsTheRowUnderThePoint) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     int selectionChangedCount = 0;
     listView->onSelectionChanged.add([&](ListView&) {
@@ -1131,9 +2390,10 @@ TEST(ListView, MouseDownPastTheLastRowDoesNotSelectAnything) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float clickY = listView->getClientBounds().top() + 10.0f * listView->rowHeight();
     listView->onMouseDown(*listView, Point(10.0f, clickY), 0, 0);
@@ -1163,9 +2423,10 @@ void ClickRow(ListView* listView, std::size_t index, std::uint32_t keyMask) {
 TEST(ListView, PlainClickReplacesTheWholeSelection) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, 0);
@@ -1180,9 +2441,10 @@ TEST(ListView, PlainClickReplacesTheWholeSelection) {
 TEST(ListView, CtrlClickTogglesARowWithoutDisturbingTheRest) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, kmCtrl);
@@ -1200,9 +2462,10 @@ TEST(ListView, CtrlClickTogglesARowWithoutDisturbingTheRest) {
 TEST(ListView, ShiftClickSelectsARangeFromTheLastPlainClick) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     ClickRow(listView, 1, 0);
     ClickRow(listView, 3, kmShift);
@@ -1221,9 +2484,10 @@ TEST(ListView, ShiftClickSelectsARangeFromTheLastPlainClick) {
 TEST(ListView, SelectRangeAddToSelectionAndClearSelectionWorkDirectly) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->selectRange(1u, 3u);
     EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
@@ -1245,9 +2509,10 @@ TEST(ListView, SelectRangeAddToSelectionAndClearSelectionWorkDirectly) {
 TEST(ListView, MultiSelectionPaintsAllSelectedRowsWithoutCrashing) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     listView->selectRange(1u, 3u);
 
     BLImage image(100, 200, BL_FORMAT_PRGB32);
@@ -1272,9 +2537,10 @@ TEST(ListView, HoverHighlightIsEnabledByDefault) {
 TEST(ListView, MouseMoveTracksTheHoveredRowAndMouseLeftClearsIt) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
     listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
@@ -1293,9 +2559,10 @@ TEST(ListView, MouseMoveTracksTheHoveredRowAndMouseLeftClearsIt) {
 TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     float row2Y = listView->getClientBounds().top() + 2.5f * listView->rowHeight();
     listView->onMouseMove(*listView, Point(10.0f, row2Y), 0, 0);
@@ -1317,9 +2584,10 @@ TEST(ListView, DisablingHoverHighlightClearsAnyCurrentlyHoveredRow) {
 TEST(ListView, SetKeyboardHighlightedIndexClampsAndIsIndependentOfHover) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 200));
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
 
     listView->setKeyboardHighlightedIndex(2u);
     ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
@@ -1347,13 +2615,161 @@ TEST(ListView, SetKeyboardHighlightedIndexClampsAndIsIndependentOfHover) {
     delete listView;
 }
 
+// ---------------------------------------------------------------------
+// ListView - keyboard navigation (handleKeyDown(), controls.cpp). Mirrors
+// the plain/Ctrl/Shift click conventions above but driven by Up/Down/Home/
+// End instead of a clicked row - see handleKeyDown()'s own doc comment
+// (controls.h) for the full plain/Shift/Ctrl+Arrow/Ctrl+Space contract.
+// ---------------------------------------------------------------------
+
+namespace {
+
+void PressKey(ListView* listView, std::uint32_t VKeyCode, std::uint32_t keyMask) {
+    listView->onKeyDown(*listView, keyMask, 0, 1, VKeyCode);
+}
+
+}  // namespace
+
+TEST(ListView, PlainArrowMovesAndReplacesSelection) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(std::move(modelOwner));
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 2u }));
+
+    PressKey(listView, vkUpArrow, 0);
+    PressKey(listView, vkUpArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 0u }))
+        << "Up Arrow at row 0 must clamp, not wrap or go negative";
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, DownArrowClampsAtTheLastRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c" };
+    listView->setModel(std::move(modelOwner));
+
+    listView->setSelectedIndex(2u);
+    PressKey(listView, vkDownArrow, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 2u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, HomeAndEndJumpToTheFirstAndLastRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(std::move(modelOwner));
+
+    listView->setSelectedIndex(2u);
+    PressKey(listView, vkEnd, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 4u }));
+
+    PressKey(listView, vkHome, 0);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 0u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ShiftArrowExtendsFromTheAnchorAndKeepsExtending) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(std::move(modelOwner));
+
+    ClickRow(listView, 1, 0);  // sets selectionAnchor_ to row 1, like a plain click
+
+    PressKey(listView, vkDownArrow, kmShift);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u }));
+
+    // A second Shift+Down must extend further from row 2, not reset back
+    // to ranging from the anchor to row 2 again.
+    PressKey(listView, vkDownArrow, kmShift);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u, 3u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(std::move(modelOwner));
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, kmCtrl);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u }))
+        << "Ctrl+Arrow must not touch real selection";
+    ASSERT_TRUE(listView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*listView->keyboardHighlightedIndex(), 2u);
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b", "c", "d", "e" };
+    listView->setModel(std::move(modelOwner));
+
+    listView->setSelectedIndex(1u);
+    PressKey(listView, vkDownArrow, kmCtrl);  // highlight -> row 2, selection still just {1}
+    PressKey(listView, vkSpaceBar, kmCtrl);
+
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u, 2u }));
+
+    // Toggling again clears it back off.
+    PressKey(listView, vkSpaceBar, kmCtrl);
+    EXPECT_EQ(listView->selectedIndices(), (std::set<std::size_t>{ 1u }));
+
+    listView->destroy();
+    delete listView;
+}
+
+TEST(ListView, ArrowKeysAreANoOpWithNoRows) {
+    auto* listView = new ListView();
+    listView->setBounds(Rect(0, 0, 100, 200));
+
+    PressKey(listView, vkDownArrow, 0);  // must not crash with itemCount() == 0
+
+    EXPECT_FALSE(listView->selectedIndex().has_value());
+
+    listView->destroy();
+    delete listView;
+}
+
 TEST(ListView, PaintDoesNotCrashAndReusesASinglePooledItemAcrossRowsAndCalls) {
     auto* listView = new ListView();
     listView->setBounds(Rect(0, 0, 100, 60));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c", "d", "e" };
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     listView->setSelectedIndex(1u);
 
     ListItem* before = listView->controller().createItem(0);
@@ -1376,11 +2792,12 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* listView = new ListView();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     for (int i = 0; i < 50; ++i) {
         model.rows.push_back("row " + std::to_string(i));
     }
-    listView->setModel(&model);
+    listView->setModel(std::move(modelOwner));
     scrollView->addChild(listView);
 
     // No scrollbar of its own, and pinned to the (much smaller) viewport
@@ -1396,6 +2813,269 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
 
     scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
     listView->paint(ctx);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// ---------------------------------------------------------------------
+// ScrollView::handleContentRequestScrollIntoView() (controls.cpp) - a
+// content child's onRequestScrollIntoView (view.h, fired from paint())
+// actually nudging the hosting ScrollView's own scrollbar. Confirmed
+// live as a real, pre-existing gap: onRequestScrollIntoView was fired in
+// five places across this codebase (TextControl's caret, ListView/
+// TreeView's selection and keyboard highlight) but never subscribed to
+// anywhere - arrow-key-driven selection moved correctly but never
+// scrolled the newly-selected row into view once it left the viewport.
+// ---------------------------------------------------------------------
+
+TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // establishes real vBar range/pageSize
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    ASSERT_FALSE(scrollView->hBar()->isVisible())
+        << "ListView content is exactly as wide as its viewport - a "
+           "horizontal bar here would silently shrink viewportHeight and "
+           "throw off the scroll-into-view target below";
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    listView->setSelectedIndex(40u);
+    listView->paint(ctx);  // paint() is what fires onRequestScrollIntoView
+
+    float rowTop = listView->controller().itemOffset(40);
+    float rowBottom = rowTop + listView->controller().itemHeight(40);
+    float value = scrollView->vBar()->value();
+    float pageSize = scrollView->vBar()->pageSize();
+
+    EXPECT_GT(value, 0.0f) << "row 40 required scrolling down from the top";
+    EXPECT_GE(rowTop, value - 0.01f);
+    EXPECT_LE(rowBottom, value + pageSize + 0.01f);
+    // Pinned exact value, not just the tolerant bounds above: with the
+    // full 60px viewport height (no phantom horizontal bar stealing 16px
+    // for a fallback thickness), row 40 (top=800, bottom=820) must land
+    // scrolled so its bottom is flush with the viewport bottom.
+    EXPECT_FLOAT_EQ(value, 760.0f);
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+// Real, live-reported bug: paint() used to fire onRequestScrollIntoView()
+// unconditionally every single call (whenever selectedIndex() had a value
+// at all, not just when it actually changed) - so dragging this
+// ScrollView's own scrollbar to look at other rows, which itself triggers
+// a repaint (ScrollBar::onValueChanged -> handleVBarValueChanged() ->
+// child->redraw()), immediately snapped straight back to the still-
+// selected row on the very next paint(). The user could never actually
+// scroll a selected row *out* of view with the scrollbar at all.
+TEST(ListView, ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNextPaint) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+
+    listView->setSelectedIndex(40u);
+    listView->paint(ctx);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 760.0f) << "test assumption: paint() scrolled to reveal row 40, same as the sibling test above";
+
+    // Simulates the user dragging the scrollbar thumb back to the top,
+    // away from the still-selected row 40 - same handleVBarValueChanged()
+    // path a real drag goes through.
+    scrollView->vBar()->setValue(0.0f);
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    // A second, unrelated repaint - e.g. anything else in the window
+    // invalidating, or simply the redraw() the manual scroll itself
+    // triggered - must NOT snap the view back to row 40 just because it's
+    // still selectedIndex(); nothing about the *selection* changed.
+    listView->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "an unrelated repaint must not re-fire onRequestScrollIntoView() for a selection that hasn't changed";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, SelectingARowBelowTheViewportRepaintsItInTheSamePaintCall) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto* spyController = new SpyListController();
+    listView->setController(std::unique_ptr<ListController>(spyController));
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);  // establishes real vBar range/pageSize
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    listView->setSelectedIndex(40u);
+    spyController->paintedIndices.clear();
+    listView->paint(ctx);
+
+    // Row 40 must be among the rows THIS SAME paint() call actually drew
+    // - not just something a *second* paint() would eventually catch up
+    // to. Before the fix, onRequestScrollIntoView() fired after the row
+    // loop had already read the stale scrollOffsetY_, so this call would
+    // still only draw rows 0-2 (the old, pre-scroll viewport) and row 40
+    // would only appear on a subsequent paint().
+    EXPECT_NE(std::find(spyController->paintedIndices.begin(), spyController->paintedIndices.end(), 40u),
+        spyController->paintedIndices.end())
+        << "row 40 was not painted in the same paint() call that scrolled it into view";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, SelectingARowAboveTheViewportScrollsUpToRevealIt) {
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    scrollView->vBar()->setValue(scrollView->vBar()->maxValue());
+    listView->paint(ctx);
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f);
+
+    listView->setSelectedIndex(0u);
+    listView->paint(ctx);
+
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f) << "row 0 required scrolling back up to the top";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, HomeAndEndKeysScrollTheHostingScrollViewToo) {
+    // Same end-to-end path as SelectingARow[Below/Above]TheViewport... above,
+    // but driven through real handleKeyDown() (PressKey(), same helper
+    // ListView's own arrow-key test group uses) instead of calling
+    // setSelectedIndex() directly - vkHome/vkEnd share the exact same
+    // setSelectedIndex() tail every other non-modified arrow key does
+    // (see handleKeyDown()'s own switch, controls.cpp), so this is
+    // mainly a regression guard confirming that shared path really does
+    // behave identically when reached via Home/End specifically.
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f);
+
+    PressKey(listView, vkEnd, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 49u);
+    float lastRowBottom = listView->controller().itemOffset(49) + listView->controller().itemHeight(49);
+    EXPECT_GE(scrollView->vBar()->value() + scrollView->vBar()->pageSize(), lastRowBottom - 0.01f)
+        << "End must scroll all the way to the bottom, not leave the last row still offscreen";
+
+    PressKey(listView, vkHome, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 0u);
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "Home must scroll all the way back to the top";
+
+    scrollView->destroy();
+    delete scrollView;
+}
+
+TEST(ListView, HomeAfterRepeatedDownArrowsScrollsAllTheWayBackToTheTop) {
+    // Reproduces the exact real-app sequence reported live: Tab into the
+    // ListView (real keyboard focus, not a click - PressKey() drives
+    // handleKeyDown() directly, same as any real focused-View key
+    // dispatch), press Down repeatedly past the viewport (each one its
+    // own real Down keystroke, not a single jump to a far index the way
+    // ClickRow()/setSelectedIndex() elsewhere in this file would be), then
+    // Home. Down alone was confirmed working live; Home was not.
+    auto* scrollView = new ScrollView();
+    scrollView->setBounds(Rect(0, 0, 100, 60));
+
+    auto* listView = new ListView();
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    for (int i = 0; i < 50; ++i) {
+        model.rows.push_back("row " + std::to_string(i));
+    }
+    listView->setModel(std::move(modelOwner));
+    scrollView->addChild(listView);
+
+    BLImage image(100, 60, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    listView->paint(ctx);
+    ASSERT_TRUE(scrollView->vBar()->isVisible());
+
+    listView->setSelectedIndex(0u);
+    for (int i = 0; i < 20; ++i) {
+        PressKey(listView, vkDownArrow, 0);
+        listView->paint(ctx);
+    }
+
+    ASSERT_EQ(*listView->selectedIndex(), 20u);
+    ASSERT_GT(scrollView->vBar()->value(), 0.0f) << "20 Down presses must have actually scrolled";
+
+    PressKey(listView, vkHome, 0);
+    listView->paint(ctx);
+
+    EXPECT_EQ(*listView->selectedIndex(), 0u);
+    EXPECT_FLOAT_EQ(scrollView->vBar()->value(), 0.0f)
+        << "Home must scroll all the way back to the top even after many prior Down presses";
 
     scrollView->destroy();
     delete scrollView;
@@ -1456,8 +3136,9 @@ TEST(TreeView, DefaultConstructedHasZeroVisibleRowsAndNoSelection) {
 TEST(TreeView, ContentSizeReflectsOnlyCurrentlyVisibleRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     // Collapsed: just the 2 root children.
     Size collapsedSize = treeView->contentSize();
@@ -1474,8 +3155,9 @@ TEST(TreeView, ContentSizeReflectsOnlyCurrentlyVisibleRows) {
 TEST(TreeView, ClickingTheGlyphTogglesExpandWithoutSelecting) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     EXPECT_FALSE(treeView->controller().isExpanded({ 0u }));
 
@@ -1493,8 +3175,9 @@ TEST(TreeView, ClickingTheGlyphTogglesExpandWithoutSelecting) {
 TEST(TreeView, ClickingTheLabelSelectsWithoutTogglingExpand) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     // Well to the right of the glyph - the row's own label text.
     ClickTreeRow(treeView, 0, 50.0f, 0);
@@ -1510,8 +3193,9 @@ TEST(TreeView, ClickingTheLabelSelectsWithoutTogglingExpand) {
 TEST(TreeView, CtrlClickTogglesSelectionAcrossRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     ClickTreeRow(treeView, 0, 50.0f, 0);        // select {0}
     ClickTreeRow(treeView, 1, 50.0f, kmCtrl);   // add {1}
@@ -1525,8 +3209,9 @@ TEST(TreeView, CtrlClickTogglesSelectionAcrossRows) {
 TEST(TreeView, ShiftClickSelectsARangeAcrossExpandedRows) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
 
     ClickTreeRow(treeView, 0, 50.0f, 0);         // anchor at visible row 0 ({0})
@@ -1538,13 +3223,169 @@ TEST(TreeView, ShiftClickSelectsARangeAcrossExpandedRows) {
     delete treeView;
 }
 
+// ---------------------------------------------------------------------
+// TreeView - keyboard navigation (handleKeyDown(), controls.cpp). Up/Down/
+// Home/End/Shift/Ctrl mirror ListView's own contract over visible row
+// index; Left/Right add the tree-specific collapse-or-go-to-parent /
+// expand-or-go-to-first-child pair - see handleKeyDown()'s own doc comment
+// (controls.h). StubTreeRowModel (above): 2 root children, the first
+// ({0}) has 2 of its own ({0,0}/{0,1}), the second ({1}) is a leaf.
+// ---------------------------------------------------------------------
+
+namespace {
+
+void PressTreeKey(TreeView* treeView, std::uint32_t VKeyCode, std::uint32_t keyMask) {
+    treeView->onKeyDown(*treeView, keyMask, 0, 1, VKeyCode);
+}
+
+}  // namespace
+
+TEST(TreeView, PlainArrowMovesAndReplacesSelectionAcrossVisibleRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));  // collapsed: visible {0}, {1}
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, 0);
+
+    ASSERT_TRUE(treeView->selectedPath().has_value());
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 1u }));
+
+    PressTreeKey(treeView, vkDownArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 1u })) << "Down at the last visible row must clamp";
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RightArrowExpandsFirstThenMovesToTheFirstChildOnASecondPress) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+
+    PressTreeKey(treeView, vkRightArrow, 0);
+    EXPECT_TRUE(treeView->controller().isExpanded({ 0u }));
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "the first Right Arrow only expands - it doesn't also move";
+
+    PressTreeKey(treeView, vkRightArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u, 0u }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, LeftArrowCollapsesFirstThenMovesToTheParentOnASecondPress) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+    treeView->controller().setExpanded({ 0u }, true);
+
+    // A leaf (path {0,0} has no children of its own) - Left goes straight
+    // to the parent, no collapse step to do first.
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u, 0u });
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }));
+
+    // Now sitting on {0}, which IS expanded (has children) - first Left
+    // collapses it rather than immediately jumping to its own parent.
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_FALSE(treeView->controller().isExpanded({ 0u }));
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "the first Left Arrow only collapses - it doesn't also move";
+
+    // {0} is a top-level path (size 1) - no parent to move to.
+    PressTreeKey(treeView, vkLeftArrow, 0);
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ShiftArrowExtendsSelectionAcrossVisibleRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+    treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
+
+    ClickTreeRow(treeView, 0, 50.0f, 0);  // anchor at visible row 0 ({0})
+
+    PressTreeKey(treeView, vkDownArrow, kmShift);
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u } }));
+
+    PressTreeKey(treeView, vkDownArrow, kmShift);
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 0u, 0u }, { 0u, 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, CtrlArrowMovesTheHighlightWithoutChangingSelection) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));  // collapsed: visible {0}, {1}
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, kmCtrl);
+
+    EXPECT_EQ(*treeView->selectedPath(), (std::vector<std::size_t>{ 0u }))
+        << "Ctrl+Arrow must not touch real selection";
+    ASSERT_TRUE(treeView->keyboardHighlightedIndex().has_value());
+    EXPECT_EQ(*treeView->keyboardHighlightedIndex(), 1u);
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, CtrlSpaceTogglesSelectionAtTheHighlightedRow) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+
+    treeView->setSelectedPath(std::vector<std::size_t>{ 0u });
+    PressTreeKey(treeView, vkDownArrow, kmCtrl);  // highlight -> {1}, selection still just {0}
+    PressTreeKey(treeView, vkSpaceBar, kmCtrl);
+
+    EXPECT_EQ(treeView->selectedPaths(), (std::set<std::vector<std::size_t>>{ { 0u }, { 1u } }));
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, ArrowKeysAreANoOpWithNoRows) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+
+    PressTreeKey(treeView, vkDownArrow, 0);  // must not crash with visibleCount() == 0
+
+    EXPECT_FALSE(treeView->selectedPath().has_value());
+
+    treeView->destroy();
+    delete treeView;
+}
+
 TEST(TreeView, HoverHighlightIsEnabledByDefaultAndTracksMouseMove) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
     EXPECT_TRUE(treeView->hoverHighlightEnabled());
 
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
 
     float row1Y = treeView->getClientBounds().top() + 1.5f * treeView->rowHeight();
     treeView->onMouseMove(*treeView, Point(50.0f, row1Y), 0, 0);
@@ -1563,8 +3404,9 @@ TEST(TreeView, HoverHighlightIsEnabledByDefaultAndTracksMouseMove) {
 TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
     auto* treeView = new TreeView();
     treeView->setBounds(Rect(0, 0, 100, 200));
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);
     treeView->setSelectedPath(std::vector<std::size_t>{ 0u, 1u });
 
@@ -1583,13 +3425,69 @@ TEST(TreeView, PaintDoesNotCrashAndReusesASinglePooledItem) {
     delete treeView;
 }
 
+TEST(TreeView, RectForPathIsNulloptWhenNotCurrentlyVisible) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+
+    // {0}'s own children are collapsed away by default.
+    EXPECT_FALSE(treeView->rectForPath({ 0u, 0u }).has_value());
+    // Doesn't exist in the model at all.
+    EXPECT_FALSE(treeView->rectForPath({ 5u }).has_value());
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RectForPathMatchesTheOnScreenRowWithNoScroll) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+
+    std::optional<Rect> rect = treeView->rectForPath({ 1u });
+    ASSERT_TRUE(rect.has_value());
+    Rect clientBounds = treeView->getClientBounds();
+    EXPECT_FLOAT_EQ(rect->left(), clientBounds.left());
+    EXPECT_FLOAT_EQ(rect->top(), clientBounds.top() + treeView->rowHeight());
+    EXPECT_FLOAT_EQ(rect->width(), clientBounds.width());
+    EXPECT_FLOAT_EQ(rect->height(), treeView->rowHeight());
+
+    treeView->destroy();
+    delete treeView;
+}
+
+TEST(TreeView, RectForPathAccountsForTheCurrentScrollOffset) {
+    auto* treeView = new TreeView();
+    treeView->setBounds(Rect(0, 0, 100, 200));
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
+    treeView->controller().setExpanded({ 0u }, true);  // visible: {0}, {0,0}, {0,1}, {1}
+
+    treeView->onScrollOffsetChanged(*treeView, Point(0.0f, treeView->rowHeight()));
+
+    // {0,1} is visible row 2 - content-space Y is 2*rowHeight, minus the
+    // 1*rowHeight scroll offset just applied above.
+    std::optional<Rect> rect = treeView->rectForPath({ 0u, 1u });
+    ASSERT_TRUE(rect.has_value());
+    EXPECT_FLOAT_EQ(rect->top(), treeView->getClientBounds().top() + treeView->rowHeight());
+
+    treeView->destroy();
+    delete treeView;
+}
+
 TEST(TreeView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
     auto* scrollView = new ScrollView();
     scrollView->setBounds(Rect(0, 0, 100, 60));
 
     auto* treeView = new TreeView();
-    StubTreeRowModel model;
-    treeView->setModel(&model);
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    treeView->setModel(std::move(modelOwner));
     treeView->controller().setExpanded({ 0u }, true);
     scrollView->addChild(treeView);
 
@@ -1637,9 +3535,10 @@ TEST(DropDownList, DefaultConstructedHasNoSelectionAndIsNotOpen) {
 TEST(DropDownList, SetModelWiresTheControllerAndClearsAnOutOfRangeSelection) {
     auto* dropDown = new DropDownList();
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     EXPECT_EQ(dropDown->model(), &model);
 
     dropDown->setSelectedIndex(2u);
@@ -1649,9 +3548,10 @@ TEST(DropDownList, SetModelWiresTheControllerAndClearsAnOutOfRangeSelection) {
     // clears the now-invalid selection - same reasoning
     // TreeController::setModel() already has for expandedPaths_ referring
     // to a path that no longer exists.
-    StubRowModel smallerModel;
+    auto smallerModelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& smallerModel = *smallerModelOwner;
     smallerModel.rows = { "only one" };
-    dropDown->setModel(&smallerModel);
+    dropDown->setModel(std::move(smallerModelOwner));
     EXPECT_FALSE(dropDown->selectedIndex().has_value());
 
     dropDown->destroy();
@@ -1702,9 +3602,10 @@ TEST(DropDownList, ClickingTheButtonWithNoLiveWindowIsASafeNoOp) {
     auto* dropDown = new TestableDropDownList();
     dropDown->setBounds(Rect(0, 0, 200, 24));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
@@ -1721,9 +3622,10 @@ TEST(DropDownList, ClickingOutsideTheButtonDoesNotOpenIt) {
     auto* dropDown = new DropDownList();
     dropDown->setBounds(Rect(0, 0, 200, 24));
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point outsideButton(4.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, outsideButton, 0, 0);
@@ -1739,9 +3641,10 @@ TEST(DropDownList, DisabledDropDownIgnoresButtonClicks) {
     dropDown->setBounds(Rect(0, 0, 200, 24));
     dropDown->setEnabled(false);
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     Point insideButton(dropDown->buttonRect().left() + 2.0f, 12.0f);
     dropDown->onMouseDown(*dropDown, insideButton, 0, 0);
@@ -1763,9 +3666,10 @@ TEST(DropDownList, PaintDoesNotCrashWithOrWithoutASelection) {
     // glyph without crashing.
     dropDown->paint(ctx);
 
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
     dropDown->paint(ctx);
 
@@ -1780,9 +3684,10 @@ TEST(DropDownList, PaintDoesNotCrashWithOrWithoutASelection) {
 
 TEST(DropDownList, DownArrowWithNoSelectionSelectsTheFirstItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
 
@@ -1795,9 +3700,10 @@ TEST(DropDownList, DownArrowWithNoSelectionSelectsTheFirstItem) {
 
 TEST(DropDownList, DownArrowAdvancesAndClampsAtTheLastItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
@@ -1815,9 +3721,10 @@ TEST(DropDownList, DownArrowAdvancesAndClampsAtTheLastItem) {
 
 TEST(DropDownList, UpArrowRetreatsAndClampsAtTheFirstItem) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setSelectedIndex(1u);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkUpArrow);
@@ -1845,9 +3752,10 @@ TEST(DropDownList, ArrowKeysAreIgnoredWithNoModel) {
 
 TEST(DropDownList, ArrowKeysAreIgnoredWhileDisabled) {
     auto* dropDown = new DropDownList();
-    StubRowModel model;
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
     model.rows = { "a", "b", "c" };
-    dropDown->setModel(&model);
+    dropDown->setModel(std::move(modelOwner));
     dropDown->setEnabled(false);
 
     dropDown->onKeyDown(*dropDown, 0, 0, 0, vkDownArrow);
@@ -1855,4 +3763,1000 @@ TEST(DropDownList, ArrowKeysAreIgnoredWhileDisabled) {
 
     dropDown->destroy();
     delete dropDown;
+}
+
+// ---- Label: LabelStyle::textColor manual override ----
+
+namespace {
+newui::LabelStyle& labelStyleOf(newui::Label& label) {
+    return dynamic_cast<newui::LabelStyle&>(label.style());
+}
+}
+
+TEST(Label, StateChangeDrivesTextColorWhenNothingOverridesIt) {
+    auto* label = new newui::Label();
+    newui::Color normal = labelStyleOf(*label).textColor();
+
+    label->setEnabled(false);
+    EXPECT_NE(labelStyleOf(*label).textColor(), normal);  // dimmed to DisabledText
+
+    label->setEnabled(true);
+    EXPECT_EQ(labelStyleOf(*label).textColor(), normal);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ExternallySetStyleTextColorSurvivesLaterStateChanges) {
+    auto* label = new newui::Label();
+    newui::Color custom(1.0f, 0.0f, 0.5f, 1.0f);
+    labelStyleOf(*label).setTextColor(custom);  // e.g. edited through the Properties grid
+
+    label->setEnabled(false);
+    label->setEnabled(true);
+    label->setHotLink(true);
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), custom);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ClearingTheOverrideToNullResumesStateDrivenColor) {
+    auto* label = new newui::Label();
+    newui::Color normal = labelStyleOf(*label).textColor();
+    labelStyleOf(*label).setTextColor(newui::Color(1.0f, 0.0f, 0.5f, 1.0f));
+
+    labelStyleOf(*label).setTextColor(newui::Color::null());
+    label->setEnabled(false);
+    label->setEnabled(true);
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), normal);
+
+    label->destroy();
+    delete label;
+}
+
+TEST(Label, ExplicitSetTextColorAlwaysWinsOverAnOverride) {
+    auto* label = new newui::Label();
+    labelStyleOf(*label).setTextColor(newui::Color(1.0f, 0.0f, 0.5f, 1.0f));
+
+    label->setTextColor(BLRgba32(0xFF112233u));
+
+    EXPECT_EQ(labelStyleOf(*label).textColor(), newui::Color(BLRgba32(0xFF112233u)));
+
+    label->destroy();
+    delete label;
+}
+
+// ---- Shared controllers (ListView / TreeView / DropDownList) ----
+// One controller can back several views over the same data; a view that dies must not leave the
+// controller holding a dangling onDataChanged subscriber.
+
+TEST(ListView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a", "b" };
+    auto controller = std::make_shared<ListController>();
+    controller->setModel(std::move(modelOwner));
+
+    auto* first = new ListView();
+    first->setController(controller);
+    auto* second = new ListView();
+    second->setController(controller);
+    EXPECT_EQ(first->sharedController(), second->sharedController());
+
+    first->destroy();
+    delete first;
+    model.onChanged(model);  // controller fires onDataChanged; only `second` may still hear it
+
+    second->destroy();
+    delete second;
+    model.onChanged(model);  // and nobody at all now
+    SUCCEED();
+}
+
+TEST(ListView, SwappingControllersUnsubscribesFromTheOldOne) {
+    auto modelOwner = std::make_unique<StubRowModel>();
+    StubRowModel& model = *modelOwner;
+    model.rows = { "a" };
+    auto oldController = std::make_shared<ListController>();
+    oldController->setModel(std::move(modelOwner));
+
+    auto* view = new ListView();
+    view->setController(oldController);
+    view->setController(std::make_shared<ListController>());
+
+    view->destroy();
+    delete view;
+    model.onChanged(model);  // oldController must not call into the deleted view
+    SUCCEED();
+}
+
+TEST(TreeView, ASharedControllerOutlivingAViewLeavesNoDanglingSubscriber) {
+    auto modelOwner = std::make_unique<StubTreeRowModel>();
+    StubTreeRowModel& model = *modelOwner;
+    auto controller = std::make_shared<TreeController>();
+    controller->setModel(std::move(modelOwner));
+
+    auto* view = new TreeView();
+    view->setController(controller);
+    EXPECT_EQ(view->sharedController(), controller);
+
+    view->destroy();
+    delete view;
+    model.onChanged(model);
+    SUCCEED();
+}
+
+TEST(DropDownList, SetControllerSharesItAndClampsAnOutOfRangeSelection) {
+    auto threeRowsOwner = std::make_unique<StubRowModel>();
+    StubRowModel& threeRows = *threeRowsOwner;
+    threeRows.rows = { "a", "b", "c" };
+    auto oneRowOwner = std::make_unique<StubRowModel>();
+    StubRowModel& oneRow = *oneRowOwner;
+    oneRow.rows = { "only" };
+
+    auto* dropDown = new DropDownList();
+    dropDown->setModel(std::move(threeRowsOwner));
+    dropDown->setSelectedIndex(2);
+
+    auto controller = std::make_shared<ListController>();
+    controller->setModel(std::move(oneRowOwner));
+    dropDown->setController(controller);
+
+    EXPECT_EQ(dropDown->sharedController(), controller);
+    EXPECT_EQ(&dropDown->controller(), controller.get());
+    EXPECT_EQ(dropDown->model(), &oneRow);
+    EXPECT_FALSE(dropDown->selectedIndex().has_value());  // index 2 no longer exists
+
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(Slider, ItsThumbIsAnInternalNonSelectablePart) {
+    auto* slider = new Slider();
+    ASSERT_NE(slider->thumb(), nullptr);
+    EXPECT_TRUE(slider->thumb()->isInternal());
+    EXPECT_FALSE(slider->thumb()->isSelectableAtDesignTime());
+    EXPECT_FALSE(slider->isInternal());
+    EXPECT_TRUE(slider->isSelectableAtDesignTime());
+    slider->destroy();
+    delete slider;
+}
+
+TEST(Progress, ItsFillIsAnInternalNonSelectablePart) {
+    auto* progress = new Progress();
+    ASSERT_NE(progress->fill(), nullptr);
+    EXPECT_TRUE(progress->fill()->isInternal());
+    EXPECT_FALSE(progress->fill()->isSelectableAtDesignTime());
+    progress->destroy();
+    delete progress;
+}
+
+TEST(Slider, ItsTickMarksViewIsAnInternalNonSelectablePart) {
+    auto* slider = new Slider();
+    slider->setShowTicks(true);
+    ASSERT_NE(slider->ticks(), nullptr);
+    EXPECT_TRUE(slider->ticks()->isInternal());
+    EXPECT_FALSE(slider->ticks()->isSelectableAtDesignTime());
+    slider->destroy();
+    delete slider;
+}
+
+TEST(ScrollView, ItsScrollBarsAreInternalNonSelectableButItsViewportIsNot) {
+    auto* scroll = new ScrollView();
+    ASSERT_NE(scroll->vBar(), nullptr);
+    ASSERT_NE(scroll->hBar(), nullptr);
+    EXPECT_TRUE(scroll->vBar()->isInternal());
+    EXPECT_TRUE(scroll->hBar()->isInternal());
+    EXPECT_FALSE(scroll->vBar()->isSelectableAtDesignTime());
+    EXPECT_FALSE(scroll->hBar()->isSelectableAtDesignTime());
+    EXPECT_FALSE(scroll->isInternal());
+    scroll->destroy();
+    delete scroll;
+}
+
+namespace {
+    // Pixels in a 300x40 render of textControl that are clearly red (text drawn in the red run).
+    std::size_t redTextPixels(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 300; ++x) {
+                const std::uint32_t px = row[x];
+                const std::uint32_t r = (px >> 16) & 0xFF, g = (px >> 8) & 0xFF, b = px & 0xFF;
+                count += (r > 120 && g < 60 && b < 60) ? 1 : 0;
+            }
+        }
+        return count;
+    }
+}
+
+// Color runs (e.g. syntax highlighting) recolor ranges of the text; plain black text has no red.
+TEST(TextControl, ColorRunsRecolorTheirRangeOfTheText) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"WWWWWW plain");
+    textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    ASSERT_EQ(redTextPixels(textControl), 0u);
+
+    textControl.setColorRuns({ text::TextColorRun{ 0, 6, Color(1.0f, 0.0f, 0.0f, 1.0f) } });
+
+    EXPECT_GT(redTextPixels(textControl), 20u);
+}
+
+namespace {
+    std::uint32_t pixelAt(TextControl& textControl, int width, int height, int x, int y) {
+        BLImage image(width, height, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+        return row[x];
+    }
+}
+
+// Real-pixel check (not just the property round-tripping) - a short line leaves most of its own
+// width past the glyphs untouched by any TextDecoration/selection/color-run painting, so a pixel
+// there changing when the property is toggled proves the highlight actually spans the FULL
+// control width, not just the text's own extent (see highlightsCurrentLine()'s own comment on why
+// that distinction is the whole point of this being a dedicated draw call).
+TEST(TextControl, HighlightsCurrentLineTintsTheFullLineWidthPastTheTextItself) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+
+    const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);   // far right of "ab", same line
+    textControl.setHighlightsCurrentLine(true);
+    const std::uint32_t after = pixelAt(textControl, 300, 40, 250, 10);
+    EXPECT_NE(before, after);
+
+    textControl.destroy();
+}
+
+TEST(TextControl, HighlightsCurrentLineIsOffByDefault) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+    EXPECT_FALSE(textControl.highlightsCurrentLine());
+
+    textControl.destroy();
+}
+
+// A double-click word-select (a common real case) is still, deliberately, "on this line" - an
+// earlier version of this suppressed the tint for any active selection at all, on an assumption
+// about matching VS/VS Code that turned out to be wrong in practice; keep it through a selection.
+TEST(TextControl, HighlightsCurrentLineStaysThroughAnActiveSelection) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"ab");
+    textControl.caret().setPosition(text::TextPosition(0));
+
+    const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);
+    textControl.setHighlightsCurrentLine(true);
+    textControl.selection().setRange(text::TextRange(0, 1));
+    const std::uint32_t withSelectionOn = pixelAt(textControl, 300, 40, 250, 10);
+    EXPECT_NE(before, withSelectionOn) << "still tinted with an active selection, not suppressed";
+
+    textControl.destroy();
+}
+
+TEST(TextControl, ColorRunsPastTheEndOfTheTextAreIgnored) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"abc");
+    textControl.setColorRuns({ text::TextColorRun{ 2, 50, Color(1.0f, 0.0f, 0.0f, 1.0f) },
+                               text::TextColorRun{ 10, 5, Color(0.0f, 1.0f, 0.0f, 1.0f) } });
+
+    EXPECT_GT(redTextPixels(textControl), 0u) << "the in-range part is clamped, not dropped";
+}
+
+namespace {
+    // Pixels of a 300x40 render of textControl that are clearly the given primary color.
+    std::size_t colorPixels(TextControl& textControl, int channel) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 300; ++x) {
+                const std::uint32_t px = row[x];
+                const int v[3] = { int((px >> 16) & 0xFF), int((px >> 8) & 0xFF), int(px & 0xFF) };
+                const int a = int((px >> 24) & 0xFF);
+                bool dominant = a > 100 && v[channel] > 150;
+                for (int other = 0; other < 3; ++other) {
+                    dominant = dominant && (other == channel || v[other] < 90);
+                }
+                count += dominant ? 1 : 0;
+            }
+        }
+        return count;
+    }
+
+    TextControl& decoratedText(TextControl& textControl) {
+        textControl.setBounds(Rect(0, 0, 300, 40));
+        textControl.setText(L"alpha beta gamma");
+        textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+        return textControl;
+    }
+}
+
+TEST(TextControlDecorations, NoneMeansNothingColoredIsDrawn) {
+    TextControl textControl;
+    decoratedText(textControl);
+    for (int channel = 0; channel < 3; ++channel) {
+        EXPECT_EQ(colorPixels(textControl, channel), 0u) << channel;
+    }
+}
+
+TEST(TextControlDecorations, EachKindDrawsInItsColor) {
+    using Kind = text::TextDecorationKind;
+    const struct { Kind kind; int channel; } cases[] = {
+        { Kind::Squiggle, 0 }, { Kind::Underline, 0 }, { Kind::Box, 2 }, { Kind::RoundBox, 2 }, { Kind::Background, 1 },
+    };
+    for (const auto& testCase : cases) {
+        TextControl textControl;
+        decoratedText(textControl);
+        text::TextDecoration decoration;
+        decoration.start = 6;   // "beta"
+        decoration.length = 4;
+        decoration.kind = testCase.kind;
+        decoration.color = Color(testCase.channel == 0 ? 1.0f : 0.0f, testCase.channel == 1 ? 1.0f : 0.0f,
+            testCase.channel == 2 ? 1.0f : 0.0f, 1.0f);
+        textControl.setDecorations({ decoration });
+        EXPECT_GT(colorPixels(textControl, testCase.channel), 5u) << "kind " << int(testCase.kind);
+    }
+}
+
+TEST(TextControlDecorations, ARangePastTheEndIsClampedNotDropped) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::TextDecoration decoration;
+    decoration.start = 11;   // "gamma" and far beyond
+    decoration.length = 500;
+    decoration.kind = text::TextDecorationKind::Squiggle;
+    decoration.color = Color(1.0f, 0.0f, 0.0f, 1.0f);
+    textControl.setDecorations({ decoration });
+    EXPECT_GT(colorPixels(textControl, 0), 5u);
+}
+
+TEST(TextControlLineAnnotations, AMessageIsDrawnAfterItsLineInItsColor) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;   // anywhere on the line
+    annotation.text = "oops, a mistake";
+    annotation.color = Color(1.0f, 0.0f, 0.0f, 1.0f);
+    textControl.setLineAnnotations({ annotation });
+    EXPECT_GT(colorPixels(textControl, 0), 20u);
+}
+
+TEST(TextControlLineAnnotations, AnnotationAtFindsTheMessageNotTheCodeBesideIt) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.text = "oops, a mistake";
+    textControl.setLineAnnotations({ annotation });
+    colorPixels(textControl, 0);   // paints, so the layout is current
+
+    Point lineEnd;
+    float height = 0.0f;
+    textControl.controller().layoutEngine().hitTestPosition(text::TextPosition(16), lineEnd, height);
+    const float y = lineEnd.y + height * 0.5f;
+    const Point inMessage(lineEnd.x + TextController::kAnnotationGap + 10.0f, y);
+    EXPECT_EQ(textControl.controller().annotationAt(inMessage), 0u);
+    EXPECT_EQ(textControl.controller().annotationAt(Point(2.0f, y)), TextController::npos);
+    EXPECT_EQ(textControl.controller().annotationAt(Point(lineEnd.x + 5.0f, y)), TextController::npos);   // the gap
+    EXPECT_EQ(textControl.controller().annotationAt(Point(inMessage.x, y + height * 3.0f)), TextController::npos);
+}
+
+TEST(TextControlLineAnnotations, WithNoMessageAndNoTintNothingColoredIsDrawn) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.color = Color(1.0f, 0.0f, 0.0f, 1.0f);   // a color but no text
+    textControl.setLineAnnotations({ annotation });
+    for (int channel = 0; channel < 3; ++channel) {
+        EXPECT_EQ(colorPixels(textControl, channel), 0u) << channel;
+    }
+}
+
+TEST(TextControlLineAnnotations, ATintFillsTheWholeLineNotJustItsText) {
+    TextControl textControl;
+    decoratedText(textControl);   // "alpha beta gamma" in a 300px-wide control
+    text::LineAnnotation annotation;
+    annotation.offset = 3;
+    annotation.lineBackground = Color(0.0f, 1.0f, 0.0f, 1.0f);
+    textControl.setLineAnnotations({ annotation });
+    // The text is a small part of the width: only a full-width fill reaches this many pixels.
+    EXPECT_GT(colorPixels(textControl, 1), 3000u);
+}
+
+TEST(TextControlLineAnnotations, TwoOnOneLineDrawOneTint) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation first;
+    first.offset = 3;
+    first.lineBackground = Color(0.0f, 1.0f, 0.0f, 1.0f);
+    text::LineAnnotation second = first;
+    second.offset = 9;
+
+    textControl.setLineAnnotations({ first });
+    const std::size_t one = colorPixels(textControl, 1);
+    textControl.setLineAnnotations({ first, second });
+    EXPECT_EQ(colorPixels(textControl, 1), one);
+}
+
+TEST(TextControlLineAnnotations, AnnotationsMoveWithEditsBeforeThem) {
+    TextControl textControl;
+    decoratedText(textControl);
+    text::LineAnnotation annotation;
+    annotation.offset = 6;
+    annotation.text = "x";
+    textControl.setLineAnnotations({ annotation });
+
+    textControl.model().insert(0, L"abc ");
+    ASSERT_EQ(textControl.lineAnnotations().size(), 1u);
+    EXPECT_EQ(textControl.lineAnnotations()[0].offset, 10u);
+}
+
+namespace {
+    // The leftmost column with dark text pixels in a 300x40 render of textControl (-1: none).
+    int leftmostInk(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        for (int x = 0; x < 300; ++x) {
+            for (int y = 0; y < 40; ++y) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if (int((row[x] >> 16) & 0xFF) < 100) {
+                    return x;
+                }
+            }
+        }
+        return -1;
+    }
+
+    // A 300x40 render of textControl on white, as 300 * 40 pixels.
+    std::vector<std::uint32_t> renderPixels(TextControl& textControl) {
+        BLImage image(300, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < 40; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            pixels.insert(pixels.end(), row, row + 300);
+        }
+        return pixels;
+    }
+
+    const std::wstring kLongLine = L"a long line of text that is a good deal wider than a hundred pixel control could ever show";
+}
+
+TEST(TextControlWordWrap, WrappingIsTheDefaultAndTheContentIsNeverWiderThanTheView) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 100, 40));
+    textControl.setText(kLongLine);
+
+    EXPECT_TRUE(textControl.wordWrap());
+    EXPECT_FLOAT_EQ(textControl.contentSize().width, 100.0f);
+    EXPECT_GT(textControl.contentSize().height, 40.0f) << "it wrapped onto several rows";
+}
+
+TEST(TextControlWordWrap, WithWrappingOffTheContentIsAsWideAsTheLongestLine) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 100, 40));
+    textControl.setText(kLongLine);
+    textControl.setWordWrap(false);
+
+    EXPECT_FALSE(textControl.wordWrap());
+    EXPECT_GT(textControl.contentSize().width, 300.0f) << "wide enough to scroll sideways";
+    EXPECT_LT(textControl.contentSize().height, 40.0f) << "a single row now";
+}
+
+TEST(TextControlWordWrap, ShortTextWithWrappingOffIsNeverNarrowerThanTheView) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"abc");
+    textControl.setWordWrap(false);
+
+    EXPECT_FLOAT_EQ(textControl.contentSize().width, 300.0f);
+}
+
+TEST(TextControlWordWrap, TheTextIsDrawnShiftedBySidewaysScrolling) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    textControl.setWordWrap(false);
+
+    const std::vector<std::uint32_t> before = renderPixels(textControl);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));   // what a ScrollView's hBar sends
+    const std::vector<std::uint32_t> after = renderPixels(textControl);
+    ASSERT_EQ(textControl.controller().scrollOffsetX(), 60.0f);
+    ASSERT_GE(leftmostInk(textControl), 0) << "the text continues past the left edge";
+
+    // Scrolling 60px right is the same picture moved 60px left. Glyph rasterization isn't bit-identical
+    // when moved, so look for the shift that matches best: it must be 60.
+    int bestShift = -1;
+    std::size_t fewestDiffering = static_cast<std::size_t>(-1);
+    for (int shift = 0; shift <= 100; ++shift) {
+        std::size_t differing = 0;
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 0; x < 190; ++x) {
+                differing += after[y * 300 + x] != before[y * 300 + x + shift] ? 1 : 0;
+            }
+        }
+        if (differing < fewestDiffering) {
+            fewestDiffering = differing;
+            bestShift = shift;
+        }
+    }
+    EXPECT_EQ(bestShift, 60);
+}
+
+TEST(TextControlWordWrap, WrappedTextIgnoresASidewaysOffset) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));
+
+    EXPECT_EQ(textControl.controller().scrollOffsetX(), 0.0f);
+}
+
+TEST(TextControlWordWrap, TurningWrappingBackOnClearsTheSidewaysScroll) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(kLongLine);
+    textControl.setWordWrap(false);
+    textControl.onScrollOffsetChanged(textControl, Point(60.0f, 0.0f));
+    ASSERT_EQ(textControl.controller().scrollOffsetX(), 60.0f);
+
+    textControl.setWordWrap(true);
+    EXPECT_EQ(textControl.controller().scrollOffsetX(), 0.0f);
+}
+
+namespace {
+    struct InkScan {
+        int rightmostInk = -1;      // rightmost column with dark text pixels
+        std::size_t ink = 0;        // dark pixels
+        std::vector<std::uint32_t> pixels;
+    };
+
+    InkScan scanInk(TextControl& textControl, int width, int height) {
+        BLImage image(width, height, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            textControl.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        InkScan scan;
+        for (int y = 0; y < height; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < width; ++x) {
+                scan.pixels.push_back(row[x]);
+                const bool dark = ((row[x] >> 8) & 0xFF) < 128;
+                if (dark) {
+                    scan.rightmostInk = x > scan.rightmostInk ? x : scan.rightmostInk;
+                    ++scan.ink;
+                }
+            }
+        }
+        return scan;
+    }
+
+    TextControl& styledText(TextControl& textControl, const std::wstring& text) {
+        textControl.setBounds(Rect(0, 0, 400, 40));
+        textControl.setFont(Font("Segoe UI", 16.0f));
+        textControl.setText(text);
+        textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+        return textControl;
+    }
+}
+
+TEST(TextControlFontRuns, BoldWidensTheTextAndMovesTheCaretPositionsAfterIt) {
+    TextControl plain;
+    styledText(plain, L"mmmmmm x");
+    plain.controller().ensureLayoutUpToDate();
+    Point plainX;
+    float height = 0.0f;
+    plain.controller().layoutEngine().hitTestPosition(text::TextPosition(7), plainX, height);
+
+    TextControl bold;
+    styledText(bold, L"mmmmmm x");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 6;
+    run.bold = true;
+    bold.setFontRuns({ run });
+    bold.controller().ensureLayoutUpToDate();
+    Point boldX;
+    bold.controller().layoutEngine().hitTestPosition(text::TextPosition(7), boldX, height);
+
+    EXPECT_GT(boldX.x, plainX.x + 1.0f);
+}
+
+// The point of one shared layout: what's drawn is what's hit-tested.
+TEST(TextControlFontRuns, TheDrawnBoldTextEndsWhereItsHitTestRectEnds) {
+    TextControl textControl;
+    styledText(textControl, L"mmmmmmmm");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 8;
+    run.bold = true;
+    textControl.setFontRuns({ run });
+
+    const InkScan scan = scanInk(textControl, 400, 40);
+    const std::vector<Rect> rects = textControl.controller().layoutEngine().hitTestRange(text::TextRange(0, 8));
+    ASSERT_FALSE(rects.empty());
+    ASSERT_GE(scan.rightmostInk, 0);
+    EXPECT_LE(scan.rightmostInk, rects.back().right() + 1.0f);
+    EXPECT_GE(scan.rightmostInk, rects.back().right() - 4.0f);
+}
+
+TEST(TextControlFontRuns, UnderlineAddsInkBelowTheText) {
+    TextControl plain;
+    styledText(plain, L"abc abc abc");
+    TextControl underlined;
+    styledText(underlined, L"abc abc abc");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 11;
+    run.underline = true;
+    underlined.setFontRuns({ run });
+
+    // A line under ~80px of text.
+    EXPECT_GT(scanInk(underlined, 400, 40).ink, scanInk(plain, 400, 40).ink + 40);
+}
+
+TEST(TextControlFontRuns, ItalicChangesTheDrawnGlyphs) {
+    TextControl plain;
+    styledText(plain, L"lllllll");
+    TextControl italic;
+    styledText(italic, L"lllllll");
+    text::TextFontRun run;
+    run.start = 0;
+    run.length = 7;
+    run.italic = true;
+    italic.setFontRuns({ run });
+
+    EXPECT_NE(scanInk(italic, 400, 40).pixels, scanInk(plain, 400, 40).pixels);
+}
+
+#include "newui/reflectionio.h"
+#include "newui/textstyle.h"
+
+namespace {
+    std::shared_ptr<TextStyleSheet> sampleSheet(const Color& keywordColor) {
+        auto sheet = std::make_shared<TextStyleSheet>();
+        auto* keyword = new TextStyle("keyword");
+        keyword->setBold(true);
+        keyword->setColor(keywordColor);
+        sheet->addStyle(keyword);
+        auto* comment = new TextStyle("comment");
+        comment->setItalic(true);
+        comment->setBackgroundColor(Color(1.0f, 1.0f, 0.0f, 1.0f));
+        sheet->addStyle(comment);
+        auto* error = new TextStyle("error");
+        error->setDecoration(text::TextDecorationKind::Squiggle);
+        error->setDecorationColor(Color(1.0f, 0.0f, 0.0f, 1.0f));
+        sheet->addStyle(error);
+        return sheet;
+    }
+}
+
+TEST(TextStyles, ExpandTurnsEachStyleIntoRunsAndDecorations) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, {
+        { 0, 4, "keyword" }, { 5, 6, "comment" }, { 12, 3, "error" }, { 16, 2, "noSuchStyle" } });
+
+    ASSERT_EQ(out.colorRuns.size(), 1u) << "only keyword sets a color";
+    EXPECT_EQ(out.colorRuns[0].start, 0u);
+    EXPECT_EQ(out.colorRuns[0].color, Color(0.0f, 0.0f, 1.0f, 1.0f));
+
+    ASSERT_EQ(out.fontRuns.size(), 2u);
+    EXPECT_TRUE(out.fontRuns[0].bold);
+    EXPECT_TRUE(out.fontRuns[1].italic);
+
+    ASSERT_EQ(out.decorations.size(), 2u);
+    EXPECT_EQ(out.decorations[0].kind, text::TextDecorationKind::Background);
+    EXPECT_EQ(out.decorations[0].start, 5u);
+    EXPECT_EQ(out.decorations[1].kind, text::TextDecorationKind::Squiggle);
+    EXPECT_EQ(out.decorations[1].start, 12u);
+}
+
+TEST(TextStyles, ARangesAnnotationBecomesALineAnnotationInTheStylesColor) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    text::TextStyleRange range;
+    range.start = 12;
+    range.length = 3;
+    range.style = "error";
+    range.annotation = "'x' was not declared";
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { range, { 0, 4, "keyword" } });
+
+    ASSERT_EQ(out.annotations.size(), 1u) << "only the range that has a message";
+    EXPECT_EQ(out.annotations[0].offset, 12u);
+    EXPECT_EQ(out.annotations[0].text, "'x' was not declared");
+    EXPECT_EQ(out.annotations[0].color, Color(1.0f, 0.0f, 0.0f, 1.0f)) << "the style's decoration color";
+    EXPECT_TRUE(out.annotations[0].lineBackground.isNull());
+}
+
+TEST(TextStyles, AStyleWithALineBackgroundTintsItsLineEvenWithoutAMessage) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    sheet->style("error")->setLineBackgroundColor(Color(1.0f, 0.0f, 0.0f, 0.2f));
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 12, 3, "error" }, { 0, 4, "keyword" } });
+
+    ASSERT_EQ(out.annotations.size(), 1u);
+    EXPECT_TRUE(out.annotations[0].text.empty());
+    EXPECT_EQ(out.annotations[0].lineBackground, Color(1.0f, 0.0f, 0.0f, 0.2f));
+}
+
+TEST(TextStyles, ATextControlStylesItsRangesAndRestylesWhenTheSheetChanges) {
+    TextControl textControl;
+    textControl.setBounds(Rect(0, 0, 300, 40));
+    textControl.setText(L"auto x = 1; // note");
+    textControl.setStyledRanges({ { 0, 4, "keyword" }, { 12, 7, "comment" } });
+    EXPECT_TRUE(textControl.colorRuns().empty()) << "nothing to resolve names against yet";
+
+    textControl.setStyleSheet(sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f)));
+    ASSERT_EQ(textControl.colorRuns().size(), 1u);
+    EXPECT_EQ(textControl.fontRuns().size(), 2u);
+    EXPECT_EQ(textControl.decorations().size(), 1u);
+
+    textControl.setStyleSheet(sampleSheet(Color(0.0f, 0.5f, 0.0f, 1.0f)));   // a different theme
+    ASSERT_EQ(textControl.colorRuns().size(), 1u);
+    EXPECT_EQ(textControl.colorRuns()[0].color, Color(0.0f, 0.5f, 0.0f, 1.0f));
+}
+
+TEST(TextStyles, AStyleFontSizeChangesTheLayout) {
+    auto sheet = std::make_shared<TextStyleSheet>();
+    auto* big = new TextStyle("big");
+    big->setFontSize(36.0f);
+    sheet->addStyle(big);
+
+    TextControl plain;
+    plain.setBounds(Rect(0, 0, 400, 80));
+    plain.setText(L"small BIG");
+    plain.controller().ensureLayoutUpToDate();
+    const std::vector<Rect> plainRects = plain.controller().layoutEngine().hitTestRange(text::TextRange(6, 3));
+
+    TextControl styled;
+    styled.setBounds(Rect(0, 0, 400, 80));
+    styled.setText(L"small BIG");
+    styled.setStyleSheet(sheet);
+    styled.setStyledRanges({ { 6, 3, "big" } });
+    styled.controller().ensureLayoutUpToDate();
+    const std::vector<Rect> bigRects = styled.controller().layoutEngine().hitTestRange(text::TextRange(6, 3));
+
+    ASSERT_FALSE(plainRects.empty());
+    ASSERT_FALSE(bigRects.empty());
+    EXPECT_GT(bigRects[0].width(), plainRects[0].width() * 1.5f);
+}
+
+TEST(TextStyles, AStyleSheetSurvivesSaveAndLoad) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    sheet->setName("lightTheme");
+    reflection::ObjectWriter writer;
+    writer.write(sheet.get());
+
+    reflection::ObjectReader reader;
+    ASSERT_FALSE(json5::from_string(json5::to_string(writer.doc), reader.doc));
+    std::unique_ptr<TextStyleSheet> loaded(reader.readNew<TextStyleSheet>());
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->name(), "lightTheme");
+    ASSERT_EQ(loaded->styles().size(), 3u);
+    TextStyle* keyword = loaded->style("keyword");
+    ASSERT_NE(keyword, nullptr);
+    EXPECT_TRUE(keyword->isBold());
+    EXPECT_EQ(keyword->color(), Color(0.0f, 0.0f, 1.0f, 1.0f));
+    TextStyle* error = loaded->style("error");
+    ASSERT_NE(error, nullptr);
+    EXPECT_EQ(error->decoration(), text::TextDecorationKind::Squiggle);
+    EXPECT_TRUE(loaded->style("comment")->isItalic());
+}
+
+namespace {
+    std::vector<std::uint32_t> renderField(TextField& field) {
+        BLImage image(200, 30, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFF));
+            field.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < 30; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            pixels.insert(pixels.end(), row, row + 200);
+        }
+        return pixels;
+    }
+
+    std::size_t inkIn(const std::vector<std::uint32_t>& pixels) {
+        std::size_t count = 0;
+        for (std::uint32_t px : pixels) {
+            count += ((px >> 8) & 0xFF) < 220 ? 1 : 0;
+        }
+        return count;
+    }
+}
+
+TEST(TextFieldPlaceholder, ShowsWhileEmptyAndIsNeverPartOfTheText) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 200, 30));
+    field.controller().caret().stop();
+    const std::size_t blank = inkIn(renderField(field));
+
+    field.setPlaceholder("Search");
+    const std::vector<std::uint32_t> withPlaceholder = renderField(field);
+
+    EXPECT_GT(inkIn(withPlaceholder), blank + 20) << "the placeholder is drawn";
+    EXPECT_TRUE(field.text().empty());
+}
+
+TEST(TextFieldPlaceholder, TextReplacesItAndClearingBringsItBack) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 200, 30));
+    field.setPlaceholder("Search");
+    const std::vector<std::uint32_t> empty = renderField(field);
+
+    field.setText(L"abc");
+    EXPECT_NE(renderField(field), empty);
+    EXPECT_EQ(field.text(), L"abc");
+
+    field.setText(L"");
+    EXPECT_EQ(renderField(field), empty);
+}
+
+TEST(TextFieldPlaceholder, IsAReflectedProperty) {
+    const reflection::Class* cls = reflection::classinfo(typeid(TextField));
+    ASSERT_NE(cls, nullptr);
+    std::vector<const reflection::Property*> properties;
+    cls->allProperties(properties);
+    bool found = false;
+    for (const reflection::Property* property : properties) {
+        found = found || property->name() == "placeholder";
+    }
+    EXPECT_TRUE(found);
+}
+
+// What a status bar listens to: the caret moving, the selection changing, overwrite mode flipping.
+TEST(TextController, EditStateChangesAreReported) {
+    TextControl control;
+    control.setText(L"hello\nworld");
+    int changes = 0;
+    control.controller().onEditStateChanged.add([&changes](TextController&) {
+        ++changes;
+        return SyncReturn::Handled;
+    });
+
+    control.caret().setPosition(text::TextPosition(3));
+    EXPECT_EQ(changes, 1);
+    control.caret().setPosition(text::TextPosition(3));
+    EXPECT_EQ(changes, 1) << "not moved";
+
+    control.selection().setRange(text::TextRange(0, 4));
+    EXPECT_EQ(changes, 2);
+
+    EXPECT_FALSE(control.controller().isOverwriteMode());
+    control.controller().setOverwriteMode(true);
+    EXPECT_TRUE(control.controller().isOverwriteMode());
+    EXPECT_EQ(changes, 3);
+    control.controller().setOverwriteMode(true);
+    EXPECT_EQ(changes, 3) << "unchanged";
+}
+
+TEST(TextStyles, CompositeBlendsTwoColorsTheWayTheOperatorSays) {
+    const Color red(1.0f, 0.0f, 0.0f, 1.0f);
+    const Color halfWhite(1.0f, 1.0f, 1.0f, 0.5f);
+    const Color gray(0.5f, 0.5f, 0.5f, 1.0f);
+
+    const Color faded = composite(halfWhite, red, CompositeMode::SrcOver);
+    EXPECT_NEAR(faded.r, 1.0f, 1e-5f);
+    EXPECT_NEAR(faded.g, 0.5f, 1e-5f);
+    EXPECT_NEAR(faded.b, 0.5f, 1e-5f);
+    EXPECT_NEAR(faded.a, 1.0f, 1e-5f);
+
+    EXPECT_EQ(composite(halfWhite, red, CompositeMode::Src), halfWhite);
+    const Color product = composite(Color(0.5f, 0.5f, 0.5f, 1.0f), red, CompositeMode::Multiply);
+    EXPECT_NEAR(product.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(product.g, 0.0f, 1e-5f);
+    const Color lighter = composite(gray, Color(0.2f, 0.8f, 0.4f, 1.0f), CompositeMode::Lighten);
+    EXPECT_NEAR(lighter.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(lighter.g, 0.8f, 1e-5f);
+    const Color screened = composite(gray, gray, CompositeMode::Screen);
+    EXPECT_NEAR(screened.r, 0.75f, 1e-5f);
+    const Color summed = composite(Color(0.7f, 0.0f, 0.0f, 1.0f), Color(0.6f, 0.0f, 0.0f, 1.0f), CompositeMode::Plus);
+    EXPECT_NEAR(summed.r, 1.0f, 1e-5f) << "clamped";
+}
+
+TEST(TextStyles, AnOverlayFadesTheColorTheTextAlreadyHas) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(1.0f, 1.0f, 1.0f, 0.5f));
+    sheet->addStyle(dim);
+
+    // keyword blue over 0..4; dim over 2..8: blue faded where they meet, the base color (black) faded after
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 4, "keyword" }, { 2, 6, "dim" } },
+                                                          Color(0.0f, 0.0f, 0.0f, 1.0f));
+    ASSERT_EQ(out.colorRuns.size(), 3u) << "the keyword, then the faded part of it and the faded rest";
+    EXPECT_EQ(out.colorRuns[0].color, Color(0.0f, 0.0f, 1.0f, 1.0f));
+    EXPECT_EQ(out.colorRuns[1].start, 2u);
+    EXPECT_EQ(out.colorRuns[1].length, 2u);
+    EXPECT_NEAR(out.colorRuns[1].color.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(out.colorRuns[1].color.b, 1.0f, 1e-5f);
+    EXPECT_EQ(out.colorRuns[2].start, 4u);
+    EXPECT_EQ(out.colorRuns[2].length, 4u);
+    EXPECT_NEAR(out.colorRuns[2].color.r, 0.5f, 1e-5f) << "black faded toward white";
+    EXPECT_NEAR(out.colorRuns[2].color.b, 0.5f, 1e-5f);
+}
+
+TEST(TextStyles, AnOverlayWithNoBaseColorLeavesUncoloredTextAlone) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(1.0f, 1.0f, 1.0f, 0.5f));
+    sheet->addStyle(dim);
+
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 4, "keyword" }, { 2, 6, "dim" } });
+    ASSERT_EQ(out.colorRuns.size(), 2u) << "only the keyword's part is faded";
+    EXPECT_EQ(out.colorRuns[1].start, 2u);
+    EXPECT_EQ(out.colorRuns[1].length, 2u);
+}
+
+TEST(TextStyles, ALaterRunWinsAsTheBackdropOfAnOverlay) {
+    auto sheet = sampleSheet(Color(0.0f, 0.0f, 1.0f, 1.0f));
+    auto* green = new TextStyle("green");
+    green->setColor(Color(0.0f, 1.0f, 0.0f, 1.0f));
+    sheet->addStyle(green);
+    auto* dim = new TextStyle("dim");
+    dim->setOverlayColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+    dim->setOverlayComposite(CompositeMode::Multiply);
+    sheet->addStyle(dim);
+
+    text::ExpandedTextStyles out = text::expandTextStyles(*sheet, { { 0, 6, "keyword" }, { 0, 6, "green" }, { 0, 6, "dim" } });
+    ASSERT_EQ(out.colorRuns.size(), 3u);
+    EXPECT_EQ(out.colorRuns[2].color, Color(0.0f, 0.0f, 0.0f, 1.0f)) << "green times black";
 }

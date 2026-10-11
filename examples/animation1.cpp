@@ -229,9 +229,9 @@ void demoAnimationManagerWithRunLoop() {
     animation->addKey("start", 0)->setValue(opacity, 0.0f);
     animation->addKey("end", 15)->setValue(opacity, 100.0f, newui::InterpolationKind::EaseInOut);
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::AnimationManager::addToRunLoop(runLoop);
 
@@ -284,9 +284,9 @@ void demoLoopingAnimation() {
     animation->addKey("high", 5)->setValue(scale, 100.0f, newui::InterpolationKind::EaseOut);
     animation->addKey("low-again", 10)->setValue(scale, 0.0f, newui::InterpolationKind::EaseIn);
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::AnimationManager::addToRunLoop(runLoop);
 

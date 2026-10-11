@@ -58,7 +58,7 @@ namespace newui {
         }
 
         explicit Cursor(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32) {
-            setPath(path, hotspotX, hotspotY, maxSize);
+            loadPath(path, hotspotX, hotspotY, maxSize);
         }
 
         Cursor(const Cursor&) = delete;
@@ -72,10 +72,12 @@ namespace newui {
             if (this != &other) {
                 releaseOwnedHandle();
                 kind_ = other.kind_;
+                fallbackKind_ = other.fallbackKind_;
                 path_ = std::move(other.path_);
                 handle_ = other.handle_;
 
                 other.kind_ = CursorKind::Arrow;
+                other.fallbackKind_ = CursorKind::Arrow;
                 other.path_.clear();
                 other.handle_ = nullptr;
             }
@@ -101,15 +103,33 @@ namespace newui {
         // path() becomes path on success. Returns false, leaving this
         // Cursor completely unchanged, if the file can't be loaded
         // (missing/unreadable file, undecodable format, oversized image).
-        bool setPath(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32);
+        bool loadPath(const std::string& path, int hotspotX = 0, int hotspotY = 0, int maxSize = 32);
+
+        // The reflected setter that pairs with path() - what a designer's file picker or a saved
+        // file calls. A non-empty path is loaded (a .png, .svg, or any other format Blend2D
+        // decodes) exactly as loadPath() does, and on success kind() becomes Custom; if the file
+        // can't be loaded the cursor is left unchanged. An empty path on a file-based custom
+        // cursor reverts it to the system kind it had before becoming Custom (a system kind has no
+        // path to clear, so it is untouched).
+        void setPath(const std::string& path);
 
         CursorKind kind() const {
             return kind_;
         }
 
+        // The setter that pairs with kind() - what makes "kind" a settable reflected property
+        // (a designer's dropdown, a saved file). Custom can't be chosen this way (it only ever
+        // results from loadPath()/setPath()/setImage(), which supply the actual handle), so it is ignored.
+        void setKind(CursorKind kind) {
+            if (kind != CursorKind::Custom) {
+                setCursorKind(kind);
+            }
+        }
+
         // The path setPath() last loaded successfully - empty for every
         // other case (a system kind, or a setImage()-built handle), even
         // though kind() is Custom in the setImage() case too.
+        //@reflect tags=filepath,image
         const std::string& path() const {
             return path_;
         }
@@ -144,6 +164,12 @@ namespace newui {
         // to real memory - real, reproduced access violation the moment
         // this got reachable via View::cursor() (view.h) registering as a
         // Property.
+        // For a system kind(), resolved once and cached into handle_ (see its own comment) -
+        // ::LoadCursor() for a given IDC_* constant always returns the same process-wide shared
+        // handle anyway (Windows owns and caches it internally, hence no DestroyCursor() for
+        // these), so this is purely a "skip the redundant call" optimization, not a correctness
+        // fix - handle() is called on every WM_SETCURSOR (RootView::handleMessage()), i.e.
+        // potentially many times a second during a drag.
         //@reflect ignore=true
         HCURSOR handle() const;
 
@@ -153,6 +179,7 @@ namespace newui {
         // always reports true here; use kind()/handle() to ask "what
         // would actually be shown", this is specifically about the
         // Custom-cursor payload).
+        //@reflect ignore=true
         bool isNull() const {
             return path_.empty() && handle_ == nullptr;
         }
@@ -185,7 +212,22 @@ namespace newui {
 
         CursorKind kind_ = CursorKind::Arrow;
         std::string path_;
-        HCURSOR handle_ = nullptr;
+
+        // The system kind this cursor had before it last became Custom - what setPath("") (and
+        // so an undo of setting a path) goes back to, instead of always dropping to Arrow.
+        CursorKind fallbackKind_ = CursorKind::Arrow;
+
+        // Doubles as the Custom-owned handle (see ownsHandle()) AND, for a system kind_, a
+        // lazily-resolved cache of that shape's HCURSOR - handle() populates it via
+        // resolveCursor() on first read after a kind change, returning it directly on every
+        // later read instead of re-resolving (::LoadCursor()) every time. Safe to reuse the same
+        // member for both roles: releaseOwnedHandle() already clears it unconditionally on every
+        // setCursorKind()/setPath()/setImage() call (the only three places kind_ can change), so
+        // a stale system-kind cache can never survive past the change that would invalidate it -
+        // and ownsHandle() already gates the actual ::DestroyCursor() by kind_ == Custom, so a
+        // cached system handle (never owned) is never mistakenly freed. mutable since handle()
+        // is const but needs to populate this cache on a cache-miss read.
+        mutable HCURSOR handle_ = nullptr;
     };
 
 }

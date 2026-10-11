@@ -1,0 +1,130 @@
+#pragma once
+
+
+#include "lang_grammar.h"
+#include "core_utf8.h"
+
+
+namespace waavs 
+{
+    // copyFrom()
+    // 
+    // BUGBUG: This is kind of dangerous, as we're only copying stuff
+    // and not doing any bounds checking
+    static INLINE void bspan_copy_from(ByteSpan& a, const void* src, size_t sz) noexcept
+    {
+        if (sz > 0)
+            std::memcpy(const_cast<uint8_t*>(a.data()), src, sz);
+    }
+
+    // expandXmlEntities
+    //
+    // This function scans the input ByteSpan for XML character entities
+    // such as 
+    //	&lt; &gt; &amp; &apos; &quot; 
+    //	&#nnn; &#xhhh;
+    // and expands them into their corresponding byte values.
+    // It will handle both standard entities and numeric entities (decimal and hex).
+    // The output ByteSpan must be large enough to hold the expanded content.
+
+    static size_t expandXmlEntities(const ByteSpan& inSpan, ByteSpan& outSpan) noexcept
+    {
+        ByteSpan s = inSpan;
+        ByteSpan outCursor = outSpan;
+
+        while (s)
+        {
+            if (*s == '&')
+            {
+                // skip past the initial ampersand, ready to decode the rest
+                ++s;
+                if (!s)
+                    break;
+
+                // By taking the token up to the ';', we have already moved
+                // the input cursor to the next character
+                // so we're free to decode the content in isolation
+                auto ent = bspan_read_until(s, ';');
+
+                if (*ent == '#') 
+                {
+                    char outBuff[10] = { 0 };
+                    size_t outLen{ 0 };
+                    uint64_t value = 0;
+                    
+                    // should be a numeric entity
+                    ++ent;
+                    
+                    if (*ent == 'x') {
+                        // hex entity
+                        ++ent;
+
+                        if (parseHex64u(ent, value)) 
+                        {
+                            // convert the codepoint into a utf8 sequence
+                            // and insert that sequence into the outCursor
+                            if (convertUTF32ToUTF8(value, outBuff, outLen)) 
+                            {
+                                bspan_copy_from(outCursor, outBuff, outLen);
+                                outCursor += outLen;
+                            }
+                        }
+                    }
+                    else if (isdigit(*ent)) 
+                    {
+                        // decimal entity
+                        if (parse64u(ent, value)) 
+                        {
+                            // convert the codepoint into a utf8 sequence
+                            // and insert that sequence into the outCursor
+                            if (convertUTF32ToUTF8(value, outBuff, outLen)) 
+                            {
+                                bspan_copy_from(outCursor, outBuff, outLen);
+                                outCursor += outLen;
+                            }
+                        }
+
+                    } 
+
+                
+                }
+                else {
+                    // Otherwise, process a standard character entity
+                    if (ent == "lt") {
+                        outCursor[0] = '<';
+                        ++outCursor;
+                    }
+                    else if (ent == "gt") {
+                        outCursor[0] = '>';
+                        ++outCursor;
+                    }
+                    else if (ent == "amp") {
+                        outCursor[0] = '&';
+                        ++outCursor;
+                    }
+                    else if (ent == "apos") {
+                        outCursor[0] = '\'';
+                        ++outCursor;
+                    }
+                    else if (ent == "quot") {
+                        outCursor[0] = '"';
+                        ++outCursor;
+                    }
+                }
+            }
+            else
+            {
+                outCursor[0] = *s;
+                ++outCursor;
+                ++s;
+            }
+
+
+        }
+        outSpan.resetEnd(outCursor.begin());
+
+        return outSpan.size();
+    }
+
+}
+

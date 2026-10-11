@@ -625,9 +625,9 @@ TEST(AnimationManagerRun, DrivesAnAnimationToCompletionViaRunLoopIdle) {
     animation->addKey("start", 0)->setValue(value, 0.0f);
     animation->addKey("end", 5)->setValue(value, 100.0f);
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::AnimationManager::addToRunLoop(runLoop);
 

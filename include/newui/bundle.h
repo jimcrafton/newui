@@ -1,10 +1,12 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/svgimage.h>
 
 #include <blend2d/blend2d.h>
 
 #include <string>
+#include <unordered_map>
 
 namespace newui {
 
@@ -44,10 +46,25 @@ namespace newui {
         Bundle& operator=(const Bundle&) = delete;
 
         // Directory containing the running .exe (no trailing slash),
-        // computed once via GetModuleFileNameA() and cached.
+        // computed once via GetModuleFileNameA() and cached - unless
+        // overridden, see setExecutableDirOverride() below.
         const std::string& executableDir() const {
             return executableDir_;
         }
+
+        // Overrides executableDir() (and, via it, resourcesDir()) for a
+        // host where the running process's own exe directory isn't the
+        // right root - e.g. NativeEditControls.dll hosted inside
+        // devenv.exe, whose own exe directory has nothing to do with
+        // whichever project's .newui files are actually being edited.
+        // Pass "" to reset to the real, OS-derived value. Mutates this
+        // shared singleton, so it isn't safe for two callers needing
+        // different roots active at the same time - a real limitation
+        // for two Designer documents from different projects open at
+        // once, accepted for now rather than making Bundle non-singleton.
+        // Also invalidates the cached Info.json read (appName()/
+        // appVersion()), since that resolves against executableDir() too.
+        void setExecutableDirOverride(const std::string& dir);
 
         // executableDir() + "\Resources".
         const std::string& resourcesDir() const {
@@ -60,11 +77,46 @@ namespace newui {
         // exceptions.
         std::string resourcePath(const std::string& relativePath) const;
 
+        // Registers every .ttf / .otf under resourcesDir() + "\" + relativeDir (subfolders too) with
+        // FontManager::addFontDirectory(), so text drawn by blend2d finds them by name - how an application
+        // ships its own fonts. Returns how many it registered; 0 if the folder does not exist. Call it once at
+        // startup, before text is drawn; see FontManager::addFontFile() for what sees them.
+        std::size_t loadFonts(const std::string& relativeDir = "Fonts") const;
+
         // Loads relativePath (resolved via resourcePath()) as a BLImage.
         // BMP/JPEG/PNG/QOI all work out of the box - blend2d builds those
-        // codecs in unconditionally. Returns false, leaving outImage
-        // untouched, if the path doesn't resolve or isn't a loadable image.
+        // codecs in unconditionally. A ".svg" path is instead rasterized
+        // via renderSvgFile() (svgimage.h) at a fixed kDefaultSvgRasterSize
+        // x kDefaultSvgRasterSize - svgandme has no reliable way to ask an
+        // SVG for its own "natural" size (see renderSvgFile()'s own
+        // comment). Returns false, leaving outImage untouched, if the path
+        // doesn't resolve or isn't a loadable image.
         bool loadImage(const std::string& relativePath, BLImage& outImage) const;
+
+        // Same as loadImage() above, but rasterizes a ".svg" path at
+        // exactly width x height instead of the fixed kDefaultSvgRasterSize
+        // default - for a caller that knows the real pixel size it needs
+        // up front (a small toolbar/tree-row icon, e.g.) and wants a crisp
+        // render at that size rather than a blit-time downscale of a
+        // 32x32 default. A non-SVG path ignores width/height entirely
+        // (BLImage::read_from_file() has no resize step of its own) and
+        // behaves exactly like the two-argument overload.
+        bool loadImage(const std::string& relativePath, BLImage& outImage, int width, int height) const;
+
+        // loadImage(relativePath, outImage, width, height) above, but
+        // rasterized/decoded at most once per (relativePath, width,
+        // height) for this Bundle's lifetime - every later call with the
+        // same three arguments returns the same cached BLImage (a cheap
+        // BLImage copy, itself copy-on-write) instead of re-reading and
+        // re-parsing the file. Meant for exactly the case that motivated
+        // it: a small, fixed set of UI icons repeatedly painted (Item's
+        // own paintItemIcon() helper, items.cpp) - not a general-purpose
+        // image cache with any eviction policy, since that fixed-set
+        // assumption is what makes "never evict" acceptable here. Returns
+        // false (outImage untouched) under the same conditions
+        // loadImage() would, without polluting the cache with a failed
+        // lookup's default-constructed BLImage.
+        bool loadCachedImage(const std::string& relativePath, BLImage& outImage, int width = kDefaultSvgRasterSize, int height = kDefaultSvgRasterSize) const;
 
         // Reads relativePath (resolved via resourcePath()) as text.
         // Returns "" if the path doesn't resolve or can't be read - not
@@ -85,12 +137,78 @@ namespace newui {
         // Delegates to loadFrame(dialog.frame()) - see Dialog::frame().
         bool loadDialog(Dialog& dialog) const;
 
+        // Same as loadFrame(), but reads absolutePath directly - never
+        // touches executableDir()/resourcesDir(). For a document outside
+        // this app's own resource bundle (see loadRootViewFromFile()).
+        // frame.getName() isn't consulted for resolution here.
+        bool loadFrameFromFile(Frame& frame, const std::string& absolutePath) const;
+
+        // Loads just the "rootView" node of "<bundleName>.newui" into
+        // target in place - no Frame required, for a standalone RootView
+        // (see RootView's Frame-less constructor). Returns false for any
+        // of loadFrame()'s own failure reasons (bundleName empty, file
+        // missing/invalid).
+        //
+        // Templated (defined + explicitly instantiated in bundle.cpp, not
+        // inline here - same "declare in the header, define + explicitly
+        // instantiate in the .cpp" shape as any templated member that
+        // doesn't need to be usable for every possible T at every call
+        // site) so a registered proxy class (Class::proxy()/proxyFor(),
+        // reflection.h - e.g. RootViewProxy, cpp_codetools' own
+        // design-time stand-in for a real RootView, which can't be loaded
+        // through this as a real RootView& at all since it's a genuinely
+        // different, unrelated type - see RootViewProxy's own class
+        // comment) can be loaded the same way a real RootView is, reusing
+        // this method's own file-resolution/parsing, not a hand-rolled
+        // duplicate. Add a new explicit instantiation in bundle.cpp for
+        // any future T that needs this.
+        //
+        // designMode, when true, propagates Component::setDesignTime(true)
+        // (via Class::trySetDesignTime()) onto every freshly-constructed
+        // child read while rebuilding target's own childViews - readNested()
+        // itself never consults a "type" tag for target's own top-level
+        // node (it always trusts T, this call's own static type - see
+        // reflection.h's readNested()), so designMode only ever affects
+        // target's *descendants*, not target itself. Defaults to false
+        // (ordinary, non-design-time load) - a real running app loading its
+        // own RootView normally should never mark its own content as
+        // design-time; a design-time caller (e.g. cpp_codetools' own
+        // DesignerEditor, loading into a RootViewProxy) passes true
+        // explicitly. Bundle has no built-in notion of which T "means"
+        // design-time - that's the caller's call, not something to infer
+        // from T here.
+        //
+        // IMPORTANT, real trap already hit once: this only actually
+        // matters for a target tree that stays *unattached* to any
+        // RootView (Component::isDesignTime() is what reads the flag this
+        // sets). The moment a loaded child is addChild()'d onto a real
+        // RootView, View::isDesignTime() takes over (it hides Component's
+        // own method by name, not override) and unconditionally defers to
+        // rootView_->isDesignTime() instead - so designMode's per-child
+        // propagation is silently moot for anything actually hosted in a
+        // window. For that case (e.g. DesignerEditor's own RootViewProxy,
+        // itself a child of a real, hosting RootView), call
+        // rootView->setDesignTime(true) once on that outer, real RootView
+        // instead - every attached descendant already defers to it, no
+        // per-load propagation needed at all.
+        template<typename T>
+        bool loadRootView(T& target, const std::string& bundleName, bool designMode = false) const;
+
+        // Same as loadRootView() above, but resolves absolutePath directly -
+        // never touches executableDir()/resourcesDir(). For a document
+        // outside this app's own resource bundle (a user's project file).
+        // Bundle resolves this app's own resources only, never a
+        // per-document root - don't use setExecutableDirOverride() for this.
+        template<typename T>
+        bool loadRootViewFromFile(T& target, const std::string& absolutePath, bool designMode = false) const;
+
         // Loads just the "rootView" node of
         // "<rootView.getFrame()->getName()>.newui" into rootView in place -
         // the owning Frame's own properties are untouched. rootView must
         // already be attached to a live Frame (rootView.getFrame() !=
         // nullptr); returns false otherwise, or for any of loadFrame()'s
-        // own failure reasons.
+        // own failure reasons. Thin wrapper over the bundleName overload
+        // above.
         bool loadRootView(RootView& rootView) const;
 
         // Loads just the "animations" block of "<frame.getName()>.newui"
@@ -141,6 +259,55 @@ namespace newui {
         // file couldn't be written.
         bool writeView(View& view, const std::string& name) const;
 
+        // Write-side counterpart to loadRootView(T&, bundleName) - for a
+        // standalone RootView (or registered proxy - see loadRootView()'s
+        // own comment) with no owning Frame. Unlike writeFrame() (which
+        // always writes the whole Frame fresh), this preserves every
+        // other top-level key an existing "<bundleName>.newui" already
+        // has (title, bounds, animations, ...) - only "rootView" is
+        // replaced - so editing a Frame-less view of a file a real Frame
+        // elsewhere still loadFrame()s from doesn't silently drop that
+        // Frame's own data. Returns false if bundleName is empty or the
+        // file couldn't be written. Same templated/explicit-instantiation
+        // shape as loadRootView() - see its own comment.
+        //
+        // designMode, when true, writes target's real Class::proxyFor()
+        // name (e.g. "RootView") as the "rootView" node's own "type" tag
+        // instead of target's actual class name (e.g. "RootViewProxy") -
+        // see ObjectWriter::isDesignMode()/Class::proxyFor()'s own
+        // comments - so a file written from a design-time proxy tree still
+        // reads as an ordinary RootView-shaped document. A no-op for a T
+        // with no registered proxyFor() (RootView itself, in particular),
+        // so callers that never use proxies don't need to pass this at
+        // all. Defaults to false, same reasoning as loadRootView()'s own
+        // designMode parameter.
+        template<typename T>
+        bool writeRootView(T& target, const std::string& bundleName, bool designMode = false) const;
+
+        // Write-side counterpart to loadRootViewFromFile(). Same
+        // preserve-other-keys behavior as writeRootView(), resolved
+        // directly against absolutePath. Doesn't create the containing
+        // directory - the document is expected to already live there.
+        template<typename T>
+        bool writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode = false) const;
+
+        // Text counterparts of the *FromFile/*ToFile functions above - the same document format,
+        // for an editor that shows or edits a document's text (a designer's Source view). The file
+        // versions are built on these.
+        //
+        // writeRootViewToText(): target's tree as document text, keeping every other top-level key
+        // of existingText (e.g. the frame's title) as it is - existingText may be empty.
+        template<typename T>
+        std::string writeRootViewToText(T& target, const std::string& existingText, bool designMode = false) const;
+        // loadRootViewFromText(): reads text's "rootView" into target. False - with a message such
+        // as "line 3, column 5: ..." in *error, if given - when text doesn't parse or has no
+        // "rootView" object; target is untouched then.
+        template<typename T>
+        bool loadRootViewFromText(T& target, const std::string& text, bool designMode = false,
+            std::string* error = nullptr) const;
+        // Frame-level keys (title, ...) and animations from document text.
+        bool loadFrameFromText(Frame& frame, const std::string& text) const;
+
         // Lazily parsed once from executableDir() + "\Info.json" (a plain
         // JSON5 read - Bundle isn't part of the View hierarchy).
         // appName() falls back to
@@ -174,6 +341,14 @@ namespace newui {
         mutable std::string appName_;      // from Info.json only ("" if absent) - never overwritten by the fallback
         mutable std::string appVersion_;
         mutable std::string resolvedAppName_;  // scratch buffer for appName()'s live Application fallback
+
+        // loadCachedImage()'s own cache - keyed by "<relativePath>@<width>x<height>"
+        // rather than a struct key, since std::unordered_map has no
+        // built-in tuple/struct hashing and this table is small/short-
+        // lived enough (one Bundle singleton, a handful of distinct icon
+        // sizes) that the string concatenation cost is irrelevant next to
+        // the SVG parse it's avoiding.
+        mutable std::unordered_map<std::string, BLImage> imageCache_;
     };
 
 }

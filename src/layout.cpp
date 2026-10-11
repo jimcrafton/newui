@@ -79,7 +79,7 @@ namespace {
         float totalWeight = 0.0f;
         float totalNaturalMain = 0.0f;
         for (std::size_t i = first; i < last; ++i) {
-            totalWeight += (entries[i].params != nullptr) ? entries[i].params->weight : 0.0f;
+            totalWeight += (entries[i].params != nullptr) ? entries[i].params->weight() : 0.0f;
             totalNaturalMain += entries[i].mainSize;
         }
 
@@ -93,8 +93,8 @@ namespace {
         for (std::size_t i = 0; i < count; ++i) {
             const FlexEntry& entry = entries[first + i];
             resolvedMain[i] = entry.mainSize;
-            if (entry.params != nullptr && entry.params->weight > 0.0f && totalWeight > 0.0f) {
-                resolvedMain[i] += leftover * (entry.params->weight / totalWeight);
+            if (entry.params != nullptr && entry.params->weight() > 0.0f && totalWeight > 0.0f) {
+                resolvedMain[i] += leftover * (entry.params->weight() / totalWeight);
             }
         }
 
@@ -113,8 +113,8 @@ namespace {
         for (std::size_t i = 0; i < count; ++i) {
             const FlexEntry& entry = entries[first + i];
             newui::CrossAxisAlignment crossAlign = crossAxisAlignment;
-            if (entry.params != nullptr && entry.params->crossAxisAlignment.has_value()) {
-                crossAlign = *entry.params->crossAxisAlignment;
+            if (entry.params != nullptr && entry.params->crossAxisAlignment().has_value()) {
+                crossAlign = *entry.params->crossAxisAlignment();
             }
 
             float crossPos = crossStart;
@@ -151,7 +151,7 @@ namespace newui {
         const Size containerSize = clientBounds.size();
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
@@ -166,36 +166,36 @@ namespace newui {
             float width = current.size().width;
             float height = current.size().height;
 
-            const bool left = hasAnchor(params->anchors, Anchor::Left);
-            const bool right = hasAnchor(params->anchors, Anchor::Right);
-            const bool top = hasAnchor(params->anchors, Anchor::Top);
-            const bool bottom = hasAnchor(params->anchors, Anchor::Bottom);
+            const bool left = hasAnchor(params->anchors(), Anchor::Left);
+            const bool right = hasAnchor(params->anchors(), Anchor::Right);
+            const bool top = hasAnchor(params->anchors(), Anchor::Top);
+            const bool bottom = hasAnchor(params->anchors(), Anchor::Bottom);
 
             if (left && right) {
-                x = params->leftMargin;
-                width = containerSize.width - params->leftMargin - params->rightMargin;
+                x = params->leftMargin();
+                width = containerSize.width - params->leftMargin() - params->rightMargin();
             } else if (left) {
-                x = params->leftMargin;
-                width = params->width;
+                x = params->leftMargin();
+                width = params->width();
             } else if (right) {
-                width = params->width;
-                x = containerSize.width - params->rightMargin - width;
-            } else if (hasAnchor(params->anchors, Anchor::CenterX)) {
-                width = params->width;
+                width = params->width();
+                x = containerSize.width - params->rightMargin() - width;
+            } else if (hasAnchor(params->anchors(), Anchor::CenterX)) {
+                width = params->width();
                 x = (containerSize.width - width) * 0.5f;
             }
 
             if (top && bottom) {
-                y = params->topMargin;
-                height = containerSize.height - params->topMargin - params->bottomMargin;
+                y = params->topMargin();
+                height = containerSize.height - params->topMargin() - params->bottomMargin();
             } else if (top) {
-                y = params->topMargin;
-                height = params->height;
+                y = params->topMargin();
+                height = params->height();
             } else if (bottom) {
-                height = params->height;
-                y = containerSize.height - params->bottomMargin - height;
-            } else if (hasAnchor(params->anchors, Anchor::CenterY)) {
-                height = params->height;
+                height = params->height();
+                y = containerSize.height - params->bottomMargin() - height;
+            } else if (hasAnchor(params->anchors(), Anchor::CenterY)) {
+                height = params->height();
                 y = (containerSize.height - height) * 0.5f;
             }
 
@@ -218,13 +218,13 @@ namespace newui {
         entries.reserve(container.childViews().size());
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
             auto* params = dynamic_cast<FlexLayoutParams*>(child->layoutParams());
             const Size childSize = child->desiredSize();
-            const bool weighted = (params != nullptr && params->weight > 0.0f);
+            const bool weighted = (params != nullptr && params->weight() > 0.0f);
 
             // A weighted child's main-axis size is entirely computed by
             // this layout (natural + its leftover share below) - so
@@ -322,10 +322,24 @@ namespace newui {
         }
     }
 
+    namespace {
+        // The children a card layout pages through: all but those that opted out of layout
+        // (View::isLayoutIgnored()), which are never counted, shown or hidden.
+        std::vector<SubView*> cardChildren(const View& container) {
+            std::vector<SubView*> children;
+            for (SubView* child : container.childViews()) {
+                if (!child->isLayoutIgnored()) {
+                    children.push_back(child);
+                }
+            }
+            return children;
+        }
+    }
+
     void CardLayout::arrange(View& container) {
         container_ = &container;
 
-        const auto& children = container.childViews();
+        const std::vector<SubView*> children = cardChildren(container);
         if (children.empty()) {
             return;
         }
@@ -358,7 +372,7 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
+        const std::vector<SubView*> children = cardChildren(*container_);
         for (std::size_t i = 0; i < children.size(); ++i) {
             if (children[i]->name() == name) {
                 show(i);
@@ -372,12 +386,12 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
-        if (children.empty()) {
+        const std::size_t count = cardChildren(*container_).size();
+        if (count == 0) {
             return;
         }
 
-        show((activeIndex_ + 1) % children.size());
+        show((activeIndex_ + 1) % count);
     }
 
     void CardLayout::previous() {
@@ -385,12 +399,12 @@ namespace newui {
             return;
         }
 
-        const auto& children = container_->childViews();
-        if (children.empty()) {
+        const std::size_t count = cardChildren(*container_).size();
+        if (count == 0) {
             return;
         }
 
-        show((activeIndex_ + children.size() - 1) % children.size());
+        show((activeIndex_ + count - 1) % count);
     }
 
     namespace {
@@ -454,13 +468,13 @@ namespace newui {
         }
     }
 
-    void GridLayout::arrange(View& container) {
+    GridLayout::GridGeometry GridLayout::trackGeometry(const View& container) const {
+        GridGeometry geometry;
         if (rows_.empty() || columns_.empty()) {
-            return;  // nothing to place into
+            return geometry;  // nothing to place into
         }
 
-        const Rect clientBounds = container.getClientBounds();
-        const Size containerSize = clientBounds.size();
+        const Size containerSize = container.getClientBounds().size();
 
         // Auto tracks first: walk visible children once per axis, taking
         // the max desiredSize() among non-spanning children landing in
@@ -470,7 +484,7 @@ namespace newui {
         std::vector<float> autoColumnSizes(columns_.size(), 0.0f);
         std::vector<float> autoRowSizes(rows_.size(), 0.0f);
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
             auto* params = dynamic_cast<GridLayoutParams*>(child->layoutParams());
@@ -478,25 +492,39 @@ namespace newui {
                 continue;
             }
             const Size desired = child->desiredSize();
-            if (params->columnSpan <= 1 && params->column < columns_.size() &&
-                    columns_[params->column].kind == GridTrackKind::Auto &&
-                    desired.width > autoColumnSizes[params->column]) {
-                autoColumnSizes[params->column] = desired.width;
+            if (params->columnSpan() <= 1 && params->column() < columns_.size() &&
+                    columns_[params->column()].kind == GridTrackKind::Auto &&
+                    desired.width > autoColumnSizes[params->column()]) {
+                autoColumnSizes[params->column()] = desired.width;
             }
-            if (params->rowSpan <= 1 && params->row < rows_.size() &&
-                    rows_[params->row].kind == GridTrackKind::Auto &&
-                    desired.height > autoRowSizes[params->row]) {
-                autoRowSizes[params->row] = desired.height;
+            if (params->rowSpan() <= 1 && params->row() < rows_.size() &&
+                    rows_[params->row()].kind == GridTrackKind::Auto &&
+                    desired.height > autoRowSizes[params->row()]) {
+                autoRowSizes[params->row()] = desired.height;
             }
         }
 
-        const std::vector<float> columnSizes = resolveGridTrackSizes(columns_, autoColumnSizes, containerSize.width, columnSpacing_);
-        const std::vector<float> rowSizes = resolveGridTrackSizes(rows_, autoRowSizes, containerSize.height, rowSpacing_);
-        const std::vector<float> columnOffsets = gridTrackOffsets(columnSizes, columnSpacing_);
-        const std::vector<float> rowOffsets = gridTrackOffsets(rowSizes, rowSpacing_);
+        geometry.columns.sizes = resolveGridTrackSizes(columns_, autoColumnSizes, containerSize.width, columnSpacing_);
+        geometry.rows.sizes = resolveGridTrackSizes(rows_, autoRowSizes, containerSize.height, rowSpacing_);
+        geometry.columns.offsets = gridTrackOffsets(geometry.columns.sizes, columnSpacing_);
+        geometry.rows.offsets = gridTrackOffsets(geometry.rows.sizes, rowSpacing_);
+        return geometry;
+    }
+
+    void GridLayout::arrange(View& container) {
+        if (rows_.empty() || columns_.empty()) {
+            return;  // nothing to place into
+        }
+
+        const Rect clientBounds = container.getClientBounds();
+        const GridGeometry geometry = trackGeometry(container);
+        const std::vector<float>& columnSizes = geometry.columns.sizes;
+        const std::vector<float>& rowSizes = geometry.rows.sizes;
+        const std::vector<float>& columnOffsets = geometry.columns.offsets;
+        const std::vector<float>& rowOffsets = geometry.rows.offsets;
 
         for (SubView* child : container.childViews()) {
-            if (!child->isVisible()) {
+            if (!child->isVisible() || child->isLayoutIgnored()) {
                 continue;
             }
 
@@ -504,23 +532,23 @@ namespace newui {
             if (params == nullptr) {
                 continue;  // unconfigured child - left exactly where it was
             }
-            if (params->row >= rows_.size() || params->column >= columns_.size()) {
+            if (params->row() >= rows_.size() || params->column() >= columns_.size()) {
                 continue;  // out of range - left exactly where it was
             }
 
-            const std::size_t rowSpan = (params->rowSpan > 0) ? params->rowSpan : std::size_t(1);
-            const std::size_t columnSpan = (params->columnSpan > 0) ? params->columnSpan : std::size_t(1);
-            std::size_t rowEnd = params->row + rowSpan;
+            const std::size_t rowSpan = (params->rowSpan() > 0) ? params->rowSpan() : std::size_t(1);
+            const std::size_t columnSpan = (params->columnSpan() > 0) ? params->columnSpan() : std::size_t(1);
+            std::size_t rowEnd = params->row() + rowSpan;
             if (rowEnd > rows_.size()) {
                 rowEnd = rows_.size();
             }
-            std::size_t colEnd = params->column + columnSpan;
+            std::size_t colEnd = params->column() + columnSpan;
             if (colEnd > columns_.size()) {
                 colEnd = columns_.size();
             }
 
-            const float cellX = columnOffsets[params->column];
-            const float cellY = rowOffsets[params->row];
+            const float cellX = columnOffsets[params->column()];
+            const float cellY = rowOffsets[params->row()];
             const float cellWidth = (columnOffsets[colEnd - 1] + columnSizes[colEnd - 1]) - cellX;
             const float cellHeight = (rowOffsets[rowEnd - 1] + rowSizes[rowEnd - 1]) - cellY;
 
@@ -528,9 +556,9 @@ namespace newui {
 
             float x = cellX;
             float width = cellWidth;
-            if (params->horizontalAlignment != CrossAxisAlignment::Stretch) {
+            if (params->horizontalAlignment() != CrossAxisAlignment::Stretch) {
                 width = desired.width;
-                switch (params->horizontalAlignment) {
+                switch (params->horizontalAlignment()) {
                     case CrossAxisAlignment::Start: break;
                     case CrossAxisAlignment::Center: x += (cellWidth - width) * 0.5f; break;
                     case CrossAxisAlignment::End: x += cellWidth - width; break;
@@ -540,9 +568,9 @@ namespace newui {
 
             float y = cellY;
             float height = cellHeight;
-            if (params->verticalAlignment != CrossAxisAlignment::Stretch) {
+            if (params->verticalAlignment() != CrossAxisAlignment::Stretch) {
                 height = desired.height;
-                switch (params->verticalAlignment) {
+                switch (params->verticalAlignment()) {
                     case CrossAxisAlignment::Start: break;
                     case CrossAxisAlignment::Center: y += (cellHeight - height) * 0.5f; break;
                     case CrossAxisAlignment::End: y += cellHeight - height; break;

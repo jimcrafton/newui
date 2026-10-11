@@ -93,10 +93,16 @@ namespace newui {
     // color can be constructed via the fromHSL()/fromHSV()/fromLab()/
     // fromCMY()/fromCMYK()/fromYUV() factory functions, which all resolve
     // down to this same r/g/b/a storage.
+    //
+    // @reflect stringvalue - fromString()/toString() below give this a
+    // total, round-trippable single-string form, so a Color-typed property
+    // (ViewStyle::borderFill(), highlightFill(), ...) reads/writes as a
+    // plain string ("#ff0000ff", "red", "WindowBackground") in a .newui
+    // file instead of the usual nested "{type:\"Color\", r, g, b, a}"
+    // object - see ClassBuilder<T>::stringValue()'s own comment
+    // (reflection.h) for the general mechanism this opts into.
     class Color {
     public:
-
-        int foo = 0;
 
         Color() = default;
         constexpr Color(float r, float g, float b, float a = 1.0f) noexcept
@@ -114,6 +120,14 @@ namespace newui {
             b = rgba.b;
             a = rgba.a;
         }
+
+        // Implicit, unlike the packed-integer constructors above - BLRgba32 is already a distinct,
+        // unambiguous type (not a bare integer that could mean anything), so a direct
+        // `Color c = someBLRgba32;`/`someField = someBLRgba32;` (someField already a Color) reads
+        // naturally and matches how freely BLRgba32 itself gets constructed/passed around
+        // elsewhere in this codebase (e.g. every existing "= BLRgba32(r, g, b)" style-field
+        // assignment, viewstyle.h/.cpp and their own tests, predating Color even existing there).
+        Color(const BLRgba32& rgba32) noexcept : Color(rgba32.value) {}
 
         // 64-bit packed color: 0xAAAARRRRGGGGBBBB when hasAlpha (matching
         // blend2d's BLRgba64 packing - alpha in the top 16 bits), or the
@@ -571,19 +585,42 @@ namespace newui {
         // "#00ff33"). Alpha defaults to fully opaque for the 3/6-digit
         // forms that don't specify one. If str isn't valid hex, falls
         // back to fromName() (so e.g. "red" and "cornflowerblue" work
-        // here too).
+        // here too), then to a UIColorRole name (e.g. "WindowBackground",
+        // "ControlText" - see fromUIColorRoleName()'s own comment) - so a
+        // color specified anywhere as a plain string (a saved ViewStyle/
+        // Fill property in particular) can name a live, theme-tracking
+        // role instead of a fixed value, with zero extra plumbing beyond
+        // this one shared parse path.
         //
         // Returns false and leaves outColor untouched if str is neither
-        // valid hex nor a recognized color name; true otherwise. Pairs
-        // with toString().
+        // valid hex, a recognized color name, nor a UIColorRole name;
+        // true otherwise. Pairs with toString() (hex/name output only -
+        // a role match here is resolved to a plain value, not preserved
+        // as a role on the way back out).
         //
         // https://www.w3.org/TR/css-color-4/#hex-notation
         static bool fromString(const std::string& str, Color& outColor) noexcept {
             if (fromHex(str, outColor)) {
                 return true;
             }
-            return fromName(str, outColor);
+            if (fromName(str, outColor)) {
+                return true;
+            }
+            return fromUIColorRoleName(str, outColor);
         }
+
+        // The UIColorRole half of fromString() above - out-of-line (color.cpp),
+        // not inline like every other Color parser here, specifically to
+        // avoid a circular #include: UIColorManager (uicolormanager.h)
+        // already includes color.h for Color itself, so color.h can't
+        // also #include uicolormanager.h to call UIColorManager::colorFor()
+        // inline. Matches str case-insensitively against a UIColorRole
+        // enum name ("WindowBackground", "ControlText", "LinkText", ...)
+        // and resolves it live via UIColorManager::colorFor() - not a
+        // frozen snapshot, so re-parsing the same string later (e.g. after
+        // an OS light/dark mode change) picks up the new value. Returns
+        // false (outColor untouched) if str doesn't match any role name.
+        static bool fromUIColorRoleName(const std::string& str, Color& outColor) noexcept;
 
         // Packs r/g/b/a into out per the given channel list: each channel
         // is independently quantized (clamped, then rounded) to its own
@@ -676,7 +713,21 @@ namespace newui {
             return toBLRgba().to_rgba32();
         }
 
-        
+        // The sentinel isNull() checks for - the all-zero {0,0,0,0} default for a style field
+        // that's meant to be off until explicitly given a real color (an edge bevel, a checkmark,
+        // label text, ...), the same role a null BLVar played for these before they were plain,
+        // reflectable Color fields (BLVar itself can't be - reflection.h, writes silently drop
+        // it). Named rather than a bare {0.0f, 0.0f, 0.0f, 0.0f} literal at each field's own
+        // declaration, so the intent ("this field starts unset") reads directly at the call site.
+        static constexpr Color null() noexcept { return Color(0.0f, 0.0f, 0.0f, 0.0f); }
+
+        // True only for the exact null() sentinel above. A deliberately-set fully-transparent
+        // color with real r/g/b (e.g. a fade-out mid-animation) still paints nothing either way
+        // (alpha alone governs that), but isn't treated as "unset" here - only the untouched
+        // default is.
+        bool isNull() const noexcept { return r == 0.0f && g == 0.0f && b == 0.0f && a == 0.0f; }
+
+
         operator BLRgba() const noexcept {
             return toBLRgba();
         }        

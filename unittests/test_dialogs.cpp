@@ -1,4 +1,5 @@
 #include "newui/dialogs.h"
+#include "newui/subview.h"
 
 #include <gtest/gtest.h>
 
@@ -68,4 +69,28 @@ TEST(Dialog, ShowModalReturnsCancelWithoutBlockingOnceClosed) {
     dialog.close();
 
     EXPECT_EQ(dialog.showModal(), newui::DialogResult::Cancel);
+}
+
+// Regression: closing a Dialog used to free its whole child SubView tree synchronously inside
+// WM_DESTROY - before showModal() returned - so any read of a child widget's state afterward
+// (the natural way to fetch a result) was a use-after-free. Needs a real (never-pumped) native
+// window; WM_CLOSE is sent, not posted, so the whole close path runs synchronously.
+TEST(Dialog, ChildTreeSurvivesWindowDestruction) {
+    newui::Dialog dialog;
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(1, 2, 30, 40));
+    dialog.rootView().addChild(child);
+
+    ASSERT_TRUE(dialog.show());
+    HWND hwnd = dialog.dialogHandle();
+    ASSERT_NE(hwnd, nullptr);
+
+    ::SendMessage(hwnd, WM_CLOSE, 0, 0);
+
+    EXPECT_TRUE(dialog.isClosed());
+    EXPECT_EQ(dialog.dialogHandle(), nullptr);
+    EXPECT_EQ(dialog.rootView().windowHandle(), nullptr);
+    ASSERT_EQ(dialog.rootView().childViews().size(), 1u);
+    EXPECT_EQ(dialog.rootView().childViews()[0], child);
+    EXPECT_FLOAT_EQ(child->bounds().size().width, 30.0f);  // still live, readable memory
 }

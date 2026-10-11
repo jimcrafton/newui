@@ -19,6 +19,7 @@
 namespace newui {
 
 class RootView;
+class View;
 
 // Newui's own effect enum, independent of the raw DROPEFFECT_* bits -
 // keeps the friendly DropSource/DropTarget classes below (and anything a
@@ -84,6 +85,25 @@ public:
     Delegate<DropTarget, const std::vector<std::wstring>&> onFilesDropped;
     Delegate<DropTarget, const BLImage&> onImageDropped;
     Delegate<DropTarget, const std::wstring&> onTextDropped;
+
+    // Text drops with a position, and live hover feedback while one is in flight - what a
+    // designer-style surface needs to show "it would land here" cues. All points are in this
+    // target's own View's local space. A View accepts a text drag if either onTextDropped or
+    // onTextDroppedAt has a listener (the hover delegates alone never make a View accept).
+    //
+    // onTextDropped's positioned twin - both fire on a drop when both have listeners.
+    Delegate<DropTarget, const std::wstring&, const Point&> onTextDroppedAt;
+
+    // Fired for the drag's first move over this target and every move after (the first call after
+    // onDragLeave is the "enter"), with the dragged text and the current point. A handler can set
+    // effect to DropEffect::None to refuse a drop at this point (the cursor shows "not allowed",
+    // and the drop itself is refused there too); it starts as Copy.
+    Delegate<DropTarget, const std::wstring&, const Point&, DropEffect&> onTextDragOver;
+
+    // The hover over this target ended: the drag left it, was cancelled, or is about to be dropped
+    // on it (fired right before onTextDropped/onTextDroppedAt) - so a subscriber only needs this
+    // one notification to clear whatever hover feedback onTextDragOver showed.
+    Delegate<DropTarget> onDragLeave;
 };
 
 // Extraction utilities (src/dragndrop.cpp) - pull a single payload kind out
@@ -260,8 +280,17 @@ public:
     HRESULT dropAt(IDataObject* dataObject, const Point& clientPt, DWORD* effect);
 
 private:
+    // Runs the accept test at clientPt, fires onDragLeave/onTextDragOver as the hovered View
+    // changes, and writes the negotiated effect - shared by dragEnterAt()/dragOverAt().
+    void updateHover(const Point& clientPt, DWORD* effect);
+    // Fires onDragLeave on the currently hovered View's DropTarget (if any) and forgets it.
+    void endHover();
+
     RootView& rootView_;
     Microsoft::WRL::ComPtr<IDataObject> currentDataObject_;
+    std::wstring currentText_;       // the drag's CF_UNICODETEXT payload, cached at drag-enter
+    bool hasCurrentText_ = false;
+    View* hoverView_ = nullptr;      // non-owning; the View whose DropTarget last got onTextDragOver
     Microsoft::WRL::ComPtr<IDropTargetHelper> dropTargetHelper_;
 };
 

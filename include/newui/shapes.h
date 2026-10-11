@@ -33,6 +33,21 @@
 // reach past.
 namespace newui::shapes {
 
+    // How far past a shape's own localBounds() a box-blurred glow/drop-
+    // shadow mask can still show visible (> ~1/255 alpha) coverage, in
+    // units of softness - matches Shape::paintEffect()'s own boxBlur3()
+    // call (shapes.cpp, 3 passes of a radius derived 1:1 from softness),
+    // padded a little further since a box blur's own tail isn't
+    // infinitely sharp. Public (not shapes.cpp-anonymous-namespace-local)
+    // specifically so a caller computing its own pre-paint dirty/reserved
+    // bounds for a Shape-based effect it's about to render - see
+    // ViewStyle::computePrePaintBounds()'s elevation-driven drop shadow,
+    // viewstyle.cpp - can mirror this exact padding instead of guessing
+    // or duplicating the constant somewhere else, where it could drift
+    // out of sync with what Shape::boundsWithEffects()/paintEffect()
+    // themselves actually use.
+    constexpr float kBlurPadFactor = 3.0f;
+
     // Scale, then rotate (about pivot), then translate - applied to ctx
     // in that order via applyTo(), which composes onto whatever transform
     // ctx already has (its "parent space") rather than replacing it.
@@ -269,6 +284,10 @@ namespace newui::shapes {
         Rectangle() = default;
         ~Rectangle() override = default;
 
+		Rectangle(float x, float y, float width, float height)
+			: x_(x), y_(y), width_(width), height_(height) {
+		}
+
         float x() const { return x_; }
         void setX(float value) { x_ = value; }
         float y() const { return y_; }
@@ -297,6 +316,10 @@ namespace newui::shapes {
         RoundRect() = default;
         ~RoundRect() override = default;
 
+        RoundRect(float x, float y, float width, float height, float radius)
+            : Rectangle(x, y, width, height), radiusX_(radius), radiusY_(radius) {
+        }
+
         float radiusX() const { return radiusX_; }
         void setRadiusX(float value) { radiusX_ = value; }
         float radiusY() const { return radiusY_; }
@@ -309,6 +332,78 @@ namespace newui::shapes {
         float radiusX_ = 4.0f;
         float radiusY_ = 4.0f;
     };
+
+    // Which edge CalloutRoundRect's tail points out of.
+    enum class TailSide {
+        Top,
+        Bottom,
+        Left,
+        Right
+    };
+
+    // A rounded-rect "callout" card - like RoundRect, but with a small
+    // triangular tail poking out of one edge (the classic popover/
+    // tooltip shape, pointing back at whatever triggered it). Built as
+    // one continuous BLPath rather than a RoundRect plus a separate
+    // triangle Shape - two overlapping shapes would each stroke their
+    // own full outline, leaving a visible seam line where the tail meets
+    // the body; one path has no such seam. Same rounded-corner technique
+    // buildPartiallyRoundedRectPath() (below) uses (BLPath::
+    // arc_quadrant_to() per corner), just with the tail's two extra
+    // line_to() calls spliced into whichever edge tailSide() names,
+    // keeping the same clockwise winding the rest of the contour already
+    // has (deviate outward, then back - never backtrack).
+    class CalloutRoundRect : public Rectangle {
+    public:
+        CalloutRoundRect() = default;
+        ~CalloutRoundRect() override = default;
+
+        float radius() const { return radius_; }
+        void setRadius(float value) { radius_ = value; }
+
+        // Width of the tail's base, and how far it pokes out past its edge.
+        float tailWidth() const { return tailWidth_; }
+        void setTailWidth(float value) { tailWidth_ = value; }
+        float tailHeight() const { return tailHeight_; }
+        void setTailHeight(float value) { tailHeight_ = value; }
+
+        TailSide tailSide() const { return tailSide_; }
+        void setTailSide(TailSide value) { tailSide_ = value; }
+
+        // Position of the tail's tip along tailSide()'s edge, as a 0-1
+        // fraction of that edge's own length (0 = its start - the left
+        // end for Top/Bottom, the top end for Left/Right; 1 = its end;
+        // 0.5, the default, centers it). Not clamped - a value outside
+        // 0-1 places the tip past the corresponding rounded corner, which
+        // buildPath() doesn't account for.
+        float tailPosition() const { return tailPosition_; }
+        void setTailPosition(float value) { tailPosition_ = value; }
+
+        Rect localBounds() const override;
+
+    protected:
+        void buildPath(BLPath& path) const override;
+
+    private:
+        float radius_ = 12.0f;
+        float tailWidth_ = 24.0f;
+        float tailHeight_ = 14.0f;
+        TailSide tailSide_ = TailSide::Top;
+        float tailPosition_ = 0.5f;
+    };
+
+    // Builds a rectangle path whose top-left/top-right corners are rounded
+    // by radius only if roundTop is true, and whose bottom-left/bottom-
+    // right corners are rounded only if roundBottom is true - the shape a
+    // "this fill meets a square seam on one side" view needs (FrameProxy's
+    // own title bar, meeting its body below; RootViewProxy's own body fill
+    // when hosted under a FrameProxy, meeting its title bar above) that a
+    // plain BLRoundRect can't express (one uniform radius on all four
+    // corners). radius <= 0, or neither flag set, degenerates to a plain
+    // rectangle. A free function, not a Shape - both real callers build
+    // this directly into their own paint()'s BLPath, not through a
+    // ShapeLayer.
+    void buildPartiallyRoundedRectPath(BLPath& path, const Rect& r, float radius, bool roundTop, bool roundBottom);
 
     class Circle : public Shape {
     public:

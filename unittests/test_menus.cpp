@@ -71,7 +71,7 @@ TEST(MenuItem, AddChildSetsParentAndReturnsRawPointer) {
     newui::MenuItem* raw = root.addChild(std::make_unique<newui::MenuItem>("Child"));
 
     ASSERT_EQ(root.children().size(), 1u);
-    EXPECT_EQ(root.children()[0].get(), raw);
+    EXPECT_EQ(root.children()[0], raw);
     EXPECT_EQ(raw->parent(), &root);
     EXPECT_TRUE(root.hasChildren());
     EXPECT_FALSE(raw->hasChildren());
@@ -79,7 +79,7 @@ TEST(MenuItem, AddChildSetsParentAndReturnsRawPointer) {
 
 TEST(MenuItem, SeparatorFactorySetsIsSeparator) {
     auto sep = newui::MenuItem::Separator();
-    EXPECT_TRUE(sep->isSeparator);
+    EXPECT_TRUE(sep->isSeparator());
 }
 
 TEST(MenuItem, DefaultCommandIdIsZeroBeforeAnyBuild) {
@@ -127,7 +127,7 @@ TEST(ContextMenu, BuildNativeMenuBuildsCorrectNestingAndText) {
 TEST(ContextMenu, LeafItemTextIncludesTabSeparatedShortcut) {
     newui::MenuItem root;
     newui::MenuItem* save = root.addChild(std::make_unique<newui::MenuItem>("Save"));
-    save->shortcutText = "Ctrl+S";
+    save->setShortcutText("Ctrl+S");
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -185,7 +185,7 @@ TEST(ContextMenu, DispatchCommandReturnsFalseForUnknownId) {
 TEST(ContextMenu, RadioGroupMembersGetRadioCheckMenuFlag) {
     newui::MenuItem root;
     newui::MenuItem* smallItem = root.addChild(std::make_unique<newui::MenuItem>("Small"));
-    smallItem->radioGroup = 0;
+    smallItem->setRadioGroup(0);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -201,14 +201,14 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
     newui::MenuItem root;
 
     newui::MenuItem* smallItem = root.addChild(std::make_unique<newui::MenuItem>("Small"));
-    smallItem->radioGroup = 0;
-    smallItem->checked = true;
+    smallItem->setRadioGroup(0);
+    smallItem->setChecked(true);
 
     newui::MenuItem* mediumItem = root.addChild(std::make_unique<newui::MenuItem>("Medium"));
-    mediumItem->radioGroup = 0;
+    mediumItem->setRadioGroup(0);
 
     newui::MenuItem* largeItem = root.addChild(std::make_unique<newui::MenuItem>("Large"));
-    largeItem->radioGroup = 0;
+    largeItem->setRadioGroup(0);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -218,9 +218,9 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
 
     menu.dispatchCommand(mediumItem->commandId());
 
-    EXPECT_FALSE(smallItem->checked);
-    EXPECT_TRUE(mediumItem->checked);
-    EXPECT_FALSE(largeItem->checked);
+    EXPECT_FALSE(smallItem->isChecked());
+    EXPECT_TRUE(mediumItem->isChecked());
+    EXPECT_FALSE(largeItem->isChecked());
 
     EXPECT_EQ(::GetMenuState(menu.handle(), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
     EXPECT_NE(::GetMenuState(menu.handle(), mediumItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
@@ -235,11 +235,11 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
     menu.buildNativeMenu(root);
 
     menu.setChecked(*wrap, true);
-    EXPECT_TRUE(wrap->checked);
+    EXPECT_TRUE(wrap->isChecked());
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 
     menu.setEnabled(*wrap, false);
-    EXPECT_FALSE(wrap->state.isEnabled());
+    EXPECT_FALSE(wrap->state().isEnabled());
     EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_GRAYED, 0u);
 }
 
@@ -251,7 +251,7 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
 TEST(ContextMenu, OwnerDrawnItemGetsOwnerDrawFlagAndItemDataPointer) {
     newui::MenuItem root;
     newui::MenuItem* custom = root.addChild(std::make_unique<newui::MenuItem>("Custom"));
-    custom->ownerDrawn = true;
+    custom->setOwnerDrawn(true);
 
     TestableContextMenu menu;
     menu.buildNativeMenu(root);
@@ -337,6 +337,12 @@ TEST(MenuBar, ConstructedVisibleWithThemedBackgroundStyleAndHorizontalLayout) {
     delete bar;
 }
 
+TEST(MenuBar, AcceptsFocusByDefault) {
+    auto* bar = new newui::MenuBar();
+    EXPECT_TRUE(bar->acceptsFocus());
+    delete bar;
+}
+
 TEST(MenuBar, SetMenuItemsBuildsOneThemedButtonPerTopLevelItem) {
     std::vector<std::unique_ptr<newui::MenuItem>> items;
     items.push_back(std::make_unique<newui::MenuItem>("File"));
@@ -354,7 +360,7 @@ TEST(MenuBar, SetMenuItemsBuildsOneThemedButtonPerTopLevelItem) {
         EXPECT_TRUE(button->isVisible());
         EXPECT_NE(dynamic_cast<const newui::ThemedMenuBarItemStyle*>(&button->style()), nullptr);
         EXPECT_GT(button->desiredSize().width, 0.0f);
-        EXPECT_EQ(button->name(), bar->root().children()[i]->text);
+        EXPECT_EQ(button->name(), bar->root().children()[i]->text());
     }
 
     bar->destroy();
@@ -380,4 +386,124 @@ TEST(MenuBar, SetMenuItemsCalledAgainReplacesButtons) {
 
     bar->destroy();
     delete bar;
+}
+
+TEST(MenuBar, ItsGeneratedButtonsAreInternalNonSelectableParts) {
+    std::vector<std::unique_ptr<newui::MenuItem>> items;
+    items.push_back(std::make_unique<newui::MenuItem>("File"));
+
+    auto* bar = new newui::MenuBar();
+    bar->setMenuItems(std::move(items));
+
+    ASSERT_EQ(bar->childViews().size(), 1u);
+    EXPECT_TRUE(bar->childViews()[0]->isInternal());
+    EXPECT_FALSE(bar->childViews()[0]->isSelectableAtDesignTime());
+    EXPECT_FALSE(bar->isInternal());
+
+    bar->destroy();
+    delete bar;
+}
+
+TEST(MenuItemTree, AddChildTakesOwnershipAndMovesAnItemFromItsPreviousParent)
+{
+    newui::MenuItem a("a");
+    newui::MenuItem b("b");
+    auto* child = new newui::MenuItem("child");
+
+    a.addChild(child);
+    EXPECT_EQ(child->parent(), &a);
+
+    b.addChild(child);
+    EXPECT_EQ(child->parent(), &b);
+    EXPECT_TRUE(a.children().empty());
+    ASSERT_EQ(b.children().size(), 1u);
+    EXPECT_EQ(b.children()[0], child);
+}
+
+TEST(MenuItemTree, RemoveChildDetachesWithoutDeleting)
+{
+    newui::MenuItem parent("parent");
+    auto* child = new newui::MenuItem("child");
+    parent.addChild(child);
+
+    parent.removeChild(child);
+
+    EXPECT_TRUE(parent.children().empty());
+    EXPECT_EQ(child->parent(), nullptr);
+    EXPECT_EQ(child->text(), "child");   // still alive - the caller owns it again
+    delete child;
+}
+
+TEST(MenuItemTree, SetParentMovesAndRefusesACycle)
+{
+    newui::MenuItem root("root");
+    auto* a = root.addChild(std::make_unique<newui::MenuItem>("a"));
+    auto* b = a->addChild(std::make_unique<newui::MenuItem>("b"));
+
+    EXPECT_FALSE(a->setParent(b)) << "a can't become a child of its own descendant";
+    EXPECT_EQ(a->parent(), &root);
+
+    EXPECT_TRUE(b->setParent(&root));
+    EXPECT_EQ(b->parent(), &root);
+    EXPECT_TRUE(a->children().empty());
+    EXPECT_EQ(root.children().size(), 2u);
+
+    EXPECT_TRUE(b->setParent(nullptr));
+    EXPECT_EQ(b->parent(), nullptr);
+    EXPECT_EQ(root.children().size(), 1u);
+    delete b;
+}
+
+TEST(MenuItemTree, ReorderChildMovesWithinTheSameParent)
+{
+    newui::MenuItem root("root");
+    auto* a = root.addChild(std::make_unique<newui::MenuItem>("a"));
+    auto* b = root.addChild(std::make_unique<newui::MenuItem>("b"));
+    auto* c = root.addChild(std::make_unique<newui::MenuItem>("c"));
+
+    root.reorderChild(c, 0);
+    EXPECT_EQ(root.children(), (std::vector<newui::MenuItem*>{ c, a, b }));
+
+    root.reorderChild(c, 99);   // clamped to the end
+    EXPECT_EQ(root.children(), (std::vector<newui::MenuItem*>{ a, b, c }));
+}
+
+TEST(MenuItemTree, IsAComponentWithAName)
+{
+    newui::MenuItem item("File");
+    item.setName("fileMenu");
+    newui::Component& component = item;
+    EXPECT_EQ(component.name(), "fileMenu");
+}
+
+TEST(MenuBarMenus, AddAndRemoveMenuRebuildTheButtons)
+{
+    auto* bar = new newui::MenuBar();
+    auto* file = new newui::MenuItem("File");
+    bar->addMenu(file);
+    bar->addMenu(new newui::MenuItem("Edit"));
+    EXPECT_EQ(bar->childViews().size(), 2u);
+    EXPECT_EQ(file->parent(), &bar->root());
+
+    bar->removeMenu(file);
+    EXPECT_EQ(bar->menus().size(), 1u);
+    EXPECT_EQ(bar->childViews().size(), 1u);
+    EXPECT_EQ(file->parent(), nullptr);
+    delete file;
+
+    bar->menus()[0]->setText("Edit2");
+    bar->rebuildButtons();
+    ASSERT_EQ(bar->childViews().size(), 1u);
+    EXPECT_EQ(bar->childViews()[0]->name(), "Edit2");
+
+    bar->destroy();
+    delete bar;
+}
+
+TEST(MenuMnemonics, StripMnemonicsRemovesMarkersAndKeepsEscapedAmpersands)
+{
+    EXPECT_EQ(newui::stripMnemonics("&File"), "File");
+    EXPECT_EQ(newui::stripMnemonics("Save && E&xit"), "Save & Exit");
+    EXPECT_EQ(newui::stripMnemonics("Trailing&"), "Trailing&");
+    EXPECT_EQ(newui::stripMnemonics(""), "");
 }

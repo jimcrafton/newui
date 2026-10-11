@@ -3,9 +3,105 @@
 #include "newui/keyboard_constants.h"
 #include "newui/mouse_constants.h"
 #include <bitset>
+#include <KnownFolders.h>
+#include <ShlObj.h>
 
 
 namespace newui {
+	std::wstring utf8ToWide(const std::string& text)
+	{
+		if (text.empty()) {
+			return std::wstring();
+		}
+		int required = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+		if (required <= 0) {
+			return std::wstring();
+		}
+		std::wstring result(static_cast<std::size_t>(required), L'\0');
+		::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required);
+		return result;
+	}
+
+	std::string wideToUtf8(const std::wstring& text)
+	{
+		if (text.empty()) {
+			return std::string();
+		}
+		int required = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+		if (required <= 0) {
+			return std::string();
+		}
+		std::string result(static_cast<std::size_t>(required), '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required, nullptr, nullptr);
+		return result;
+	}
+
+	std::string normalizePath(std::string path)
+	{
+		for (char& c : path) {
+			if (c == '\\') c = '/';
+		}
+		while (path.size() > 1 && path.back() == '/') path.pop_back();
+		return path;
+	}
+
+	std::string toLowerCase(const std::string& text)
+	{
+		std::wstring wide = utf8ToWide(text);
+		if (!wide.empty()) {
+			::CharLowerBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+		}
+		return wideToUtf8(wide);
+	}
+
+	namespace {
+		std::string knownFolder(const KNOWNFOLDERID& id)
+		{
+			PWSTR path = nullptr;
+			std::string result;
+			if (SUCCEEDED(::SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &path)) && path != nullptr) {
+				result = normalizePath(wideToUtf8(path));
+			}
+			::CoTaskMemFree(path);   // allocated even when the call fails
+			return result;
+		}
+	}
+
+	std::string SpecialFolders::home() { return knownFolder(FOLDERID_Profile); }
+	std::string SpecialFolders::desktop() { return knownFolder(FOLDERID_Desktop); }
+	std::string SpecialFolders::documents() { return knownFolder(FOLDERID_Documents); }
+	std::string SpecialFolders::downloads() { return knownFolder(FOLDERID_Downloads); }
+	std::string SpecialFolders::localAppData() { return knownFolder(FOLDERID_LocalAppData); }
+	std::string SpecialFolders::roamingAppData() { return knownFolder(FOLDERID_RoamingAppData); }
+	std::string SpecialFolders::programData() { return knownFolder(FOLDERID_ProgramData); }
+	std::string SpecialFolders::programFiles() { return knownFolder(FOLDERID_ProgramFiles); }
+
+	std::string SpecialFolders::temp()
+	{
+		wchar_t buffer[MAX_PATH + 2];
+		const DWORD size = static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0]));
+		const DWORD length = ::GetTempPathW(size, buffer);
+		if (length == 0 || length >= size) {
+			return std::string();
+		}
+		return normalizePath(wideToUtf8(std::wstring(buffer, length)));
+	}
+
+	std::string SpecialFolders::createTempFile(const std::string& prefix)
+	{
+		wchar_t folder[MAX_PATH + 2];
+		const DWORD size = static_cast<DWORD>(sizeof(folder) / sizeof(folder[0]));
+		const DWORD length = ::GetTempPathW(size, folder);
+		if (length == 0 || length >= size) {
+			return std::string();
+		}
+		wchar_t file[MAX_PATH + 2];
+		if (::GetTempFileNameW(folder, utf8ToWide(prefix).c_str(), 0, file) == 0) {   // creates the empty file
+			return std::string();
+		}
+		return normalizePath(wideToUtf8(file));
+	}
+
 	std::string extractNamespace(const std::type_info& info)
 	{
 		std::string result = "";
@@ -178,6 +274,11 @@ namespace newui {
 
 		case VK_END: {
 			result = vkEnd;
+		}
+		break;
+
+		case VK_INSERT: {
+			result = vkInsert;
 		}
 		break;
 

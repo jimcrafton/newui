@@ -9,6 +9,8 @@
 #include "newui/uicolormanager.h"
 #include "newui/graphics.h"
 
+#include <algorithm>
+
 #include <blend2d/blend2d.h>
 
 #include <utility>
@@ -23,9 +25,9 @@
 namespace {
 
 newui::Size defaultMenuItemMeasure(const newui::MenuItem& item) {
-    std::string label = item.shortcutText.empty()
-        ? item.text
-        : item.text + "    " + item.shortcutText;
+    std::string label = item.shortcutText().empty()
+        ? item.text()
+        : item.text() + "    " + item.shortcutText();
     if (label.empty()) {
         label = " ";
     }
@@ -112,7 +114,8 @@ public:
             return;
         }
 
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(menuItem->text);
+        const std::string label = newui::stripMnemonics(menuItem->text());
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(label);
         if (!shaped.valid) {
             return;
         }
@@ -131,7 +134,7 @@ public:
         // its own theme-aware color to match instead of staying fixed.
         newui::Color textColor = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText);
         ctx.set_fill_style(textColor.toBLRgba32());
-        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, menuItem->text.c_str());
+        ctx.fill_utf8_text(BLPoint(x, baselineY), *shaped.font, label.c_str());
     }
 };
 
@@ -174,11 +177,82 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
 
 namespace newui {
 
-MenuItem* MenuItem::addChild(std::unique_ptr<MenuItem> child) {
+std::string stripMnemonics(const std::string& text) {
+    std::string out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '&' && i + 1 < text.size()) {
+            ++i;   // "&&" keeps one '&'
+        }
+        out += text[i];
+    }
+    return out;
+}
+
+MenuItem::~MenuItem() {
+    deleteChildren();
+}
+
+void MenuItem::addChild(MenuItem* child) {
+    if (child == nullptr || child->parent_ == this) {
+        return;
+    }
+    if (child->parent_ != nullptr) {
+        child->parent_->removeChild(child);
+    }
     child->parent_ = this;
-    MenuItem* raw = child.get();
-    children_.push_back(std::move(child));
+    children_.push_back(child);
+}
+
+MenuItem* MenuItem::addChild(std::unique_ptr<MenuItem> child) {
+    MenuItem* raw = child.release();
+    addChild(raw);
     return raw;
+}
+
+void MenuItem::removeChild(MenuItem* child) {
+    auto it = std::find(children_.begin(), children_.end(), child);
+    if (it == children_.end()) {
+        return;
+    }
+    children_.erase(it);
+    child->parent_ = nullptr;
+}
+
+void MenuItem::reorderChild(MenuItem* child, std::size_t newIndex) {
+    auto it = std::find(children_.begin(), children_.end(), child);
+    if (it == children_.end()) {
+        return;
+    }
+    children_.erase(it);
+    newIndex = newIndex < children_.size() ? newIndex : children_.size();
+    children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(newIndex), child);
+}
+
+void MenuItem::deleteChildren() {
+    std::vector<MenuItem*> children = std::move(children_);
+    children_.clear();
+    for (MenuItem* child : children) {
+        child->parent_ = nullptr;
+        delete child;
+    }
+}
+
+bool MenuItem::setParent(MenuItem* newParent) {
+    if (newParent == parent_) {
+        return true;
+    }
+    for (MenuItem* ancestor = newParent; ancestor != nullptr; ancestor = ancestor->parent_) {
+        if (ancestor == this) {
+            return false;  // would create a cycle
+        }
+    }
+    if (parent_ != nullptr) {
+        parent_->removeChild(this);
+    }
+    if (newParent != nullptr) {
+        newParent->addChild(this);
+    }
+    return true;
 }
 
 void MenuItem::setAction(Action* action) {
@@ -198,7 +272,7 @@ ContextMenu::~ContextMenu() {
 
 void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
     int position = 0;
-    for (auto& childPtr : parentItem.children_) {
+    for (MenuItem* childPtr : parentItem.children_) {
         MenuItem& item = *childPtr;
         item.ownerMenu_ = hmenu;
 
@@ -212,35 +286,35 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
         // built below, is the only place that needs to.
         if (item.action() != nullptr) {
             item.action()->update();
-            item.state.setEnabled(item.action()->enabled());
+            item.state().setEnabled(item.action()->enabled());
         }
 
         MENUITEMINFOA mii = {};
         mii.cbSize = sizeof(mii);
         mii.fMask = MIIM_FTYPE | MIIM_STATE;
-        mii.fState = (item.state.isEnabled() ? MFS_ENABLED : MFS_DISABLED)
-            | (item.checked ? MFS_CHECKED : MFS_UNCHECKED);
+        mii.fState = (item.state().isEnabled() ? MFS_ENABLED : MFS_DISABLED)
+            | (item.isChecked() ? MFS_CHECKED : MFS_UNCHECKED);
 
         std::string label;  // must outlive the InsertMenuItemA() call below
 
-        if (item.isSeparator) {
+        if (item.isSeparator()) {
             mii.fType = MFT_SEPARATOR;
         } else {
-            mii.fType = (item.ownerDrawn ? MFT_OWNERDRAW : MFT_STRING)
-                | (item.radioGroup >= 0 ? MFT_RADIOCHECK : 0);
+            mii.fType = (item.isOwnerDrawn() ? MFT_OWNERDRAW : MFT_STRING)
+                | (item.radioGroup() >= 0 ? MFT_RADIOCHECK : 0);
 
-            if (item.ownerDrawn) {
+            if (item.isOwnerDrawn()) {
                 mii.fMask |= MIIM_DATA;
                 mii.dwItemData = reinterpret_cast<ULONG_PTR>(&item);
             } else {
-                label = item.shortcutText.empty() ? item.text : item.text + "\t" + item.shortcutText;
+                label = item.shortcutText().empty() ? item.text() : item.text() + "\t" + item.shortcutText();
                 mii.fMask |= MIIM_STRING;
                 mii.dwTypeData = const_cast<char*>(label.c_str());
                 mii.cch = static_cast<UINT>(label.size());
 
-                if (item.bitmap != nullptr) {
+                if (item.bitmap() != nullptr) {
                     mii.fMask |= MIIM_BITMAP;
-                    mii.hbmpItem = item.bitmap;
+                    mii.hbmpItem = item.bitmap();
                 }
             }
 
@@ -257,7 +331,7 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
 
         ::InsertMenuItemA(hmenu, static_cast<UINT>(position), TRUE, &mii);
 
-        if (!item.isSeparator && item.hasChildren()) {
+        if (!item.isSeparator() && item.hasChildren()) {
             buildMenuLevel(mii.hSubMenu, item);
         }
 
@@ -309,10 +383,9 @@ bool ContextMenu::dispatchCommand(UINT id) {
     }
     MenuItem* item = it->second;
 
-    if (item->radioGroup >= 0 && item->parent_ != nullptr) {
-        for (auto& siblingPtr : item->parent_->children_) {
-            MenuItem* sibling = siblingPtr.get();
-            if (sibling->radioGroup == item->radioGroup) {
+    if (item->radioGroup() >= 0 && item->parent_ != nullptr) {
+        for (MenuItem* sibling : item->parent_->children_) {
+            if (sibling->radioGroup() == item->radioGroup()) {
                 setChecked(*sibling, sibling == item);
             }
         }
@@ -323,7 +396,7 @@ bool ContextMenu::dispatchCommand(UINT id) {
 }
 
 void ContextMenu::setChecked(MenuItem& item, bool checked) {
-    item.checked = checked;
+    item.setChecked(checked);
     // A parent/separator item never got a real commandId_ (stays 0) -
     // MF_BYCOMMAND against id 0 simply finds nothing in ownerMenu_ and
     // no-ops, so this is harmless to call on one, it just has no visible
@@ -335,7 +408,7 @@ void ContextMenu::setChecked(MenuItem& item, bool checked) {
 }
 
 void ContextMenu::setEnabled(MenuItem& item, bool enabled) {
-    item.state.setEnabled(enabled);
+    item.state().setEnabled(enabled);
     if (item.ownerMenu_ != nullptr) {
         ::EnableMenuItem(item.ownerMenu_, item.commandId_,
             MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
@@ -387,11 +460,11 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
     }
 
 
-    item->state.setDisabled((dis.itemState & ODS_DISABLED) == ODS_DISABLED);
-    item->state.setInactive((dis.itemState & ODS_INACTIVE) == ODS_INACTIVE);
-    item->state.setGreyedOut((dis.itemState & ODS_GRAYED) == ODS_GRAYED);
-    item->state.setFocused((dis.itemState & ODS_FOCUS) == ODS_FOCUS);
-    item->state.setHighlighted((dis.itemState & ODS_HOTLIGHT) == ODS_HOTLIGHT);
+    item->state().setDisabled((dis.itemState & ODS_DISABLED) == ODS_DISABLED);
+    item->state().setInactive((dis.itemState & ODS_INACTIVE) == ODS_INACTIVE);
+    item->state().setGreyedOut((dis.itemState & ODS_GRAYED) == ODS_GRAYED);
+    item->state().setFocused((dis.itemState & ODS_FOCUS) == ODS_FOCUS);
+    item->state().setHighlighted((dis.itemState & ODS_HOTLIGHT) == ODS_HOTLIGHT);
     //item->state.setSelected((dis.itemState & ODS_SELECTED) == ODS_SELECTED);
 
 
@@ -408,17 +481,34 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
 MenuBar::MenuBar() {
     setName("MenuBar");
     setVisible(true);
+    setAcceptsFocus(true);
     setStyle(std::make_unique<ThemedMenuBarBackgroundStyle>());
     setLayout(std::make_unique<FlexLayout>(Orientation::Horizontal));
     setDesiredSize(Size(0.0f, 32.0f));  // caller can override via setDesiredSize() afterward
 }
 
 void MenuBar::setMenuItems(std::vector<std::unique_ptr<MenuItem>> items) {
+    root_.deleteChildren();
+    for (auto& item : items) {
+        root_.addChild(std::move(item));
+    }
+    rebuildButtons();
+}
+
+void MenuBar::addMenu(MenuItem* item) {
+    root_.addChild(item);
+    rebuildButtons();
+}
+
+void MenuBar::removeMenu(MenuItem* item) {
+    root_.removeChild(item);
+    rebuildButtons();
+}
+
+void MenuBar::rebuildButtons() {
     // Detach + delete the previous button Views - removeChild() doesn't
     // delete (caller-managed, same convention as everywhere else raw
-    // View ownership terminates - see View::destroy()'s own while-loop),
-    // and the previous root_ tree they pointed into is about to be
-    // replaced anyway.
+    // View ownership terminates - see View::destroy()'s own while-loop).
     while (!childViews().empty()) {
         SubView* child = childViews().front();
         removeChild(child);
@@ -426,18 +516,15 @@ void MenuBar::setMenuItems(std::vector<std::unique_ptr<MenuItem>> items) {
         delete child;
     }
 
-    root_ = MenuItem();
-
-    for (auto& item : items) {
-        MenuItem* topLevel = root_.addChild(std::move(item));
-
-        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(topLevel->text);
+    for (MenuItem* topLevel : root_.children()) {
+        ShapedMenuBarLabel shaped = ShapeMenuBarLabel(stripMnemonics(topLevel->text()));
         Size buttonSize = shaped.valid
             ? Size(shaped.width + 24.0f, shaped.ascent + shaped.descent + 12.0f)
             : Size(60.0f, 28.0f);
 
         auto* button = new MenuBarButtonView();
-        button->setName(topLevel->text);
+        button->setName(topLevel->text());
+        button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         button->setVisible(true);
         button->menuItem = topLevel;
         button->setStyle(std::make_unique<ThemedMenuBarItemStyle>());

@@ -441,7 +441,8 @@ namespace {
         if (!dropTarget->onImageDropped.empty() && offersFormat(dataObject, CF_DIB)) {
             return true;
         }
-        if (!dropTarget->onTextDropped.empty() && offersFormat(dataObject, CF_UNICODETEXT)) {
+        if ((!dropTarget->onTextDropped.empty() || !dropTarget->onTextDroppedAt.empty())
+                && offersFormat(dataObject, CF_UNICODETEXT)) {
             return true;
         }
         return false;
@@ -489,38 +490,88 @@ COMDropTarget::COMDropTarget(RootView& rootView) : rootView_(rootView) {
     ::CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dropTargetHelper_));
 }
 
+void COMDropTarget::endHover() {
+    if (hoverView_ == nullptr) {
+        return;
+    }
+    View* view = hoverView_;
+    hoverView_ = nullptr;
+    if (DropTarget* dropTarget = view->dropTarget(); dropTarget != nullptr && !dropTarget->onDragLeave.empty()) {
+        dropTarget->onDragLeave(*dropTarget);
+    }
+}
+
+void COMDropTarget::updateHover(const Point& clientPt, DWORD* effect) {
+    View* target = findDropTargetView(rootView_, clientPt, currentDataObject_.Get());
+    if (target != hoverView_) {
+        endHover();
+    }
+
+    DropEffect proposed = (target != nullptr) ? DropEffect::Copy : DropEffect::None;
+    if (target != nullptr) {
+        hoverView_ = target;
+        DropTarget* dropTarget = target->dropTarget();
+        if (hasCurrentText_ && !dropTarget->onTextDragOver.empty()) {
+            dropTarget->onTextDragOver(*dropTarget, currentText_, target->rootToLocal(clientPt), proposed);
+        }
+    }
+    negotiateEffect(target != nullptr && proposed != DropEffect::None, effect);
+}
+
 HRESULT COMDropTarget::dragEnterAt(IDataObject* dataObject, const Point& clientPt, DWORD* effect) {
+    endHover();
     currentDataObject_ = dataObject;
-    View* target = findDropTargetView(rootView_, clientPt, dataObject);
-    negotiateEffect(target != nullptr, effect);
+    currentText_.clear();
+    hasCurrentText_ = extractUnicodeText(dataObject, currentText_);
+    updateHover(clientPt, effect);
     return S_OK;
 }
 
 HRESULT COMDropTarget::dragOverAt(const Point& clientPt, DWORD* effect) {
-    View* target = findDropTargetView(rootView_, clientPt, currentDataObject_.Get());
-    negotiateEffect(target != nullptr, effect);
+    updateHover(clientPt, effect);
     return S_OK;
 }
 
 HRESULT COMDropTarget::dropAt(IDataObject* dataObject, const Point& clientPt, DWORD* effect) {
     View* target = findDropTargetView(rootView_, clientPt, dataObject);
-    negotiateEffect(target != nullptr, effect);
+
+    // Give a text hover handler the same chance to refuse at the drop point that it had while
+    // hovering (it may have set None) - a drop refused there must not be delivered.
+    DropEffect proposed = (target != nullptr) ? DropEffect::Copy : DropEffect::None;
+    std::wstring text;
+    bool hasText = extractUnicodeText(dataObject, text);
+    if (target != nullptr && hasText) {
+        DropTarget* dropTarget = target->dropTarget();
+        if (!dropTarget->onTextDragOver.empty()) {
+            dropTarget->onTextDragOver(*dropTarget, text, target->rootToLocal(clientPt), proposed);
+        }
+    }
+    negotiateEffect(target != nullptr && proposed != DropEffect::None, effect);
+
+    // The hover ends here either way - subscribers clear their feedback off onDragLeave alone.
+    endHover();
 
     if (target != nullptr && effect != nullptr && *effect != DROPEFFECT_NONE) {
         DropTarget* dropTarget = target->dropTarget();
         std::vector<std::wstring> paths;
         BLImage image;
-        std::wstring text;
         if (!dropTarget->onFilesDropped.empty() && extractFilePaths(dataObject, paths)) {
             dropTarget->onFilesDropped(*dropTarget, paths);
         } else if (!dropTarget->onImageDropped.empty() && extractDibImage(dataObject, image)) {
             dropTarget->onImageDropped(*dropTarget, image);
-        } else if (!dropTarget->onTextDropped.empty() && extractUnicodeText(dataObject, text)) {
-            dropTarget->onTextDropped(*dropTarget, text);
+        } else if (hasText && (!dropTarget->onTextDropped.empty() || !dropTarget->onTextDroppedAt.empty())) {
+            if (!dropTarget->onTextDroppedAt.empty()) {
+                dropTarget->onTextDroppedAt(*dropTarget, text, target->rootToLocal(clientPt));
+            }
+            if (!dropTarget->onTextDropped.empty()) {
+                dropTarget->onTextDropped(*dropTarget, text);
+            }
         }
     }
 
     currentDataObject_.Reset();
+    currentText_.clear();
+    hasCurrentText_ = false;
     return S_OK;
 }
 
@@ -548,7 +599,10 @@ STDMETHODIMP COMDropTarget::DragLeave() {
     if (dropTargetHelper_) {
         dropTargetHelper_->DragLeave();
     }
+    endHover();
     currentDataObject_.Reset();
+    currentText_.clear();
+    hasCurrentText_ = false;
     return S_OK;
 }
 

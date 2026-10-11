@@ -5,9 +5,12 @@
 #include "newui/dialogs.h"
 #include "newui/frame.h"
 #include "newui/layout.h"
+#include "newui/menus.h"
 #include "newui/property.h"
 #include "newui/rootview.h"
+#include "newui/rootviewproxy.h"
 #include "newui/subview.h"
+#include "newui/svgimage.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
 
@@ -29,6 +32,51 @@ TEST(Bundle, ExecutableDirAndResourcesDirAreSane) {
     EXPECT_EQ(bundle.resourcesDir(), bundle.executableDir() + "\\Resources");
 }
 
+// Bundle is a shared singleton - every test here that calls
+// setExecutableDirOverride() must restore the real value ("") before
+// returning, or every later test in this binary (most of which rely on
+// resourcesDir() pointing at the real build output) breaks.
+TEST(Bundle, ExecutableDirOverrideChangesResourcesDirToo) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    const std::string realExecutableDir = bundle.executableDir();
+
+    bundle.setExecutableDirOverride("C:\\SomeOverriddenRoot");
+    EXPECT_EQ(bundle.executableDir(), "C:\\SomeOverriddenRoot");
+    EXPECT_EQ(bundle.resourcesDir(), "C:\\SomeOverriddenRoot\\Resources");
+
+    bundle.setExecutableDirOverride("");
+    EXPECT_EQ(bundle.executableDir(), realExecutableDir);
+}
+
+TEST(Bundle, ExecutableDirOverrideAffectsResourcePathResolution) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    const std::string realExecutableDir = bundle.executableDir();
+
+    char tempPathBuf[MAX_PATH]{};
+    ::GetTempPathA(MAX_PATH, tempPathBuf);
+    const std::string overrideRoot = std::string(tempPathBuf) + "BundleOverrideTest";
+    const std::string overrideResources = overrideRoot + "\\Resources";
+    ::CreateDirectoryA(overrideRoot.c_str(), nullptr);
+    ::CreateDirectoryA(overrideResources.c_str(), nullptr);
+
+    const std::string filePath = overrideResources + "\\overrideProbe.txt";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "hello from override root";
+    }
+
+    bundle.setExecutableDirOverride(overrideRoot);
+    EXPECT_EQ(bundle.loadTextFile("overrideProbe.txt"), "hello from override root");
+
+    bundle.setExecutableDirOverride("");
+    EXPECT_EQ(bundle.executableDir(), realExecutableDir);
+    EXPECT_TRUE(bundle.loadTextFile("overrideProbe.txt").empty());  // no longer resolves once restored
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(overrideResources.c_str());
+    ::RemoveDirectoryA(overrideRoot.c_str());
+}
+
 TEST(Bundle, ResourcePathReturnsEmptyForMissingFile) {
     EXPECT_TRUE(newui::Bundle::instance().resourcePath("NoSuchFile.txt").empty());
 }
@@ -36,6 +84,105 @@ TEST(Bundle, ResourcePathReturnsEmptyForMissingFile) {
 TEST(Bundle, LoadImageFailsForMissingFile) {
     BLImage image;
     EXPECT_FALSE(newui::Bundle::instance().loadImage("NoSuchImage.png", image));
+}
+
+TEST(Bundle, LoadImageRasterizesAnSvgResourceAtTheFixedDefaultSize) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\test.svg";
+    {
+        // Same tiny opaque-red-rect SVG as test_graphics.cpp's own
+        // WriteTestSVG() - only cares that ".svg" routes through
+        // renderSvgFile() at all, not real-world rendering fidelity.
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(bundle.loadImage("test.svg", image));
+    EXPECT_EQ(image.size().w, newui::kDefaultSvgRasterSize);
+    EXPECT_EQ(image.size().h, newui::kDefaultSvgRasterSize);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadImageWithExplicitSizeRasterizesAnSvgAtThatSizeInstead) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\sizedTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(bundle.loadImage("sizedTest.svg", image, 15, 15));
+    EXPECT_EQ(image.size().w, 15);
+    EXPECT_EQ(image.size().h, 15);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageReturnsTheSameContentOnASecondCall) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\cachedTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage first;
+    ASSERT_TRUE(bundle.loadCachedImage("cachedTest.svg", first, 12, 12));
+    EXPECT_EQ(first.size().w, 12);
+
+    // Delete the file on disk - a genuinely fresh loadImage() call would
+    // now fail, so a second loadCachedImage() succeeding at all proves
+    // this came from the cache, not a re-read.
+    ::DeleteFileA(filePath.c_str());
+
+    BLImage second;
+    ASSERT_TRUE(bundle.loadCachedImage("cachedTest.svg", second, 12, 12));
+    EXPECT_EQ(second.size().w, 12);
+    EXPECT_EQ(second.size().h, 12);
+
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageWithADifferentSizeIsNotServedFromTheSmallerCacheEntry) {
+    newui::Bundle& bundle = newui::Bundle::instance();
+    ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+
+    const std::string filePath = bundle.resourcesDir() + "\\multiSizeTest.svg";
+    {
+        std::ofstream file(filePath, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage smallImage;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", smallImage, 12, 12));
+    BLImage largeImage;
+    ASSERT_TRUE(bundle.loadCachedImage("multiSizeTest.svg", largeImage, 24, 24));
+
+    EXPECT_EQ(smallImage.size().w, 12);
+    EXPECT_EQ(largeImage.size().w, 24);
+
+    ::DeleteFileA(filePath.c_str());
+    ::RemoveDirectoryA(bundle.resourcesDir().c_str());
+}
+
+TEST(Bundle, LoadCachedImageFailsForMissingFileWithoutCachingTheFailure) {
+    BLImage image;
+    EXPECT_FALSE(newui::Bundle::instance().loadCachedImage("NoSuchCachedImage.svg", image));
 }
 
 TEST(Bundle, ResourcePathAndLoadTextFileFindAnOnDiskResource) {
@@ -299,6 +446,118 @@ TEST_F(NewuiFileFixture, LoadRootViewOnlyTouchesRootViewNotFramesOwnProperties) 
     EXPECT_EQ(frame.rootView().childViews()[0]->name(), "onlyChild");
 }
 
+// Frame-less overload - for a standalone RootView (see RootView's
+// Frame-less constructor), which has no Frame to pull the bundle name
+// from, so the caller supplies it explicitly instead.
+TEST_F(NewuiFileFixture, LoadRootViewWithExplicitBundleNameWorksWithNoFrame) {
+    writeFile("BundleTestFrameless", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_EQ(root.getFrame(), nullptr);
+
+    EXPECT_TRUE(newui::Bundle::instance().loadRootView(root, "BundleTestFrameless"));
+
+    ASSERT_EQ(root.childViews().size(), 1u);
+    EXPECT_EQ(root.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithExplicitBundleNameFailsWhenNameIsEmpty) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+
+    EXPECT_FALSE(newui::Bundle::instance().loadRootView(root, ""));
+}
+
+// loadRootView()/writeRootView() are templated (Bundle::loadRootView<T>()/
+// writeRootView<T>()) specifically so a registered proxy class (Class::
+// proxy()/proxyFor()) can be loaded/written the same way a real RootView
+// is - RootViewProxy (newui/rootviewproxy.h) can't be loaded as a real
+// RootView& at all (unrelated, non-inheriting types - see its own class
+// comment), so this is the real, only way DesignerEditor (cpp_codetools)
+// can load a document into one.
+TEST_F(NewuiFileFixture, LoadRootViewIntoARegisteredProxyTypeAlsoWorks) {
+    writeFile("BundleTestProxyLoad", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    EXPECT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyLoad"));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_EQ(proxy.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithDesignModePropagatesDesignTimeOntoFreshChildren) {
+    writeFile("BundleTestProxyDesignMode", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyDesignMode", /*designMode=*/true));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_TRUE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiFileFixture, LoadRootViewWithoutDesignModeLeavesFreshChildrenNotDesignTime) {
+    writeFile("BundleTestProxyNoDesignMode", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(proxy, "BundleTestProxyNoDesignMode"));  // designMode defaults false
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_FALSE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFromAProxyWithDesignModeWritesTheRealClassName) {
+    trackFile("BundleTestProxyWriteDesignMode");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(proxy, "BundleTestProxyWriteDesignMode", /*designMode=*/true));
+
+    // A real running app's own loadRootView(RootView&, name) never actually
+    // consults this "type" tag (readNested() always trusts its own static
+    // T - see its own comment, reflectionio.h), so this is really about
+    // the saved file being human-legible/consistent, not correctness of
+    // any real load path - still worth locking down explicitly.
+    std::string written = newui::Bundle::instance().loadTextFile("BundleTestProxyWriteDesignMode.newui");
+    EXPECT_NE(written.find("RootView"), std::string::npos);
+    EXPECT_EQ(written.find("RootViewProxy"), std::string::npos);
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFromAProxyWithoutDesignModeWritesItsOwnClassName) {
+    trackFile("BundleTestProxyWriteNoDesignMode");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(proxy, "BundleTestProxyWriteNoDesignMode"));  // designMode defaults false
+
+    std::string written = newui::Bundle::instance().loadTextFile("BundleTestProxyWriteNoDesignMode.newui");
+    EXPECT_NE(written.find("RootViewProxy"), std::string::npos);
+}
+
 TEST_F(NewuiFileFixture, LoadViewConstructsAFreshInstanceWithChildren) {
     writeFile("BundleTestPanel", R"({
         type: "SubView",
@@ -350,6 +609,248 @@ TEST_F(NewuiFileFixture, WriteFrameRoundTripsTitleAndRootViewChildren) {
 TEST_F(NewuiFileFixture, WriteFrameFailsWithNoNameSet) {
     newui::Frame frame;
     EXPECT_FALSE(newui::Bundle::instance().writeFrame(frame));
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewRoundTripsChildrenWithNoExistingFile) {
+    trackFile("BundleWriteRootViewFresh");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* child = new newui::SubView();
+    child->setName("writtenChild");
+    root.addChild(child);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(root, "BundleWriteRootViewFresh"));
+
+    newui::RootView reloaded(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootView(reloaded, "BundleWriteRootViewFresh"));
+    ASSERT_EQ(reloaded.childViews().size(), 1u);
+    EXPECT_EQ(reloaded.childViews()[0]->name(), "writtenChild");
+}
+
+TEST_F(NewuiFileFixture, WriteRootViewFailsWithEmptyBundleName) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().writeRootView(root, ""));
+}
+
+// The real point of writeRootView() over writeView(): a Frame-shaped file
+// already on disk (title/bounds, as a real Frame elsewhere would still
+// loadFrame() from) keeps its other top-level keys when only the
+// rootView is re-saved through a Frame-less DesignerEditor-style edit.
+TEST_F(NewuiFileFixture, WriteRootViewPreservesOtherTopLevelKeysFromAnExistingFile) {
+    trackFile("BundleWriteRootViewMerge");
+
+    newui::Frame originalFrame;
+    originalFrame.setName("BundleWriteRootViewMerge");
+    originalFrame.setTitle("Original Frame Title");
+    originalFrame.setBounds(newui::Rect(5, 6, 400, 300));
+    newui::SubView* oldChild = new newui::SubView();
+    oldChild->setName("oldChild");
+    originalFrame.rootView().addChild(oldChild);
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(originalFrame));
+
+    // A totally separate, Frame-less RootView - standing in for
+    // DesignerEditor's own standalone tree - with different content.
+    newui::RootView editedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* newChild = new newui::SubView();
+    newChild->setName("newChild");
+    editedRoot.addChild(newChild);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootView(editedRoot, "BundleWriteRootViewMerge"));
+
+    newui::Frame reloadedFrame;
+    reloadedFrame.setName("BundleWriteRootViewMerge");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloadedFrame));
+
+    // title/bounds survived - never touched by writeRootView().
+    EXPECT_EQ(reloadedFrame.getTitle(), "Original Frame Title");
+    EXPECT_EQ(reloadedFrame.getBounds(), newui::Rect(5, 6, 400, 300));
+
+    // rootView reflects the new edit, not the old content.
+    ASSERT_EQ(reloadedFrame.rootView().childViews().size(), 1u);
+    EXPECT_EQ(reloadedFrame.rootView().childViews()[0]->name(), "newChild");
+}
+
+namespace {
+
+    // *FromFile()/*ToFile() resolve against an arbitrary absolute path, so
+    // this fixture uses a plain temp dir, not resourcesDir().
+    class NewuiAbsolutePathFixture : public ::testing::Test {
+    protected:
+        void SetUp() override {
+            char tempPathBuf[MAX_PATH]{};
+            ::GetTempPathA(MAX_PATH, tempPathBuf);
+            dir_ = std::string(tempPathBuf) + "NewuiAbsolutePathFixture";
+            ::CreateDirectoryA(dir_.c_str(), nullptr);
+        }
+
+        void TearDown() override {
+            for (const std::string& path : writtenPaths_) {
+                ::DeleteFileA(path.c_str());
+            }
+            ::RemoveDirectoryA(dir_.c_str());
+        }
+
+        // dir_ + "\" + fileName, tracked for TearDown() cleanup.
+        std::string pathFor(const std::string& fileName) {
+            std::string path = dir_ + "\\" + fileName;
+            writtenPaths_.push_back(path);
+            return path;
+        }
+
+        void writeFile(const std::string& fileName, const std::string& contents) {
+            std::ofstream file(pathFor(fileName), std::ios::binary);
+            file << contents;
+        }
+
+        std::string dir_;
+
+    private:
+        std::vector<std::string> writtenPaths_;
+    };
+
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadFrameFromFileAppliesTitleAndRebuildsRootViewChildren) {
+    writeFile("AbsFrame1.newui", R"({
+        type: "Frame",
+        title: "Loaded Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "child1" },
+            ],
+        },
+    })");
+
+    newui::Frame frame;
+    EXPECT_TRUE(newui::Bundle::instance().loadFrameFromFile(frame, pathFor("AbsFrame1.newui")));
+
+    EXPECT_EQ(frame.getTitle(), "Loaded Title");
+    ASSERT_EQ(frame.rootView().childViews().size(), 1u);
+    EXPECT_EQ(frame.rootView().childViews()[0]->name(), "child1");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadFrameFromFileFailsForMissingFile) {
+    newui::Frame frame;
+    EXPECT_FALSE(newui::Bundle::instance().loadFrameFromFile(frame, pathFor("NoSuchFile.newui")));
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileWorksWithAnArbitraryPath) {
+    writeFile("AbsFrameless.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_TRUE(newui::Bundle::instance().loadRootViewFromFile(root, pathFor("AbsFrameless.newui")));
+
+    ASSERT_EQ(root.childViews().size(), 1u);
+    EXPECT_EQ(root.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileFailsWhenPathIsEmpty) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromFile(root, ""));
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileIntoARegisteredProxyTypeAlsoWorks) {
+    writeFile("AbsProxyLoad.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    EXPECT_TRUE(newui::Bundle::instance().loadRootViewFromFile(proxy, pathFor("AbsProxyLoad.newui")));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_EQ(proxy.childViews()[0]->name(), "onlyChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, LoadRootViewFromFileWithDesignModePropagatesDesignTimeOntoFreshChildren) {
+    writeFile("AbsProxyDesignMode.newui", R"({
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "onlyChild" },
+            ],
+        },
+    })");
+
+    newui::RootViewProxy proxy;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(proxy, pathFor("AbsProxyDesignMode.newui"), /*designMode=*/true));
+
+    ASSERT_EQ(proxy.childViews().size(), 1u);
+    EXPECT_TRUE(proxy.childViews()[0]->isDesignTime());
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileRoundTripsChildrenWithNoExistingFile) {
+    std::string path = pathFor("AbsWriteFresh.newui");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* child = new newui::SubView();
+    child->setName("writtenChild");
+    root.addChild(child);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(root, path));
+
+    newui::RootView reloaded(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(reloaded, path));
+    ASSERT_EQ(reloaded.childViews().size(), 1u);
+    EXPECT_EQ(reloaded.childViews()[0]->name(), "writtenChild");
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileFailsWithEmptyPath) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    EXPECT_FALSE(newui::Bundle::instance().writeRootViewToFile(root, ""));
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFilePreservesOtherTopLevelKeysFromAnExistingFile) {
+    std::string path = pathFor("AbsWriteMerge.newui");
+    writeFile("AbsWriteMerge.newui", R"({
+        title: "Original Frame Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "oldChild" },
+            ],
+        },
+    })");
+
+    newui::RootView editedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    newui::SubView* newChild = new newui::SubView();
+    newChild->setName("newChild");
+    editedRoot.addChild(newChild);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(editedRoot, path));
+
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    EXPECT_NE(ss.str().find("Original Frame Title"), std::string::npos);  // survived - never touched by writeRootViewToFile()
+
+    newui::RootView reloadedRoot(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromFile(reloadedRoot, path));
+    ASSERT_EQ(reloadedRoot.childViews().size(), 1u);
+    EXPECT_EQ(reloadedRoot.childViews()[0]->name(), "newChild");  // reflects the new edit, not the old content
+}
+
+TEST_F(NewuiAbsolutePathFixture, WriteRootViewToFileNeverTouchesBundleResourcesDir) {
+    std::string path = pathFor("AbsWriteNoResourcesDirTouch.newui");
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "standaloneRoot");
+    ASSERT_TRUE(newui::Bundle::instance().writeRootViewToFile(root, path));
+
+    std::string wouldBeBundlePath = newui::Bundle::instance().resourcesDir() + "\\AbsWriteNoResourcesDirTouch.newui.newui";
+    DWORD attrs = ::GetFileAttributesA(wouldBeBundlePath.c_str());
+    EXPECT_EQ(attrs, INVALID_FILE_ATTRIBUTES);
 }
 
 TEST_F(NewuiFileFixture, WriteDialogDelegatesToUnderlyingFrame) {
@@ -413,7 +914,7 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
     panel.setLayout(std::move(flex));
 
     auto label = std::make_unique<newui::LabelStyle>();
-    label->text = "Hello from style()";
+    label->setText("Hello from style()");
     panel.setStyle(std::move(label));
 
     ASSERT_TRUE(newui::Bundle::instance().writeView(panel, "BundleWriteLayoutStyle"));
@@ -429,7 +930,46 @@ TEST_F(NewuiFileFixture, WriteViewRoundTripsItsLayoutAndStyle) {
 
     auto* reloadedStyle = dynamic_cast<newui::LabelStyle*>(&reloaded->style());
     ASSERT_NE(reloadedStyle, nullptr);
-    EXPECT_EQ(reloadedStyle->text, "Hello from style()");
+    EXPECT_EQ(reloadedStyle->text(), "Hello from style()");
+
+    reloaded->destroy();
+    delete reloaded;
+}
+
+// A GridLayout's row/column tracks were written to the file but never read back (rows()/columns()
+// had no setters, so the reader had nothing to assign through) - a saved grid reloaded with no
+// tracks at all and every child lost its cell.
+TEST_F(NewuiFileFixture, WriteViewRoundTripsAGridLayoutsTracksAndSpacing) {
+    trackFile("BundleWriteGridTracks");
+
+    newui::SubView panel;
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedRow(40.0f);
+    grid->addStarRow(2.0f);
+    grid->addAutoRow();
+    grid->addAutoColumn();
+    grid->addStarColumn(1.0f);
+    grid->setRowSpacing(3.0f);
+    grid->setColumnSpacing(5.0f);
+    panel.setLayout(std::move(grid));
+
+    ASSERT_TRUE(newui::Bundle::instance().writeView(panel, "BundleWriteGridTracks"));
+    newui::View* reloaded = newui::Bundle::instance().loadView("BundleWriteGridTracks");
+    ASSERT_NE(reloaded, nullptr);
+
+    auto* layout = dynamic_cast<newui::GridLayout*>(reloaded->layout());
+    ASSERT_NE(layout, nullptr);
+    ASSERT_EQ(layout->rows().size(), 3u);
+    EXPECT_EQ(layout->rows()[0].kind, newui::GridTrackKind::Fixed);
+    EXPECT_FLOAT_EQ(layout->rows()[0].value, 40.0f);
+    EXPECT_EQ(layout->rows()[1].kind, newui::GridTrackKind::Star);
+    EXPECT_FLOAT_EQ(layout->rows()[1].value, 2.0f);
+    EXPECT_EQ(layout->rows()[2].kind, newui::GridTrackKind::Auto);
+    ASSERT_EQ(layout->columns().size(), 2u);
+    EXPECT_EQ(layout->columns()[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_EQ(layout->columns()[1].kind, newui::GridTrackKind::Star);
+    EXPECT_FLOAT_EQ(layout->rowSpacing(), 3.0f);
+    EXPECT_FLOAT_EQ(layout->columnSpacing(), 5.0f);
 
     reloaded->destroy();
     delete reloaded;
@@ -516,4 +1056,329 @@ TEST(Bundle, AppNameFallsBackToApplicationNameWithoutInfoJson) {
     // by it.
     newui::Application::instance().setName("bundle-test-app-renamed");
     EXPECT_EQ(newui::Bundle::instance().appName(), "bundle-test-app-renamed");
+}
+
+// A TabControl saves its structure (strip + pages) and loads back through childViews, but its
+// tab buttons are rebuilt rather than serialized - each TabPage carries its own title, and the
+// pages area re-creates a button for every page attached to it.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATabControlsTabsAndTitles) {
+    trackFile("BundleTabControlFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleTabControlFrame1");
+
+    auto* tabs = new newui::TabControl();
+    tabs->setName("myTabs");
+    auto* first = new newui::TabPage();
+    first->setName("firstPage");
+    tabs->addTab("Alpha", first);
+    auto* second = new newui::TabPage();
+    second->setName("secondPage");
+    tabs->addTab("Beta", second);
+    frame.rootView().addChild(tabs);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTabControlFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::TabControl*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->name(), "myTabs");
+
+    // Exactly the constructor-built strip and pages area - nothing duplicated.
+    EXPECT_EQ(loaded->childViews().size(), 2u);
+    ASSERT_EQ(loaded->tabCount(), 2u);
+    EXPECT_EQ(loaded->tabButton(0)->name(), "Alpha");
+    EXPECT_EQ(loaded->tabButton(1)->name(), "Beta");
+    EXPECT_EQ(loaded->page(0)->name(), "firstPage");
+    EXPECT_EQ(loaded->page(1)->name(), "secondPage");
+    EXPECT_EQ(loaded->selectedIndex(), 0u);
+    EXPECT_TRUE(loaded->tabButton(0)->isInternal());
+
+    // The reloaded tabs still work.
+    loaded->tabButton(1)->onMouseDown(*loaded->tabButton(1), newui::Point(1, 1), 0, 0);
+    EXPECT_EQ(loaded->selectedIndex(), 1u);
+}
+
+// A ListView's model is a reflected property whose setter takes ownership (the controller owns
+// it), so a StringListModel and its rows save with the design and are rebuilt - and attached -
+// when it loads.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAListViewsStringListModel) {
+    trackFile("BundleListModelFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleListModelFrame1");
+
+    auto* list = new newui::ListView();
+    list->setName("myList");
+    auto model = std::make_unique<newui::StringListModel>();
+    model->items() = { "alpha", "beta", "gamma" };
+    list->setModel(std::move(model));
+    frame.rootView().addChild(list);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleListModelFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::ListView*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* loadedModel = dynamic_cast<newui::StringListModel*>(loaded->model());
+    ASSERT_NE(loadedModel, nullptr) << "no StringListModel was restored";
+    ASSERT_EQ(loadedModel->items().size(), 3u);
+    EXPECT_EQ(loadedModel->items()[0], "alpha");
+    EXPECT_EQ(loadedModel->items()[2], "gamma");
+
+    // Attached to the view's controller, not just held.
+    EXPECT_EQ(loaded->controller().itemCount(), 3u);
+}
+
+// Same as the ListView test above, for TreeView + StringTreeModel - rows() is a reflected
+// collection of TreeRow (itself a plain reflected struct, like GridLayout's own GridTrack), so
+// nesting survives the round trip too, not just the flat text.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsATreeViewsStringTreeModel) {
+    trackFile("BundleTreeModelFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleTreeModelFrame1");
+
+    auto* tree = new newui::TreeView();
+    tree->setName("myTree");
+    auto model = std::make_unique<newui::StringTreeModel>();
+    model->rows() = { { 0, "Fruits" }, { 1, "Apple" }, { 0, "Vegetables" } };
+    tree->setModel(std::move(model));
+    frame.rootView().addChild(tree);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTreeModelFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::TreeView*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    auto* loadedModel = dynamic_cast<newui::StringTreeModel*>(loaded->model());
+    ASSERT_NE(loadedModel, nullptr) << "no StringTreeModel was restored";
+    ASSERT_EQ(loadedModel->rows().size(), 3u);
+    EXPECT_EQ(loadedModel->rows()[1].depth, 1u);
+    EXPECT_EQ(loadedModel->rows()[1].text, "Apple");
+
+    // Attached to the view's controller, not just held - and the nesting is real, not just
+    // three flat rows.
+    EXPECT_EQ(loadedModel->childCount({0}), 1u);
+    EXPECT_EQ(loaded->controller().visibleCount(), 2u);   // "Fruits" (collapsed) + "Vegetables"
+}
+
+// MenuItem's children and MenuBar's menus are reflected collections, so a whole menu tree -
+// nested submenus included - survives a save/load, and the loaded bar rebuilds its buttons.
+TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAMenuBarsMenuTree) {
+    trackFile("BundleMenuBarFrame1");
+
+    newui::Frame frame;
+    frame.setName("BundleMenuBarFrame1");
+
+    auto* bar = new newui::MenuBar();
+    bar->setName("myMenuBar");
+    auto* file = new newui::MenuItem("File");
+    file->addChild(new newui::MenuItem("Open"));
+    auto* recent = new newui::MenuItem("Recent");
+    recent->addChild(new newui::MenuItem("a.txt"));
+    file->addChild(recent);
+    file->addChild(newui::MenuItem::Separator().release());
+    auto* exitItem = new newui::MenuItem("Exit");
+    exitItem->setShortcutText("Alt+F4");
+    file->addChild(exitItem);
+    bar->addMenu(file);
+    bar->addMenu(new newui::MenuItem("Edit"));
+    frame.rootView().addChild(bar);
+
+    ASSERT_TRUE(newui::Bundle::instance().writeFrame(frame));
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleMenuBarFrame1");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
+
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::MenuBar*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+
+    ASSERT_EQ(loaded->menus().size(), 2u);
+    newui::MenuItem* loadedFile = loaded->menus()[0];
+    EXPECT_EQ(loadedFile->text(), "File");
+    EXPECT_EQ(loadedFile->parent(), &loaded->root());
+    EXPECT_EQ(loaded->menus()[1]->text(), "Edit");
+
+    ASSERT_EQ(loadedFile->children().size(), 4u);
+    EXPECT_EQ(loadedFile->children()[0]->text(), "Open");
+    newui::MenuItem* loadedRecent = loadedFile->children()[1];
+    ASSERT_EQ(loadedRecent->children().size(), 1u);
+    EXPECT_EQ(loadedRecent->children()[0]->text(), "a.txt");
+    EXPECT_EQ(loadedRecent->children()[0]->parent(), loadedRecent);
+    EXPECT_TRUE(loadedFile->children()[2]->isSeparator());
+    EXPECT_EQ(loadedFile->children()[3]->shortcutText(), "Alt+F4");
+
+    // One button per top-level menu.
+    EXPECT_EQ(loaded->childViews().size(), 2u);
+}
+
+// The text counterparts the designer's Source view uses - same format as the file versions.
+TEST(BundleText, WriteThenLoadRootViewTextRoundTripsAndKeepsOtherTopLevelKeys) {
+    newui::Frame frame;
+    frame.setName("BundleTextFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    button->setText("OK");
+    frame.rootView().addChild(button);
+
+    const std::string existing = "{ title: \"My Window\", rootView: {} }";
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), existing);
+    EXPECT_NE(text.find("My Window"), std::string::npos) << "other top-level keys are kept";
+    EXPECT_NE(text.find("okButton"), std::string::npos);
+
+    newui::Frame reloaded;
+    reloaded.setName("BundleTextFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, false, &error)) << error;
+    ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews()[0]);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->text(), "OK");
+}
+
+TEST(BundleText, LoadRootViewFromTextReportsWhereTheTextIsBroken) {
+    newui::Frame frame;
+    std::string error;
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), "{ rootView: { ", false, &error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_TRUE(frame.rootView().childViews().empty());
+}
+
+TEST(BundleText, LoadRootViewFromTextNeedsARootViewObject) {
+    newui::Frame frame;
+    std::string error;
+    EXPECT_FALSE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), "{ title: \"x\" }", false, &error));
+    EXPECT_NE(error.find("rootView"), std::string::npos);
+}
+
+// A design-time load keeps an event's recorded target (the "delegates" block) as a descriptor-only
+// listener, so the designer can show it and a save writes it back. The target object (e.g. a
+// controller) doesn't exist in the designer's process, so nothing is actually connected.
+namespace {
+    const newui::reflection::Delegate* findDelegate(const char* className, const char* delegateName,
+                                                    std::vector<const newui::reflection::Delegate*>& storage) {
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(std::string(className));
+        if (clazz == nullptr) {
+            return nullptr;
+        }
+        clazz->allDelegates(storage);
+        for (const newui::reflection::Delegate* d : storage) {
+            if (d->name() == delegateName) {
+                return d;
+            }
+        }
+        return nullptr;
+    }
+
+    std::vector<std::string> onClickListeners(newui::Button& button) {
+        std::vector<const newui::reflection::Delegate*> storage;
+        const newui::reflection::Delegate* d = findDelegate("Button", "onClick", storage);
+        return d != nullptr ? d->describedListeners(&button) : std::vector<std::string>{};
+    }
+
+    const char* kDescriptor = "this@SaveDialogController.onOkClick";
+}
+
+TEST(DelegateDescriptorRoundTrip, AddDescriptorListenerRecordsItOnceAndConnectsNothing) {
+    newui::Button button;
+    std::vector<const newui::reflection::Delegate*> storage;
+    const newui::reflection::Delegate* onClick = findDelegate("Button", "onClick", storage);
+    ASSERT_NE(onClick, nullptr);
+
+    EXPECT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));
+    EXPECT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));  // already there: no duplicate
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{kDescriptor});
+
+    EXPECT_FALSE(onClick->addDescriptorListener(&button, ""));
+    EXPECT_FALSE(onClick->addDescriptorListener(nullptr, kDescriptor));
+}
+
+TEST(DelegateDescriptorRoundTrip, RemoveDescriptorListenerDropsOnlyThatOne) {
+    newui::Button button;
+    std::vector<const newui::reflection::Delegate*> storage;
+    const newui::reflection::Delegate* onClick = findDelegate("Button", "onClick", storage);
+    ASSERT_NE(onClick, nullptr);
+    const std::string other = "this@SaveDialogController.onCancelClick";
+    ASSERT_TRUE(onClick->addDescriptorListener(&button, kDescriptor));
+    ASSERT_TRUE(onClick->addDescriptorListener(&button, other));
+
+    EXPECT_TRUE(onClick->removeDescriptorListener(&button, kDescriptor));
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{other});
+
+    EXPECT_TRUE(onClick->removeDescriptorListener(&button, kDescriptor));   // already gone: nothing to do
+    EXPECT_FALSE(onClick->removeDescriptorListener(&button, ""));
+    EXPECT_EQ(onClickListeners(button), std::vector<std::string>{other});
+}
+
+TEST(DelegateDescriptorRoundTrip, ADesignLoadKeepsTheRecordedTargetAndASaveWritesItBack) {
+    newui::Frame frame;
+    frame.setName("RoundTripFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    frame.rootView().addChild(button);
+    std::vector<const newui::reflection::Delegate*> storage;
+    ASSERT_TRUE(findDelegate("Button", "onClick", storage)->addDescriptorListener(button, kDescriptor));
+
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), "{}");
+    ASSERT_NE(text.find(kDescriptor), std::string::npos) << text;
+
+    // Design-mode load: the descriptor comes back as a listener...
+    newui::Frame reloaded;
+    reloaded.setName("RoundTripFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, true, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(onClickListeners(*loaded), std::vector<std::string>{kDescriptor});
+
+    // ...so saving again keeps it (this is what used to be lost on every designer save).
+    const std::string saved = newui::Bundle::instance().writeRootViewToText(reloaded.rootView(), "{}");
+    EXPECT_NE(saved.find(kDescriptor), std::string::npos) << saved;
+}
+
+TEST(DelegateDescriptorRoundTrip, ARuntimeLoadDoesNotAttachRecordedTargets) {
+    newui::Frame frame;
+    frame.setName("RoundTripFrame");
+    auto* button = new newui::Button();
+    button->setName("okButton");
+    frame.rootView().addChild(button);
+    std::vector<const newui::reflection::Delegate*> storage;
+    ASSERT_TRUE(findDelegate("Button", "onClick", storage)->addDescriptorListener(button, kDescriptor));
+    const std::string text = newui::Bundle::instance().writeRootViewToText(frame.rootView(), "{}");
+
+    newui::Frame reloaded;
+    reloaded.setName("RoundTripFrame");
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(reloaded.rootView(), text, false, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(reloaded.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_TRUE(onClickListeners(*loaded).empty()) << "only the designer keeps them";
+}
+
+TEST(DelegateDescriptorRoundTrip, AnEntryForAnUnknownDelegateIsIgnored) {
+    const std::string text =
+        R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "b", delegates: { onNoSuchEvent: ["x@Y.z"] } } ] } })";
+    newui::Frame frame;
+    std::string error;
+    ASSERT_TRUE(newui::Bundle::instance().loadRootViewFromText(frame.rootView(), text, true, &error)) << error;
+    auto* loaded = dynamic_cast<newui::Button*>(frame.rootView().childViews().at(0));
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_TRUE(onClickListeners(*loaded).empty());
 }

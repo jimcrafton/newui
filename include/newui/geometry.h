@@ -10,6 +10,8 @@
 #include "newui/newui.h"
 #include <blend2d/blend2d.h>
 
+#include <cmath>
+
 
 namespace newui {
 
@@ -273,6 +275,79 @@ public:
     // Uniform inset on all four sides.
     Rect deflate(float amount) const {
         return deflate(amount, amount, amount, amount);
+    }
+
+    Rect inflate(float left, float top, float right, float bottom) const {
+        return deflate(-left, -top, -right, -bottom);
+    }
+
+    Rect inflate(float amount) const {
+        return inflate(amount, amount, amount, amount);
+    }
+
+    // Snaps outward to whole-pixel boundaries - floors the leading edges,
+    // ceils the trailing ones, so the result only ever grows, never
+    // shrinks and clips off a partial pixel (same recipe as rootview.cpp's
+    // own file-local snappedToPixels(), promoted here once a second real
+    // consumer needed the identical logic - View::paintChildren()'s own
+    // per-child translate/clip_to_rect(), view.cpp). Matters because a
+    // fractional-edged ctx.clip_to_rect() stops Blend2D's JIT from taking
+    // its fast axis-aligned "box fill" pipeline (FillType::kBoxA), and a
+    // themed control's buffered-paint blit_image() running under the
+    // resulting non-box path trips a real 'is_rect_fill()' assertion in
+    // fetchpatternpart.cpp - reproduced live (a Slider's thumb, positioned
+    // at a generically-fractional proportional X, painting through
+    // ThemedTrackbarThumbStyle inside a parent paintChildren() that
+    // translated/clipped by that same unsnapped fractional bounds).
+    Rect snappedOutwardToPixels() const {
+        float snappedLeft = std::floor(left());
+        float snappedTop = std::floor(top());
+        float snappedRight = std::ceil(right());
+        float snappedBottom = std::ceil(bottom());
+        return Rect(snappedLeft, snappedTop, snappedRight - snappedLeft, snappedBottom - snappedTop);
+    }
+
+    // The smallest Rect containing both this one and other - min of the
+    // near corners, max of the *far* corners (not max of the sizes
+    // independently, which only happens to be right when both rects share a
+    // top-left corner). empty() - the cleared/default Rect, all four
+    // components zero, not merely "zero area" - is the identity: uniting
+    // with it returns the other operand unchanged, so a running union
+    // (RootView's dirtyRect_) can start from a cleared Rect.
+    Rect united(const Rect& other) const {
+        if (empty()) {
+            return other;
+        }
+        if (other.empty()) {
+            return *this;
+        }
+        float l = left() < other.left() ? left() : other.left();
+        float t = top() < other.top() ? top() : other.top();
+        float r = right() > other.right() ? right() : other.right();
+        float b = bottom() > other.bottom() ? bottom() : other.bottom();
+        return Rect(l, t, r - l, b - t);
+    }
+
+    // True if the two rects share some area - touching edges don't count, and a rect with no area
+    // (zero or negative width/height) overlaps nothing.
+    bool intersects(const Rect& other) const {
+        if (width() <= 0.0f || height() <= 0.0f || other.width() <= 0.0f || other.height() <= 0.0f) {
+            return false;
+        }
+        return right() > other.left() && left() < other.right() && bottom() > other.top() && top() < other.bottom();
+    }
+
+    // The area both rects cover; when they don't overlap, a zero-sized Rect at the overlap's would-be
+    // top-left corner (so check intersects() first if "no overlap" needs telling apart from a real one).
+    Rect intersected(const Rect& other) const {
+        const float l = left() > other.left() ? left() : other.left();
+        const float t = top() > other.top() ? top() : other.top();
+        const float r = right() < other.right() ? right() : other.right();
+        const float b = bottom() < other.bottom() ? bottom() : other.bottom();
+        if (r <= l || b <= t) {
+            return Rect(l, t, 0.0f, 0.0f);
+        }
+        return Rect(l, t, r - l, b - t);
     }
 
     bool operator==(const Rect& other) const {

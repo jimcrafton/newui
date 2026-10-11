@@ -51,13 +51,39 @@ TEST(AnchorLayout, SkipsInvisibleChildren) {
     container->addChild(child);
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->width = 40.0f;
-    params->height = 20.0f;
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
 
     EXPECT_EQ(child->bounds(), newui::Rect(1, 2, 3, 4));
+
+    delete child;
+    delete container;
+}
+
+TEST(AnchorLayout, ShowingAChildAfterLayoutPositionsItAndHidingItReflowsTheOthers) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 100));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+
+    auto* child = new newui::SubView();   // starts invisible
+    container->addChild(child);
+    auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
+    params->setRightMargin(10.0f);
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
+    child->setLayoutParams(std::move(params));
+    container->updateLayout();
+    EXPECT_NE(child->bounds().left(), 150.0f) << "an invisible child isn't laid out";
+
+    child->setVisible(true);
+    EXPECT_EQ(child->bounds(), newui::Rect(150, 0, 40, 20));
+
+    // Moving the container re-runs layout as before; the child stays right-anchored.
+    container->setBounds(newui::Rect(0, 0, 300, 100));
+    EXPECT_EQ(child->bounds().left(), 250.0f);
 
     delete child;
     delete container;
@@ -70,10 +96,10 @@ TEST(AnchorLayout, LeftTopPositionsAtMarginWithOwnSize) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->leftMargin = 5.0f;
-    params->topMargin = 8.0f;
-    params->width = 40.0f;
-    params->height = 20.0f;
+    params->setLeftMargin(5.0f);
+    params->setTopMargin(8.0f);
+    params->setWidth(40.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -91,10 +117,10 @@ TEST(AnchorLayout, RightBottomPositionsFromFarEdge) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Bottom);
-    params->rightMargin = 10.0f;
-    params->bottomMargin = 5.0f;
-    params->width = 30.0f;
-    params->height = 20.0f;
+    params->setRightMargin(10.0f);
+    params->setBottomMargin(5.0f);
+    params->setWidth(30.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -114,10 +140,10 @@ TEST(AnchorLayout, OpposingAnchorsStretchThatAxis) {
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(
         newui::Anchor::Left | newui::Anchor::Right | newui::Anchor::Top);
-    params->leftMargin = 10.0f;
-    params->rightMargin = 20.0f;
-    params->topMargin = 5.0f;
-    params->height = 15.0f;
+    params->setLeftMargin(10.0f);
+    params->setRightMargin(20.0f);
+    params->setTopMargin(5.0f);
+    params->setHeight(15.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -136,8 +162,8 @@ TEST(AnchorLayout, CenterXCenterYCentersChild) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::CenterX | newui::Anchor::CenterY);
-    params->width = 50.0f;
-    params->height = 20.0f;
+    params->setWidth(50.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -153,14 +179,14 @@ TEST(AnchorLayout, ArrangesWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-    params->width = 20.0f;
-    params->height = 20.0f;
+    params->setWidth(20.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -177,7 +203,7 @@ TEST(AnchorLayout, OpposingAnchorsStretchWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* child = NewChild(container, newui::Rect());
@@ -350,7 +376,7 @@ TEST(FlexLayout, ArrangesWithinStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 100, 300));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* childA = NewChild(container, newui::Rect(0, 0, 40, 20));
@@ -615,7 +641,7 @@ TEST(CardLayout, ActiveChildFillsStyledContainersClientBounds) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 10.0f;
+    style->setBorderWidth(10.0f);
     container->setStyle(std::move(style));
 
     auto* childA = NewChild(container, newui::Rect(0, 0, 10, 10));
@@ -708,7 +734,7 @@ TEST(GridLayout, AutoColumnSizesToLargestDesiredSizeIgnoringSpanningChildren) {
     spanning->setDesiredSize(newui::Size(1000.0f, 10.0f));
     spanning->setVisible(true);
     auto spanParams = std::make_unique<newui::GridLayoutParams>(0, 0);
-    spanParams->columnSpan = 2;
+    spanParams->setColumnSpan(2);
     spanning->setLayoutParams(std::move(spanParams));
     container->addChild(spanning);
 
@@ -738,7 +764,7 @@ TEST(GridLayout, ColumnSpanUnionsTrackExtents) {
 
     auto* child = NewChild(container, newui::Rect());
     auto params = std::make_unique<newui::GridLayoutParams>(0, 0);
-    params->columnSpan = 2;
+    params->setColumnSpan(2);
     child->setLayoutParams(std::move(params));
     container->updateLayout();
 
@@ -761,8 +787,8 @@ TEST(GridLayout, NonStretchAlignmentKeepsDesiredSizeAndCentersWithinCell) {
     child->setDesiredSize(newui::Size(40.0f, 20.0f));
     child->setVisible(true);
     auto params = std::make_unique<newui::GridLayoutParams>(0, 0);
-    params->horizontalAlignment = newui::CrossAxisAlignment::Center;
-    params->verticalAlignment = newui::CrossAxisAlignment::Center;
+    params->setHorizontalAlignment(newui::CrossAxisAlignment::Center);
+    params->setVerticalAlignment(newui::CrossAxisAlignment::Center);
     child->setLayoutParams(std::move(params));
     container->addChild(child);
     container->updateLayout();
@@ -851,6 +877,80 @@ TEST(GridLayout, ColumnAndRowSpacingOffsetTracks) {
 }
 
 // ---------------------------------------------------------------------
+// GridLayout::trackGeometry() - the same per-axis pixel offsets/sizes
+// arrange() computes and immediately consumes, exposed for a design-time
+// caller (a grid-line cue, or resolving which cell a point falls in)
+// without duplicating arrange()'s own track-sizing math.
+// ---------------------------------------------------------------------
+
+TEST(GridLayoutTrackGeometry, MatchesTheSameSizesArrangeWouldProduce) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 120, 50));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedColumn(20.0f);
+    grid->addStarColumn(1.0f);
+    grid->addStarColumn(3.0f);
+    grid->addFixedRow(50.0f);
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    ASSERT_EQ(geometry.columns.offsets.size(), 3u);
+    ASSERT_EQ(geometry.columns.sizes.size(), 3u);
+    // leftover = 120 - 20 = 100, split 1:3 -> 25 and 75 - same as
+    // GridLayout.StarColumnsSplitLeftoverProportionalToWeight above.
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[0], 0.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[0], 20.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[1], 20.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[1], 25.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[2], 45.0f);
+    EXPECT_FLOAT_EQ(geometry.columns.sizes[2], 75.0f);
+
+    ASSERT_EQ(geometry.rows.offsets.size(), 1u);
+    EXPECT_FLOAT_EQ(geometry.rows.offsets[0], 0.0f);
+    EXPECT_FLOAT_EQ(geometry.rows.sizes[0], 50.0f);
+
+    delete container;
+}
+
+TEST(GridLayoutTrackGeometry, IncludesSpacingInOffsets) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 55, 27));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedColumn(20.0f);
+    grid->addFixedColumn(30.0f);
+    grid->setColumnSpacing(5.0f);
+    grid->addFixedRow(20.0f);
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    EXPECT_FLOAT_EQ(geometry.columns.offsets[1], 25.0f);  // 20 (column 0) + 5 (columnSpacing)
+
+    delete container;
+}
+
+TEST(GridLayoutTrackGeometry, EmptyTracksReturnEmptyGeometry) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 100));
+
+    auto grid = std::make_unique<newui::GridLayout>();
+    newui::GridLayout* gridPtr = grid.get();
+    container->setLayout(std::move(grid));
+
+    newui::GridLayout::GridGeometry geometry = gridPtr->trackGeometry(*container);
+
+    EXPECT_TRUE(geometry.columns.offsets.empty());
+    EXPECT_TRUE(geometry.rows.offsets.empty());
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------
 // View/SubView integration
 // ---------------------------------------------------------------------
 
@@ -861,8 +961,8 @@ TEST(ViewLayout, ResizingContainerReRunsLayout) {
     auto* child = NewChild(container, newui::Rect());
 
     auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
-    params->width = 20.0f;
-    params->height = 20.0f;
+    params->setWidth(20.0f);
+    params->setHeight(20.0f);
     child->setLayoutParams(std::move(params));
 
     container->setLayout(std::make_unique<newui::AnchorLayout>());
@@ -906,5 +1006,158 @@ TEST(ViewLayout, NullLayoutStopsAutomaticArranging) {
     EXPECT_EQ(child->bounds(), newui::Rect(5, 5, 50, 20));
 
     delete child;
+    delete container;
+}
+
+// ---------------------------------------------------------------------
+// View::isLayoutIgnored() - a child that stays in childViews() but that no
+// layout positions, sizes, counts or hides (an overlay floating over the
+// container).
+// ---------------------------------------------------------------------
+
+TEST(LayoutIgnored, IsOffByDefault) {
+    auto* view = new newui::SubView();
+    EXPECT_FALSE(view->isLayoutIgnored());
+    delete view;
+}
+
+TEST(LayoutIgnored, FlexLayoutLeavesTheChildAloneAndDoesNotReserveSpaceForIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 400));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+
+    auto* first = NewChild(container, newui::Rect(0, 0, 50, 20));
+    auto* overlay = NewChild(container, newui::Rect(10, 10, 80, 80));
+    auto* second = NewChild(container, newui::Rect(0, 0, 50, 30));
+
+    // Counted like any child at first: the overlay's own 80 sits between the two.
+    EXPECT_EQ(second->bounds().top(), 100.0f);
+
+    // Flagging stops the layout touching it; whatever bounds it has then are its own, so the owner places it.
+    overlay->setLayoutIgnored(true);
+    overlay->setBounds(newui::Rect(10, 10, 80, 80));
+    EXPECT_EQ(first->bounds().top(), 0.0f);
+    EXPECT_EQ(second->bounds().top(), 20.0f);   // the siblings closed up: no space is reserved for it
+
+    // Still an ordinary child otherwise: in childViews(), in order, visible.
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[1], overlay);
+    EXPECT_TRUE(overlay->isVisible());
+
+    // A resize re-runs the layout and still leaves it where it is.
+    container->setBounds(newui::Rect(0, 0, 300, 500));
+    EXPECT_EQ(overlay->bounds(), newui::Rect(10, 10, 80, 80));
+
+    // Turning it back off puts it back in the flow.
+    overlay->setLayoutIgnored(false);
+    EXPECT_EQ(second->bounds().top(), 100.0f);
+
+    delete first;
+    delete overlay;
+    delete second;
+    delete container;
+}
+
+TEST(LayoutIgnored, AnchorLayoutDoesNotApplyItsAnchorsToTheChild) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 100));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+
+    auto* overlay = NewChild(container, newui::Rect(20, 30, 40, 50));
+    auto params = std::make_unique<newui::AnchorLayoutParams>(
+        newui::Anchor::Left | newui::Anchor::Top | newui::Anchor::Right | newui::Anchor::Bottom);
+    overlay->setLayoutParams(std::move(params));
+    container->updateLayout();
+    EXPECT_EQ(overlay->bounds(), newui::Rect(0, 0, 200, 100));   // stretched by its anchors
+
+    overlay->setLayoutIgnored(true);
+    overlay->setBounds(newui::Rect(20, 30, 40, 50));
+    container->setBounds(newui::Rect(0, 0, 300, 150));           // re-arranges
+    EXPECT_EQ(overlay->bounds(), newui::Rect(20, 30, 40, 50));   // the anchors no longer apply
+
+    delete overlay;
+    delete container;
+}
+
+TEST(LayoutIgnored, GridLayoutDoesNotSizeAutoTracksFromItOrPlaceIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 300, 200));
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addAutoColumn();
+    grid->addAutoRow();
+    container->setLayout(std::move(grid));
+
+    auto* cell = NewChild(container, newui::Rect(0, 0, 40, 20));
+    cell->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 0));
+    auto* overlay = NewChild(container, newui::Rect(5, 5, 250, 180));
+    overlay->setLayoutParams(std::make_unique<newui::GridLayoutParams>(0, 0));
+    overlay->setLayoutIgnored(true);
+    container->updateLayout();
+
+    EXPECT_EQ(cell->bounds(), newui::Rect(0, 0, 40, 20));       // the auto track is the cell's, not the overlay's 250x180
+    EXPECT_EQ(overlay->bounds(), newui::Rect(5, 5, 250, 180));  // and the overlay wasn't moved into the cell
+
+    delete cell;
+    delete overlay;
+    delete container;
+}
+
+TEST(LayoutIgnored, CardLayoutDoesNotCountShowOrHideIt) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 100));
+    auto card = std::make_unique<newui::CardLayout>();
+    newui::CardLayout* cards = card.get();
+    container->setLayout(std::move(card));
+
+    auto* page0 = NewChild(container, newui::Rect());
+    auto* overlay = NewChild(container, newui::Rect(10, 10, 30, 30));
+    auto* page1 = NewChild(container, newui::Rect());
+    overlay->setLayoutIgnored(true);   // (the layout had already hidden it as a non-active card: the owner shows and places it)
+    overlay->setVisible(true);
+    overlay->setBounds(newui::Rect(10, 10, 30, 30));
+
+    cards->show(1);   // the second CARD, not the second child
+    EXPECT_FALSE(page0->isVisible());
+    EXPECT_TRUE(page1->isVisible());
+    EXPECT_TRUE(overlay->isVisible());                          // never hidden by the layout
+    EXPECT_EQ(overlay->bounds(), newui::Rect(10, 10, 30, 30));  // never resized to fill the card area
+
+    cards->next();   // two cards: wraps to the first
+    EXPECT_TRUE(page0->isVisible());
+    EXPECT_FALSE(page1->isVisible());
+    EXPECT_TRUE(overlay->isVisible());
+
+    delete page0;
+    delete overlay;
+    delete page1;
+    delete container;
+}
+
+TEST(LayoutIgnored, TogglingOnAViewWithNoParentIsHarmless) {
+    auto* view = new newui::SubView();
+    view->setLayoutIgnored(true);
+    EXPECT_TRUE(view->isLayoutIgnored());
+    view->setLayoutIgnored(true);   // no change: nothing to do
+    view->setLayoutIgnored(false);
+    EXPECT_FALSE(view->isLayoutIgnored());
+    delete view;
+}
+
+TEST(LayoutIgnored, StillHitTestsByItsOwnBoundsOverTheLaidOutSiblings) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 200));
+    container->setVisible(true);
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    auto* under = NewChild(container, newui::Rect(0, 0, 200, 200));
+    auto* overlay = NewChild(container, newui::Rect(50, 50, 60, 60));
+    overlay->setLayoutIgnored(true);   // added last: on top
+    overlay->setBounds(newui::Rect(50, 50, 60, 60));
+
+    newui::Point local;
+    EXPECT_EQ(container->hitTestChildren(newui::Point(70, 70), local), overlay);
+    EXPECT_EQ(container->hitTestChildren(newui::Point(150, 150), local), under);
+
+    delete under;
+    delete overlay;
     delete container;
 }

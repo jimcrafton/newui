@@ -1,4 +1,8 @@
 #include "newui/fontmanager.h"
+#include "newui/text.h"
+#include "newui/utils.h"
+
+#include <dwrite.h>
 
 #include <gtest/gtest.h>
 
@@ -81,4 +85,57 @@ TEST(FontManager, ListedFontsAreOpenTypeOrTrueType) {
         ASSERT_EQ(face.create_from_file(info.filePath.c_str()), BL_SUCCESS) << info.filePath;
         EXPECT_EQ(face.face_type(), BL_FONT_FACE_TYPE_OPENTYPE) << info.name;
     }
+}
+
+TEST(FontManager, AddFontFileRegistersAFontByItsNamesAndItWinsOverTheSystemOne) {
+    const std::vector<newui::SystemFontInfo>& system = newui::FontManager::listFonts();
+    ASSERT_GT(system.size(), 0u);
+    const std::string path = system[0].filePath;   // any loadable file stands in for a shipped font
+
+    ASSERT_TRUE(newui::FontManager::addFontFile(path));
+    const newui::SystemFontInfo& added = newui::FontManager::listFonts().back();
+    EXPECT_TRUE(added.bundled);
+    EXPECT_EQ(added.filePath, path);
+
+    BLFont font;
+    EXPECT_TRUE(newui::FontManager::createFont(added.name, 12.0f, font)) << "found by the registered full name";
+    EXPECT_FALSE(newui::FontManager::addFontFile("C:\\no\\such\\font.ttf"));
+}
+
+TEST(FontManager, AddFontDirectoryOnAMissingFolderRegistersNothing) {
+    EXPECT_EQ(newui::FontManager::addFontDirectory("C:\\no\\such\\folder"), 0u);
+}
+
+TEST(FontManager, RegisteringAFontDoesNotMakeAnInstalledOneLookMissing) {
+    const std::vector<newui::SystemFontInfo>& fonts = newui::FontManager::listFonts();
+    ASSERT_GT(fonts.size(), 0u);
+    const std::string name = fonts[0].name;
+    ASSERT_TRUE(newui::FontManager::isInstalled(name));
+
+    ASSERT_TRUE(newui::FontManager::addFontFile(fonts[0].filePath));
+    EXPECT_TRUE(newui::FontManager::isInstalled(name)) << "DirectWrite still finds it";
+}
+
+TEST(FontManager, DirectWriteSeesAFontRegisteredHereAlongWithTheSystemOnes) {
+    const std::vector<newui::SystemFontInfo>& fonts = newui::FontManager::listFonts();
+    ASSERT_GT(fonts.size(), 0u);
+    const std::string path = fonts[0].filePath;
+    BLFontFace face;
+    ASSERT_EQ(face.create_from_file(path.c_str()), BL_SUCCESS);
+    const std::string family = face.family_name().data();
+    ASSERT_FALSE(family.empty());
+
+    const unsigned before = newui::FontManager::registeredFontVersion();
+    ASSERT_TRUE(newui::FontManager::addFontFile(path));
+    EXPECT_NE(newui::FontManager::registeredFontVersion(), before) << "a stale collection is noticed";
+    EXPECT_FALSE(newui::FontManager::registeredFontFiles().empty());
+
+    IDWriteFontCollection* collection = newui::text::DirectWriteResources::fontCollection();
+    ASSERT_NE(collection, nullptr);
+    EXPECT_EQ(collection, newui::text::DirectWriteResources::fontCollection()) << "built once per change";
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    ASSERT_TRUE(SUCCEEDED(collection->FindFamilyName(newui::utf8ToWide(family).c_str(), &index, &exists)));
+    EXPECT_TRUE(exists) << family;
+    EXPECT_GT(collection->GetFontFamilyCount(), 1u) << "the system's families are still there";
 }

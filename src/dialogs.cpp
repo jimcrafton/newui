@@ -2,6 +2,7 @@
 
 #include "newui/application.h"
 #include "newui/runloop.h"
+#include "newui/utils.h"
 
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -9,33 +10,6 @@
 namespace newui {
 
 namespace {
-
-    std::wstring Utf8ToWide(const std::string& text) {
-        if (text.empty()) {
-            return std::wstring();
-        }
-        int required = ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
-        if (required <= 0) {
-            return std::wstring();
-        }
-        std::wstring result(static_cast<size_t>(required), L'\0');
-        ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), required);
-        return result;
-    }
-
-    std::string WideToUtf8(const wchar_t* text) {
-        if (text == nullptr || *text == L'\0') {
-            return std::string();
-        }
-        int len = static_cast<int>(wcslen(text));
-        int required = ::WideCharToMultiByte(CP_UTF8, 0, text, len, nullptr, 0, nullptr, nullptr);
-        if (required <= 0) {
-            return std::string();
-        }
-        std::string result(static_cast<size_t>(required), '\0');
-        ::WideCharToMultiByte(CP_UTF8, 0, text, len, result.data(), required, nullptr, nullptr);
-        return result;
-    }
 
     // Initializes COM (STA) for the current thread if it isn't already,
     // and releases it again on destruction - only if this instance is the
@@ -84,8 +58,8 @@ namespace {
         storage.clear();
         storage.reserve(filters.size() * 2);
         for (const auto& filter : filters) {
-            storage.push_back(Utf8ToWide(filter.name));
-            storage.push_back(Utf8ToWide(filter.pattern));
+            storage.push_back(utf8ToWide(filter.name));
+            storage.push_back(utf8ToWide(filter.pattern));
         }
 
         std::vector<COMDLG_FILTERSPEC> specs;
@@ -104,17 +78,17 @@ namespace {
                              std::vector<std::wstring>& filterStorage,
                              std::vector<COMDLG_FILTERSPEC>& filterSpecs) {
         if (!options.title.empty()) {
-            dialog->SetTitle(Utf8ToWide(options.title).c_str());
+            dialog->SetTitle(utf8ToWide(options.title).c_str());
         }
         if (!options.defaultFileName.empty()) {
-            dialog->SetFileName(Utf8ToWide(options.defaultFileName).c_str());
+            dialog->SetFileName(utf8ToWide(options.defaultFileName).c_str());
         }
         if (!options.defaultExtension.empty()) {
-            dialog->SetDefaultExtension(Utf8ToWide(options.defaultExtension).c_str());
+            dialog->SetDefaultExtension(utf8ToWide(options.defaultExtension).c_str());
         }
         if (!options.initialDirectory.empty()) {
             IShellItem* folder = nullptr;
-            std::wstring wideDir = Utf8ToWide(options.initialDirectory);
+            std::wstring wideDir = utf8ToWide(options.initialDirectory);
             if (SUCCEEDED(::SHCreateItemFromParsingName(wideDir.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
                 dialog->SetFolder(folder);
                 folder->Release();
@@ -131,7 +105,7 @@ namespace {
         if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) || path == nullptr) {
             return false;
         }
-        outPath = WideToUtf8(path);
+        outPath = wideToUtf8(path);
         ::CoTaskMemFree(path);
         return true;
     }
@@ -148,7 +122,7 @@ namespace {
 
 }  // namespace
 
-DialogResult Dialog::ShowMessageBox(HWND owner, const std::string& text, const std::string& title,
+DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const std::string& title,
                                      MessageBoxButtons buttons, MessageBoxIcon icon) {
     UINT flags = 0;
     switch (buttons) {
@@ -181,7 +155,7 @@ DialogResult Dialog::ShowMessageBox(HWND owner, const std::string& text, const s
     }
 }
 
-bool Dialog::ShowOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -202,7 +176,7 @@ bool Dialog::ShowOpenFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::ShowOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
+bool Dialog::showOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -247,7 +221,7 @@ bool Dialog::ShowOpenFileMulti(HWND owner, const FileDialogOptions& options, std
     return result;
 }
 
-bool Dialog::ShowSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -268,7 +242,7 @@ bool Dialog::ShowSaveFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath) {
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -298,33 +272,142 @@ bool Dialog::ShowBrowseForFolder(HWND owner, const FileDialogOptions& options, s
 }
 
 Dialog::Dialog() {
-    frame_.onClosed.add(this, &Dialog::handleFrameClosed);
+    // Frame::onClosed explicitly (not onClosed - Dialog::onClosed above shadows Frame's own
+    // member of that name, same type-erased-by-name shadowing any derived class gets when it
+    // declares a member with the same name as one already in its base; here that's deliberate,
+    // since Dialog::onClosed's own richer DialogResult-flavored meaning is what external callers
+    // should get from a plain dialog.onClosed).
+    Frame::onClosed.add(this, &Dialog::handleFrameClosed);
 }
 
 Dialog::~Dialog() {
-    // Frame::~Frame() throws if a live window still exists with its
-    // rootView_ not yet torn down (see frame.cpp) - close()/the user
-    // closing the window normally already does this via WM_CLOSE ->
-    // WM_DESTROY, but if this Dialog is destroyed while still open
-    // (show()'d and never closed), force the window down synchronously
-    // here first so frame_'s own destructor - which runs right after this
-    // one finishes, as a member - never sees a live rootView_ next to a
-    // live frameHandle_. A Dialog that was never shown at all needs no
-    // such help: frameHandle_ is still null, and Frame::~Frame() itself
-    // already knows a never-created window has nothing to tear down.
-    if (frame_.frameHandle() != nullptr) {
-        ::DestroyWindow(frame_.frameHandle());
+    // Frame::~Frame() throws if a live window still exists with its rootView_ not yet torn down
+    // (see frame.cpp) - close()/the user closing the window normally already does this via
+    // WM_CLOSE -> WM_DESTROY, but if this Dialog is destroyed while still open (show()'d and
+    // never closed), force the window down synchronously here first so Frame::~Frame() - which
+    // runs right after this destructor's own body finishes, same as it always did as a base class
+    // now instead of a member - never sees a live rootView_ next to a live frameHandle_. A Dialog
+    // that was never shown at all needs no such help: frameHandle_ is still null, and
+    // Frame::~Frame() itself already knows a never-created window has nothing to tear down.
+    if (frameHandle() != nullptr) {
+        ::DestroyWindow(frameHandle());
     }
+}
+
+bool Dialog::initialize()
+{
+    bool result = true;
+    WNDCLASSEXA wcex;
+    std::string className = "Dialog";
+    wcex.cbSize = sizeof(wcex);
+
+    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
+    wcex.cbClsExtra = 0;
+    wcex.cbWndExtra = 0;
+    wcex.hInstance = Application::instance().instanceHandle();
+    wcex.hIcon = NULL;
+    wcex.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
+    wcex.hbrBackground = NULL;//(HBRUSH)(COLOR_WINDOW+1);
+    wcex.lpszMenuName = NULL;
+    wcex.lpszClassName = className.c_str();
+    wcex.hIconSm = NULL;
+
+    RegisterClassExA(&wcex);
+
+
+    DWORD dialogStyle = WS_POPUPWINDOW | WS_CAPTION | WS_CLIPSIBLINGS | DS_MODALFRAME;
+    DWORD dwExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CONTROLPARENT;
+
+    // Modal over an owner: centered on it (kept on its monitor), not wherever the layout file put it.
+    int x = static_cast<int>(bounds_.left());
+    int y = static_cast<int>(bounds_.top());
+    const int width = static_cast<int>(bounds_.size().width);
+    const int height = static_cast<int>(bounds_.size().height);
+    RECT ownerRect;
+    if (modalOwner_ != nullptr && ::GetWindowRect(modalOwner_, &ownerRect)) {
+        x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
+        y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
+
+        MONITORINFO monitor = {};
+        monitor.cbSize = sizeof(monitor);
+        if (::GetMonitorInfo(::MonitorFromWindow(modalOwner_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const RECT& area = monitor.rcWork;
+            if (x + width > area.right) {
+                x = area.right - width;
+            }
+            if (y + height > area.bottom) {
+                y = area.bottom - height;
+            }
+            if (x < area.left) {
+                x = area.left;
+            }
+            if (y < area.top) {
+                y = area.top;
+            }
+        }
+    }
+
+    auto hwnd = ::CreateWindowExA(
+        dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
+        x, y, width, height,
+        modalOwner_,
+        NULL,
+         ::GetModuleHandleA(nullptr),
+        this
+    );
+
+
+    if (!hwnd) {
+        result = false;
+        return result;
+    }
+
+    //frameHandle_ was set in WndProc during WM_NCCREATE, so we can check it here
+    //should be the same as hwnd returned from CreateWindowExA
+    if (hwnd != this->frameHandle_) {
+        result = false;
+        return result;
+    }
+
+    //::ShowWindow(frameHandle_, SW_SHOW);
+    //::RedrawWindow(frameHandle_, NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
+
+    return result;
 }
 
 bool Dialog::ensureInitialized() {
     if (closed_) {
         return false;  // single-show - see class comment in dialogs.h
     }
-    if (frame_.frameHandle() != nullptr) {
+    if (frameHandle() != nullptr) {
         return true;
     }
-    return frame_.initialize();
+    return initialize();
+}
+
+bool Dialog::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {
+    if (message == WM_DESTROY) {
+        // Deliberately no ::PostQuitMessage(0) - see this class's own comment (dialogs.h) for why:
+        // that's the one behavior that would be actively wrong to inherit unchanged from
+        // Frame::handleMessage()'s own WM_DESTROY case, since destroying a Dialog must never quit
+        // the whole application's message loop. Same fix shape PopupFrame::handleMessage() already
+        // established for exactly this problem (a dropdown popup's own Frame).
+        // Also deliberately not destroy(): that deletes the whole child SubView tree, and a
+        // caller reading a child widget's state after showModal() returns (the obvious way to
+        // get a result out of a dialog) would be reading freed memory. Tear down only the
+        // window here; ~Frame() frees the still-intact tree with the Dialog itself.
+        onDestroyed(*this);
+        if (rootView_ != nullptr) {
+            rootView_->releaseWindow();
+        }
+        // Frame::~Frame() throws over a live frameHandle_ next to a live rootView_, and the
+        // handle is dead now anyway.
+        frameHandle_ = nullptr;
+        outLRESULT = 0;
+        return true;
+    }
+    return Frame::handleMessage(message, wParam, lParam, outLRESULT);
 }
 
 SyncReturn Dialog::handleFrameClosed(Frame&) {
@@ -344,14 +427,38 @@ bool Dialog::show() {
 }
 
 DialogResult Dialog::showModal(Frame* owner) {
+    HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
+    
+	return showModal(ownerHandle);
+}
+
+
+DialogResult Dialog::showModal(View* view)
+{
+    return showModal(view->rootView()->windowHandle());
+}
+
+
+DialogResult Dialog::showModal(HWND hwnd, RunLoop* runLoop) {
+
+	modalOwner_ = hwnd;
+
     if (!ensureInitialized()) {
         return DialogResult::Cancel;
     }
 
-    HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
 
-    bool completedNormally = Application::instance().runLoop().runModal(
-        frame_.frameHandle(), ownerHandle, [this]() { return closed_; });
+    RunLoop* loopToUse = runLoop ? runLoop : &RunLoop::current();
+
+
+    if (!*loopToUse) {
+        throw std::runtime_error("newui::Dialog::showModal: no RunLoop is running on this thread");
+    }
+
+
+    bool completedNormally = loopToUse->runModal(
+        frameHandle(), hwnd, [this]() { return closed_; });
+
     if (!completedNormally) {
         // runModal() gave up because WM_QUIT reached this thread (the app
         // itself is shutting down), not because closed_ actually became
@@ -372,14 +479,14 @@ void Dialog::close(DialogResult result) {
         return;  // first close() (or the user closing the window) already won
     }
     result_ = result;
-    if (frame_.frameHandle() != nullptr) {
+    if (frameHandle() != nullptr) {
         // Async on purpose - lets this run from inside a handler that's
         // itself on the frame's message-dispatch call stack (e.g. a
         // button's onClicked) without reentering DestroyWindow from
         // there. Funnels through the exact same WM_CLOSE path a native X
         // click takes, so handleFrameClosed() above is the single place
         // that actually finalizes things.
-        ::PostMessage(frame_.frameHandle(), WM_CLOSE, 0, 0);
+        ::PostMessage(frameHandle(), WM_CLOSE, 0, 0);
     } else {
         closed_ = true;
         onClosed(*this);

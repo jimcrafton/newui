@@ -95,41 +95,58 @@ namespace newui {
     // Shared, unmodified data model for both MenuBar (a SubView-tree menu
     // bar - see below) and ContextMenu (a native popup) - either can show
     // any MenuItem's children as a dropdown.
-    class MenuItem {
+    // text with its "&" mnemonic markers removed ("&File" -> "File", "Save && Exit" ->
+    // "Save & Exit") - what a self-drawn menu label shows. Native popups interpret "&" themselves.
+    std::string stripMnemonics(const std::string& text);
+
+    class MenuItem : public Component {
     public:
         MenuItem() = default;
-        explicit MenuItem(std::string text) : text(std::move(text)) {}
+        explicit MenuItem(std::string text) : text_(std::move(text)) {}
+        // Deletes every child still attached (see addChild()).
+        ~MenuItem() override;
+
+        // Owns raw child pointers, like View - a copy would double-delete them.
+        MenuItem(const MenuItem&) = delete;
+        MenuItem& operator=(const MenuItem&) = delete;
 
         typedef Delegate<MenuItem> ClickDelegate;
         ClickDelegate onClick;
 
 
         
-        MenuState state;
+        MenuState& state() { return state_; }
+        const MenuState& state() const { return state_; }
 
-        std::string text;
-        
-        bool isSeparator = false;
-        bool checked = false;
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text) { text_ = text; }
+
+        bool isSeparator() const { return separator_; }
+        void setSeparator(bool separator) { separator_ = separator; }
+
+        bool isChecked() const { return checked_; }
+        void setChecked(bool checked) { checked_ = checked; }
 
         // >= 0: this item is mutually exclusive with every sibling that
         // shares the same non-negative value - see
         // ContextMenu::dispatchCommand(). -1 (default): not part of a
         // radio group, checked (if set) toggles independently.
-        int radioGroup = -1;
+        int radioGroup() const { return radioGroup_; }
+        void setRadioGroup(int radioGroup) { radioGroup_ = radioGroup; }
 
         // Display-only, e.g. "Ctrl+S" - shown right-aligned next to text
-        // (appended as "text\tshortcutText" when the native item is
+        // (appended as "text	shortcutText" when the native item is
         // built). Ignored (see onDraw) when ownerDrawn is set - Windows
         // never renders dwTypeData/text itself for an MFT_OWNERDRAW item,
         // only onMeasure/onDraw's handler decides what appears. No real
         // accelerator-table/keyboard handling is wired up for it either
         // way - just the visual.
-        std::string shortcutText;
+        const std::string& shortcutText() const { return shortcutText_; }
+        void setShortcutText(const std::string& shortcutText) { shortcutText_ = shortcutText; }
 
         // Opt in to drawing this item yourself (MFT_OWNERDRAW) instead of
         // Windows' own native rendering - see onMeasure/onDraw below.
-        // Ignored on a separator (isSeparator always wins - a native
+        // Ignored on a separator (isSeparator() always wins - a native
         // separator is cheap and rarely worth owner-drawing).
         //
         // Known limitation, confirmed live: Windows falls back to legacy,
@@ -139,10 +156,11 @@ namespace newui {
         // popup's own frame/background around an owner-drawn item stays
         // stuck in light chrome even when enableDarkModeForWindow()
         // (uicolormanager.h) has been applied to its owner. No known
-        // workaround short of not owner-drawing at all - see bitmap
+        // workaround short of not owner-drawing at all - see bitmap()
         // below for a native alternative (an icon next to plain text)
         // that doesn't hit this.
-        bool ownerDrawn = false;
+        bool isOwnerDrawn() const { return ownerDrawn_; }
+        void setOwnerDrawn(bool ownerDrawn) { ownerDrawn_ = ownerDrawn; }
 
         // Native MIIM_BITMAP icon shown to the left of a plain
         // (non-owner-drawn) item's text - caller-owned, borrowed only
@@ -150,8 +168,12 @@ namespace newui {
         // Win32 handle this class avoids owning - see the class
         // comment). nullptr (default) = no icon, plain MFT_STRING as
         // before. The way to get a "colored glyph next to a label" look
-        // without MFT_OWNERDRAW's dark-mode caveat above.
-        HBITMAP bitmap = nullptr;
+        // without MFT_OWNERDRAW's dark-mode caveat above. Not reflected:
+        // a runtime handle can't be saved.
+        //@reflect ignore=true
+        HBITMAP bitmap() const { return bitmap_; }
+        //@reflect ignore=true
+        void setBitmap(HBITMAP bitmap) { bitmap_ = bitmap; }
 
         // Fired from Frame's WM_MEASUREITEM (via DispatchMenuMeasureItem())
         // only when ownerDrawn is set. outSize arrives pre-filled with a
@@ -190,18 +212,33 @@ namespace newui {
 
         static std::unique_ptr<MenuItem> Separator() {
             auto item = std::make_unique<MenuItem>();
-            item->isSeparator = true;
+            item->setSeparator(true);
             return item;
         }
 
-        // Takes ownership of child, sets child->parent_ to this, and
-        // returns the raw pointer just added (for chaining/wiring up
-        // onClick without a separate lookup).
-        MenuItem* addChild(std::unique_ptr<MenuItem> child);
-
-        const std::vector<std::unique_ptr<MenuItem>>& children() const {
+        // Child ownership mirrors View's: addChild() takes ownership (detaching child from any
+        // previous parent first), removeChild() detaches without deleting (the caller owns it
+        // again), and whatever is still attached is deleted with this item.
+        //
+        // @reflect collection add=addChild remove=removeChild - saved and loaded as a real tree,
+        // the same way View::childViews() is.
+        const std::vector<MenuItem*>& children() const {
             return children_;
         }
+
+        void addChild(MenuItem* child);
+        void removeChild(MenuItem* child);
+
+        // Convenience for building menus in code: takes ownership and returns the item just added
+        // (for wiring up onClick without a separate lookup).
+        //@reflect ignore=true
+        MenuItem* addChild(std::unique_ptr<MenuItem> child);
+
+        // Moves an attached child to newIndex (clamped); a no-op if child isn't a direct child.
+        void reorderChild(MenuItem* child, std::size_t newIndex);
+
+        // Deletes every child.
+        void deleteChildren();
 
         bool hasChildren() const {
             return !children_.empty();
@@ -217,12 +254,19 @@ namespace newui {
             return parent_;
         }
 
+        // Same contract as View::setParent(): detaches from the current parent (if any), then
+        // appends to newParent (nullptr just detaches - the caller then owns this item). Refuses
+        // (false, no-op) if newParent is this item or one of its descendants.
+        bool setParent(MenuItem* newParent);
+
         // 0 until a ContextMenu::show() over this item's parent last
         // assigned one - only leaf items (no children, not a separator)
         // ever get one; Windows never sends WM_COMMAND for a
         // submenu-opening item, so parent items have no command id.
         // Transient - only meaningful while that show() call is still on
-        // the stack (see ContextMenu::show()'s doc comment).
+        // the stack (see ContextMenu::show()'s doc comment). Not reflected:
+        // runtime-only, never saved or edited.
+        //@reflect ignore=true
         UINT commandId() const {
             return commandId_;
         }
@@ -234,7 +278,7 @@ namespace newui {
         // call.
         friend class ContextMenu;
 
-        std::vector<std::unique_ptr<MenuItem>> children_;
+        std::vector<MenuItem*> children_;
         MenuItem* parent_ = nullptr;
         UINT commandId_ = 0;
         Action* action_ = nullptr;
@@ -247,6 +291,15 @@ namespace newui {
         // dangles once the popup is torn down (harmless - nothing reads
         // it afterward).
         HMENU ownerMenu_ = nullptr;
+
+        MenuState state_;
+        std::string text_;
+        bool separator_ = false;
+        bool checked_ = false;
+        int radioGroup_ = -1;
+        std::string shortcutText_;
+        bool ownerDrawn_ = false;
+        HBITMAP bitmap_ = nullptr;
     };
 
     // Builds a real, transient native Win32 popup menu (HMENU) from an
@@ -367,6 +420,7 @@ namespace newui {
     // addChild() exactly like any other SubView (e.g.
     // rootView.addChild(menuBar)) - ownership from then on is the normal
     // View/SubView tree ownership, nothing MenuBar-specific to manage.
+    // @reflect category=menutoolbar
     class MenuBar : public SubView {
     public:
         MenuBar();
@@ -376,10 +430,28 @@ namespace newui {
         // per top-level MenuItem.
         void setMenuItems(std::vector<std::unique_ptr<MenuItem>> items);
 
+        // The top-level menus (root()'s children) - what a saved MenuBar holds.
+        // addMenu()/removeMenu() follow MenuItem::addChild()/removeChild()'s ownership and rebuild
+        // the buttons.
+        //
+        // @reflect collection add=addMenu remove=removeMenu
+        const std::vector<MenuItem*>& menus() const {
+            return root_.children();
+        }
+        void addMenu(MenuItem* item);
+        void removeMenu(MenuItem* item);
+
+        // Recreates one button per top-level menu - call after changing root()'s children or a
+        // top-level item's text directly.
+        void rebuildButtons();
+
+        // Not reflected: menus() already covers its children.
+        //@reflect ignore=true
         MenuItem& root() {
             return root_;
         }
 
+        //@reflect ignore=true
         const MenuItem& root() const {
             return root_;
         }

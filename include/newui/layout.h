@@ -52,6 +52,12 @@ namespace newui {
         // how most modern layout systems treat a hidden widget.
         // CardLayout is the exception: it owns visibility itself (see
         // its class comment), so it doesn't pre-filter by it.
+        //
+        // Every layout also leaves out a child that is layout-ignored
+        // (View::isLayoutIgnored()): it is never positioned, sized, counted (flex
+        // lines, grid tracks, card pages) or shown/hidden - it keeps whatever
+        // bounds and visibility it was given. That is what an overlay floating
+        // over the container wants.
         virtual void arrange(View& container) = 0;
     };
 
@@ -61,6 +67,7 @@ namespace newui {
     // Right, or Top + Bottom) means the child stretches to fill that
     // axis instead of just being positioned along it - see
     // AnchorLayout::arrange().
+    // @reflect flags
     enum class Anchor : std::uint8_t {
         None    = 0,
         Left    = 1 << 0,
@@ -97,24 +104,40 @@ namespace newui {
     class AnchorLayoutParams : public LayoutParams {
     public:
         AnchorLayoutParams() = default;
-        explicit AnchorLayoutParams(Anchor anchors) : anchors(anchors) {}
+        explicit AnchorLayoutParams(Anchor anchors) : anchors_(anchors) {}
 
-        Anchor anchors = Anchor::Left | Anchor::Top;
+        Anchor anchors() const { return anchors_; }
+        void setAnchors(Anchor anchors) { anchors_ = anchors; }
 
         // Gap kept from the corresponding container edge, only meaningful
-        // when that edge's flag is set in anchors.
-        float leftMargin = 0.0f;
-        float topMargin = 0.0f;
-        float rightMargin = 0.0f;
-        float bottomMargin = 0.0f;
+        // when that edge's flag is set in anchors().
+        float leftMargin() const { return leftMargin_; }
+        void setLeftMargin(float value) { leftMargin_ = value; }
+        float topMargin() const { return topMargin_; }
+        void setTopMargin(float value) { topMargin_ = value; }
+        float rightMargin() const { return rightMargin_; }
+        void setRightMargin(float value) { rightMargin_ = value; }
+        float bottomMargin() const { return bottomMargin_; }
+        void setBottomMargin(float value) { bottomMargin_ = value; }
 
         // Size used along an axis that isn't stretched by opposing
         // anchors (Left alone, Right alone, or CenterX - and the same
         // vertically for height). Ignored for a stretched axis (Left +
         // Right, or Top + Bottom), where size comes from the container
         // instead.
-        float width = 0.0f;
-        float height = 0.0f;
+        float width() const { return width_; }
+        void setWidth(float value) { width_ = value; }
+        float height() const { return height_; }
+        void setHeight(float value) { height_ = value; }
+
+    private:
+        Anchor anchors_ = Anchor::Left | Anchor::Top;
+        float leftMargin_ = 0.0f;
+        float topMargin_ = 0.0f;
+        float rightMargin_ = 0.0f;
+        float bottomMargin_ = 0.0f;
+        float width_ = 0.0f;
+        float height_ = 0.0f;
     };
 
     // Pins each child to some combination of its container's edges and
@@ -192,18 +215,23 @@ namespace newui {
     class FlexLayoutParams : public LayoutParams {
     public:
         FlexLayoutParams() = default;
-        explicit FlexLayoutParams(float weight) : weight(weight) {}
+        explicit FlexLayoutParams(float weight) : weight_(weight) {}
 
         // This child's share of leftover main-axis space, proportional
         // to every other weighted sibling's own weight - CSS flex-grow.
         // 0 (the default) means "natural size only", i.e. this child's
         // desiredSize() along the main axis (see View::desiredSize()).
-        float weight = 0.0f;
+        float weight() const { return weight_; }
+        void setWeight(float value) { weight_ = value; }
 
         // Overrides the FlexLayout's own crossAxisAlignment for this
         // child alone; unset (the default) means "use the container's".
-        std::optional<CrossAxisAlignment> crossAxisAlignment;
+        std::optional<CrossAxisAlignment> crossAxisAlignment() const { return crossAxisAlignment_; }
+        void setCrossAxisAlignment(std::optional<CrossAxisAlignment> value) { crossAxisAlignment_ = value; }
 
+    private:
+        float weight_ = 0.0f;
+        std::optional<CrossAxisAlignment> crossAxisAlignment_;
     };
 
     // Arranges children in a single row (Orientation::Horizontal) or
@@ -337,7 +365,9 @@ namespace newui {
     // Java AWT's CardLayout; useful for wizard steps, tabbed content
     // panes, or any single-active-view stack. Children keep their place
     // in container.childViews() (index-based); show()'s by-name overload
-    // matches against SubView::getName().
+    // matches against SubView::getName(). A layout-ignored child
+    // (View::isLayoutIgnored()) is not a card: indices count only the
+    // others, and it is never shown or hidden.
     //
     // Unlike AnchorLayout/FlexLayout, CardLayout remembers the last
     // container arrange() ran on, so show()/next()/previous() can
@@ -414,21 +444,34 @@ namespace newui {
     class GridLayoutParams : public LayoutParams {
     public:
         GridLayoutParams() = default;
-        GridLayoutParams(std::size_t row, std::size_t column) : row(row), column(column) {}
+        GridLayoutParams(std::size_t row, std::size_t column) : row_(row), column_(column) {}
 
-        std::size_t row = 0;
-        std::size_t column = 0;
+        std::size_t row() const { return row_; }
+        void setRow(std::size_t value) { row_ = value; }
+        std::size_t column() const { return column_; }
+        void setColumn(std::size_t value) { column_ = value; }
 
         // How many rows/columns (starting at row/column) this child
         // occupies - 1 (the default) means "just its own cell". A
         // spanning child (>1) is ignored when auto-sizing an Auto track -
         // see GridLayout::arrange().
-        std::size_t rowSpan = 1;
-        std::size_t columnSpan = 1;
+        std::size_t rowSpan() const { return rowSpan_; }
+        void setRowSpan(std::size_t value) { rowSpan_ = value; }
+        std::size_t columnSpan() const { return columnSpan_; }
+        void setColumnSpan(std::size_t value) { columnSpan_ = value; }
 
-        CrossAxisAlignment horizontalAlignment = CrossAxisAlignment::Stretch;
-        CrossAxisAlignment verticalAlignment = CrossAxisAlignment::Stretch;
+        CrossAxisAlignment horizontalAlignment() const { return horizontalAlignment_; }
+        void setHorizontalAlignment(CrossAxisAlignment value) { horizontalAlignment_ = value; }
+        CrossAxisAlignment verticalAlignment() const { return verticalAlignment_; }
+        void setVerticalAlignment(CrossAxisAlignment value) { verticalAlignment_ = value; }
 
+    private:
+        std::size_t row_ = 0;
+        std::size_t column_ = 0;
+        std::size_t rowSpan_ = 1;
+        std::size_t columnSpan_ = 1;
+        CrossAxisAlignment horizontalAlignment_ = CrossAxisAlignment::Stretch;
+        CrossAxisAlignment verticalAlignment_ = CrossAxisAlignment::Stretch;
     };
 
     // Row-and-column ("table") layout - WPF/WinForms Grid/TableLayoutPanel-
@@ -439,6 +482,23 @@ namespace newui {
     // consecutive tracks on each axis, same idea as FlexLayout::spacing().
     class GridLayout : public Layout {
     public:
+        // One axis's resolved per-track pixel offset/size, computed live against a
+        // container's current bounds and children - see trackGeometry().
+        // offsets[i]/sizes[i] describe rows()[i] or columns()[i] (whichever axis this
+        // came from), relative to the container's getClientBounds() origin - the same
+        // values arrange() itself computes and immediately consumes, exposed here so a
+        // caller (e.g. a design-time grid-line cue, or a drag resolving which cell a
+        // point falls in) doesn't have to duplicate arrange()'s own track-sizing math.
+        struct GridTrackGeometry {
+            std::vector<float> offsets;
+            std::vector<float> sizes;
+        };
+
+        struct GridGeometry {
+            GridTrackGeometry columns;
+            GridTrackGeometry rows;
+        };
+
         // Explicit, not relying on the implicit compiler-generated one -
         // see AnchorLayout's own comment above for why.
         GridLayout() = default;
@@ -479,7 +539,19 @@ namespace newui {
             return rows_;
         }
 
+        // The mutable overloads are what make the track lists round-trip: reflection restores a
+        // container property by reaching the live container through a non-const reference getter
+        // (the same shape Gradient::stops() has). With only the const getter - even paired with a
+        // setter - the tracks were written to a file but never read back.
+        std::vector<GridTrack>& rows() {
+            return rows_;
+        }
+
         const std::vector<GridTrack>& columns() const {
+            return columns_;
+        }
+
+        std::vector<GridTrack>& columns() {
             return columns_;
         }
 
@@ -501,6 +573,9 @@ namespace newui {
 
         void arrange(View& container) override;
 
+        // Resolves both axes' current pixel geometry - the same computation
+        // arrange() runs, without actually positioning any children.
+        GridGeometry trackGeometry(const View& container) const;
 
     private:
         std::vector<GridTrack> rows_;

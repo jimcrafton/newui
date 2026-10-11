@@ -124,8 +124,12 @@ void AddGradientCircleShape(newui::shapes::ShapeLayer& layer) {
 
     newui::gfx::Gradient gradient;
     gradient.setKind(newui::gfx::GradientKind::Linear);
-    gradient.setLinearStart(newui::Point(circle->centerX() - circle->radius(), circle->centerY()));
-    gradient.setLinearEnd(newui::Point(circle->centerX() + circle->radius(), circle->centerY()));
+    // linearStart()/linearEnd() are proportional [0,1] fractions of the shape's own localBounds()
+    // now (graphics.h), not absolute pixel coordinates - (0, 0.5)->(1, 0.5) is exactly this
+    // circle's own left-edge-to-right-edge span, at vertical center, same as the old absolute
+    // (centerX-radius, centerY)->(centerX+radius, centerY) used to describe.
+    gradient.setLinearStart(newui::Point(0.0f, 0.5f));
+    gradient.setLinearEnd(newui::Point(1.0f, 0.5f));
     gradient.stops().push_back(newui::gfx::GradientStop(0.0f, newui::Color(0xffcc00u, false)));
     gradient.stops().push_back(newui::gfx::GradientStop(1.0f, newui::Color(0xff3366u, false)));
 
@@ -385,7 +389,10 @@ void AddConicColorWheelShape(newui::shapes::ShapeLayer& layer) {
 
     newui::gfx::Gradient gradient;
     gradient.setKind(newui::gfx::GradientKind::Conic);
-    gradient.setConicCenter(newui::Point(wheel->centerX(), wheel->centerY()));
+    // conicCenter() is a proportional [0,1] fraction of the shape's own localBounds() now
+    // (graphics.h) - (0.5, 0.5) is exactly this circle's own center, same as the old absolute
+    // (wheel->centerX(), wheel->centerY()) used to describe.
+    gradient.setConicCenter(newui::Point(0.5f, 0.5f));
     for (int i = 0; i <= 6; ++i) {
         float t = float(i) / 6.0f;
         gradient.stops().push_back(newui::gfx::GradientStop(t, newui::Color::fromHSL(t * 360.0f, 1.0f, 0.5f)));
@@ -520,8 +527,13 @@ void AddTextShapes(newui::shapes::ShapeLayer& layer) {
 
     newui::gfx::Gradient titleGradient;
     titleGradient.setKind(newui::gfx::GradientKind::Linear);
-    titleGradient.setLinearStart(newui::Point(30.0f, 985.0f));
-    titleGradient.setLinearEnd(newui::Point(330.0f, 985.0f));
+    // linearStart()/linearEnd() are proportional [0,1] fractions of the shape's own localBounds()
+    // now (graphics.h) - (0, 0.5)->(1, 0.5) spans this text's own real glyph bounding box exactly
+    // left edge to right edge, replacing the old absolute (30,985)->(330,985), which was really
+    // just a guess at "300px is probably wide enough for this string at this font size" - this
+    // version can't undershoot/overshoot the real rendered width the way that guess could.
+    titleGradient.setLinearStart(newui::Point(0.0f, 0.5f));
+    titleGradient.setLinearEnd(newui::Point(1.0f, 0.5f));
     titleGradient.stops().push_back(newui::gfx::GradientStop(0.0f, newui::Color(0x6a5acdu, false)));
     titleGradient.stops().push_back(newui::gfx::GradientStop(1.0f, newui::Color(0xff6b6bu, false)));
     title->style().fill().setGradient(titleGradient);

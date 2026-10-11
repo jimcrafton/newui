@@ -145,9 +145,9 @@ void demoPostCall() {
     std::cout << "\n== Demo 5: postCall runs the delegate asynchronously on a RunLoop ==\n";
     std::cout << "  main thread: " << std::this_thread::get_id() << "\n";
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::Delegate<int> onWorkDone;
     onWorkDone += &OnBackgroundWorkDone;

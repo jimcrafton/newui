@@ -5,6 +5,7 @@
 #include "newui/font.h"
 #include "newui/geometry.h"
 #include "newui/models.h"
+#include "newui/piecetree.h"
 #include "newui/runloop.h"
 
 #include <blend2d/blend2d.h>
@@ -12,6 +13,7 @@
 #include <any>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,7 +40,9 @@
 // safe to use as a reference/pointer return type below.
 struct ID2D1Factory;
 struct IDWriteFactory;
+struct IDWriteFontCollection;
 struct IWICImagingFactory;
+struct IDWriteTextLayout;
 
 namespace newui::text {
 
@@ -166,6 +170,10 @@ namespace newui::text {
         typedef Delegate<Caret> VisibilityChangedDelegate;
         VisibilityChangedDelegate onVisibilityChanged;
 
+        // Fired by setPosition() when the position actually changes.
+        typedef Delegate<Caret> PositionChangedDelegate;
+        PositionChangedDelegate onPositionChanged;
+
         Caret() = default;
         ~Caret();
 
@@ -226,7 +234,8 @@ namespace newui::text {
         // positioned this caret's current position() on screen; the
         // bar's width is this class's own concern, not the caller's -
         // see systemCaretWidth().
-        void draw(BLContext& ctx, const Point& topLeft, float height) const;
+        // width > 0: a half-transparent block that wide instead (overwrite mode's caret).
+        void draw(BLContext& ctx, const Point& topLeft, float height, float width = 0.0f) const;
 
         // The system's current caret width in pixels (SPI_GETCARETWIDTH) -
         // the same accessibility-configurable value a real Win32 EDIT
@@ -349,13 +358,10 @@ namespace newui::text {
 
     // Owns a text buffer's actual content - insertion, deletion, and
     // character extraction, addressed throughout by plain offset/length
-    // (TextPosition/TextRange above), never an iterator. That's
-    // deliberate: a std::wstring backing this directly is today's
-    // simplest correct choice, but every public member here is expressed
-    // in terms plain offsets can survive a swap to a more sophisticated
-    // backing (a piece table, a rope, a gap buffer) without this class's
-    // own public API changing at all - only replace()'s own
-    // implementation would need to.
+    // (TextPosition/TextRange above), never an iterator. The content is
+    // a PieceTree (piecetree.h): edits and line queries are O(log n) at
+    // any size, and snapshot() is an O(1) copy that later edits never
+    // touch - what undo history and background readers hold on to.
     //
     // Pure text storage - no change notification of its own (no
     // onChanged-style delegate). A caller that needs to know when this
@@ -365,13 +371,20 @@ namespace newui::text {
     class TextStorage {
     public:
         TextStorage() = default;
-        explicit TextStorage(const std::wstring& text) : text_(text) {}
+        explicit TextStorage(const std::wstring& text) : tree_(text) {}
 
-        size_t length() const { return text_.size(); }
-        bool empty() const { return text_.empty(); }
+        size_t length() const { return tree_.length(); }
+        bool empty() const { return tree_.empty(); }
 
-        const std::wstring& text() const { return text_; }
-        void setText(const std::wstring& text) { text_ = text; }
+        // The whole content as one string - a convenience: it's built on demand and kept until
+        // the next edit (O(n)), and the reference is good only until then. Prefer the range reads
+        // below, or snapshot(), for anything that runs per keystroke or per frame.
+        const std::wstring& text() const;
+        void setText(const std::wstring& text);
+
+        // The content as it is now, unaffected by later edits and safe to read on another thread
+        // (O(1)).
+        PieceTree snapshot() const { return tree_; }
 
         // The character at offset, or L'\0' if offset is out of range -
         // never throws (a caret one past the last character, or a stale
@@ -383,6 +396,50 @@ namespace newui::text {
         // length() - a range that runs past the end returns however much
         // of it actually exists rather than throwing.
         std::wstring substring(const TextRange& range) const;
+
+        // Range-based reads: everything a reader needs without assuming the
+        // content is one contiguous string (text() above is the exception,
+        // and only a convenience). Anything that runs per keystroke or per
+        // frame should use these. All clamp like substring() does.
+
+        // Appends the characters range covers to out.
+        void appendTo(const TextRange& range, std::wstring& out) const;
+
+        // The offset of the first ch at or after from, or npos.
+        static constexpr size_t npos = static_cast<size_t>(-1);
+        size_t find(wchar_t ch, size_t from = 0) const;
+
+        // How many ch fall inside range.
+        size_t count(wchar_t ch, const TextRange& range) const;
+
+        // Calls visit with each contiguous stretch of range, in order.
+        void forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const;
+
+        // Whole-content comparisons against a plain string, without copying
+        // this one: equality, the length of the shared start, and of the
+        // shared end (at most limit characters - callers pass what's left
+        // after the shared start so the two can't overlap).
+        bool equals(const std::wstring& other) const;
+        size_t commonPrefixLength(const std::wstring& other) const;
+        size_t commonSuffixLength(const std::wstring& other, size_t limit) const;
+
+        // Line breaks are "\n", "\r\n" and a lone '\r' - the one rule the
+        // layout engine, the folding gutter and the lexer all share.
+        // findLineBreak() is the offset of the first break starting at or
+        // after from (from must not be the '\n' of a "\r\n"), or npos, and
+        // sets *terminatorLength (if given) to 1 or 2. countLineBreaks() is
+        // how many breaks start inside range (a "\r\n" counts once, at its
+        // '\r').
+        size_t findLineBreak(size_t from, size_t* terminatorLength = nullptr) const;
+        size_t countLineBreaks(const TextRange& range) const;
+
+        // Lines: a line ends at a break. Always at least one line; an empty
+        // one after a final break.
+        size_t lineCount() const;
+        // The offset line starts at (length() for a line past the last).
+        size_t lineStart(size_t line) const;
+        // The line offset is on (offset clamped to length()).
+        size_t lineOfOffset(size_t offset) const;
 
         // Inserts text at offset (clamped to [0, length()]) - equivalent
         // to replace(TextRange(offset, 0), text).
@@ -398,7 +455,9 @@ namespace newui::text {
         void replace(const TextRange& range, const std::wstring& replacement);
 
     private:
-        std::wstring text_;
+        PieceTree tree_;
+        mutable std::wstring flat_;   // text()'s copy
+        mutable bool flatValid_ = false;
     };
 
     // Wraps TextStorage as a Model (models.h) - the "storage vs.
@@ -480,23 +539,47 @@ namespace newui::text {
 
         const std::wstring& text() const { return storage_.text(); }
 
+        // The content as it is now, unaffected by later edits and safe to read on another thread
+        // (O(1)) - see TextStorage::snapshot().
+        PieceTree snapshot() const { return storage_.snapshot(); }
+
+        // The mutators are virtual so a subclass can watch every edit (HistoryTextModel, in
+        // texthistory.h, records them for undo).
+
         // A no-op (storage() left exactly as it was) if onBeforeRangeChanged
         // vetoes.
-        void setText(const std::wstring& text);
+        virtual void setText(const std::wstring& text);
 
         // A no-op if onBeforeChar (text.size() == 1) or
         // onBeforeRangeChanged (every other size, including 0) vetoes.
-        void insert(size_t offset, const std::wstring& text);
+        virtual void insert(size_t offset, const std::wstring& text);
 
         // A no-op if onBeforeChar (range clamps to length 1) or
         // onBeforeRangeChanged (every other length) vetoes.
-        void remove(const TextRange& range);
+        virtual void remove(const TextRange& range);
 
         // Always goes through onBeforeRangeChanged/onAfterRangeChanged,
         // regardless of range's or replacement's length - see this
         // class's own doc comment on why a 1-for-1 replace() isn't
         // treated as a Char event. A no-op if vetoed.
-        void replace(const TextRange& range, const std::wstring& replacement);
+        virtual void replace(const TextRange& range, const std::wstring& replacement);
+
+        // Undo/redo: none here (always false); HistoryTextModel has them. On success
+        // *affected (if given) is where the text that was put back now sits.
+        virtual bool canUndo() const { return false; }
+        virtual bool canRedo() const { return false; }
+        virtual bool undo(TextRange* affected = nullptr) { (void)affected; return false; }
+        virtual bool redo(TextRange* affected = nullptr) { (void)affected; return false; }
+        // The next edit starts a new undo step (a caret move, a click, losing focus) - nothing
+        // here.
+        virtual void breakCoalescing() {}
+
+        // Fired when what canUndo()/canRedo() answer may have changed: after an edit has been
+        // recorded, after undo()/redo(), and when the history is reset. onChanged comes first and
+        // sees the old answers; this one sees the new ones (a toolbar button follows it). Never
+        // fires from a plain TextModel.
+        typedef Delegate<TextModel> HistoryChangedDelegate;
+        HistoryChangedDelegate onHistoryChanged;
 
         // Model: value()/setValue() bridge the generic std::any API to
         // this class's own typed text() above - value() returns text()
@@ -515,6 +598,10 @@ namespace newui::text {
         // as any other whole-content replace - a no-op (storage() left
         // untouched, onCleared() never fires) if vetoed.
         void clear() override;
+
+    protected:
+        // For a subclass that keeps history: fires onHistoryChanged.
+        void notifyHistoryChanged() { onHistoryChanged(*this); }
 
     private:
         // Fires onBeforeChar and returns whether the caller should
@@ -568,6 +655,13 @@ namespace newui::text {
         // null-dereferencing instead.
         static ID2D1Factory& d2dFactory();
         static IDWriteFactory& dwriteFactory();
+
+        // The fonts a text format resolves family names against: the system's plus every file
+        // FontManager::addFontFile() registered, or null (the system's own) while none is. Built on first use
+        // after the registered set changes (FontManager::registeredFontVersion()), so register fonts before the
+        // first text is drawn; a format already created keeps the collection it had. Null too if this Windows
+        // has no IDWriteFactory5 (before Windows 10 1703). Owned here; do not release.
+        static IDWriteFontCollection* fontCollection();
 
         // WIC (Windows Imaging Component) - what TextRenderer uses to
         // create an IWICBitmap a D2D render target can draw directly
@@ -628,6 +722,104 @@ namespace newui::text {
     // (keyed by font name/size/bold/italic), the same "resolve lazily,
     // re-resolve only when it actually changes" shape Font::blFont()
     // itself already uses for BLFont.
+    // A color for one range of a text control's text - how syntax highlighting (or any
+    // per-range coloring) reaches the renderer. start/length are in UTF-16 code units of the
+    // text, like every other text position here. Only color: it never changes the layout, so
+    // caret and hit-testing stay exact.
+    struct TextColorRun {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        Color color;
+    };
+
+    // Font styling for one range of a text control's text - unlike TextColorRun it can change the
+    // layout (bold is wider), so it's applied to the one layout used for both drawing and
+    // hit-testing (TextLayoutEngine), keeping the caret and clicks on the drawn glyphs.
+    // start/length are UTF-16 code units.
+    struct TextFontRun {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        bool bold = false;
+        bool italic = false;
+        bool underline = false;
+        bool strikethrough = false;
+        std::string fontName;   // empty: the control's font family
+        float fontSize = 0.0f;  // 0: the control's font size
+
+        bool operator==(const TextFontRun& other) const {
+            return start == other.start && length == other.length && bold == other.bold
+                && italic == other.italic && underline == other.underline && strikethrough == other.strikethrough
+                && fontName == other.fontName && fontSize == other.fontSize;
+        }
+        bool operator!=(const TextFontRun& other) const { return !(*this == other); }
+    };
+
+    class TextLayoutEngine;
+
+    // Something drawn on or around a range of text - over the laid-out glyphs, not through
+    // DirectWrite, so it never changes the layout: a squiggle under it (a spelling or syntax
+    // problem), a straight underline, a box or rounded box around it, or a fill behind it. A range
+    // that wraps gets one per line it covers. start/length are UTF-16 code units, like
+    // TextColorRun.
+    // None (last, so the others keep their values): nothing - e.g. a TextStyle without one.
+    enum class TextDecorationKind { Squiggle, Underline, Box, RoundBox, Background, None };
+
+    struct TextDecoration {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        TextDecorationKind kind = TextDecorationKind::Squiggle;
+        Color color;
+        float thickness = 1.0f;   // line width (Squiggle, Underline, Box, RoundBox)
+        float radius = 3.0f;      // corner radius (RoundBox)
+    };
+
+    // Paints decoration onto the rects its range covers (one per line, from a layout's
+    // hit-testing), in the same space as those rects.
+    void drawTextDecoration(BLContext& ctx, const TextDecoration& decoration, const std::vector<Rect>& rects);
+
+    // Something shown for the whole line that contains offset - an "error lens": a diagnostic's
+    // message after the code it is about, and/or a tint behind the line. Painted over (the text) or
+    // under (the tint) the laid-out text and never part of the layout, so it moves nothing (a long
+    // message is clipped at the control's right edge). offset is a UTF-16 code unit offset, like
+    // TextDecoration::start.
+    struct LineAnnotation {
+        std::size_t offset = 0;
+        std::string text;      // UTF-8; only its first line is shown. Empty: no message
+        Color color;           // the message's color; null: the control's own text color
+        Color lineBackground;  // null: no tint; else the whole line (every row it wraps to) is filled with it
+    };
+
+    // A foldable region of the text (outlining). Collapsed, [start, start + length) is hidden and
+    // placeholder is shown in its place, inline: the text before and after it stays put, so a
+    // block's "{ ... }" joins its first and last lines.
+    struct TextFold {
+        std::size_t start = 0;
+        std::size_t length = 0;
+        std::wstring placeholder = L"...";
+        bool collapsed = false;
+
+        std::size_t end() const { return start + length; }
+        bool operator==(const TextFold& other) const {
+            return start == other.start && length == other.length && placeholder == other.placeholder && collapsed == other.collapsed;
+        }
+        bool operator!=(const TextFold& other) const { return !(*this == other); }
+    };
+
+    // length characters of the text at textStart, laid out at layoutStart in a line's layout.
+    // A whitespace character, or a line's ending, and where it's laid out - what a "show
+    // whitespace" view marks. A line ending's rect has no width: it sits just past the line's text.
+    enum class WhitespaceKind { Space, Tab, CarriageReturn, LineFeed, CarriageReturnLineFeed };
+    struct WhitespaceMark {
+        WhitespaceKind kind = WhitespaceKind::Space;
+        Rect rect;
+    };
+
+    struct LayoutSegment {
+        std::size_t textStart = 0;
+        std::size_t layoutStart = 0;
+        std::size_t length = 0;
+    };
+
     class TextRenderer {
     public:
         // Declared (not = default) and defined in text.cpp, where Impl
@@ -667,8 +859,18 @@ namespace newui::text {
         // to be told the same thing separately; the two are always
         // called with matching values for one owning control (see
         // TextField::paint()/TextControl::paint(), controls.cpp).
+        // colorRuns (optional) recolor ranges of text over textColor.
         void render(BLContext& ctx, int width, int height, const std::wstring& text,
-            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true);
+            const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true,
+            const std::vector<TextColorRun>& colorRuns = {});
+
+        // Draws layout's own current layout (its text, font runs and wrapping) rather than
+        // building one - so what's drawn is exactly what layout hit-tests against. layout must be
+        // up to date (TextLayoutEngine::update()).
+        // Collapsed folds' placeholders are drawn in foldColor.
+        void render(BLContext& ctx, int width, int height, const TextLayoutEngine& layout,
+            const Color& textColor, float scrollOffsetY = 0.0f, const std::vector<TextColorRun>& colorRuns = {},
+            const Color& foldColor = Color(0.5f, 0.5f, 0.5f, 1.0f));
 
     private:
         // (Re)builds the WIC bitmap + render target together for the
@@ -676,6 +878,21 @@ namespace newui::text {
         // this class's own doc comment on why the two can't be resized
         // independently the way the old DC-render-target version could.
         bool ensureRenderTarget(int width, int height);
+        // The opaque counterpart drawLayouts() draws ClearType text on, over a copy of the pixels
+        // already under the text.
+        bool ensureOpaqueRenderTarget(int width, int height);
+        // A layout drawn at y = top: segments map it to the text, placeholders (textStart: the
+        // fold's start) are folds' stand-ins.
+        struct LayoutPiece {
+            IDWriteTextLayout* layout;
+            float top;
+            std::size_t layoutLength;
+            std::vector<LayoutSegment> segments;
+            std::vector<LayoutSegment> placeholders;
+        };
+        // Both render()s end here: colors each piece's ranges, draws them, and composites the result.
+        void drawLayouts(BLContext& ctx, int width, int height, const std::vector<LayoutPiece>& pieces,
+            const Color& textColor, float scrollOffsetY, const std::vector<TextColorRun>& colorRuns, const Color& foldColor);
 
         // Holds the real ID2D1RenderTarget/IWICBitmap (_com_ptr_t)
         // members, plus a cached IDWriteTextFormat (via the same
@@ -695,6 +912,8 @@ namespace newui::text {
         // this class allocates itself.
         int bufferWidth_ = 0;
         int bufferHeight_ = 0;
+        int opaqueWidth_ = 0;
+        int opaqueHeight_ = 0;
     };
 
     // Owns a persistent IDWriteTextLayout for one TextStorage's current
@@ -735,7 +954,12 @@ namespace newui::text {
         // own case (a genuinely single-line control - wrapping would be
         // wrong there regardless of how the result then gets displayed/
         // scrolled).
-        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true);
+        // fontRuns (optional) bold / italicize / underline / strike ranges of the text. folds
+        // (optional): the collapsed ones are laid out as their placeholders. tabWidth: tab stops
+        // every that many characters (a digit's width - exact in a monospaced font); 0 leaves
+        // DirectWrite's default (4x the font size).
+        bool update(const TextStorage& storage, const Font& font, float maxWidth, float maxHeight, bool wordWrap = true,
+            const std::vector<TextFontRun>& fontRuns = {}, const std::vector<TextFold>& folds = {}, std::size_t tabWidth = 4);
 
         // One highlight rect per contiguous visual run range covers (a
         // multi-line selection spans more than one line, hence possibly
@@ -781,18 +1005,59 @@ namespace newui::text {
         // no layout has been built yet.
         float contentHeight() const;
 
+        // The width of the widest line (a wrapped line is at most maxWidth wide; with wordWrap off, a
+        // long line is as wide as its text) - what a horizontally scrolling view sizes its content to.
+        // 0.0f if no layout has been built yet.
+        float contentWidth() const;
+
+        // The text is laid out one visual line (split at "\n", "\r\n" or a lone '\r') per layout,
+        // so an edit re-lays out only the lines it touched and drawing covers only visible lines.
+        // A collapsed fold joins the lines it spans into one. Always at least one line once
+        // update() has succeeded.
+        std::size_t lineCount() const;
+        // Offset of line's first character, and the length of text it spans (hidden text
+        // included), excluding the line break.
+        std::size_t lineStart(std::size_t line) const;
+        std::size_t lineLength(std::size_t line) const;
+        // Its y and height (all its wrapped rows).
+        float lineTop(std::size_t line) const;
+        float lineHeight(std::size_t line) const;
+        // The line holding offset, and the line at y (clamped to the first / last).
+        std::size_t lineAt(std::size_t offset) const;
+        std::size_t lineAtY(float y) const;
+        // The (0-based) line of the text it starts on - what a line-number margin shows.
+        std::size_t lineNumber(std::size_t line) const;
+        // Its first row's baseline, down from lineTop().
+        float lineBaseline(std::size_t line) const;
+
+        // Where collapsed folds' placeholders are, on lines within [top, bottom).
+        std::vector<Rect> placeholderRects(float top, float bottom) const;
+        // Whether localPoint is on a collapsed fold's placeholder, and that fold's start.
+        bool foldAtPoint(const Point& localPoint, std::size_t& outFoldStart) const;
+        // How many line layouts the last rebuilding update() created (the rest were reused).
+        std::size_t layoutsBuiltLastUpdate() const;
+
+        // The spaces, tabs, stray carriage returns and line endings on lines within [top, bottom)
+        // - not in collapsed folds' hidden text.
+        std::vector<WhitespaceMark> whitespaceMarks(float top, float bottom) const;
+
     private:
-        // Holds the real IDWriteTextLayout (_com_ptr_t), plus a cached
-        // IDWriteTextFormat (the same shared TextFormatCache helper
-        // TextRenderer uses) - see this file's own top-of-file comment
-        // on why neither can be named directly here.
+        // The per-line IDWriteTextLayouts (_com_ptr_t), plus a cached IDWriteTextFormat (the same
+        // shared TextFormatCache helper TextRenderer uses) - see this file's own top-of-file
+        // comment on why neither can be named directly here.
         struct Impl;
         std::unique_ptr<Impl> impl_;
 
-        std::wstring lastText_;
+        // TextRenderer draws this engine's layout itself (render(..., const TextLayoutEngine&)).
+        friend class TextRenderer;
+
+        PieceTree lastText_;   // the text as of the last update() - an O(1) snapshot, not a copy
         float lastMaxWidth_ = 0.0f;
         float lastMaxHeight_ = 0.0f;
         bool lastWordWrap_ = true;
+        std::vector<TextFontRun> lastFontRuns_;
+        std::vector<TextFold> lastFolds_;   // the collapsed ones, sorted
+        std::size_t lastTabWidth_ = 4;
     };
 
 }

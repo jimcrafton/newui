@@ -118,19 +118,15 @@ namespace newui {
     // chief among them) when the system is in Dark mode.
     void enableProcessDarkModeSupport();
 
-    // Opts a single window into real native dark chrome -
-    // AllowDarkModeForWindow (ordinal) plus SetWindowTheme(hwnd,
-    // L"DarkMode_Explorer", nullptr) (that part IS documented, declared
-    // in <uxtheme.h>). enableProcessDarkModeSupport() must already have
-    // run once in this process for this to have any visible effect. Call
-    // on a popup menu's owner window before TrackPopupMenuEx() - see
-    // ContextMenu::show() (menus.cpp). Idempotent and cheap to call on
-    // every show() - actual work only happens the first time a given
-    // HWND is seen (SetWindowTheme() sends that window a real
-    // WM_THEMECHANGED every time it runs, so redoing it on every call
-    // would re-trigger Frame's own WM_THEMECHANGED handling, including
-    // Application::onThemeChanged(), on every single call - see its own
-    // doc comment in uicolormanager.cpp for the full story).
+    // Opts a single window into real native dark chrome via
+    // AllowDarkModeForWindow (ordinal). Deliberately no SetWindowTheme(hwnd,
+    // L"DarkMode_Explorer") - that forces dark variants of the window's
+    // themed controls even in Light mode, which a popup menu doesn't need.
+    // enableProcessDarkModeSupport() must already have run once in this
+    // process for this to have any visible effect. Call on a popup menu's
+    // owner window before TrackPopupMenuEx() - see ContextMenu::show()
+    // (menus.cpp). Idempotent and cheap to call on every show() - actual
+    // work only happens the first time a given HWND is seen.
     void enableDarkModeForWindow(HWND hwnd);
 
     // Un-sticks native TrackPopupMenuEx() popups (ContextMenu, menus.h)

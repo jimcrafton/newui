@@ -4,6 +4,7 @@
 #include <newui/font.h>
 #include <newui/geometry.h>
 #include <newui/color.h>
+#include <newui/graphics.h>
 
 // <newui/newui.h> already transitively includes <windows.h> with
 // NOMINMAX defined first - see the feedback_no_std_minmax memory if this
@@ -70,13 +71,6 @@ namespace newui {
     }
 
 
-    enum FillStyle{
-        FillNone = 0,
-        FillColor,
-        FillImage,
-        FillGradient
-    };
-
     enum StrokeStyle {
         StrokeNone = 0,
         StrokeColor,
@@ -84,8 +78,8 @@ namespace newui {
         StrokeGradient
     };
 
-    // How an image fill (FillStyle::FillImage, on either backgroundFill
-    // or highlightFill) maps its BLImage onto the shape being filled -
+    // How an image fill (gfx::PaintKind::Image, on backgroundFill) maps its BLImage onto the
+    // shape being filled -
     // Tile repeats the image at its own natural size (the only behavior
     // ViewStyle::paint() had before this enum existed); Stretch scales it
     // to exactly cover the fill rect, ignoring the image's own aspect
@@ -148,12 +142,38 @@ namespace newui {
     BLCompOp toBLCompOp(CompositingFlag f);
     CompositingFlag toCompositingFlag(BLCompOp f);
 
+    // Convenient, doc-matched starting points for ViewStyle::setElevation()
+    // (below) - Fluent's own named elevation scale (learn.microsoft.com/
+    // windows/apps/design/signature-experiences/layering) publishes these
+    // names/relative magnitudes, not a concrete blur/offset formula (see
+    // viewstyle.cpp's own elevationBlurRadius()/
+    // elevationShadowOffsetMagnitude() for the bounded approximation that
+    // actually turns a value from here into pixels). setElevation() itself
+    // takes any float - these are just recognizable reference points, not
+    // an enum a caller is restricted to. "Control" is spelled out in full
+    // (not just Control) to avoid colliding with newui::Control
+    // (controls.h) for anyone who brings this whole namespace in scope.
+    namespace ElevationLevel {
+        constexpr float Layer = 1.0f;
+        constexpr float ControlLevel = 2.0f;
+        constexpr float Card = 8.0f;
+        constexpr float Tooltip = 16.0f;
+        constexpr float Flyout = 32.0f;
+        constexpr float Dialog = 128.0f;
+    }
+
     // Common appearance drawn by View::paintStyle() before a view's own
-    // paint() runs. backgroundFill/borderFill/highlightFill are BLVar, so
-    // each can independently hold a solid color (BLRgba32/BLRgba64), a
-    // gradient (BLGradient), or an image (BLPattern wrapping a BLImage
-    // loaded via BLImage::read_from_file()/read_from_data()) - a null
-    // BLVar (the default) means "don't draw that part".
+    // paint() runs. backgroundFill/borderFill/highlightFill are gfx::Fill
+    // (graphics.h), so each can independently hold a solid color, a
+    // gradient, or an image - a default-constructed Fill (kind() ==
+    // gfx::PaintKind::None) means "don't draw that part", resolved to
+    // whatever set_fill_style()/set_stroke_style() actually accepts via
+    // Fill::toBLVar() at paint time. Was raw BLVar until this class's own
+    // "properties panel" story (cpp_codetools) needed these reflectable -
+    // BLVar itself can't be (reflection.h - writes silently drop it,
+    // property.h's IsPodLike check fails it for animation too), same
+    // reasoning ShapeStyle's own fill()/stroke() (shapes.h) already
+    // migrated to Fill/Stroke for.
     //
     // Polymorphic so a View can be handed a ButtonStyle/CheckBoxStyle/
     // custom subclass via View::setStyle() to draw widget-specific chrome
@@ -162,7 +182,7 @@ namespace newui {
     // border, then add whatever's specific to that widget kind.
     class ViewStyle {
     protected:
-        BLVar backgroundFill_;
+        gfx::Fill backgroundFill_;
     public:
         // Explicit, not relying on the implicit compiler-generated one -
         // reflectgen's constructor collection only ever sees a
@@ -177,36 +197,65 @@ namespace newui {
         virtual ~ViewStyle() = default;
 
         
-        const BLVar& backgroundFill() const { return backgroundFill_;  }
+        // Both const and non-const, same pair-shape as View::style() (view.h) - the *real* reason
+        // this pairing matters here, not just symmetry: reflection.h's own property() addressability
+        // rule explicitly requires a non-const lvalue reference with no setter to treat a getter as
+        // addressable (see ClassBuilder::property()'s own `constexpr bool addressable` check) - a
+        // const-only accessor would make PropertiesModel::classifyProperty() fall through to
+        // Kind::PropertyUnsupported even though gfx::Fill itself is a real, reflectable Class (a
+        // real bug caught live: this was true throughout this whole migration until here). Safe to
+        // expose mutably despite the "only ever set via setBackgroundColor/Gradient/Image()"
+        // framing elsewhere in this class - see bkgFillStyle's own removal, below, which was the
+        // real reason a raw mutable reference used to be unsafe (a Properties-panel edit through
+        // this reference would have silently desynced it from backgroundFill_.kind() otherwise).
+        const gfx::Fill& backgroundFill() const { return backgroundFill_;  }
+        gfx::Fill& backgroundFill() { return backgroundFill_;  }
 
-        BLVar borderFill;
-        float borderWidth = 0.0f;
-        BLVar highlightFill;
-        FillStyle bkgFillStyle = FillStyle::FillColor;
-        FillStyle hilightFillStyle = FillStyle::FillColor;
-        StrokeStyle strokeStyle = StrokeStyle::StrokeColor;
+        // Getter/setter pairs, not plain public fields, for every one of these - reflectgen only
+        // ever registers a plain public field as a Class::Field (see reflection.h's own Field/
+        // Property distinction), and cpp_codetools's PropertiesModel (the Designer's own Properties
+        // panel) only ever walks Class::allProperties(), never Class::allFields() - a real,
+        // previously-invisible gap: every one of these was completely absent from the Properties
+        // panel despite being real, meaningful, design-time-editable state. Getter/setter pairs
+        // register as real Properties instead, matching backgroundFill's own const/non-const-pair
+        // treatment above (though these are simpler - plain by-value getter+setter, no addressable-
+        // reference concerns, since none of them need in-place nested editing the way a Fill does).
+        const Color& borderFill() const { return borderFill_; }
+        void setBorderFill(const Color& color) { borderFill_ = color; }
 
-        // How an image fill is drawn - see ImageFillMode's own comment.
-        // Shared by backgroundFill/highlightFill (only one of which is
-        // ever actually painted per paint() call, per useHighlight
-        // there), same as opacity/compositingOp already being shared
-        // across both rather than duplicated per-fill.
-        ImageFillMode imageFillMode = ImageFillMode::Tile;
+        float borderWidth() const { return borderWidth_; }
+        void setBorderWidth(float width) { borderWidth_ = width; }
+
+        const Color& highlightFill() const { return highlightFill_; }
+        void setHighlightFill(const Color& color) { highlightFill_ = color; }
+
+        StrokeStyle strokeStyle() const { return strokeStyle_; }
+        void setStrokeStyle(StrokeStyle style) { strokeStyle_ = style; }
+
+        // How an image fill is drawn - see ImageFillMode's own comment. Only ever meaningful for
+        // backgroundFill (gfx::PaintKind::Image) - highlightFill is solid-color-only, see its own
+        // comment above.
+        ImageFillMode imageFillMode() const { return imageFillMode_; }
+        void setImageFillMode(ImageFillMode mode) { imageFillMode_ = mode; }
 
         // Anchor ImageFillMode::Align positions an unscaled image fill
         // at - ignored by Tile/Stretch.
-        ImageAlignment imageAlignment = ImageAlignment::Center;
+        ImageAlignment imageAlignment() const { return imageAlignment_; }
+        void setImageAlignment(ImageAlignment alignment) { imageAlignment_ = alignment; }
 
-        float rectRadius = 0.0;
+        float rectRadius() const { return rectRadius_; }
+        void setRectRadius(float radius) { rectRadius_ = radius; }
 
         // Multiplies the alpha of whatever's set above (works uniformly for
         // colors, gradients and images) - separate from any alpha already
         // baked into a color/image itself.
-        float opacity = 1.0f;
+        float opacity() const { return opacity_; }
+        void setOpacity(float value) { opacity_ = value; }
 
         // How background/border blend with whatever's already in the
         // buffer; see BLCompOp. Defaults to normal alpha-blended painting.
-        CompositingFlag compositingOp = CompSrcOver;
+        CompositingFlag compositingOp() const { return compositingOp_; }
+        void setCompositingOp(CompositingFlag op) { compositingOp_ = op; }
 
         // Font available for this style's own text-drawing needs - e.g. a
         // LabelStyle subclass that draws text in its paint() override. See
@@ -215,21 +264,21 @@ namespace newui {
         // base ViewStyle::paint() doesn't draw text itself (this toolkit
         // has no automatic text layout/drawing yet), so this is just
         // storage for whoever paints text for this view.
-        Font font;
-
-
+        const Font& font() const { return font_; }
+        void setFont(const Font& value) { font_ = value; }
 
         // Sets backgroundFill to path's image (PNG/BMP/JPEG/QOI - decoded
         // via BLImage::read_from_file(), same codecs Bundle::loadImage()
-        // uses), wrapped in a BLPattern - backgroundFill already supports
-        // this (it's a BLVar, which can hold a solid color, a gradient,
-        // or a BLPattern/image - see the class comment above), this is
-        // just the convenient way to load one from disk. The BLPattern
-        // takes its own independent, refcounted handle to the decoded
-        // image (ordinary BLImage COW semantics), so the local BLImage
-        // this reads into along the way doesn't need to outlive the
-        // call. Returns false (backgroundFill left unchanged) if the
-        // file can't be read/decoded.
+        // uses) - backgroundFill's own setImagePath() (gfx::Fill,
+        // graphics.h) does the actual lazy load/cache; this is just the
+        // convenient "load one from disk and mark this fill as an image"
+        // one-call wrapper (setImagePath() + setKind(Image)), matching
+        // setBackgroundColor()/setBackgroundGradient()'s own shape below.
+        // Returns false (backgroundFill left unchanged) if the file can't
+        // be read/decoded - checked eagerly here (unlike setImagePath()
+        // itself, which only ever discovers a bad path lazily, the next
+        // toBLVar() call) since a caller of *this* method is specifically
+        // asking "did this succeed", not just "remember this path".
         //
         // Deliberately takes a path/BLImage, not a newui::Image
         // (graphics.h) - Image::blImage() wraps a Win32 DIB section's
@@ -242,11 +291,22 @@ namespace newui {
         // there's no such hazard.
         bool setBackgroundImage(const std::string& path);
 
-        // Sets backgroundFill directly from an already-decoded BLImage,
-        // wrapped in a BLPattern - see the path-based overload above for
-        // why this takes a plain BLImage rather than a newui::Image.
+        // Sets backgroundFill directly from an already-decoded BLImage -
+        // gfx::Fill::setImage() (graphics.h) bypasses its own path-based
+        // lazy load for exactly this "already have real pixels in memory,
+        // no file to reflect a path to" case; see the path-based overload
+        // above for why this takes a plain BLImage rather than a
+        // newui::Image.
         void setBackgroundImage(const BLImage& image);
 
+        // Converts the given raw blend2d BLGradient into backgroundFill's
+        // own reflectable gfx::Gradient representation (viewstyle.cpp) -
+        // BLGradient itself isn't reflectable (same reason BLVar wasn't),
+        // so this is a real, lossy-only-in-the-ways-gfx::Gradient itself
+        // already is (a radial gradient's second radius, r1, is never
+        // preserved - gfx::Gradient's own model has no field for it,
+        // matching Gradient::toBLGradient()'s own reverse direction) one-
+        // time conversion, not a live reference to gradient.
         void setBackgroundGradient(const BLGradient& gradient);
 
         void setBackgroundColor(const Color& color);
@@ -254,6 +314,8 @@ namespace newui {
 
         void setHilightColor(const Color& color);
         
+		float elevation() const { return elevation_; }        
+		void setElevation(float value) { elevation_ = value; }
         
 
         // The rect (local to a view of this size, (0,0) at its top-left) a
@@ -270,11 +332,29 @@ namespace newui {
         // whatever they add; see ButtonStyle/CheckBoxStyle.
         virtual Rect computeClientBounds(const Size& size) const;
 
-        // Paints this style into ctx, which is already translated/clipped
-        // to (0,0)-(size.width,size.height) for the view being styled;
-        // highlighted mirrors the view's isHighlighted() at paint time.
-        // Base implementation: background (backgroundFill, or
-        // highlightFill when highlighted and set) then border.
+        // Phase 1 of 3 - draws an effect that needs to extend *outside*
+        // this View's own bounds (a drop shadow, a glow, ...), before
+        // paint() below even runs. Called by View::prePaintStyle()
+        // (view.h), with ctx translated to this View's own origin but
+        // deliberately *not* clipped to its bounds the way paint() is -
+        // View::paintChildren() (view.cpp) opens a separate, unclipped
+        // save()/restore() scope around this call specifically so an
+        // override has real room to paint beyond (0,0)-(size.width,
+        // size.height) without anything cutting it off.
+        //
+        // Base implementation: no-op - nothing in this codebase needs a
+        // pre-paint effect yet (YAGNI), this is purely the hook a future
+        // one would override. See postPaint() below for the same shape
+        // on the other side of paint(), which does have a real user
+        // already (the focus ring).
+        virtual void prePaint(BLContext& /*ctx*/, const Size& /*size*/, bool /*highlighted*/) const;
+
+        // Phase 2 of 3 - paints this style into ctx, which is already
+        // translated/clipped to (0,0)-(size.width,size.height) for the
+        // view being styled; highlighted mirrors the view's
+        // isHighlighted() at paint time. Base implementation: background
+        // (backgroundFill, or highlightFill when highlighted and set)
+        // then border.
         //
         // clientBounds is an out parameter, set to computeClientBounds(size)
         // above - since that call is unqualified, it dispatches virtually
@@ -285,6 +365,52 @@ namespace newui {
         // anything further - see ButtonStyle/CheckBoxStyle, which rely on
         // this and don't need to touch clientBounds again themselves.
         virtual void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const;
+
+        // Phase 3 of 3 - draws an effect that, like prePaint() above,
+        // needs to extend outside this View's own bounds - called by
+        // View::postPaintStyle() (view.h) in its own separate unclipped
+        // scope, same shape as prePaint() but on the other side of
+        // paint(). clientBounds is computeClientBounds(size) recomputed
+        // fresh (paint()'s own out-parameter copy doesn't survive past
+        // the clipped scope it was produced in), not necessarily the
+        // exact same BLContext state paint() left behind.
+        //
+        // Called unconditionally, every paint pass - unlike this
+        // method's predecessor (paintFocusRing(), gated by the *caller*
+        // on View::isFocused() before ever calling in) this is called
+        // regardless of focus state, so an override stays free to draw
+        // something else here too (a hover glow, say) without fighting a
+        // caller-side gate that assumed "post-paint == focus ring only".
+        // The default implementation below does its own view()->
+        // isFocused() check internally instead, for exactly that reason.
+        //
+        // Base implementation: when the owning View is focused, a solid
+        // rounded-rect outline inset from clientBounds in
+        // UIColorRole::HighlightBackground (uicolormanager.h - the
+        // user's accent color, same role selection highlights already
+        // use). Solid, not the classic dashed DrawFocusRect() look, on
+        // purpose - see this method's own definition (viewstyle.cpp) for
+        // why (this vendored Blend2D build's path stroker doesn't
+        // actually implement dashing at all, confirmed live). Inset, not
+        // Fluent's own real outward-offset convention - tried outward
+        // and confirmed live to render invisibly: View::paintChildren()
+        // clips every child strictly to its own bounds (zero margin)
+        // during phase 2, but that constraint is exactly what this
+        // 3-phase split (and this method's own unclipped calling scope)
+        // now removes - an outward ring is worth retrying here.
+        //
+        // Override to suppress or customize where the default would look
+        // wrong for a specific style. ThemedEditStyle (below) was tried as
+        // exactly such an override once - relying on ETS_FOCUSED's own
+        // native border instead - and confirmed live to be the wrong call:
+        // that border renders pixel-identical to unfocused on at least one
+        // real Windows theme, so it now keeps this default instead. Treat
+        // that as a cautionary precedent, not a template, before adding
+        // another override here.
+        virtual void postPaint(BLContext& ctx, const Size& size, bool highlighted, const Rect& clientBounds) const;
+
+
+        virtual void computePrePaintBounds(Rect& outDirtyBounds) const;
 
         // Non-owning upward back-reference to the owning View (View owns
         // *this via its own std::unique_ptr<ViewStyle> style_) - reachable
@@ -314,6 +440,18 @@ namespace newui {
         void markDirty();
 
     private:
+        Color borderFill_ = Color::null();
+        float borderWidth_ = 0.0f;
+        Color highlightFill_ = Color::null();
+        StrokeStyle strokeStyle_ = StrokeStyle::StrokeColor;
+        ImageFillMode imageFillMode_ = ImageFillMode::Tile;
+        ImageAlignment imageAlignment_ = ImageAlignment::Center;
+        float rectRadius_ = 0.0f;
+        float opacity_ = 1.0f;
+        CompositingFlag compositingOp_ = CompSrcOver;
+        Font font_;
+		float elevation_ = 0.0f;  // for drop shadow, etc.
+
         View* view_ = nullptr;
     };
 
@@ -329,35 +467,49 @@ namespace newui {
         // see ViewStyle's own comment above for why.
         ButtonStyle() = default;
 
-        Edge3DStyle edgeStyle = Edge3DStyle::Raised;
-        float edgeWidth = 2.0f;
-        BLVar edgeHighlightColor;
-        BLVar edgeShadowColor;
+        Edge3DStyle edgeStyle() const { return edgeStyle_; }
+        void setEdgeStyle(Edge3DStyle style) { edgeStyle_ = style; }
+
+        float edgeWidth() const { return edgeWidth_; }
+        void setEdgeWidth(float width) { edgeWidth_ = width; }
+
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        const Color& edgeHighlightColor() const { return edgeHighlightColor_; }
+        void setEdgeHighlightColor(const Color& color) { edgeHighlightColor_ = color; }
+
+        const Color& edgeShadowColor() const { return edgeShadowColor_; }
+        void setEdgeShadowColor(const Color& color) { edgeShadowColor_ = color; }
 
         // Etched/Bump are two nested bevels, so they occupy 2x edgeWidth
         // inward from the outer edge; Raised/Sunken are just the one.
         Rect computeClientBounds(const Size& size) const override {
             Rect bounds = ViewStyle::computeClientBounds(size);
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.is_null() && edgeShadowColor.is_null())) {
+            if (edgeWidth_ <= 0.0f || (edgeHighlightColor_.isNull() && edgeShadowColor_.isNull())) {
                 return bounds;
             }
-            bool doubled = (edgeStyle == Edge3DStyle::Etched || edgeStyle == Edge3DStyle::Bump);
-            return bounds.deflate(doubled ? edgeWidth * 2.0f : edgeWidth);
+            bool doubled = (edgeStyle_ == Edge3DStyle::Etched || edgeStyle_ == Edge3DStyle::Bump);
+            return bounds.deflate(doubled ? edgeWidth_ * 2.0f : edgeWidth_);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (edgeWidth <= 0.0f || (edgeHighlightColor.is_null() && edgeShadowColor.is_null())) {
+            if (edgeWidth_ <= 0.0f || (edgeHighlightColor_.isNull() && edgeShadowColor_.isNull())) {
                 return;
             }
 
             ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
-            paintEdge3D(ctx, size, edgeStyle, edgeHighlightColor, edgeShadowColor, edgeWidth);
+            ctx.set_comp_op(toBLCompOp(compositingOp()));
+            paintEdge3D(ctx, size, edgeStyle_, BLVar(edgeHighlightColor_.toBLRgba32()), BLVar(edgeShadowColor_.toBLRgba32()), edgeWidth_);
             ctx.restore();
         }
 
+    private:
+        Edge3DStyle edgeStyle_ = Edge3DStyle::Raised;
+        float edgeWidth_ = 2.0f;
+        Color edgeHighlightColor_ = Color::null();
+        Color edgeShadowColor_ = Color::null();
     };
 
     // ViewStyle plus a single line of text (background/border only besides
@@ -366,88 +518,53 @@ namespace newui {
     // textColor is null (nothing drawn) by default, like the other
     // optional fills in this file - set it to actually see text.
     //
-    // Strongly consider also setting backgroundFill to an opaque color
-    // matching whatever's actually behind this view (see ViewStyle::paint()'s
-    // own base implementation, which this delegates to first). This
-    // codebase's paint pipeline doesn't (currently) skip redrawing a view
-    // whose own area wasn't part of what actually changed - RootView's own
-    // background fill is scoped to the dirty region on each repaint, but
-    // View::paintChildren() still walks and redraws every descendant
-    // unconditionally regardless of whether *its* area was included (see
-    // RootView::repaint()'s comment) - so a text view with no
-    // backgroundFill of its own gets its anti-aliased glyph edges
-    // alpha-blended directly onto whatever was already there on every
-    // unrelated repaint anywhere in the tree, not just onto a fresh
-    // backdrop. That's not idempotent: repeated re-blending of the same
-    // translucent edge pixels darkens/thickens them a little further each
-    // time instead of reproducing the same result, which reads as subtly
-    // "fuzzy" or "bolder than it should be" text after enough unrelated
-    // repaints have happened - confirmed live, not just reasoned about
-    // (see HANDOFF.md). An opaque backgroundFill makes every redraw
-    // self-correcting again, the same way every themed control's own
-    // track/fill chrome already is.
+    // No backgroundFill is needed for the text to render cleanly: every
+    // RootView::repaint() starts from a blank buffer and redraws the whole
+    // tree, so this view's anti-aliased glyph edges always land on a fresh
+    // backdrop and reproduce the same pixels each time. (That wasn't always
+    // so - repaint() used to fill the root background only inside the dirty
+    // rect while still redrawing every child over the whole window, so a
+    // transparent text view had its glyph edges re-blended onto themselves
+    // on every unrelated repaint and thickened visibly - which is why this
+    // comment used to recommend an opaque backgroundFill as a workaround.
+    // Set one only if you actually want that look.)
+    // Where a Label's text sits across its width.
+    enum class TextAlignment { Left, Center, Right };
+
     class LabelStyle : public ViewStyle {
     public:
-        std::string text;
-        BLVar textColor;
+        const std::string& text() const { return text_; }
+        void setText(const std::string& value) { text_ = value; }
+
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        const Color& textColor() const { return textColor_; }
+        void setTextColor(const Color& color) { textColor_ = color; }
+
+        // Off by default - the original, single-line-centered behavior
+        // every existing Label still gets unchanged. When on, paint()
+        // (viewstyle.cpp) greedily breaks text() across as many lines as
+        // needed to fit clientBounds' own width (breaking only at a
+        // space, never mid-word), vertically centering the whole block
+        // instead of just one line.
+        bool wordWrap() const { return wordWrap_; }
+        void setWordWrap(bool value) { wordWrap_ = value; }
+
+        // Centered by default.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; }
 
         LabelStyle() {
-			font = FontManager::getSystemFont(SystemUIFont::Message);
+			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
 
-        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
-            ViewStyle::paint(ctx, size, highlighted, clientBounds);
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
-            if (text.empty() || textColor.is_null()) {
-                return;
-            }
-
-            BLFont* blFont = font.blFont();
-            if (blFont == nullptr || !blFont->is_valid()) {
-				throw std::runtime_error("LabelStyle::paint: font not resolved to a valid BLFont");
-            }
-
-            if (clientBounds.size().width <= 0.0f || clientBounds.size().height <= 0.0f) {
-                return;
-            }
-
-            BLGlyphBuffer glyphBuffer;
-            glyphBuffer.set_utf8_text(text.c_str(), text.size());
-            blFont->shape(glyphBuffer);
-
-            BLTextMetrics textMetrics;
-            blFont->get_text_metrics(glyphBuffer, textMetrics);
-
-            const BLFontMetrics& fontMetrics = blFont->metrics();
-            double textWidth = textMetrics.advance.x;
-            double textHeight = fontMetrics.ascent + fontMetrics.descent;
-
-            double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-            double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
-
-            ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
-            ctx.set_fill_style(textColor);
-            ctx.set_fill_alpha(opacity);
-            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
-
-            if (font.underlined()) {
-                // Same fill_style/alpha already set above for the text
-                // itself - the underline is meant to look like part of
-                // the same stroke of "color", not a separate element.
-                // Positioned/sized from the font's own underline_position/
-                // underline_thickness (BLFontMetrics) so it tracks
-                // whatever font is actually in use rather than a guessed
-                // fixed offset.
-                double thickness = fontMetrics.underline_thickness > 0.0f
-                    ? double(fontMetrics.underline_thickness) : 1.0;
-                double underlineY = y + fontMetrics.underline_position;
-                ctx.fill_rect(BLRect(x, underlineY, textWidth, thickness));
-            }
-
-            ctx.restore();
-        }
-
+    private:
+        std::string text_;
+        Color textColor_ = Color::null();
+        bool wordWrap_ = false;
+        TextAlignment textAlignment_ = TextAlignment::Center;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),
@@ -459,65 +576,96 @@ namespace newui {
         // see ViewStyle's own comment above for why.
         CheckBoxStyle() = default;
 
-        bool checked = false;
-        float boxSize = 13.0f;
-        Edge3DStyle boxEdgeStyle = Edge3DStyle::Sunken;
-        float boxEdgeWidth = 2.0f;
-        BLVar boxFill;
-        BLVar boxEdgeHighlightColor;
-        BLVar boxEdgeShadowColor;
-        BLVar checkColor;
-        float checkWidth = 2.0f;
+        bool isChecked() const { return checked_; }
+        void setChecked(bool value) { checked_ = value; }
+
+        float boxSize() const { return boxSize_; }
+        void setBoxSize(float size) { boxSize_ = size; }
+
+        Edge3DStyle boxEdgeStyle() const { return boxEdgeStyle_; }
+        void setBoxEdgeStyle(Edge3DStyle style) { boxEdgeStyle_ = style; }
+
+        float boxEdgeWidth() const { return boxEdgeWidth_; }
+        void setBoxEdgeWidth(float width) { boxEdgeWidth_ = width; }
+
+        // Off (Color::null()) by default, not Color's own usual opaque-black default - see
+        // Color::isNull()'s own comment for why.
+        const Color& boxFill() const { return boxFill_; }
+        void setBoxFill(const Color& color) { boxFill_ = color; }
+
+        const Color& boxEdgeHighlightColor() const { return boxEdgeHighlightColor_; }
+        void setBoxEdgeHighlightColor(const Color& color) { boxEdgeHighlightColor_ = color; }
+
+        const Color& boxEdgeShadowColor() const { return boxEdgeShadowColor_; }
+        void setBoxEdgeShadowColor(const Color& color) { boxEdgeShadowColor_ = color; }
+
+        const Color& checkColor() const { return checkColor_; }
+        void setCheckColor(const Color& color) { checkColor_ = color; }
+
+        float checkWidth() const { return checkWidth_; }
+        void setCheckWidth(float width) { checkWidth_ = width; }
 
         // Gap left between the box and clientBounds, e.g. for a label
         // drawn by the client to the right of the box.
-        float boxLabelSpacing = 4.0f;
+        float boxLabelSpacing() const { return boxLabelSpacing_; }
+        void setBoxLabelSpacing(float spacing) { boxLabelSpacing_ = spacing; }
 
         // The box occupies the left boxSize + boxLabelSpacing of whatever
         // the border already left clientBounds with; a label drawn by the
         // client goes to the right of that.
         Rect computeClientBounds(const Size& size) const override {
             Rect bounds = ViewStyle::computeClientBounds(size);
-            if (boxSize <= 0.0f) {
+            if (boxSize_ <= 0.0f) {
                 return bounds;
             }
-            return bounds.deflate(boxSize + boxLabelSpacing, 0.0f, 0.0f, 0.0f);
+            return bounds.deflate(boxSize_ + boxLabelSpacing_, 0.0f, 0.0f, 0.0f);
         }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override {
             ViewStyle::paint(ctx, size, highlighted, clientBounds);
 
-            if (boxSize <= 0.0f) {
+            if (boxSize_ <= 0.0f) {
                 return;
             }
 
-            float boxTop = (size.height - boxSize) * 0.5f;
-            Size boxViewSize(boxSize, boxSize);
+            float boxTop = (size.height - boxSize_) * 0.5f;
+            Size boxViewSize(boxSize_, boxSize_);
 
             ctx.save();
-            ctx.set_comp_op(toBLCompOp(compositingOp));
+            ctx.set_comp_op(toBLCompOp(compositingOp()));
             ctx.translate(0.0, boxTop);
 
-            if (!boxFill.is_null()) {
-                ctx.set_fill_style(boxFill);
-                ctx.fill_rect(BLRect(0, 0, boxSize, boxSize));
+            if (!boxFill_.isNull()) {
+                ctx.set_fill_style(boxFill_.toBLRgba32());
+                ctx.fill_rect(BLRect(0, 0, boxSize_, boxSize_));
             }
 
-            if (boxEdgeWidth > 0.0f) {
-                paintEdge3D(ctx, boxViewSize, boxEdgeStyle, boxEdgeHighlightColor, boxEdgeShadowColor, boxEdgeWidth);
+            if (boxEdgeWidth_ > 0.0f) {
+                paintEdge3D(ctx, boxViewSize, boxEdgeStyle_, BLVar(boxEdgeHighlightColor_.toBLRgba32()), BLVar(boxEdgeShadowColor_.toBLRgba32()), boxEdgeWidth_);
             }
 
-            if (checked && !checkColor.is_null()) {
-                ctx.set_stroke_style(checkColor);
-                ctx.set_stroke_width(checkWidth);
-                float inset = boxSize * 0.2f;
-                ctx.stroke_line(inset, boxSize * 0.5f, boxSize * 0.45f, boxSize - inset);
-                ctx.stroke_line(boxSize * 0.45f, boxSize - inset, boxSize - inset, inset);
+            if (checked_ && !checkColor_.isNull()) {
+                ctx.set_stroke_style(checkColor_.toBLRgba32());
+                ctx.set_stroke_width(checkWidth_);
+                float inset = boxSize_ * 0.2f;
+                ctx.stroke_line(inset, boxSize_ * 0.5f, boxSize_ * 0.45f, boxSize_ - inset);
+                ctx.stroke_line(boxSize_ * 0.45f, boxSize_ - inset, boxSize_ - inset, inset);
             }
 
             ctx.restore();
         }
 
+    private:
+        bool checked_ = false;
+        float boxSize_ = 13.0f;
+        Edge3DStyle boxEdgeStyle_ = Edge3DStyle::Sunken;
+        float boxEdgeWidth_ = 2.0f;
+        Color boxFill_ = Color::null();
+        Color boxEdgeHighlightColor_ = Color::null();
+        Color boxEdgeShadowColor_ = Color::null();
+        Color checkColor_ = Color::null();
+        float checkWidth_ = 2.0f;
+        float boxLabelSpacing_ = 4.0f;
     };
 
     // ViewStyle plus a checkerboard backdrop drawn behind an image fill
@@ -535,27 +683,35 @@ namespace newui {
     // this codebase currently opts into it, so no other image fill
     // anywhere else grows an unexpected checkerboard.
     //
-    // Only ever draws anything when bkgFillStyle (or hilightFillStyle,
-    // while highlighted) is FillStyle::FillImage and that fill's BLImage
-    // actually has an alpha channel - every other fill kind (solid color,
-    // gradient, no fill at all, or an opaque XRGB32 image) falls straight
-    // through to the base paint() unchanged, drawing nothing extra.
+    // Only ever draws anything when not highlighted (highlightFill is solid-color-only, never
+    // Image) and backgroundFill().kind() is gfx::PaintKind::Image with an actual alpha channel -
+    // every other fill kind (solid color, gradient, no fill at all, or an opaque XRGB32 image)
+    // falls straight through to the base paint() unchanged, drawing nothing extra.
     class ImageFillStyle : public ViewStyle {
     public:
         ImageFillStyle() = default;
 
         // Checkerboard square size, in device pixels - the same rough
         // ballpark image editors use.
-        float checkerSize = 8.0f;
+        float checkerSize() const { return checkerSize_; }
+        void setCheckerSize(float size) { checkerSize_ = size; }
 
         // Photoshop/GIMP-style light-gray/white pair by default - always
         // drawn fully opaque, regardless of this style's own opacity (see
         // paint()'s own comment): fading the image should reveal more of
         // the checkerboard, not fade the checkerboard itself away too.
-        Color checkerColorA = Color(0xd0d0d0u, false);
-        Color checkerColorB = Color(0xffffffu, false);
+        const Color& checkerColorA() const { return checkerColorA_; }
+        void setCheckerColorA(const Color& color) { checkerColorA_ = color; }
+
+        const Color& checkerColorB() const { return checkerColorB_; }
+        void setCheckerColorB(const Color& color) { checkerColorB_ = color; }
 
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+
+    private:
+        float checkerSize_ = 8.0f;
+        Color checkerColorA_ = Color(0xd0d0d0u, false);
+        Color checkerColorB_ = Color(0xffffffu, false);
     };
 
     // Base for a second family of styles alongside ViewStyle/ButtonStyle/
@@ -663,6 +819,49 @@ namespace newui {
         }
     };
 
+    // Experimental: a Fluent-style rounded-corner Button chrome, custom-
+    // drawn with Blend2D instead of ThemedButtonStyle's native
+    // DrawThemeBackground(BP_PUSHBUTTON) - confirmed live that the native
+    // path still renders the classic square-cornered look even on
+    // Windows 11 (DrawThemeBackground has no rounded-corner Win11 visual
+    // data to draw; that's a WinUI3/XAML-only rendering, not something
+    // classic UxTheme exposes to a raw Win32 app), so matching Fluent's
+    // own 4px corner-radius convention for in-page controls (see
+    // learn.microsoft.com/windows/apps/design/signature-experiences/
+    // geometry) means not using DrawThemeBackground for this one at all.
+    //
+    // Deliberately a *subclass* of ThemedButtonStyle, not a ViewStyle
+    // sibling - Button (controls.h) holds `buttonStyle_` as a concrete
+    // `ThemedButtonStyle*` and reads `.pressed`/`.enabled`/`.font()`/
+    // `.compositingOp()`/`.opacity()` off it directly, all inherited
+    // unchanged here; only paint()/computeClientBounds() are overridden,
+    // to a genuinely different rendering path rather than routing back
+    // through ThemedViewStyle::paint()'s theme machinery at all - no
+    // uxtheme calls happen for this style, ever.
+    //
+    // Opt-in only, today - `Button::Button()` still defaults to
+    // `ThemedButtonStyle` (the native look); a caller previews this by
+    // `button->setStyle(std::make_unique<FluentButtonStyle>())` after
+    // construction. Not yet decided whether this becomes Button's new
+    // default - a deliberate visual-philosophy departure from this
+    // codebase's usual "look exactly like a native Win32 control"
+    // approach elsewhere, worth seeing live before committing to it
+    // more broadly.
+    class FluentButtonStyle : public ThemedButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            // ViewStyle::computeClientBounds(), not ThemedViewStyle's own
+            // override two levels up - that one queries
+            // GetThemeBackgroundContentRect(), meaningless here since
+            // paint() below never opens a theme at all. No native chrome
+            // to deflate for - the 1px border below is thin enough that
+            // text laid out at the full bounds still looks right.
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a native checkbox (BUTTON/BP_CHECKBOX).
     class ThemedCheckBoxStyle : public ThemedViewStyle {
     public:
@@ -682,6 +881,33 @@ namespace newui {
             if (highlighted) return checked ? CBS_CHECKEDHOT : CBS_UNCHECKEDHOT;
             return checked ? CBS_CHECKEDNORMAL : CBS_UNCHECKEDNORMAL;
         }
+    };
+
+    // Fluent-style checkbox glyph, custom-drawn instead of
+    // ThemedCheckBoxStyle's native DrawThemeBackground(BP_CHECKBOX) - same
+    // rationale/precedent as FluentButtonStyle above (classic UxTheme has
+    // no Windows 11 visual data for this either). A subclass of
+    // ThemedCheckBoxStyle, not a ViewStyle sibling, for the same reason
+    // FluentButtonStyle is a ThemedButtonStyle subclass: Toggle
+    // (controls.h) dynamic_casts style() to ThemedCheckBoxStyle* to push
+    // checked/pressed/enabled into it (Toggle::updateStyleFields()) - this
+    // stays a valid target for that cast unchanged, opted into via
+    // `toggle->setStyle(std::make_unique<FluentCheckBoxStyle>())` after
+    // construction (Toggle::rebuildStyle() still defaults to the native
+    // ThemedCheckBoxStyle/ThemedRadioButtonStyle pair).
+    //
+    // Fills its whole given size (Toggle has no separate label - the
+    // glyph View's own bounds *are* the whole control, same as a native
+    // BP_CHECKBOX part), so a caller sizes the Toggle itself to whatever
+    // glyph size they want rather than this style centering a fixed-size
+    // glyph inside a larger box.
+    class FluentCheckBoxStyle : public ThemedCheckBoxStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native radio button (BUTTON/BP_RADIOBUTTON) -
@@ -707,6 +933,19 @@ namespace newui {
         }
     };
 
+    // Fluent-style radio glyph - same rationale/opt-in shape as
+    // FluentCheckBoxStyle just above (a ThemedRadioButtonStyle subclass,
+    // so Toggle's own dynamic_cast<ThemedRadioButtonStyle*> still finds
+    // it), just a circle instead of a rounded square.
+    class FluentRadioButtonStyle : public ThemedRadioButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a native group box frame (BUTTON/BP_GROUPBOX) -
     // typically drawn behind/around a set of related controls. The real
     // control also leaves a caption gap in the top border for a label,
@@ -728,6 +967,58 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override {
             return enabled ? GBS_NORMAL : GBS_DISABLED;
         }
+    };
+
+    // Fluent-style group box frame - custom-drawn instead of
+    // ThemedGroupBoxStyle's native DrawThemeBackground(BP_GROUPBOX), same
+    // ThemedGroupBoxStyle-subclass opt-in shape as every other Fluent*
+    // style (GroupBox::handleStateChanged(), controls.cpp, dynamic_casts
+    // style() to ThemedGroupBoxStyle&, which this still satisfies). A
+    // plain rounded-rect stroke, no fill - a GroupBox is a grouping frame
+    // around already-laid-out sibling content, not a clickable/elevated
+    // surface, so unlike FluentCardStyle this has no background fill or
+    // shadow of its own. GroupBox::paint()'s own caption backdrop/text
+    // (controls.cpp) draws on top of this identically regardless of
+    // which border style is active - see its own comment.
+    class FluentGroupBoxStyle : public ThemedGroupBoxStyle {
+    public:
+        // Same "1px border is thin enough that content laid out at the
+        // full bounds still looks right" call FluentButtonStyle's own
+        // comment makes - a caller wanting real breathing room between
+        // this frame and its own child content adds that via its own
+        // Layout padding, the same way the bordered focus-scope panel in
+        // examples/uiinputmanager1.cpp already does for an unrelated
+        // bordered SubView.
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // A Fluent-style elevated "Card" surface - a plain rounded-rect panel
+    // background/border for grouping in-page content, with a Card-level
+    // drop shadow (ElevationLevel::Card above) on by default. Unlike
+    // every other Fluent* style in this file, this one is a direct
+    // ViewStyle subclass, not a Themed*Style subclass - there's no native
+    // uxtheme part this replaces (no existing GroupBox/Card control class
+    // in this codebase to stay cast-compatible with either, unlike
+    // FluentButtonStyle/FluentCheckBoxStyle/etc. - see each of their own
+    // comments). rectRadius()/elevation() are real, freely overridable
+    // ViewStyle properties, set to sensible defaults by the constructor;
+    // paint() is still overridden (rather than leaving background/border
+    // painting to the inherited ViewStyle::paint()) purely so the
+    // fill/border colors stay live UIColorManager::colorFor() lookups,
+    // matching every other Fluent* style's own dark/light-mode-reactive
+    // approach - ViewStyle::backgroundFill()/borderFill() only ever hold
+    // a static snapshot color, which would go stale across a live theme
+    // switch the way this codebase's other Fluent styles deliberately
+    // don't.
+    class FluentCardStyle : public ViewStyle {
+    public:
+        FluentCardStyle();
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native toolbar button (TOOLBAR/TP_BUTTON) -
@@ -753,6 +1044,24 @@ namespace newui {
             if (highlighted) return TS_HOT;
             return TS_NORMAL;
         }
+    };
+
+    // Fluent-style toolbar/command-bar button - custom-drawn, no border
+    // ever (matching Fluent's own flat command-bar convention - see
+    // ToolbarButton::paint()'s own "a flat toolbar button shows no visible
+    // border/fill at rest either way" comment, controls.cpp), just a
+    // rounded-rect highlight fill that appears for hover/pressed/checked.
+    // Same ThemedToolbarButtonStyle-subclass opt-in shape as
+    // FluentButtonStyle/FluentCheckBoxStyle above (ToolbarButton::
+    // updatePressedVisual() dynamic_casts style() to
+    // ThemedToolbarButtonStyle&, which this still satisfies).
+    class FluentToolbarButtonStyle : public ThemedToolbarButtonStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a native toolbar drop-down button (TOOLBAR/
@@ -1007,6 +1316,22 @@ namespace newui {
         bool readOnly = false;
         bool enabled = true;
 
+        // Deliberately does NOT override paintFocusRing() - an earlier
+        // version of this class did, on the assumption that stateId()'s
+        // own ETS_FOCUSED (above) would draw a visibly distinct native
+        // border once focused is true, making the generic dashed ring
+        // redundant. Confirmed live to be wrong: on at least one real
+        // Windows install/theme, ETS_FOCUSED renders pixel-identical to
+        // ETS_NORMAL for EP_EDITTEXT - the only real difference a focused
+        // TextField/TextControl had was the blinking caret itself (see
+        // TextController::drawCaret(), controls.cpp), easy to miss and
+        // not present at all for ListView/TreeView/DropDownList (no
+        // caret there). So this now falls through to ViewStyle's own
+        // default ring like every other control - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // and ListView/TreeView/DropDownList's own handleGotFocus()/
+        // handleLostFocus() for what keeps `focused` above in sync with
+        // real keyboard focus regardless.
 
     protected:
         int partId() const override { return EP_EDITTEXT; }
@@ -1018,6 +1343,27 @@ namespace newui {
             if (highlighted) return ETS_HOT;
             return ETS_NORMAL;
         }
+    };
+
+    // Fluent-style text field chrome - custom-drawn instead of
+    // ThemedEditStyle's native DrawThemeBackground(EP_EDITTEXT), same
+    // ThemedEditStyle-subclass opt-in shape as the other Fluent* styles
+    // above (TextField/TextControl dynamic_cast style() to
+    // ThemedEditStyle* - TextController::handleGotFocus()/
+    // handleLostFocus(), controls.cpp - which this still satisfies).
+    // Rounded border, plus WinUI TextBox's own distinctive visual
+    // signature: a plain 1px border at rest that becomes a thicker,
+    // accent-colored underline along just the bottom edge once focused
+    // (see paint()'s own definition, viewstyle.cpp, for why this stays
+    // additive rather than replacing ViewStyle::postPaint()'s generic
+    // ring - unlike the native EP_EDITTEXT part, ETS_FOCUSED here would
+    // be trivially distinguishable from ETS_NORMAL, but the ring stays on
+    // anyway for consistency with every other Fluent* style, none of
+    // which suppress it either).
+    class FluentEditStyle : public ThemedEditStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override;
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // --- Batch 2 --------------------------------------------------------
@@ -1262,6 +1608,26 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return horizontal ? TRS_NORMAL : TRVS_NORMAL; }
     };
 
+    // Fluent-style slider groove - custom-drawn instead of
+    // ThemedTrackbarTrackStyle's native DrawThemeBackground(TKP_TRACK),
+    // same ThemedTrackbarTrackStyle-subclass opt-in shape as every other
+    // Fluent* style (Slider::setHorizontal(), controls.cpp, dynamic_casts
+    // style() to ThemedTrackbarTrackStyle&, which this still satisfies).
+    // A thin rounded "pill" groove - no filled/unfilled split, same scope
+    // as the native part it replaces (the real *value*-driven fill this
+    // codebase's architecture has no concept of yet - Slider only ever
+    // positions a separate thumb child along an otherwise-uniform groove;
+    // adding a filled portion would need real new plumbing, out of scope
+    // here).
+    class FluentTrackbarTrackStyle : public ThemedTrackbarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a trackbar/slider's draggable thumb (TRACKBAR/
     // TKP_THUMB or TKP_THUMBVERT) - only the plain horizontal/vertical
     // thumb shapes are supported (uxtheme also has THUMBTOP/THUMBBOTTOM/
@@ -1289,6 +1655,27 @@ namespace newui {
             if (highlighted) return TUS_HOT;
             return TUS_NORMAL;
         }
+    };
+
+    // Fluent-style slider thumb - a filled circle (WinUI's own look: a
+    // solid accent-colored disc, not an outlined/donut shape like
+    // FluentRadioButtonStyle's checked glyph - the thumb has no
+    // "unchecked" state to distinguish from). Same ThemedTrackbarThumbStyle-
+    // subclass opt-in shape as FluentTrackbarTrackStyle above. Inherits
+    // partSize() unchanged (ThemedViewStyle, viewstyle.cpp) - Slider::
+    // resolvedThumbSize() (controls.cpp) still queries the *native*
+    // TKP_THUMB/TKP_THUMBVERT part's natural size for layout even when
+    // this style is opted into, which is a perfectly reasonable resting
+    // footprint for a custom-drawn circle too, and keeps this from
+    // needing its own hardcoded size that could drift from real DPI/
+    // theme-driven scaling.
+    class FluentTrackbarThumbStyle : public ThemedTrackbarThumbStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a trackbar/slider's tick marks (TRACKBAR/
@@ -1350,6 +1737,22 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return 0; }
     };
 
+    // Fluent-style progress bar track - custom-drawn instead of
+    // ThemedProgressBarTrackStyle's native DrawThemeBackground(PP_BAR),
+    // same subclass opt-in shape as every other Fluent* style (Progress::
+    // setHorizontal(), controls.cpp, dynamic_casts style() to
+    // ThemedProgressBarTrackStyle&, which this still satisfies). A fully-
+    // rounded "pill" bar (Fluent's own ProgressBar shape), muted so the
+    // FluentProgressBarFillStyle fill (below) reads clearly on top of it.
+    class FluentProgressBarTrackStyle : public ThemedProgressBarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a progress bar's fill (PROGRESS/PP_FILL or
     // PP_FILLVERT). How much of the bar is filled isn't a field here -
     // that's the caller's job via ordinary bounds/Layout (a narrower
@@ -1395,6 +1798,22 @@ namespace newui {
                 case FillState::Normal: default: return PBFVS_NORMAL;
             }
         }
+    };
+
+    // Fluent-style progress bar fill - same rounded "pill" shape as
+    // FluentProgressBarTrackStyle above, colored by `state` (accent for
+    // Normal, matching Fluent's own severe-red/caution-amber for Error/
+    // Paused - there's no UIColorRole for either, unlike Normal's
+    // HighlightBackground, so these two are fixed colors rather than a
+    // theme-reactive lookup, same trim ThemedProgressBarFillStyle's own
+    // class comment already accepts for marquee/PBFS_PARTIAL).
+    class FluentProgressBarFillStyle : public ThemedProgressBarFillStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override {
+            return ViewStyle::computeClientBounds(size);
+        }
+
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus a scrollbar's draggable thumb (SCROLLBAR/

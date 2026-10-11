@@ -60,6 +60,20 @@ add_subdirectory(3rdparty/blend2d)
 # MIT, header-only) - used by the reflection-driven save/load format (see
 # include/newui/reflection.h/reflectionio.h).
 
+# svgandme - Dependency
+# =====================
+# Vendored under 3rdparty/ as a permanent part of the project (wiladams/
+# svgandme, commit 2bacca9c4a75de90481c28ac88d58d6c01d4f939, MIT,
+# header-only) - only the svg/ subdirectory (the reusable SVG parser +
+# Blend2D renderer, namespace waavs); the rest of upstream (app/, testy/,
+# ...) is Win32/GDI-specific example-app scaffolding we don't need. Pinned
+# to an exact commit rather than tracking upstream - it's active but
+# pre-1.0 (only tag is v0.1.0-alpha) and its own example projects have
+# already drifted out of sync with its headers once. Used by
+# include/newui/svgimage.h/src/svgimage.cpp only - kept out of
+# include/newui/graphics.h so its ~150 headers don't end up as a transitive
+# include of every graphics.h consumer.
+
 # reflectgen build integration - see cmake/ReflectGen.cmake's own header
 # comment for the full two-stage (configure-time discovery, build-time
 # generation) design. include()'d before add_library(newui ...) below
@@ -80,16 +94,21 @@ add_library(newui STATIC
     src/application.cpp
     src/frame.cpp
     "src/rootview.cpp"
+    "include/newui/presentsurface.h"
+    "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
+    "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
+    "src/presentsurface.cpp"
     src/subview.cpp
     src/fontmanager.cpp
     "src/runloop.cpp" 
     "include/newui/keyboard_constants.h" 
     "include/newui/utils.h" 
     "src/utils.cpp" 
-    "src/view.cpp" 
-    "include/newui/mouse_constants.h" 
-    "include/newui/color.h" 
-    "include/newui/color_constants.h" 
+    "src/view.cpp"
+    "include/newui/displayunit.h" "src/displayunit.cpp"
+    "include/newui/mouse_constants.h"
+    "include/newui/color.h" "src/color.cpp"
+    "include/newui/color_constants.h"
     "include/newui/viewstyle.h" "include/newui/fontmanager.h" 
     "include/newui/font.h" 
     "include/newui/property.h" 
@@ -105,30 +124,46 @@ add_library(newui STATIC
     "include/newui/bundle.h" "src/bundle.cpp"
     "include/newui/viewpath.h" "src/viewpath.cpp"
     "include/newui/namemanager.h" "src/namemanager.cpp"
+    "include/newui/filewatcher.h" "src/filewatcher.cpp"
     "include/newui/reflection.h" "src/reflection.cpp"
     "include/newui/cursor.h" "src/cursor.cpp"
     "include/newui/graphics.h" "src/graphics.cpp"
     "include/newui/menus.h" "src/menus.cpp"
-    "include/newui/tabcontrol.h" "src/tabcontrol.cpp"
     "include/newui/dialogs.h" "src/dialogs.cpp"
     "include/newui/popupframe.h" "src/popupframe.cpp"
     "include/newui/uicolormanager.h" "src/uicolormanager.cpp"
     "include/newui/models.h" "src/models.cpp"
     "include/newui/items.h" "src/items.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
+    "include/newui/rootcontroller.h"
     "include/newui/controls.h" "src/controls.cpp"
     "include/newui/shapes.h" "src/shapes.cpp"
     "include/newui/themedata.h"
     "src/themedata.cpp"
     "include/newui/reflectionio.h"
     "include/newui/text.h" "src/text.cpp"
+    "include/newui/piecetree.h" "src/piecetree.cpp"
+    "include/newui/texthistory.h" "src/texthistory.cpp"
+    "include/newui/textstyle.h" "src/textstyle.cpp"
+    "include/newui/textfolding.h" "src/textfolding.cpp"
     "include/newui/overlay.h" "src/overlay.cpp"
+    "include/newui/underlay.h" "src/underlay.cpp"
+    "include/newui/popuptool.h" "src/popuptool.cpp"
     "include/newui/action.h"
     "include/newui/command.h" "src/command.cpp"
     "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
     "include/newui/dibimage.h" "src/dibimage.cpp"
     "include/newui/dragndrop.h" "src/dragndrop.cpp"
     "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
+    "include/newui/component.h"
+    "include/newui/undostack.h" "src/undostack.cpp"
+    "include/newui/viewbuilder.h"
+    "include/newui/frameproxy.h" "src/frameproxy.cpp"
+    "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
+    "include/newui/splitter.h" "src/splitter.cpp"
+    "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
+    "include/newui/svgimage.h" "src/svgimage.cpp"
+    "include/newui/uiinputmanager.h" "src/uiinputmanager.cpp"
     ${REFLECTION_GENERATED_CPP})
 
 add_dependencies(newui newui_version)
@@ -149,6 +184,13 @@ target_include_directories(newui PUBLIC
     3rdparty/wil/include
 )
 
+# PRIVATE, not PUBLIC like json5/wil above - svgandme is only ever included
+# from src/svgimage.cpp, never from a public newui/ header, so there's no
+# reason for it to leak into consumers' include paths.
+target_include_directories(newui PRIVATE
+    3rdparty/svgandme/svg
+)
+
 # Ole32/Uuid: COM (CoCreateInstance/CoInitializeEx and the CLSID_FileOpenDialog/
 # CLSID_FileSaveDialog symbol storage) for dialogs.h's Common Item Dialog
 # (IFileDialog) support. Shell32: SHCreateItemFromParsingName, used to turn
@@ -158,7 +200,7 @@ target_include_directories(newui PUBLIC
 # used by UIColorManager::colorFor() for the real Windows accent color.
 # Shlwapi: SHCreateMemStream, used by VirtualFileDataObject (dragndrop.cpp)
 # to hand Explorer an in-memory CFSTR_FILECONTENTS IStream per virtual file.
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib)
+target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib d3d11.lib dxgi.lib dxguid.lib)
 
 # Precompiled header
 # ===================

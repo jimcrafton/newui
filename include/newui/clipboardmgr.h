@@ -246,6 +246,17 @@ public:
     // Reads mimeType's resolved format back - "text/html" is
     // transparently unwrapped from CF_HTML first (unwrapCfHtml()).
     static bool getMimeData(const std::wstring& mimeType, std::vector<std::uint8_t>& outData);
+    // The same content in several formats at once, so each reader takes the one it understands
+    // (an app's own format, plus "text/plain" for everyone else): claims clipboard ownership once
+    // and writes every (mimeType, data) pair under that single EmptyClipboard() - calling
+    // setMimeData() repeatedly would leave only the last one. Each pair follows setMimeData()'s
+    // rules (see textMimeData() for "text/plain"). Returns false if the clipboard couldn't be
+    // opened or any write failed.
+    using MimeData = std::pair<std::wstring, std::vector<std::uint8_t>>;
+    static bool setMimeDataSet(const std::vector<MimeData>& items, View* owner = nullptr);
+    // text as CF_UNICODETEXT's bytes (null-terminated UTF-16) - the data "text/plain" needs in
+    // setMimeData()/setMimeDataSet().
+    static std::vector<std::uint8_t> textMimeData(const std::wstring& text);
 
     // application/x-file-list <-> CF_HDROP (a real DROPFILES structure,
     // not a byte blob) - kept separate from setMimeData()/getMimeData()

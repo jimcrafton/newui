@@ -12,6 +12,7 @@
 #include <any>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -25,6 +26,8 @@ using newui::text::TextModel;
 using newui::text::TextPosition;
 using newui::text::TextRange;
 using newui::text::TextRenderer;
+using newui::text::TextFold;
+using newui::text::TextFontRun;
 using newui::text::TextSelection;
 using newui::text::TextStorage;
 
@@ -243,6 +246,133 @@ TEST(TextStorage, ReplaceWithEmptyRangeActsAsInsert) {
     EXPECT_EQ(storage.text(), L"helled");
 }
 
+TEST(TextStorage, AppendToAddsTheClampedRangeToWhatIsThere) {
+    TextStorage storage(L"hello world");
+    std::wstring out = L">";
+    storage.appendTo(TextRange(6, 5), out);
+    storage.appendTo(TextRange(9, 100), out);   // clamped
+    storage.appendTo(TextRange(50, 5), out);    // past the end: nothing
+    EXPECT_EQ(out, L">worldld");
+}
+
+TEST(TextStorage, FindLocatesTheFirstMatchFromAnOffset) {
+    TextStorage storage(L"a\nb\nc");
+    EXPECT_EQ(storage.find(L'\n'), 1u);
+    EXPECT_EQ(storage.find(L'\n', 2), 3u);
+    EXPECT_EQ(storage.find(L'\n', 4), TextStorage::npos);
+    EXPECT_EQ(storage.find(L'z'), TextStorage::npos);
+    EXPECT_EQ(storage.find(L'a', 1000), TextStorage::npos);
+}
+
+TEST(TextStorage, CountCountsWithinTheClampedRange) {
+    TextStorage storage(L"a\nb\nc\n");
+    EXPECT_EQ(storage.count(L'\n', TextRange(0, 6)), 3u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(2, 2)), 1u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(0, 100)), 3u);
+    EXPECT_EQ(storage.count(L'\n', TextRange(100, 5)), 0u);
+}
+
+TEST(TextStorage, ForEachChunkVisitsTheWholeRangeInOrder) {
+    TextStorage storage(L"hello world");
+    std::wstring seen;
+    storage.forEachChunk(TextRange(3, 100), [&](const wchar_t* data, size_t length) { seen.append(data, length); });
+    EXPECT_EQ(seen, L"lo world");
+
+    int calls = 0;
+    storage.forEachChunk(TextRange(50, 5), [&](const wchar_t*, size_t) { ++calls; });
+    EXPECT_EQ(calls, 0);
+}
+
+TEST(TextStorage, EqualsAndCommonPrefixAndSuffixCompareWithoutCopying) {
+    TextStorage storage(L"hello world");
+    EXPECT_TRUE(storage.equals(L"hello world"));
+    EXPECT_FALSE(storage.equals(L"hello worle"));
+    EXPECT_EQ(storage.commonPrefixLength(L"hello there"), 6u);
+    EXPECT_EQ(storage.commonPrefixLength(L"hello"), 5u);
+    EXPECT_EQ(storage.commonPrefixLength(L"xyz"), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 100), 10u);
+    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 4), 4u);   // limited
+    EXPECT_EQ(storage.commonSuffixLength(L"xyz", 100), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(L"world", 100), 5u);
+}
+
+TEST(TextStorage, EmptyStorageHasOneEmptyLine) {
+    TextStorage storage;
+    EXPECT_EQ(storage.lineCount(), 1u);
+    EXPECT_EQ(storage.lineStart(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(50), 0u);
+}
+
+TEST(TextStorage, LinesEndAtNewlineAndAFinalNewlineStartsAnEmptyLine) {
+    TextStorage storage(L"ab\ncd\n");
+    EXPECT_EQ(storage.lineCount(), 3u);
+    EXPECT_EQ(storage.lineStart(0), 0u);
+    EXPECT_EQ(storage.lineStart(1), 3u);
+    EXPECT_EQ(storage.lineStart(2), 6u);
+    EXPECT_EQ(storage.lineStart(3), 6u);   // past the last: length()
+    EXPECT_EQ(storage.lineOfOffset(0), 0u);
+    EXPECT_EQ(storage.lineOfOffset(2), 0u);   // the '\n' itself is on line 0
+    EXPECT_EQ(storage.lineOfOffset(3), 1u);
+    EXPECT_EQ(storage.lineOfOffset(6), 2u);
+    EXPECT_EQ(storage.lineOfOffset(1000), 2u);
+}
+
+TEST(TextStorage, CrLfIsOneBreakAndALoneCrIsABreakToo) {
+    TextStorage storage(L"a\r\nb\rc\r\nd");
+    EXPECT_EQ(storage.lineCount(), 4u);
+    EXPECT_EQ(storage.lineStart(1), 3u);
+    EXPECT_EQ(storage.lineStart(2), 5u);
+    EXPECT_EQ(storage.lineStart(3), 8u);
+    EXPECT_EQ(storage.lineOfOffset(2), 0u);   // between the '\r' and '\n': still line 0
+    EXPECT_EQ(storage.lineOfOffset(4), 1u);   // the lone '\r'
+    EXPECT_EQ(storage.lineOfOffset(5), 2u);
+}
+
+TEST(TextStorage, ATrailingCrStartsAnEmptyLineAndCrCrIsTwoBreaks) {
+    EXPECT_EQ(TextStorage(L"a\r").lineCount(), 2u);
+    EXPECT_EQ(TextStorage(L"a\r\r").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(L"a\r\n\r\n").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(L"\n\r").lineCount(), 3u);
+}
+
+TEST(TextStorage, FindLineBreakReportsTheBreakAndItsLength) {
+    TextStorage storage(L"ab\r\ncd\ref\ngh");
+    size_t length = 0;
+    EXPECT_EQ(storage.findLineBreak(0, &length), 2u);
+    EXPECT_EQ(length, 2u);   // "\r\n"
+    EXPECT_EQ(storage.findLineBreak(4, &length), 6u);
+    EXPECT_EQ(length, 1u);   // a lone '\r'
+    EXPECT_EQ(storage.findLineBreak(7, &length), 9u);
+    EXPECT_EQ(length, 1u);   // '\n'
+    EXPECT_EQ(storage.findLineBreak(10), TextStorage::npos);
+    EXPECT_EQ(TextStorage(L"end\r").findLineBreak(0, &length), 3u);
+    EXPECT_EQ(length, 1u);   // a '\r' at the very end has nothing to pair with
+}
+
+TEST(TextStorage, CountLineBreaksCountsACrLfOnceAndOnlyBreaksStartingInRange) {
+    TextStorage storage(L"a\r\nb\rc\nd");
+    EXPECT_EQ(storage.countLineBreaks(TextRange(0, 100)), 3u);
+    EXPECT_EQ(storage.countLineBreaks(TextRange(0, 2)), 1u);    // "a\r": the break starts inside
+    EXPECT_EQ(storage.countLineBreaks(TextRange(2, 1)), 0u);    // just the '\n' half of a "\r\n"
+    EXPECT_EQ(storage.countLineBreaks(TextRange(3, 5)), 2u);
+    EXPECT_EQ(storage.countLineBreaks(TextRange(100, 5)), 0u);
+}
+
+TEST(TextStorage, TheLineIndexFollowsEdits) {
+    TextStorage storage(L"one\ntwo");
+    EXPECT_EQ(storage.lineCount(), 2u);
+    storage.insert(3, L"\nand a half");
+    EXPECT_EQ(storage.lineCount(), 3u);
+    EXPECT_EQ(storage.lineStart(2), 15u);
+    storage.remove(TextRange(3, 11));
+    EXPECT_EQ(storage.lineCount(), 2u);
+    storage.setText(L"x");
+    EXPECT_EQ(storage.lineCount(), 1u);
+    storage.replace(TextRange(0, 1), L"\n\n\n");
+    EXPECT_EQ(storage.lineCount(), 4u);
+}
+
 TEST(Caret, DefaultConstructedIsInactiveAndNotVisible) {
     Caret caret;
     EXPECT_FALSE(caret.isActive());
@@ -272,9 +402,9 @@ TEST(Caret, StopWhenNotActiveIsANoOp) {
 }
 
 TEST(Caret, StartMakesItActiveAndVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -307,9 +437,9 @@ TEST(Caret, StartMakesItActiveAndVisible) {
 }
 
 TEST(Caret, SecondStartWhileAlreadyActiveIsANoOp) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -342,9 +472,9 @@ TEST(Caret, SecondStartWhileAlreadyActiveIsANoOp) {
 }
 
 TEST(Caret, StopMakesItInactiveAndNotVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -374,9 +504,9 @@ TEST(Caret, StopMakesItInactiveAndNotVisible) {
 }
 
 TEST(Caret, BlinksBetweenVisibleAndHiddenOverTime) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -438,9 +568,9 @@ TEST(Caret, OnVisibilityChangedFiresOnEachBlinkTick) {
     // something *else* (e.g. a mouse-hover repaint) incidentally
     // repainted it too (confirmed live via examples/controls1.cpp - the
     // caret only blinked while the mouse was moving).
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -486,9 +616,9 @@ TEST(Caret, DrawDoesNothingWhenNotVisible) {
 }
 
 TEST(Caret, DrawPaintsASystemWidthBarWhenVisible) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     Caret caret;
     std::mutex mutex;
@@ -1349,4 +1479,338 @@ TEST(TextLayoutEngine, UpdateReflectsChangedTextOnASubsequentCall) {
     // wider - proves update() actually rebuilt against the new text
     // rather than reusing the first call's cached layout.
     EXPECT_GT(longerRects[0].width(), shortRects[0].width());
+}
+
+namespace {
+    bool imageHasInk(const BLImage& image) {
+        BLImageData data;
+        image.get_data(&data);
+        const uint8_t* base = static_cast<const uint8_t*>(data.pixel_data);
+        for (int y = 0; y < data.size.h; ++y) {
+            const uint32_t* row = reinterpret_cast<const uint32_t*>(base + y * data.stride);
+            for (int x = 0; x < data.size.w; ++x) {
+                if ((row[x] >> 24) > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+}
+
+TEST(TextLayoutEngine, SplitsTheTextIntoLinesAtEachBreak) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"a\nbb\r\nccc");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 3u);
+    EXPECT_EQ(engine.lineStart(0), 0u);
+    EXPECT_EQ(engine.lineLength(0), 1u);
+    EXPECT_EQ(engine.lineStart(1), 2u);
+    EXPECT_EQ(engine.lineLength(1), 2u);
+    EXPECT_EQ(engine.lineStart(2), 6u);
+    EXPECT_EQ(engine.lineLength(2), 3u);
+    EXPECT_EQ(engine.lineAt(4), 1u);
+    EXPECT_EQ(engine.lineAt(9), 2u);
+    EXPECT_GT(engine.lineTop(1), engine.lineTop(0));
+    EXPECT_FLOAT_EQ(engine.lineTop(2), engine.lineTop(1) + engine.lineHeight(1));
+    EXPECT_FLOAT_EQ(engine.contentHeight(), engine.lineTop(2) + engine.lineHeight(2));
+}
+
+// Run with --gtest_also_run_disabled_tests to see the numbers.
+TEST(TextLayoutEngine, DISABLED_TimingsOnALargeText) {
+    using clock = std::chrono::steady_clock;
+    auto ms = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::wstring text;
+    for (int i = 0; i < 100000; ++i) {
+        text += L"    int value" + std::to_wstring(i) + L" = compute(alpha, beta);\n";
+    }
+    TextStorage storage(text);
+    TextLayoutEngine engine;
+    newui::Font font;
+    auto t0 = clock::now();
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t1 = clock::now();
+    // A keystroke in the middle.
+    storage.insert(text.size() / 2, L"x");
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t2 = clock::now();
+    storage.insert(text.size() / 2 + 1, L"y");
+    ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
+    auto t3 = clock::now();
+    std::printf("100000 lines: first full layout %.0f ms (%zu DirectWrite layouts), keystroke %.2f ms then %.2f ms (%zu built)\n",
+        ms(t0, t1), static_cast<std::size_t>(engine.lineCount()), ms(t1, t2), ms(t2, t3), engine.layoutsBuiltLastUpdate());
+}
+
+TEST(TextLayoutEngine, ALoneCrBreaksALineToo) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"a\rbb\r\nccc\rd");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 4u);
+    EXPECT_EQ(engine.lineStart(1), 2u);
+    EXPECT_EQ(engine.lineLength(1), 2u);
+    EXPECT_EQ(engine.lineStart(2), 6u);
+    EXPECT_EQ(engine.lineLength(2), 3u);
+    EXPECT_EQ(engine.lineStart(3), 10u);
+    EXPECT_EQ(engine.lineLength(3), 1u);
+}
+
+namespace {
+    // The edit-aware update against a from-scratch one on the same final text.
+    void expectSameLines(const TextLayoutEngine& a, const TextLayoutEngine& b) {
+        ASSERT_EQ(a.lineCount(), b.lineCount());
+        for (std::size_t i = 0; i < a.lineCount(); ++i) {
+            EXPECT_EQ(a.lineStart(i), b.lineStart(i)) << "line " << i;
+            EXPECT_EQ(a.lineLength(i), b.lineLength(i)) << "line " << i;
+        }
+    }
+}
+
+TEST(TextLayoutEngine, EditsThatMakeOrBreakACrLfPairMatchAFreshLayout) {
+    struct Case { const wchar_t* before; std::size_t at; std::size_t remove; const wchar_t* insert; };
+    const Case cases[] = {
+        { L"a\rb\nc", 2, 0, L"\n" },       // '\n' typed after a '\r': "\r\n"
+        { L"a\r\nb\nc", 2, 1, L"" },       // its '\n' deleted: a lone '\r' again
+        { L"a\r\nb\nc", 1, 1, L"" },       // its '\r' deleted
+        { L"a\nb\nc", 1, 0, L"\r" },       // '\r' typed before a '\n'
+        { L"a\nb\nc", 1, 0, L"x\r" },      // text ending in '\r' typed before a '\n'
+        { L"a\rb\rc", 2, 0, L"\n\r" },
+        { L"a\r\rb", 2, 0, L"\n" },        // between two lone '\r's
+        { L"one\r\ntwo\r\nthree", 5, 3, L"" },   // a whole line removed
+    };
+    for (const Case& c : cases) {
+        TextLayoutEngine incremental;
+        newui::Font font;
+        TextStorage storage(c.before);
+        ASSERT_TRUE(incremental.update(storage, font, 500.0f, 200.0f));
+        storage.replace(TextRange(c.at, c.remove), c.insert);
+        ASSERT_TRUE(incremental.update(storage, font, 500.0f, 200.0f));
+
+        TextLayoutEngine fresh;
+        ASSERT_TRUE(fresh.update(storage, font, 500.0f, 200.0f));
+        expectSameLines(incremental, fresh);
+    }
+}
+
+TEST(TextLayoutEngine, EmptyAndTrailingLinesHaveARealHeight) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"abc\n");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    ASSERT_EQ(engine.lineCount(), 2u);
+    EXPECT_NEAR(engine.lineHeight(1), engine.lineHeight(0), 0.5f);
+
+    newui::Point topLeft;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(4), topLeft, height);
+    EXPECT_NEAR(topLeft.y, engine.lineTop(1), 0.5f);
+    EXPECT_GT(height, 0.0f);
+}
+
+TEST(TextLayoutEngine, AnEditRebuildsOnlyTheLinesItTouched) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage original(L"one\ntwo\nthree\nfour\nfive");
+    ASSERT_TRUE(engine.update(original, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 5u);
+
+    TextStorage edited(L"one\ntwo\nthreeX\nfour\nfive");
+    ASSERT_TRUE(engine.update(edited, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
+
+    TextStorage split(L"one\ntwo\nthr\neeX\nfour\nfive");
+    ASSERT_TRUE(engine.update(split, font, 500.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 2u);
+    EXPECT_EQ(engine.lineCount(), 6u);
+    EXPECT_EQ(engine.lineStart(5), 21u);
+
+    // A different width re-lays out everything.
+    ASSERT_TRUE(engine.update(split, font, 400.0f, 200.0f));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 6u);
+}
+
+TEST(TextLayoutEngine, HitTestingMapsAcrossLines) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"first\nsecond\nthird");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    newui::Point topLeft;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(8), topLeft, height);
+    EXPECT_NEAR(topLeft.y, engine.lineTop(1), 0.5f);
+    EXPECT_GT(topLeft.x, 0.0f);
+
+    const TextPosition hit = engine.hitTestPoint(newui::Point(1.0f, engine.lineTop(2) + 2.0f));
+    ASSERT_TRUE(hit.isValid());
+    EXPECT_EQ(hit.offset(), 13u);
+
+    // Past the end of a line lands before its break, not on the next line.
+    const TextPosition end = engine.hitTestPoint(newui::Point(480.0f, engine.lineTop(0) + 2.0f));
+    EXPECT_EQ(end.offset(), 5u);
+    // Below everything: the last line.
+    EXPECT_EQ(engine.lineAt(engine.hitTestPoint(newui::Point(1.0f, 1000.0f)).offset()), 2u);
+
+    const TextRange line = engine.lineRange(TextPosition(9));
+    EXPECT_EQ(line.start(), 6u);
+    EXPECT_EQ(line.length(), 6u);
+}
+
+TEST(TextLayoutEngine, HitTestRangeSpanningLinesCoversEachLineAndTheBreaks) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"first\nsecond\nthird");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
+
+    // "rst\nsecond\nth"
+    const std::vector<newui::Rect> rects = engine.hitTestRange(TextRange(2, 13));
+    ASSERT_EQ(rects.size(), 5u);   // three text runs + two line breaks
+    EXPECT_NEAR(rects.front().top(), engine.lineTop(0), 0.5f);
+    EXPECT_NEAR(rects.back().top(), engine.lineTop(2), 0.5f);
+}
+
+TEST(TextRenderer, EngineRenderDrawsOnlyTheLinesInView) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    std::wstring text = L"X";
+    for (int i = 0; i < 200; ++i) {
+        text += L"\n";
+    }
+    text += L"X";
+    TextStorage storage(text);
+    ASSERT_TRUE(engine.update(storage, font, 120.0f, 40.0f));
+    newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
+    TextRenderer renderer;
+
+    // Scrolled to the middle: only empty lines in view.
+    BLImage middle(120, 40, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(middle);
+        ctx.clear_all();
+        renderer.render(ctx, 120, 40, engine, black, engine.lineTop(100));
+        ctx.end();
+    }
+    EXPECT_FALSE(imageHasInk(middle));
+
+    // Scrolled to the last line.
+    BLImage last(120, 40, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(last);
+        ctx.clear_all();
+        renderer.render(ctx, 120, 40, engine, black, engine.lineTop(200));
+        ctx.end();
+    }
+    EXPECT_TRUE(imageHasInk(last));
+}
+
+namespace {
+    // "a {" / "  b" / "}" / "c", with [3, 8) - the break after '{' up to '}' - foldable.
+    const wchar_t* kFoldText = L"a {\n  b\n}\nc";
+    TextFold blockFold(bool collapsed) {
+        TextFold fold;
+        fold.start = 3;
+        fold.length = 5;
+        fold.placeholder = L"...";
+        fold.collapsed = collapsed;
+        return fold;
+    }
+}
+
+TEST(TextLayoutEngine, AnExpandedFoldChangesNothing) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    EXPECT_EQ(engine.lineCount(), 4u);
+    EXPECT_TRUE(engine.placeholderRects(0.0f, 1000.0f).empty());
+}
+
+TEST(TextLayoutEngine, ACollapsedFoldJoinsItsLinesAroundThePlaceholder) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(true) }));
+
+    ASSERT_EQ(engine.lineCount(), 2u);
+    EXPECT_EQ(engine.lineStart(0), 0u);
+    EXPECT_EQ(engine.lineLength(0), 9u);   // "a {" + hidden + "}"
+    EXPECT_EQ(engine.lineStart(1), 10u);
+    EXPECT_EQ(engine.lineAt(6), 0u);
+
+    // The fold's edges sit either side of the placeholder; hidden text maps to its start.
+    newui::Point before, after, hidden;
+    float height = 0.0f;
+    engine.hitTestPosition(TextPosition(3), before, height);
+    engine.hitTestPosition(TextPosition(8), after, height);
+    engine.hitTestPosition(TextPosition(6), hidden, height);
+    EXPECT_GT(after.x, before.x + 5.0f);
+    EXPECT_NEAR(after.y, before.y, 0.5f);
+    EXPECT_NEAR(hidden.x, before.x, 0.5f);
+
+    const std::vector<newui::Rect> placeholders = engine.placeholderRects(0.0f, 1000.0f);
+    ASSERT_EQ(placeholders.size(), 1u);
+    const newui::Point centre(placeholders[0].left() + placeholders[0].width() / 2.0f,
+        placeholders[0].top() + placeholders[0].height() / 2.0f);
+    std::size_t foldStart = 0;
+    EXPECT_TRUE(engine.foldAtPoint(centre, foldStart));
+    EXPECT_EQ(foldStart, 3u);
+    EXPECT_FALSE(engine.foldAtPoint(newui::Point(1.0f, centre.y), foldStart));
+
+    // A click on the placeholder never lands inside the hidden text.
+    const std::size_t hit = engine.hitTestPoint(centre).offset();
+    EXPECT_TRUE(hit == 3u || hit == 8u);
+    // Home/End span the joined line.
+    const TextRange line = engine.lineRange(TextPosition(8));
+    EXPECT_EQ(line.start(), 0u);
+    EXPECT_EQ(line.length(), 9u);
+    // A range through hidden text covers the placeholder.
+    EXPECT_EQ(engine.hitTestRange(TextRange(5, 1)).size(), 1u);
+}
+
+TEST(TextLayoutEngine, CollapsingAFoldRebuildsOnlyTheJoinedLine) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(kFoldText);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(true) }));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, true, {}, { blockFold(false) }));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 3u);
+}
+
+TEST(TextLayoutEngine, FontRunsFollowTheTextAroundACollapsedFold) {
+    TextLayoutEngine plainEngine;
+    TextLayoutEngine boldEngine;
+    newui::Font font;
+    font.setSize(16.0f);
+    TextStorage storage(L"xx {\n hidden\n} yyyy");
+    TextFold fold;
+    fold.start = 4;
+    fold.length = 9;
+    fold.collapsed = true;
+    TextFontRun bold;
+    bold.start = 13;   // "} yyyy"
+    bold.length = 6;
+    bold.bold = true;
+    ASSERT_TRUE(plainEngine.update(storage, font, 500.0f, 200.0f, true, {}, { fold }));
+    ASSERT_TRUE(boldEngine.update(storage, font, 500.0f, 200.0f, true, { bold }, { fold }));
+
+    newui::Point plainEnd, boldEnd, plainFold, boldFold;
+    float height = 0.0f;
+    plainEngine.hitTestPosition(TextPosition(19), plainEnd, height);
+    boldEngine.hitTestPosition(TextPosition(19), boldEnd, height);
+    plainEngine.hitTestPosition(TextPosition(13), plainFold, height);
+    boldEngine.hitTestPosition(TextPosition(13), boldFold, height);
+    EXPECT_NEAR(boldFold.x, plainFold.x, 0.5f) << "text before the run is unchanged";
+    EXPECT_GT(boldEnd.x, plainEnd.x) << "the run lands on the text after the fold";
 }

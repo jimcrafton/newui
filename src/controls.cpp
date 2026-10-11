@@ -1,12 +1,17 @@
 #include "newui/controls.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
+#include "newui/clipboardmgr.h"
 #include "newui/color.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
+#include "newui/font.h"
+#include "newui/fontmanager.h"
+#include "newui/layout.h"
 #include "newui/popupframe.h"
 #include "newui/runloop.h"
 #include "newui/uicolormanager.h"
+#include "newui/utils.h"
 
 #include <algorithm>
 #include <any>
@@ -57,15 +62,12 @@ namespace newui {
     Progress::Progress() {
         setVisible(true);
 
-        auto trackStyle = std::make_unique<ThemedProgressBarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedProgressBarTrackStyle>());
 
         fill_ = new SubView();
         fill_->setVisible(true);
-        auto fillStyle = std::make_unique<ThemedProgressBarFillStyle>();
-        fillStyle_ = fillStyle.get();
-        fill_->setStyle(std::move(fillStyle));
+        fill_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+        fill_->setStyle(std::make_unique<ThemedProgressBarFillStyle>());
         addChild(fill_);
 
         onSizeChanged.add(this, &Progress::handleSizeChanged);
@@ -86,8 +88,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        fillStyle_->horizontal = value;
+        // dynamic_cast, not a cached typed pointer - see fillState()'s
+        // own comment (controls.h) for why.
+        dynamic_cast<ThemedProgressBarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedProgressBarFillStyle&>(fill_->style()).horizontal = value;
         updateFillBounds();
     }
 
@@ -131,10 +135,10 @@ namespace newui {
 
     Button::Button() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->font = FontManager::getSystemFont(SystemUIFont::Message);
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         // UIColorManager::colorFor(), not Color::fromSystemColor() - the
@@ -156,6 +160,7 @@ namespace newui {
         onMouseDown.add(this, &Button::handlePressStart);
         onMouseUp.add(this, &Button::handlePressEnd);
         onClick.add(this, &Button::handleClicked);
+        onStateChanged.add(this, &Button::handleStateChanged);
     }
 
     void Button::setText(const std::string& text) {
@@ -181,12 +186,29 @@ namespace newui {
     }
 
     void Button::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedButtonStyle* - see this
+        // class's own doc comment (controls.h) for why: style() can be
+        // swapped out from under a Button (setStyle() is public on View),
+        // and a cached typed pointer would either dangle (if the old
+        // style was destroyed) or silently alias the wrong layout (if
+        // the new one isn't actually a ThemedButtonStyle). Deriving it
+        // live here costs one runtime check per call, in exchange for
+        // failing loud (std::bad_cast) instead of either.
+        auto& buttonStyle = dynamic_cast<ThemedButtonStyle&>(style());
+
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
-        if (buttonStyle_->pressed == wantPressed) {
+        bool wantEnabled = isEnabled();
+        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
+    }
+
+    SyncReturn Button::handleStateChanged(Control& /*sender*/) {
+        updatePressedVisual();
+        return SyncReturn::Ignored;
     }
 
     SyncReturn Button::handlePressStart(View& /*sender*/, const Point& /*pt*/,
@@ -218,9 +240,24 @@ namespace newui {
             return;
         }
 
-        BLFont* blFont = buttonStyle_->font.blFont();
+        // style().font() - font()/compositingOp()/opacity() below are all
+        // declared on ViewStyle itself (viewstyle.h), not ThemedButtonStyle
+        // specifically, so no cast is needed to reach them - only
+        // updatePressedVisual()'s own .pressed/.enabled (real
+        // ThemedButtonStyle-only fields) needs dynamic_cast<ThemedButtonStyle&>.
+        //
+        // This is a real, Properties-panel-editable property
+        // (FontPropertyEditor, cpp_codetools, which already rejects an
+        // edit that wouldn't resolve - see its own fontResolves()
+        // comment) - but a font set some other way (loading a saved
+        // document on a machine missing that face, say) can still fail
+        // to resolve here. A real, live-reported crash when this used to
+        // throw: skipping the text draw is the graceful degradation; the
+        // rest of this Button (its native chrome) still paints normally
+        // either way.
+        BLFont* blFont = style().font().blFont();
         if (blFont == nullptr || !blFont->is_valid()) {
-            throw std::runtime_error("Button::paint: font not resolved to a valid BLFont");
+            return;
         }
 
         Rect clientBounds = getClientBounds();
@@ -242,10 +279,18 @@ namespace newui {
         double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
         double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
+        // Same UIColorRole::DisabledText convention Label::handleStateChanged()
+        // already uses - the native BUTTON chrome (ThemedButtonStyle::paint())
+        // does visibly change for PBS_DISABLED (unlike a flat toolbar button),
+        // but the text drawn on top of it still needs to dim independently.
+        BLRgba32 effectiveTextColor = isEnabled()
+            ? BLRgba32(textColor_.as<BLRgba32>())
+            : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
         ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
-        ctx.set_fill_style(textColor_);
-        ctx.set_fill_alpha(buttonStyle_->opacity);
+        ctx.set_comp_op( toBLCompOp( style().compositingOp()));
+        ctx.set_fill_style(effectiveTextColor);
+        ctx.set_fill_alpha(style().opacity());
         ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
         ctx.restore();
     }
@@ -256,6 +301,7 @@ namespace newui {
 
     Toggle::Toggle() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         rebuildStyle();
 
@@ -284,28 +330,31 @@ namespace newui {
 
     void Toggle::rebuildStyle() {
         if (radioStyle_) {
-            auto radioButtonStyle = std::make_unique<ThemedRadioButtonStyle>();
-            radioButtonStyle_ = radioButtonStyle.get();
-            checkBoxStyle_ = nullptr;
-            setStyle(std::move(radioButtonStyle));
+            setStyle(std::make_unique<ThemedRadioButtonStyle>());
         } else {
-            auto checkBoxStyle = std::make_unique<ThemedCheckBoxStyle>();
-            checkBoxStyle_ = checkBoxStyle.get();
-            radioButtonStyle_ = nullptr;
-            setStyle(std::move(checkBoxStyle));
+            setStyle(std::make_unique<ThemedCheckBoxStyle>());
         }
         updateStyleFields();
     }
 
     void Toggle::updateStyleFields() {
-        if (radioButtonStyle_ != nullptr) {
-            radioButtonStyle_->checked = checked_;
-            radioButtonStyle_->pressed = pressing_;
-            radioButtonStyle_->enabled = isEnabled();
+        // dynamic_cast, not a cached ThemedCheckBoxStyle*/
+        // ThemedRadioButtonStyle* - see Button::updatePressedVisual()'s
+        // own comment (above) for why. The pointer-form cast (not a
+        // throwing reference-form one) is what actually distinguishes
+        // which of the two style() legitimately is right now, not just a
+        // defensive habit - rebuildStyle() just set it to one or the
+        // other above.
+        if (auto* radio = dynamic_cast<ThemedRadioButtonStyle*>(&style())) {
+            radio->checked = checked_;
+            radio->pressed = pressing_;
+            radio->enabled = isEnabled();
+        } else if (auto* check = dynamic_cast<ThemedCheckBoxStyle*>(&style())) {
+            check->checked = checked_;
+            check->pressed = pressing_;
+            check->enabled = isEnabled();
         } else {
-            checkBoxStyle_->checked = checked_;
-            checkBoxStyle_->pressed = pressing_;
-            checkBoxStyle_->enabled = isEnabled();
+            throw std::runtime_error("Toggle::updateStyleFields: style() is neither ThemedRadioButtonStyle nor ThemedCheckBoxStyle");
         }
         style().markDirty();
     }
@@ -367,7 +416,7 @@ namespace newui {
             return;
         }
         text_ = text;
-        labelStyle_->text = text;
+        labelStyle_->setText(text);
         style().markDirty();
     }
 
@@ -376,7 +425,9 @@ namespace newui {
             return;
         }
         hotLink_ = value;
-        labelStyle_->font.setUnderlined(hotLink_);
+        Font labelFont = labelStyle_->font();
+        labelFont.setUnderlined(hotLink_);
+        labelStyle_->setFont(labelFont);
         // Only while enabled - matches updateTextColor()'s own "disabled
         // never invites a hyperlink click" rule, so a disabled hot-link
         // Label doesn't show a hand cursor for a click that won't do
@@ -387,27 +438,48 @@ namespace newui {
 
     void Label::setTextColor(BLRgba32 color) {
         textColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
     void Label::setLinkColor(BLRgba32 color) {
         linkColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
     void Label::setHoveredLinkColor(BLRgba32 color) {
         hoveredLinkColor_ = color;
-        updateTextColor();
+        updateTextColor(true);
     }
 
-    void Label::updateTextColor() {
-        if (!isEnabled()) {
-            labelStyle_->textColor = UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
-        } else if (hotLink_) {
-            labelStyle_->textColor = hovering_ ? hoveredLinkColor_ : linkColor_;
-        } else {
-            labelStyle_->textColor = textColor_;
+    namespace {
+        // linkColor_/hoveredLinkColor_/textColor_ (Label's own private members, above) are still
+        // plain BLVar, each always actually holding a solid RGBA32 color (never a gradient/image -
+        // set only via Label::setTextColor()/setLinkColor()/setHoveredLinkColor(BLRgba32)) -
+        // LabelStyle::textColor itself is a plain Color now (see its own comment, viewstyle.h), so
+        // this extracts the solid color back out for the assignment.
+        Color colorFromSolidBLVar(const BLVar& var) {
+            BLRgba32 rgba;
+            var.to_rgba32(&rgba);
+            return Color(rgba);
         }
+    }
+
+    void Label::updateTextColor(bool force) {
+        const Color& current = labelStyle_->textColor();
+        if (!force && !current.isNull() && current != lastAppliedTextColor_) {
+            return;  // manual override - see the declaration's comment (controls.h)
+        }
+
+        Color wanted;
+        if (!isEnabled()) {
+            wanted = UIColorManager::colorFor(UIColorRole::DisabledText);
+        } else if (hotLink_) {
+            wanted = colorFromSolidBLVar(hovering_ ? hoveredLinkColor_ : linkColor_);
+        } else {
+            wanted = colorFromSolidBLVar(textColor_);
+        }
+        labelStyle_->setTextColor(wanted);
+        lastAppliedTextColor_ = wanted;
         style().markDirty();
     }
 
@@ -439,21 +511,142 @@ namespace newui {
     }
 
     // -----------------------------------------------------------------
+    // GroupBox
+    // -----------------------------------------------------------------
+
+    GroupBox::GroupBox() {
+        setVisible(true);
+
+        // setFont() before setStyle() moves on - a freshly constructed
+        // style otherwise has no font at all, which paint() (below)
+        // treats as unresolved and silently skips drawing the caption
+        // for, exactly the same real, live-caught gap Button::Button()'s
+        // own comment already documents (and this class repeated at
+        // first: the caption never appeared in the live example app
+        // until this was added, confirmed via a temporary debug print
+        // showing style().font().blFont() as null).
+        auto groupBoxStyle = std::make_unique<ThemedGroupBoxStyle>();
+        groupBoxStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
+        setStyle(std::move(groupBoxStyle));
+
+        // Same UIColorManager::colorFor() reasoning as Button::Button()'s
+        // own comment above (dark-mode-aware, unlike Color::fromSystemColor()) -
+        // WindowText, not ControlText, since a GroupBox's caption sits
+        // directly on the surrounding window background, not on its own
+        // control-colored fill the way Button's label does.
+        textColor_ = UIColorManager::colorFor(UIColorRole::WindowText).toBLRgba32();
+
+        onStateChanged.add(this, &GroupBox::handleStateChanged);
+    }
+
+    void GroupBox::setText(const std::string& text) {
+        if (text_ == text) {
+            return;
+        }
+        text_ = text;
+        style().markDirty();
+    }
+
+    void GroupBox::setTextColor(BLRgba32 color) {
+        textColor_ = color;
+        style().markDirty();
+    }
+
+    SyncReturn GroupBox::handleStateChanged(Control& /*sender*/) {
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment above for why.
+        dynamic_cast<ThemedGroupBoxStyle&>(style()).enabled = isEnabled();
+        style().markDirty();
+        return SyncReturn::Ignored;
+    }
+
+    void GroupBox::paint(BLContext& ctx) {
+        if (text_.empty() || textColor_.is_null()) {
+            return;
+        }
+
+        // style().font() - declared on ViewStyle itself, no cast needed
+        // (same reasoning Button::paint()'s own comment above gives).
+        BLFont* blFont = style().font().blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+
+        Size size = bounds().size();
+        if (size.width <= 0.0f || size.height <= 0.0f) {
+            return;
+        }
+
+        BLGlyphBuffer glyphBuffer;
+        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+        blFont->shape(glyphBuffer);
+
+        BLTextMetrics textMetrics;
+        blFont->get_text_metrics(glyphBuffer, textMetrics);
+
+        const BLFontMetrics& fontMetrics = blFont->metrics();
+        double textWidth = textMetrics.advance.x;
+        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+
+        // A real Win32 GroupBox's caption straddles the top border line
+        // itself (half above the control's own top edge, half below) -
+        // deliberately not replicated here. This paint() call is
+        // View::paint()'s normal, *clipped* phase (View::paintChildren(),
+        // view.cpp - clipped to this GroupBox's own bounds, unlike
+        // prePaint()/postPaint()'s unclipped phases 1/3), so anything
+        // drawn at a negative local y here is silently clipped away
+        // entirely, not just visually cut off - confirmed while building
+        // this, not left as a guess. Achieving a real straddle would mean
+        // moving caption drawing into the *style* (ThemedGroupBoxStyle's
+        // own prePaint() override), which breaks this class's established
+        // "chrome vs. content" split (style draws chrome only, Control
+        // draws its own text - same as Button/ToolbarButton) for a purely
+        // cosmetic gain - not worth it. Kept fully inside instead: a
+        // small top/left inset, still with the background-colored
+        // backdrop faking a gap in the border immediately behind it (same
+        // technique a real comctl32 GroupBox uses, just positioned
+        // differently) - works the same regardless of which border
+        // style() is currently drawing underneath (native or
+        // FluentGroupBoxStyle, below), since both draw their top edge at
+        // this same local y = 0.
+        constexpr double kCaptionLeftInset = 8.0;
+        constexpr double kCaptionTopInset = 2.0;
+        constexpr double kCaptionBackdropPadding = 4.0;
+        double x = kCaptionLeftInset;
+        double topOfCaption = kCaptionTopInset;
+        double y = topOfCaption + fontMetrics.ascent;
+
+        BLRgba32 effectiveTextColor = isEnabled()
+            ? BLRgba32(textColor_.as<BLRgba32>())
+            : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
+        ctx.save();
+        ctx.set_comp_op(toBLCompOp(style().compositingOp()));
+        ctx.set_fill_alpha(style().opacity());
+
+        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+        ctx.fill_rect(BLRect(x - kCaptionBackdropPadding, topOfCaption,
+            textWidth + kCaptionBackdropPadding * 2.0, textHeight));
+
+        ctx.set_fill_style(effectiveTextColor);
+        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+        ctx.restore();
+    }
+
+    // -----------------------------------------------------------------
     // Slider
     // -----------------------------------------------------------------
 
     Slider::Slider() {
         setVisible(true);
+        setAcceptsFocus(true);
 
-        auto trackStyle = std::make_unique<ThemedTrackbarTrackStyle>();
-        trackStyle_ = trackStyle.get();
-        setStyle(std::move(trackStyle));
+        setStyle(std::make_unique<ThemedTrackbarTrackStyle>());
 
         thumb_ = new SubView();
         thumb_->setVisible(true);
-        auto thumbStyle = std::make_unique<ThemedTrackbarThumbStyle>();
-        thumbStyle_ = thumbStyle.get();
-        thumb_->setStyle(std::move(thumbStyle));
+        thumb_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+        thumb_->setStyle(std::make_unique<ThemedTrackbarThumbStyle>());
         addChild(thumb_);
 
         onSizeChanged.add(this, &Slider::handleSizeChanged);
@@ -491,7 +684,7 @@ namespace newui {
     }
 
     void Slider::updateTickCount() {
-        if (ticksStyle_ == nullptr) {
+        if (ticks_ == nullptr) {
             return;
         }
         int count = kDefaultTickIntervals;
@@ -503,7 +696,9 @@ namespace newui {
                 count = kMaxTickIntervals;
             }
         }
-        ticksStyle_->tickCount = count;
+        // dynamic_cast, not a cached typed pointer - see Progress::
+        // fillState()'s own comment (controls.h) for why.
+        dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).tickCount = count;
         style().markDirty();
     }
 
@@ -549,10 +744,10 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
-        thumbStyle_->horizontal = value;
-        if (ticksStyle_ != nullptr) {
-            ticksStyle_->horizontal = value;
+        dynamic_cast<ThemedTrackbarTrackStyle&>(style()).horizontal = value;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).horizontal = value;
+        if (ticks_ != nullptr) {
+            dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).horizontal = value;
         }
         updateThumbBounds();
         updateTicksBounds();
@@ -566,9 +761,9 @@ namespace newui {
 
         if (ticks_ == nullptr) {
             ticks_ = new SubView();
+            ticks_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
             auto ticksStyle = std::make_unique<ThemedTrackbarTicksStyle>();
-            ticksStyle_ = ticksStyle.get();
-            ticksStyle_->horizontal = horizontal_;
+            ticksStyle->horizontal = horizontal_;
             ticks_->setStyle(std::move(ticksStyle));
             addChild(ticks_);
             updateTickCount();
@@ -597,18 +792,19 @@ namespace newui {
         // rendering the fallback-sized thumb while a dragged one, which
         // happened to re-run this after painting, picked up the real,
         // very different theme size).
-        bool wasPressed = thumbStyle_->pressed;
-        bool wasEnabled = thumbStyle_->enabled;
-        thumbStyle_->pressed = false;
-        thumbStyle_->enabled = true;
-        Size resolved = thumbStyle_->partSize(Size(kThumbSize, kThumbSize));
-        thumbStyle_->pressed = wasPressed;
-        thumbStyle_->enabled = wasEnabled;
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        bool wasPressed = thumbStyle.pressed;
+        bool wasEnabled = thumbStyle.enabled;
+        thumbStyle.pressed = false;
+        thumbStyle.enabled = true;
+        Size resolved = thumbStyle.partSize(Size(kThumbSize, kThumbSize));
+        thumbStyle.pressed = wasPressed;
+        thumbStyle.enabled = wasEnabled;
         return resolved;
     }
 
     Size Slider::resolvedTicksSize() const {
-        return ticksStyle_->partSize(Size(kTicksSize, kTicksSize));
+        return dynamic_cast<ThemedTrackbarTicksStyle&>(ticks_->style()).partSize(Size(kTicksSize, kTicksSize));
     }
 
     Rect Slider::trackRect() const {
@@ -619,9 +815,9 @@ namespace newui {
         // Reserve however thick the ticks strip's own theme part
         // actually is (see updateTicksBounds()'s own use of the same
         // query) below (horizontal) or to the right (vertical) for it -
-        // see showTicks()'s own doc comment (controls.h). ticksStyle_ is
+        // see showTicks()'s own doc comment (controls.h). ticks_ is
         // always non-null here (only reachable once showTicks_ is true,
-        // which only ever gets set after ticksStyle_ is created - see
+        // which only ever gets set after ticks_ is created - see
         // setShowTicks()).
         Size ticksSize = resolvedTicksSize();
         if (horizontal_) {
@@ -728,7 +924,7 @@ namespace newui {
             return SyncReturn::Ignored;
         }
         dragging_ = true;
-        thumbStyle_->pressed = true;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = true;
         style().markDirty();
         updateValueFromLocalPoint(toLocalSpace(sender, pt));
         return SyncReturn::Handled;
@@ -746,16 +942,17 @@ namespace newui {
     SyncReturn Slider::handleDragEnd(View& /*sender*/, const Point& /*pt*/,
             std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         dragging_ = false;
-        thumbStyle_->pressed = false;
+        dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style()).pressed = false;
         style().markDirty();
         return SyncReturn::Handled;
     }
 
     SyncReturn Slider::handleStateChanged(Control& /*sender*/) {
-        thumbStyle_->enabled = isEnabled();
+        auto& thumbStyle = dynamic_cast<ThemedTrackbarThumbStyle&>(thumb_->style());
+        thumbStyle.enabled = isEnabled();
         if (!isEnabled()) {
             dragging_ = false;
-            thumbStyle_->pressed = false;
+            thumbStyle.pressed = false;
         }
         style().markDirty();
         return SyncReturn::Handled;
@@ -1040,28 +1237,31 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        Application::instance().runLoop().postIdle([this, alive]() {
-            if (!*alive || !repeating_) {
-                return true;  // destroyed, or the press already ended - stop
-            }
+        RunLoop& loop = RunLoop::current();
+        if (loop) {
+            loop.postIdle([this, alive]() {
+                if (!*alive || !repeating_) {
+                    return true;  // destroyed, or the press already ended - stop
+                }
 
-            auto now = std::chrono::steady_clock::now();
-            if (now < repeatNextTime_) {
-                return false;  // not time for the next tick yet - keep polling
-            }
-            repeatNextTime_ = now + kRepeatInterval;
+                auto now = std::chrono::steady_clock::now();
+                if (now < repeatNextTime_) {
+                    return false;  // not time for the next tick yet - keep polling
+                }
+                repeatNextTime_ = now + kRepeatInterval;
 
-            if (trackRepeat_ && thumbRect_.contains(trackClickPt_)) {
-                // The thumb has caught up to (or passed) the original
-                // click point - real Win32 track-click paging stops here
-                // on its own, without needing a release.
-                repeating_ = false;
-                return true;
-            }
+                if (trackRepeat_ && thumbRect_.contains(trackClickPt_)) {
+                    // The thumb has caught up to (or passed) the original
+                    // click point - real Win32 track-click paging stops here
+                    // on its own, without needing a release.
+                    repeating_ = false;
+                    return true;
+                }
 
-            setValue(value_ + repeatAmount_);
-            return false;
-        });
+                setValue(value_ + repeatAmount_);
+                return false;
+                });
+        }
     }
 
     void ScrollBar::stopRepeat() {
@@ -1272,7 +1472,9 @@ namespace newui {
         repeatNextTime_ = std::chrono::steady_clock::now() + kRepeatInitialDelay;
 
         std::shared_ptr<bool> alive = aliveFlag_;
-        Application::instance().runLoop().postIdle([this, alive]() {
+        RunLoop& loop = RunLoop::current();
+        
+        loop.postIdle([this, alive]() {
             if (!*alive || !repeating_) {
                 return true;  // destroyed, or the press already ended - stop
             }
@@ -1385,6 +1587,7 @@ namespace newui {
 
     ScrollView::ScrollView() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         viewport_ = new SubView();
         viewport_->setVisible(true);
@@ -1405,12 +1608,14 @@ namespace newui {
 
         vBar_ = new ScrollBar();
         vBar_->setVisible(true);
+        vBar_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         vBar_->setHorizontal(false);
         vBar_->onValueChanged.add(this, &ScrollView::handleVBarValueChanged);
         SubView::addChild(vBar_);
 
         hBar_ = new ScrollBar();
         hBar_->setVisible(true);
+        hBar_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
         hBar_->setHorizontal(true);
         hBar_->onValueChanged.add(this, &ScrollView::handleHBarValueChanged);
         SubView::addChild(hBar_);
@@ -1424,6 +1629,14 @@ namespace newui {
 
     void ScrollView::addChild(SubView* child) {
         viewport_->addChild(child);
+        // See handleContentChildContentSizeChanged()'s own doc comment (controls.h) for why this
+        // is needed at all, not just addChild()'s own updateLayout() call below - a real,
+        // live-reported bug otherwise: expanding a TreeView row (or any other in-place content
+        // change - more text typed, a different font, ...) grows the child's own contentSize()
+        // without this ScrollView ever finding out, so its bars stay stale until some unrelated
+        // event (a resize) happens to call updateLayout() again.
+        child->onContentSizeChanged.add(this, &ScrollView::handleContentChildContentSizeChanged);
+        child->onRequestScrollIntoView.add(this, &ScrollView::handleContentRequestScrollIntoView);
         // Picks up child's own contentSize() immediately (see
         // updateLayout()'s own comment) rather than leaving contentSize_
         // at whatever it was (typically the default Size(), showing no
@@ -1452,11 +1665,26 @@ namespace newui {
         // (ScrollView.BarsHiddenWhenContentFitsViewport et al., all
         // called destroy() and crashed before this fix).
         if (child == viewport_ || child == vBar_ || child == hBar_) {
+            // Chrome only leaves during destroy(); clear it first so the virtual updateLayout()
+            // SubView::removeChild() triggers sees it gone rather than touching a dying view.
+            if (child == viewport_) { viewport_ = nullptr; }
+            if (child == vBar_) { vBar_ = nullptr; }
+            if (child == hBar_) { hBar_ = nullptr; }
             SubView::removeChild(child);
             return;
         }
         viewport_->removeChild(child);
         updateLayout();
+    }
+
+    void ScrollView::reorderChild(SubView* child, std::size_t newIndex) {
+        // Same identity guard as removeChild() above - viewport_/vBar_/hBar_ live in
+        // *this* ScrollView's own childViews_, not viewport_'s.
+        if (child == viewport_ || child == vBar_ || child == hBar_) {
+            SubView::reorderChild(child, newIndex);
+            return;
+        }
+        viewport_->reorderChild(child, newIndex);
     }
 
     void ScrollView::setContentSize(const Size& size) {
@@ -1482,6 +1710,11 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    SyncReturn ScrollView::handleContentChildContentSizeChanged(View& /*sender*/) {
+        updateLayout();
+        return SyncReturn::Handled;
+    }
+
     SubView* ScrollView::virtualizedContentChild() const {
         if (viewport_->childViews().size() != 1) {
             return nullptr;
@@ -1492,18 +1725,33 @@ namespace newui {
     }
 
     void ScrollView::updateLayout() {
+        // View's constructor-time addChild() calls reach here before all three exist.
+        if (viewport_ == nullptr || vBar_ == nullptr || hBar_ == nullptr || isDestroying()) {
+            return;
+        }
+        LayoutPass pass(*this);
         SubView* soleChild = viewport_->childViews().size() == 1 ? viewport_->childViews().front() : nullptr;
         SubView* virtualizedChild = virtualizedContentChild();
 
         Rect client = getClientBounds();
+        // Natural thickness of each bar - its current size once it has
+        // one, else a fallback for the very first pass (off by a couple of
+        // pixels at most, corrected on the next pass).
+        constexpr float kBarThicknessFallback = 16.0f;
+        float vBarWidth = vBar_->bounds().size().width > 0.0f ? vBar_->bounds().size().width : kBarThicknessFallback;
+        float hBarHeight = hBar_->bounds().size().height > 0.0f ? hBar_->bounds().size().height : kBarThicknessFallback;
         if (virtualizedChild) {
-            // Pin to the full client width first - contentSize() below
-            // needs a real wrap width to answer meaningfully, and
-            // whatever bounds() this child happened to have before being
-            // hosted here (its construction default, most likely) isn't
-            // it. Narrowed to the final viewportWidth (if a vertical bar
-            // ends up reserved) further down, once that's known.
-            virtualizedChild->setBounds(Rect(0.0f, 0.0f, client.size().width, client.size().height));
+            // Pin to a real width first - contentSize() below needs one to
+            // wrap against, and whatever bounds() this child had before
+            // being hosted here isn't it. The space left beside the bars
+            // as they are now: in the steady state that's also the final
+            // width, so the child isn't laid out at two widths every call
+            // (a TextControl re-lays out every line on a width change -
+            // ~40ms a pass for 5500 lines in Debug, twice per keystroke
+            // before this). Re-pinned further down if a bar comes or goes.
+            const float width = client.size().width - (vBar_->isVisible() ? vBarWidth : 0.0f);
+            const float height = client.size().height - (hBar_->isVisible() ? hBarHeight : 0.0f);
+            virtualizedChild->setBounds(Rect(0.0f, 0.0f, width > 0.0f ? width : 0.0f, height > 0.0f ? height : 0.0f));
         }
 
         // Re-derive contentSize_ from the sole content child's own
@@ -1520,29 +1768,26 @@ namespace newui {
             contentSize_ = soleChild ? soleChild->contentSize() : Size();
         }
 
-        // Natural thickness of each bar - queried from its own arrow part
-        // the same way ScrollBar::resolvedArrowSize() does internally;
-        // reuse partSize() through a throwaway-free path isn't available
-        // here (that helper is private to ScrollBar), so this asks each
-        // bar's own current bounds' cross-axis size once one exists, or
-        // falls back to the bar's own arrow fallback constant's rough
-        // equivalent for the very first layout pass before either bar has
-        // ever been sized. Good enough - this only ever misjudges by a
-        // couple pixels on the first frame, self-corrects immediately
-        // once GetThemePartSize() is available (see ThemedViewStyle::
-        // partSize()'s own "no theme cached yet" fallback, viewstyle.h).
-        constexpr float kBarThicknessFallback = 16.0f;
-        float vBarWidth = vBar_->bounds().size().width > 0.0f ? vBar_->bounds().size().width : kBarThicknessFallback;
-        float hBarHeight = hBar_->bounds().size().height > 0.0f ? hBar_->bounds().size().height : kBarThicknessFallback;
-
         // Two-pass: whether one bar is needed can change whether the
         // other is (showing a vertical bar narrows the viewport, which
         // can newly make a horizontal bar necessary, and vice versa) -
         // check both against the full client first, then re-check each
         // against the space actually left after the other is reserved.
+        //
+        // The needH re-check is skipped for a virtualizedChild: its
+        // contentSize_.width was just pinned above (see "Pin to a real
+        // width first"), so it's self-referential - it's whatever width
+        // it was given, never an independent "wants more width" signal. Left
+        // ungated, contentSize_.width > (client.size().width - vBarWidth)
+        // is trivially true any time needV is true at all, spuriously
+        // reserving a horizontal bar for every vertically-scrolling
+        // ListView/TreeView/TextControl regardless of actual content
+        // width. contentSizeOverridden_ isn't checked here since
+        // overriding it doesn't change whether a virtualizedChild's
+        // *natural* answer would have been self-referential.
         bool needV = contentSize_.height > client.size().height;
         bool needH = contentSize_.width > client.size().width;
-        if (needV && !needH && contentSize_.width > (client.size().width - vBarWidth)) {
+        if (needV && !needH && !virtualizedChild && contentSize_.width > (client.size().width - vBarWidth)) {
             needH = true;
         }
         if (needH && !needV && contentSize_.height > (client.size().height - hBarHeight)) {
@@ -1567,6 +1812,18 @@ namespace newui {
             if (!contentSizeOverridden_) {
                 contentSize_ = virtualizedChild->contentSize();
             }
+        }
+
+        // One "line" is a row for a list/tree, else a fixed step - the bar's own default of 1 made a
+        // wheel notch (wheelLines_ lines) and an arrow-button click move a few pixels.
+        if (!lineStepOverridden_) {
+            float step = kDefaultLineStep;
+            if (auto* list = dynamic_cast<ListView*>(virtualizedChild)) {
+                step = list->rowHeight();
+            } else if (auto* tree = dynamic_cast<TreeView*>(virtualizedChild)) {
+                step = tree->rowHeight();
+            }
+            vBar_->setLineStep(step);
         }
 
         vBar_->setVisible(needV);
@@ -1605,13 +1862,13 @@ namespace newui {
     }
 
     SyncReturn ScrollView::handleVBarValueChanged(ScrollBar& /*sender*/) {
-        if (SubView* child = virtualizedContentChild()) {
+        if (SubView* child = virtualizedContentChild()) {            
             child->onScrollOffsetChanged.syncCall(*child, Point(hBar_->isVisible() ? hBar_->value() : 0.0f, vBar_->value()));
             child->redraw();
             return SyncReturn::Handled;
         }
         Point origin = viewport_->origin();
-        origin.y = vBar_->value();
+        origin.y = vBar_->value();        
         viewport_->setOrigin(origin);
         viewport_->redraw();
         return SyncReturn::Handled;
@@ -1627,6 +1884,34 @@ namespace newui {
         origin.x = hBar_->value();
         viewport_->setOrigin(origin);
         viewport_->redraw();
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ScrollView::handleContentRequestScrollIntoView(View& /*sender*/, const Rect& requestedRect) {
+        // setValue() on each bar, not a direct viewport_->setOrigin()/
+        // onScrollOffsetChanged call - that's what handleVBarValueChanged()/
+        // handleHBarValueChanged() above already do correctly for both the
+        // virtualized and ordinary cases, the exact same path a real
+        // scrollbar drag goes through. Nothing here needs to know which
+        // case applies.
+        if (vBar_->isVisible()) {
+            float viewportHeight = viewport_->bounds().size().height;
+            float currentTop = vBar_->value();
+            if (requestedRect.top() < currentTop) {
+                vBar_->setValue(requestedRect.top());
+            } else if (requestedRect.bottom() > currentTop + viewportHeight) {
+                vBar_->setValue(requestedRect.bottom() - viewportHeight);
+            }
+        }
+        if (hBar_->isVisible()) {
+            float viewportWidth = viewport_->bounds().size().width;
+            float currentLeft = hBar_->value();
+            if (requestedRect.left() < currentLeft) {
+                hBar_->setValue(requestedRect.left());
+            } else if (requestedRect.right() > currentLeft + viewportWidth) {
+                hBar_->setValue(requestedRect.right() - viewportWidth);
+            }
+        }
         return SyncReturn::Handled;
     }
 
@@ -1655,8 +1940,8 @@ namespace newui {
         // Tile default - see this class's own comment (controls.h) for
         // why a dedicated image control's default should differ from the
         // base ViewStyle default every other image-filled View shares.
-        imageStyle->imageFillMode = ImageFillMode::Align;
-        imageStyle->imageAlignment = ImageAlignment::Center;
+        imageStyle->setImageFillMode(ImageFillMode::Align);
+        imageStyle->setImageAlignment(ImageAlignment::Center);
         setStyle(std::move(imageStyle));
 
         onImagePathChanged.add(this, &Image::updateImage);
@@ -1672,13 +1957,13 @@ namespace newui {
 
     void Image::setImageFillMode(ImageFillMode mode)
     {
-        style().imageFillMode = mode;
+        style().setImageFillMode(mode);
         style().markDirty();
     }
 
     void Image::setImageAlignment(ImageAlignment align)
     {
-        style().imageAlignment = align;
+        style().setImageAlignment(align);
         style().markDirty();
     }
 
@@ -1718,10 +2003,10 @@ namespace newui {
 
     ToolbarButton::ToolbarButton() {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto buttonStyle = std::make_unique<ThemedToolbarButtonStyle>();
-        buttonStyle_ = buttonStyle.get();
-        buttonStyle_->font = FontManager::getSystemFont(SystemUIFont::Message);
+        buttonStyle->setFont(FontManager::getSystemFont(SystemUIFont::Message));
         setStyle(std::move(buttonStyle));
 
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
@@ -1729,6 +2014,7 @@ namespace newui {
         onMouseDown.add(this, &ToolbarButton::handlePressStart);
         onMouseUp.add(this, &ToolbarButton::handlePressEnd);
         onClick.add(this, &ToolbarButton::handleClicked);
+        onStateChanged.add(this, &ToolbarButton::handleStateChanged);
     }
 
     void ToolbarButton::setText(const std::string& text) {
@@ -1744,6 +2030,14 @@ namespace newui {
         style().markDirty();
     }
 
+    void ToolbarButton::setIcon(const std::string& resourceName) {
+        if (icon_ == resourceName) {
+            return;
+        }
+        icon_ = resourceName;
+        style().markDirty();
+    }
+
     void ToolbarButton::setChecked(bool value) {
         if (checked_ == value) {
             return;
@@ -1754,14 +2048,26 @@ namespace newui {
     }
 
     void ToolbarButton::updatePressedVisual() {
+        // dynamic_cast, not a cached ThemedToolbarButtonStyle* - see
+        // Button::updatePressedVisual()'s own comment (above) for why.
+        auto& buttonStyle = dynamic_cast<ThemedToolbarButtonStyle&>(style());
+
         bool wantPressed = pressing_;
         bool wantChecked = isToggleButton_ && checked_;
-        if (buttonStyle_->pressed == wantPressed && buttonStyle_->checked == wantChecked) {
+        bool wantEnabled = isEnabled();
+        if (buttonStyle.pressed == wantPressed && buttonStyle.checked == wantChecked
+                && buttonStyle.enabled == wantEnabled) {
             return;
         }
-        buttonStyle_->pressed = wantPressed;
-        buttonStyle_->checked = wantChecked;
+        buttonStyle.pressed = wantPressed;
+        buttonStyle.checked = wantChecked;
+        buttonStyle.enabled = wantEnabled;
         style().markDirty();
+    }
+
+    SyncReturn ToolbarButton::handleStateChanged(Control& /*sender*/) {
+        updatePressedVisual();
+        return SyncReturn::Ignored;
     }
 
     SyncReturn ToolbarButton::handlePressStart(View& /*sender*/, const Point& /*pt*/,
@@ -1789,13 +2095,10 @@ namespace newui {
     }
 
     void ToolbarButton::paint(BLContext& ctx) {
-        if (text_.empty() || textColor_.is_null()) {
+        bool hasIcon = !icon_.empty();
+        bool hasText = !text_.empty() && !textColor_.is_null();
+        if (!hasIcon && !hasText) {
             return;
-        }
-
-        BLFont* blFont = buttonStyle_->font.blFont();
-        if (blFont == nullptr || !blFont->is_valid()) {
-            throw std::runtime_error("ToolbarButton::paint: font not resolved to a valid BLFont");
         }
 
         Rect clientBounds = getClientBounds();
@@ -1803,26 +2106,71 @@ namespace newui {
             return;
         }
 
-        BLGlyphBuffer glyphBuffer;
-        glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
-        blFont->shape(glyphBuffer);
+        BLFont* blFont = nullptr;
+        double textWidth = 0.0;
+        double textHeight = 0.0;
+        if (hasText) {
+            // style().font() - no cast needed, font() is declared on
+            // ViewStyle itself (see Button::paint()'s own comment).
+            blFont = style().font().blFont();
+        }
+        // style().font() is a real, Properties-panel-editable property (FontPropertyEditor,
+        // cpp_codetools) - see Button::paint()'s own comment on why an unresolved font must
+        // degrade gracefully (skip drawing the text) instead of throwing/crashing here too.
+        if (hasText && (blFont == nullptr || !blFont->is_valid())) {
+            hasText = false;
+            blFont = nullptr;
+        }
+        if (hasText) {
+            BLGlyphBuffer glyphBuffer;
+            glyphBuffer.set_utf8_text(text_.c_str(), text_.size());
+            blFont->shape(glyphBuffer);
 
-        BLTextMetrics textMetrics;
-        blFont->get_text_metrics(glyphBuffer, textMetrics);
+            BLTextMetrics textMetrics;
+            blFont->get_text_metrics(glyphBuffer, textMetrics);
 
-        const BLFontMetrics& fontMetrics = blFont->metrics();
-        double textWidth = textMetrics.advance.x;
-        double textHeight = fontMetrics.ascent + fontMetrics.descent;
+            const BLFontMetrics& fontMetrics = blFont->metrics();
+            textWidth = textMetrics.advance.x;
+            textHeight = fontMetrics.ascent + fontMetrics.descent;
+        }
 
-        double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+        // Icon + text painted as one centered block - assumes the icon
+        // paints successfully (a missing icon file leaves a small,
+        // accepted gap rather than re-centering after the fact).
+        double iconWidth = hasIcon ? (kIconSize + kIconGap) : 0.0;
+        double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
+        double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
 
-        ctx.save();
-        ctx.set_comp_op( toBLCompOp( buttonStyle_->compositingOp));
-        ctx.set_fill_style(textColor_);
-        ctx.set_fill_alpha(buttonStyle_->opacity);
-        ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
-        ctx.restore();
+        // A flat toolbar button shows no visible border/fill at rest either
+        // way (the style's own enabled field only changes the native
+        // TS_DISABLED/TS_NORMAL background chrome, invisible here) - dimming this
+        // foreground content is the only real visual signal a disabled
+        // ToolbarButton has, same UIColorRole::DisabledText convention
+        // Label::handleStateChanged() already uses for its own text.
+        bool enabled = isEnabled();
+
+        if (hasIcon) {
+            ctx.save();
+            if (!enabled) {
+                ctx.set_global_alpha(0.4);
+            }
+            x += Item::paintItemIcon(ctx, x, centerY, icon_, kIconSize, kIconGap);
+            ctx.restore();
+        }
+
+        if (hasText) {
+            double y = centerY - textHeight * 0.5 + blFont->metrics().ascent;
+            BLRgba32 effectiveTextColor = enabled
+                ? BLRgba32(textColor_.as<BLRgba32>())
+                : UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+
+            ctx.save();
+            ctx.set_comp_op( toBLCompOp( style().compositingOp()));
+            ctx.set_fill_style(effectiveTextColor);
+            ctx.set_fill_alpha(style().opacity());
+            ctx.fill_utf8_text(BLPoint(x, y), *blFont, text_.c_str(), text_.size());
+            ctx.restore();
+        }
     }
 
     // -----------------------------------------------------------------
@@ -1882,6 +2230,8 @@ namespace newui {
         textColor_ = UIColorManager::colorFor(UIColorRole::ControlText);
 
         caret_.onVisibilityChanged.add(this, &TextController::handleCaretVisibilityChanged);
+        caret_.onPositionChanged.add(this, &TextController::handleCaretPositionChanged);
+        selection_.onAfterSelectionChanged.add(this, &TextController::handleSelectionChanged);
 
         // Builds the default TextModel and wires it up via setModel()
         // itself (addView()/onBeforeChar/onBeforeRangeChanged, plus
@@ -1895,14 +2245,9 @@ namespace newui {
     }
 
     TextController::~TextController() {
-        // Must run before ownedModel_ (and every other member) is
-        // destroyed - see this destructor's own doc comment (controls.h)
-        // for the real use-after-free this avoids. Controller::setModel(nullptr)
-        // clears model_ to null too, so ~Controller()'s own cleanup
-        // (controllers.cpp) becomes a safe no-op once it runs afterward.
+        // The model is destroyed later, by ~Controller() - unregister owner_ while both are alive.
         if (Controller::model() != nullptr) {
             model().removeView(&owner_);
-            Controller::setModel(nullptr);
         }
     }
 
@@ -1912,7 +2257,22 @@ namespace newui {
     }
 
     SyncReturn TextController::handleGotFocus() {
-        caret_.start(Application::instance().runLoop());
+
+        if (RunLoop::current()) {
+            caret_.start(RunLoop::current());
+        }
+
+        // TextField/TextControl both use ThemedEditStyle (see their own
+        // constructors) - its stateId() only draws the real native
+        // ETS_FOCUSED border when this is true, so this is what actually
+        // keeps that in sync with real keyboard focus (nothing else did -
+        // the field existed, matched a real theme state, and was never
+        // set anywhere, confirmed via ThemedEditStyle's own
+        // StateIdPrecedence test only ever driving it by hand).
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = true;
+        }
+
         // start()/setPosition() below deliberately don't fire
         // onVisibilityChanged themselves (see Caret's own doc comment -
         // "the caller already knows the outcome at the call site") - this
@@ -1926,19 +2286,44 @@ namespace newui {
     }
 
     SyncReturn TextController::handleLostFocus() {
+        model().breakCoalescing();
         caret_.stop();
+        if (auto* editStyle = dynamic_cast<ThemedEditStyle*>(&owner_.style())) {
+            editStyle->focused = false;
+        }
         owner_.style().markDirty();
         return SyncReturn::Handled;
     }
 
     Point TextController::toLayoutSpace(const Point& localPt) const {
-        Rect clientBounds = owner_.getClientBounds();
-        return Point(localPt.x - clientBounds.left(), localPt.y - clientBounds.top() + scrollOffsetY_);
+        Rect clientBounds = textArea();
+        return Point(localPt.x - clientBounds.left() + scrollOffsetX_, localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
     void TextController::ensureLayoutUpToDate() {
-        Rect clientBounds = owner_.getClientBounds();
-        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(), multiline_);
+        Rect clientBounds = textArea();
+        layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
+            multiline_ && wordWrap_, fontRuns_, layoutFolds(), tabWidth_);
+    }
+
+    void TextController::setWordWrap(bool wrap) {
+        if (wordWrap_ == wrap) {
+            return;
+        }
+        wordWrap_ = wrap;
+        scrollOffsetX_ = 0.0f;
+        owner_.style().markDirty();
+        owner_.onContentSizeChanged(owner_);   // the content is a different width now
+    }
+
+    void TextController::setScrollOffsetX(float x) {
+        scrollOffsetX_ = x > 0.0f ? x : 0.0f;
+        owner_.style().markDirty();
+    }
+
+    const std::vector<text::TextFold>& TextController::layoutFolds() const {
+        static const std::vector<text::TextFold> none;
+        return none;
     }
 
     void TextController::setScrollOffsetY(float y) {
@@ -1951,6 +2336,43 @@ namespace newui {
         float caretHeight = 0.0f;
         layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
         return Rect(caretTopLeft.x, caretTopLeft.y, 1.0f, caretHeight);
+    }
+
+    void TextController::drawCurrentLineHighlight(BLContext& ctx) const {
+        // Deliberately not gated on caret_.isVisible() - that also factors in the blink phase
+        // (text.h's own comment on it), and this highlight should stay solid throughout the blink
+        // cycle, unlike the caret glyph itself. hitTestPosition() below already no-ops (caretHeight
+        // stays 0) for an invalid/never-set position, which is the only real gate needed here.
+        //
+        // Also deliberately NOT suppressed by an active selection (an earlier version of this did
+        // that, on an assumption about matching VS/VS Code that turned out to be wrong in practice -
+        // real editors, and this one, keep the current-line tint through an ordinary selection too,
+        // e.g. a double-click word-select) - drawn before drawSelection() below (same "chrome
+        // first" ordering every draw* method here follows), so the selection highlight still reads
+        // clearly on top of it regardless.
+        if (!highlightsCurrentLine_) {
+            return;
+        }
+        Point caretTopLeft;
+        float caretHeight = 0.0f;
+        layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
+        if (caretHeight <= 0.0f) {
+            return;
+        }
+        const float width = textArea().width();
+        if (width <= 0.0f) {
+            return;
+        }
+        // A neutral, theme-adaptive tint (the same "white on dark, black on light" convention
+        // FindReplaceController's own match highlighting uses) rather than a fixed hardcoded hue -
+        // faint enough (a fraction of the alpha a real selection/match highlight uses) to mark
+        // which line the caret is on without fighting with syntax-highlight colors drawn over it.
+        const Color base = UIColorManager::isDarkMode() ? Color(1.0f, 1.0f, 1.0f) : Color(0.0f, 0.0f, 0.0f);
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        ctx.set_fill_style(Color(base.r, base.g, base.b, 0.06f).toBLRgba32());
+        ctx.fill_rect(BLRect(0.0, static_cast<double>(caretTopLeft.y), static_cast<double>(width), static_cast<double>(caretHeight)));
+        ctx.restore();
     }
 
     void TextController::drawSelection(BLContext& ctx) const {
@@ -1973,6 +2395,186 @@ namespace newui {
         ctx.restore();
     }
 
+    void TextController::drawDecorations(BLContext& ctx, bool backgrounds) const {
+        if (decorations_.empty()) {
+            return;
+        }
+        const std::size_t textLength = model().length();
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::TextDecoration& decoration : decorations_) {
+            if ((decoration.kind == text::TextDecorationKind::Background) != backgrounds
+                || decoration.length == 0 || decoration.start >= textLength) {
+                continue;
+            }
+            const std::size_t available = textLength - decoration.start;
+            const text::TextRange range(decoration.start, decoration.length < available ? decoration.length : available);
+            text::drawTextDecoration(ctx, decoration, layoutEngine_.hitTestRange(range));
+        }
+        ctx.restore();
+    }
+
+    void TextController::drawLineBackgrounds(BLContext& ctx, float visibleWidth, float visibleHeight) const {
+        if (lineAnnotations_.empty()) {
+            return;
+        }
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> tintedLineEnds;
+
+        // Drawn in layout space, already shifted left by the sideways scroll: reach as far past the view's width.
+        visibleWidth += scrollOffsetX_;
+        ctx.save();
+        ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::LineAnnotation& annotation : lineAnnotations_) {
+            if (annotation.offset > length || annotation.lineBackground.isNull()) {
+                continue;
+            }
+            std::size_t lineStart = annotation.offset;
+            while (lineStart > 0 && storage.at(lineStart - 1) != L'\n' && storage.at(lineStart - 1) != L'\r') {
+                --lineStart;
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+                ++lineEnd;
+            }
+            if (std::find(tintedLineEnds.begin(), tintedLineEnds.end(), lineEnd) != tintedLineEnds.end()) {
+                continue;   // one per line
+            }
+
+            // From the line's first row to its last (a wrapped line covers several).
+            Point firstTopLeft;
+            float firstHeight = 0.0f;
+            Point lastTopLeft;
+            float lastHeight = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineStart), firstTopLeft, firstHeight);
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), lastTopLeft, lastHeight);
+            if (firstHeight <= 0.0f || lastHeight <= 0.0f) {
+                continue;
+            }
+            const float top = firstTopLeft.y;
+            const float bottom = lastTopLeft.y + lastHeight;
+            if (bottom < scrollOffsetY_ || top > scrollOffsetY_ + visibleHeight) {
+                continue;
+            }
+            ctx.set_fill_style(annotation.lineBackground.toBLRgba32());
+            ctx.fill_rect(BLRect(0.0, top, visibleWidth, bottom - top));
+            tintedLineEnds.push_back(lineEnd);
+        }
+        ctx.restore();
+    }
+
+    std::size_t TextController::annotationAt(const Point& localPt) const {
+        if (lineAnnotations_.empty()) {
+            return npos;
+        }
+        Font font(font_.name(), font_.size() * kAnnotationFontScale);
+        font.setItalic(true);
+        if (font.blFont() == nullptr) {
+            font.setItalic(false);
+        }
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return npos;
+        }
+        const Point pt = toLayoutSpace(localPt);
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> seenLineEnds;
+        for (std::size_t i = 0; i < lineAnnotations_.size(); ++i) {
+            const text::LineAnnotation& annotation = lineAnnotations_[i];
+            if (annotation.offset > length || annotation.text.empty()) {
+                continue;
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+                ++lineEnd;
+            }
+            if (std::find(seenLineEnds.begin(), seenLineEnds.end(), lineEnd) != seenLineEnds.end()) {
+                continue;
+            }
+            seenLineEnds.push_back(lineEnd);
+
+            Point topLeft;
+            float height = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), topLeft, height);
+            if (height <= 0.0f || pt.y < topLeft.y || pt.y >= topLeft.y + height) {
+                continue;
+            }
+            const std::size_t newline = annotation.text.find('\n');
+            const std::string shown = newline == std::string::npos ? annotation.text : annotation.text.substr(0, newline);
+            BLGlyphBuffer glyphs;
+            glyphs.set_utf8_text(shown.c_str(), shown.size());
+            blFont->shape(glyphs);
+            BLTextMetrics textMetrics;
+            blFont->get_text_metrics(glyphs, textMetrics);
+            const double x = topLeft.x + kAnnotationGap;
+            const double width = textMetrics.advance.x;
+            if (pt.x >= x && pt.x < x + width) {
+                return i;
+            }
+        }
+        return npos;
+    }
+
+    void TextController::drawLineAnnotations(BLContext& ctx, float visibleWidth, float visibleHeight) const {
+        if (lineAnnotations_.empty()) {
+            return;
+        }
+        Font font(font_.name(), font_.size() * kAnnotationFontScale);
+        font.setItalic(true);
+        if (font.blFont() == nullptr) {
+            font.setItalic(false);   // a face with no italic of its own
+        }
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr || !blFont->is_valid()) {
+            return;
+        }
+        const BLFontMetrics& metrics = blFont->metrics();
+        const double textHeight = metrics.ascent + metrics.descent;
+
+        const text::TextStorage& storage = model().storage();
+        const std::size_t length = storage.length();
+        std::vector<std::size_t> drawnLineEnds;
+
+        visibleWidth += scrollOffsetX_;   // layout space, as in drawLineBackgrounds
+        ctx.save();
+        ctx.clip_to_rect(BLRect(0.0, 0.0, visibleWidth, visibleHeight));
+        ctx.translate(0.0f, -scrollOffsetY_);
+        for (const text::LineAnnotation& annotation : lineAnnotations_) {
+            if (annotation.offset > length || annotation.text.empty()) {
+                continue;   // stale, or nothing to say
+            }
+            std::size_t lineEnd = annotation.offset;
+            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+                ++lineEnd;
+            }
+            if (std::find(drawnLineEnds.begin(), drawnLineEnds.end(), lineEnd) != drawnLineEnds.end()) {
+                continue;   // one per line
+            }
+
+            Point topLeft;
+            float height = 0.0f;
+            layoutEngine_.hitTestPosition(text::TextPosition(lineEnd), topLeft, height);
+            if (height <= 0.0f || topLeft.y + height < scrollOffsetY_ || topLeft.y > scrollOffsetY_ + visibleHeight) {
+                continue;
+            }
+            const double x = topLeft.x + kAnnotationGap;
+            if (x >= visibleWidth) {
+                continue;
+            }
+            const std::size_t newline = annotation.text.find('\n');
+            const std::string shown = newline == std::string::npos ? annotation.text : annotation.text.substr(0, newline);
+            const Color color = annotation.color.isNull() ? textColor() : annotation.color;
+            ctx.set_fill_style(color.toBLRgba32());
+            ctx.fill_utf8_text(BLPoint(x, topLeft.y + (height - textHeight) * 0.5 + metrics.ascent), *blFont,
+                               shown.c_str(), shown.size());
+            drawnLineEnds.push_back(lineEnd);
+        }
+        ctx.restore();
+    }
+
     void TextController::drawCaret(BLContext& ctx) const {
         if (!caret_.isVisible()) {
             return;
@@ -1980,7 +2582,142 @@ namespace newui {
         Point caretTopLeft;
         float caretHeight = 0.0f;
         layoutEngine_.hitTestPosition(caret_.position(), caretTopLeft, caretHeight);
-        caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight);
+        // Overwrite mode: a block over the character typing would replace (a digit's width at a
+        // line end).
+        float width = 0.0f;
+        if (overwriteMode_ && caret_.position().isValid()) {
+            const std::size_t offset = caret_.position().offset();
+            const text::TextStorage& storage = model().storage();
+            if (offset < storage.length() && storage.at(offset) != L'\n' && storage.at(offset) != L'\r') {
+                const std::vector<Rect> rects = layoutEngine_.hitTestRange(text::TextRange(offset, 1));
+                width = rects.empty() ? 0.0f : rects.front().width();
+            }
+            if (width <= 0.0f) {
+                width = font_.measureText("0").width;
+            }
+        }
+        caret_.draw(ctx, Point(caretTopLeft.x, caretTopLeft.y - scrollOffsetY_), caretHeight, width);
+    }
+
+    void TextController::drawWhitespace(BLContext& ctx, float visibleHeight) const {
+        if (!showsWhitespace_) {
+            return;
+        }
+        const std::vector<text::WhitespaceMark> marks = layoutEngine_.whitespaceMarks(scrollOffsetY_, scrollOffsetY_ + visibleHeight);
+        if (marks.empty()) {
+            return;
+        }
+        const BLRgba32 color = UIColorManager::colorFor(UIColorRole::DisabledText).toBLRgba32();
+        const Font labelFont(font_.name(), font_.size() * 0.55f);
+        BLFont* labelBlFont = labelFont.blFont();
+        const float labelAscent = labelFont.measureText("C").ascent;
+
+        ctx.save();
+        ctx.translate(0.0f, -scrollOffsetY_);
+        ctx.set_fill_style(color);
+        ctx.set_stroke_style(color);
+        ctx.set_stroke_width(1.0);
+        for (const text::WhitespaceMark& mark : marks) {
+            const Rect& r = mark.rect;
+            const double midY = r.top() + r.height() * 0.5;
+            switch (mark.kind) {
+                case text::WhitespaceKind::Space:
+                    ctx.fill_circle(r.left() + r.width() * 0.5, midY, 1.2);
+                    break;
+                case text::WhitespaceKind::Tab: {
+                    const double left = r.left() + 2.0;
+                    const double right = r.left() + r.width() - 2.0;
+                    if (right > left) {
+                        ctx.stroke_line(left, midY, right, midY);
+                        ctx.stroke_line(right - 3.0, midY - 3.0, right, midY);
+                        ctx.stroke_line(right - 3.0, midY + 3.0, right, midY);
+                    }
+                    break;
+                }
+                default: {
+                    // Line endings (and a stray CR): a small boxed label.
+                    const char* label = mark.kind == text::WhitespaceKind::CarriageReturnLineFeed ? "CRLF"
+                        : mark.kind == text::WhitespaceKind::LineFeed ? "LF" : "CR";
+                    if (labelBlFont == nullptr) {
+                        break;
+                    }
+                    const float width = labelFont.measureText(label).width;
+                    const double boxLeft = std::floor(r.left() + 3.0) + 0.5;
+                    const double boxHeight = labelAscent + 3.0;
+                    const double boxTop = std::floor(midY - boxHeight * 0.5) + 0.5;
+                    ctx.stroke_round_rect(boxLeft, boxTop, width + 4.0, boxHeight, 2.0);
+                    ctx.fill_utf8_text(BLPoint(boxLeft + 2.0, boxTop + 1.5 + labelAscent), *labelBlFont, label);
+                    break;
+                }
+            }
+        }
+        ctx.restore();
+    }
+
+    void TextController::setOverwriteMode(bool overwrite) {
+        if (overwriteMode_ != overwrite) {
+            overwriteMode_ = overwrite;
+            owner_.style().markDirty();
+            onEditStateChanged(*this);
+        }
+    }
+
+    namespace {
+        // Moves each item's [start, start + length) through an edit (see adjustRunsForEdit()),
+        // dropping any left empty.
+        template <typename Item>
+        void adjustForEdit(std::vector<Item>& items, std::size_t start, std::size_t removed, std::size_t inserted) {
+            const std::size_t editEnd = start + removed;
+            auto moveStart = [&](std::size_t p) { return p < start ? p : p >= editEnd ? p - removed + inserted : start + inserted; };
+            auto moveEnd = [&](std::size_t p) { return p <= start ? p : p >= editEnd ? p - removed + inserted : start; };
+            std::size_t kept = 0;
+            for (Item& item : items) {
+                const std::size_t from = moveStart(item.start);
+                const std::size_t to = moveEnd(item.start + item.length);
+                if (to > from) {
+                    item.start = from;
+                    item.length = to - from;
+                    items[kept++] = std::move(item);
+                }
+            }
+            items.resize(kept);
+        }
+    }
+
+    void TextController::adjustRunsForEdit(std::size_t start, std::size_t removed, std::size_t inserted) {
+        adjustForEdit(colorRuns_, start, removed, inserted);
+        adjustForEdit(fontRuns_, start, removed, inserted);
+        adjustForEdit(decorations_, start, removed, inserted);
+        // An annotation is a point, not a range: it moves with the text and is never dropped.
+        const std::size_t editEnd = start + removed;
+        for (text::LineAnnotation& annotation : lineAnnotations_) {
+            const std::size_t p = annotation.offset;
+            annotation.offset = p < start ? p : p >= editEnd ? p - removed + inserted : start + inserted;
+        }
+    }
+
+    SyncReturn TextController::handleModelAfterChar(text::TextModel& /*sender*/, size_t offset, wchar_t /*ch*/, text::CharChangeKind kind) {
+        if (kind == text::CharChangeKind::Inserted) {
+            adjustRunsForEdit(offset, 0, 1);
+        } else {
+            adjustRunsForEdit(offset, 1, 0);
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleModelAfterRangeChanged(text::TextModel& /*sender*/, const text::TextRange& range, const std::wstring& replacement) {
+        adjustRunsForEdit(range.start(), range.length(), replacement.size());
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleCaretPositionChanged(text::Caret& /*sender*/) {
+        onEditStateChanged(*this);
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleSelectionChanged(text::TextSelection& /*sender*/, const text::TextRange& /*range*/) {
+        onEditStateChanged(*this);
+        return SyncReturn::Handled;
     }
 
     void TextController::clearSelection() {
@@ -1988,7 +2725,78 @@ namespace newui {
         selection_.clear();
     }
 
+    bool TextController::copy() {
+        if (selection_.isEmpty() || traits_.isSecureTextEntry()) {
+            return false;
+        }
+        return ClipboardManager::setText(model().storage().substring(selection_.ranges()[0]), &owner_);
+    }
+
+    bool TextController::cut() {
+        if (traits_.isReadOnly() || !copy()) {
+            return false;
+        }
+        const text::TextRange range = selection_.ranges()[0];
+        clearSelection();
+        model().remove(range);
+        moveCaret(range.start(), false);
+        return true;
+    }
+
+    bool TextController::paste() {
+        std::wstring pasted;
+        if (traits_.isReadOnly() || !ClipboardManager::getText(pasted) || pasted.empty()) {
+            return false;
+        }
+        if (!multiline_) {
+            std::wstring flat;
+            for (std::size_t i = 0; i < pasted.size(); ++i) {
+                if (pasted[i] == L'\r' && i + 1 < pasted.size() && pasted[i + 1] == L'\n') {
+                    ++i;   // "\r\n" is one break
+                }
+                flat += (pasted[i] == L'\r' || pasted[i] == L'\n') ? L' ' : pasted[i];
+            }
+            pasted = std::move(flat);
+        }
+        const text::PieceTree before = model().snapshot();
+        std::size_t caretAt;
+        if (!selection_.isEmpty()) {
+            const text::TextRange range = selection_.ranges()[0];
+            clearSelection();
+            model().replace(range, pasted);
+            caretAt = range.start() + pasted.size();
+        } else {
+            const std::size_t at = caret_.position().isValid() ? caret_.position().offset() : model().length();
+            model().insert(at, pasted);
+            caretAt = at + pasted.size();
+        }
+        if (model().snapshot().sameAs(before)) {
+            return false;   // a listener vetoed it (read-only, max length)
+        }
+        moveCaret(caretAt, false);
+        return true;
+    }
+
+    bool TextController::undo() {
+        text::TextRange affected;
+        if (!model().undo(&affected)) {
+            return false;
+        }
+        moveCaret(affected.end(), false);
+        return true;
+    }
+
+    bool TextController::redo() {
+        text::TextRange affected;
+        if (!model().redo(&affected)) {
+            return false;
+        }
+        moveCaret(affected.end(), false);
+        return true;
+    }
+
     void TextController::moveCaret(size_t newOffset, bool extendSelection, bool resetPreferredColumn) {
+        model().breakCoalescing();   // moving away ends a typing run
         if (resetPreferredColumn) {
             hasPreferredColumnX_ = false;
         }
@@ -2060,16 +2868,16 @@ namespace newui {
             return;
         }
 
-        const std::wstring& text = model().text();
-        if (text.empty()) {
+        const text::TextStorage& chars = model().storage();
+        if (chars.empty()) {
             clearSelection();
             caret_.setPosition(text::TextPosition(0));
             owner_.style().markDirty();
             return;
         }
 
-        size_t offset = (hitPos.offset() < text.size()) ? hitPos.offset() : (text.size() - 1);
-        if (!isTextEditingWordChar(text[offset])) {
+        size_t offset = (hitPos.offset() < chars.length()) ? hitPos.offset() : (chars.length() - 1);
+        if (!isTextEditingWordChar(chars.at(offset))) {
             clearSelection();
             caret_.setPosition(hitPos);
             owner_.style().markDirty();
@@ -2077,11 +2885,11 @@ namespace newui {
         }
 
         size_t start = offset;
-        while (start > 0 && isTextEditingWordChar(text[start - 1])) {
+        while (start > 0 && isTextEditingWordChar(chars.at(start - 1))) {
             --start;
         }
         size_t end = offset;
-        while (end < text.size() && isTextEditingWordChar(text[end])) {
+        while (end < chars.length() && isTextEditingWordChar(chars.at(end))) {
             ++end;
         }
 
@@ -2105,6 +2913,11 @@ namespace newui {
     }
 
     SyncReturn TextController::handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
+        const std::size_t annotation = annotationAt(pt);
+        if (annotation != npos) {
+            onAnnotationClicked(*this, annotation);
+            return SyncReturn::Handled;
+        }
         text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
         if (!hitPos.isValid()) {
             return SyncReturn::Ignored;
@@ -2146,6 +2959,11 @@ namespace newui {
 
     SyncReturn TextController::handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
         if (!dragging_) {
+            const std::size_t annotation = annotationAt(pt);
+            if (annotation != hoveredAnnotation_) {
+                hoveredAnnotation_ = annotation;
+                onAnnotationHovered(*this, annotation);
+            }
             return SyncReturn::Ignored;
         }
         text::TextPosition hitPos = layoutEngine_.hitTestPoint(toLayoutSpace(pt));
@@ -2154,6 +2972,14 @@ namespace newui {
         }
         moveCaret(hitPos.offset(), true);
         return SyncReturn::Handled;
+    }
+
+    SyncReturn TextController::handleMouseLeft(const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
+        if (hoveredAnnotation_ != npos) {
+            hoveredAnnotation_ = npos;
+            onAnnotationHovered(*this, npos);
+        }
+        return SyncReturn::Ignored;
     }
 
     SyncReturn TextController::handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) {
@@ -2176,7 +3002,9 @@ namespace newui {
         // Control characters (Backspace/Tab/Enter/Escape/etc.) arrive
         // here too via WM_CHAR - handleKeyDown() (VKeyCode-driven) is
         // where those are actually handled, not this insertion path.
-        if (ch < 0x20 || ch == 0x7F) {
+        // A tab is typed like any character in a multi-line control - it only arrives at all when
+        // the owner wantsTabKey() (RootView moves focus on Tab otherwise).
+        if ((ch < 0x20 && !(ch == L'\t' && multiline_)) || ch == 0x7F) {
             return SyncReturn::Ignored;
         }
 
@@ -2188,7 +3016,12 @@ namespace newui {
             insertAt = range.start() + 1;
         } else {
             insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
-            model().insert(insertAt, std::wstring(1, ch));
+            const text::TextStorage& storage = model().storage();
+            if (overwriteMode_ && insertAt < storage.length() && storage.at(insertAt) != L'\n' && storage.at(insertAt) != L'\r') {
+                model().replace(text::TextRange(insertAt, 1), std::wstring(1, ch));
+            } else {
+                model().insert(insertAt, std::wstring(1, ch));
+            }
             insertAt += 1;
         }
         caret_.setPosition(text::TextPosition(insertAt));
@@ -2218,6 +3051,9 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkDelete: {
+                if ((keyMask & (kmShift | kmCtrl | kmAlt)) == kmShift && !selection_.isEmpty()) {
+                    return cut() ? SyncReturn::Handled : SyncReturn::Ignored;   // Shift+Delete
+                }
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
@@ -2258,6 +3094,46 @@ namespace newui {
             case vkEnd: {
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
                 moveCaret(line.isValid() ? line.end() : model().length(), extend);
+                return SyncReturn::Handled;
+            }
+            case vkLetterZ:
+            case vkLetterY: {
+                // Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo. Left alone (Ignored) when there's nothing
+                // to do, so a caller above can still act on the key.
+                if ((keyMask & kmCtrl) == 0 || (keyMask & kmAlt) != 0) {
+                    return SyncReturn::Ignored;
+                }
+                const bool redoing = VKeyCode == vkLetterY || (keyMask & kmShift) != 0;
+                return (redoing ? redo() : undo()) ? SyncReturn::Handled : SyncReturn::Ignored;
+            }
+            case vkLetterA:
+            case vkLetterC:
+            case vkLetterX:
+            case vkLetterV: {
+                // Ctrl alone (Ctrl+Shift+letter and Ctrl+Alt+letter are someone else's).
+                if ((keyMask & (kmShift | kmCtrl | kmAlt)) != kmCtrl) {
+                    return SyncReturn::Ignored;
+                }
+                if (VKeyCode == vkLetterA) {
+                    selectAll();
+                    return SyncReturn::Handled;
+                }
+                const bool done = VKeyCode == vkLetterC ? copy() : VKeyCode == vkLetterX ? cut() : paste();
+                return done ? SyncReturn::Handled : SyncReturn::Ignored;
+            }
+            case vkInsert: {
+                // Ctrl+Insert / Shift+Insert are copy / paste; plain Insert toggles overwrite.
+                const std::uint32_t modifiers = keyMask & (kmShift | kmCtrl | kmAlt);
+                if (modifiers == kmCtrl) {
+                    return copy() ? SyncReturn::Handled : SyncReturn::Ignored;
+                }
+                if (modifiers == kmShift) {
+                    return paste() ? SyncReturn::Handled : SyncReturn::Ignored;
+                }
+                if (modifiers != 0) {
+                    return SyncReturn::Ignored;
+                }
+                setOverwriteMode(!overwriteMode_);
                 return SyncReturn::Handled;
             }
             case vkReturn: {
@@ -2318,6 +3194,7 @@ namespace newui {
 
     TextField::TextField() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
@@ -2351,8 +3228,14 @@ namespace newui {
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         controller_->drawSelection(ctx);
-        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/false);
+        if (controller_->model().text().empty() && !placeholder_.empty()) {
+            renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+                utf8ToWide(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
+                0.0f, /*wordWrap=*/false);
+        } else {
+            renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
+                controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+        }
         controller_->drawCaret(ctx);
         ctx.restore();
     }
@@ -2363,18 +3246,21 @@ namespace newui {
 
     TextControl::TextControl() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
+        setAcceptsFocus(true);
 
         auto editStyle = std::make_unique<ThemedEditStyle>();
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
         controller_->setMultiline(true);
+        setWantsTabKey(true);   // a multi-line editor: Tab types a tab; Ctrl+Tab still moves focus
 
         onGotFocus.add(this, &TextControl::handleGotFocus);
         onLostFocus.add(this, &TextControl::handleLostFocus);
         onMouseDown.add(this, &TextControl::handleMouseDown);
         onMouseMove.add(this, &TextControl::handleMouseMove);
         onMouseUp.add(this, &TextControl::handleMouseUp);
+        onMouseLeft.add(this, &TextControl::handleMouseLeft);
         onMouseDblClick.add(this, &TextControl::handleMouseDblClick);
         onKeyPress.add(this, &TextControl::handleKeyPress);
         onKeyDown.add(this, &TextControl::handleKeyDown);
@@ -2387,35 +3273,83 @@ namespace newui {
         controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
     }
 
+    void TextControl::restyle() {
+        if (styleSheet_ == nullptr) {
+            return;
+        }
+        text::ExpandedTextStyles expanded = text::expandTextStyles(*styleSheet_, styledRanges_, controller_->textColor());
+        setColorRuns(std::move(expanded.colorRuns));
+        setFontRuns(std::move(expanded.fontRuns));
+        setDecorations(std::move(expanded.decorations));
+        setLineAnnotations(std::move(expanded.annotations));
+    }
+
     void TextControl::paint(BLContext& ctx) {
-        Rect clientBounds = getClientBounds();
+        Rect clientBounds = controller_->textArea();
         if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
             return;
         }
         controller_->ensureLayoutUpToDate();
 
+        // Only fires when the caret's document-space rect has actually
+        // *changed* since the last paint() that fired it - real, confirmed
+        // live bug otherwise (same class as ListView::paint()'s own fix,
+        // controls.cpp, see its doc comment for the full reasoning):
+        // firing unconditionally every paint() meant scrolling this
+        // TextControl's own hosting ScrollView away from the caret via its
+        // scrollbar - which itself triggers a repaint - snapped straight
+        // back to the caret on the very next paint(), so a user could
+        // never actually scroll away from it to look at other text.
         Rect caretRect = controller_->caretDocumentRect();
-        if (caretRect.height() > 0.0f) {
+        if (!controller_->wordWrap()) {
+            // The text scrolls sideways under a fixed gutter: ask for room for the gutter's width past
+            // the caret too, so it is kept clear of the view's far edge, not left under or beyond it.
+            caretRect = Rect(caretRect.left(), caretRect.top(), caretRect.width() + clientBounds.left(), caretRect.height());
+        }
+        if (caretRect.height() > 0.0f && caretRect != lastScrolledIntoViewCaretRect_) {
             onRequestScrollIntoView(*this, caretRect);
+        }
+        if (caretRect.height() > 0.0f) {
+            lastScrolledIntoViewCaretRect_ = caretRect;
         }
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
+        // Scrolled sideways, the text must not spill left over what's beside the text area (a gutter):
+        // clip first, then shift everything drawn below - selection, caret and all - by the offset.
+        ctx.clip_to_rect(BLRect(0.0, 0.0, clientBounds.width(), clientBounds.height()));
+        ctx.translate(-controller_->scrollOffsetX(), 0.0f);
+        controller_->drawCurrentLineHighlight(ctx);
+        controller_->drawLineBackgrounds(ctx, clientBounds.width(), clientBounds.height());
+        controller_->drawDecorations(ctx, /*backgrounds=*/true);
         controller_->drawSelection(ctx);
-        renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-            controller_->model().text(), controller_->font(), controller_->textColor(), controller_->scrollOffsetY(), /*wordWrap=*/true);
+        renderer_.render(ctx, static_cast<int>(clientBounds.width() + controller_->scrollOffsetX()),
+            static_cast<int>(clientBounds.height()),
+            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+        controller_->drawDecorations(ctx, /*backgrounds=*/false);
+        controller_->drawLineAnnotations(ctx, clientBounds.width(), clientBounds.height());
+        controller_->drawWhitespace(ctx, clientBounds.height());
         controller_->drawCaret(ctx);
         ctx.restore();
     }
 
     SyncReturn TextControl::handleQueryContentSize(View& /*sender*/, Size& outSize) {
         controller_->ensureLayoutUpToDate();
-        outSize = Size(getClientBounds().width(), controller_->contentHeight());
+        float width = getClientBounds().width();
+        if (!controller_->wordWrap()) {
+            // Sideways scrolling: as wide as the longest line (plus the gutter beside the text area, and
+            // a little room for the caret past it) - never narrower than the view.
+            const float gutter = width - controller_->textArea().width();
+            const float needed = gutter + controller_->layoutEngine().contentWidth() + kNoWrapRightMargin;
+            width = needed > width ? needed : width;
+        }
+        outSize = Size(width, controller_->contentHeight());
         return SyncReturn::Handled;
     }
 
     SyncReturn TextControl::handleScrollOffsetChanged(View& /*sender*/, const Point& offset) {
         controller_->setScrollOffsetY(offset.y);
+        controller_->setScrollOffsetX(controller_->wordWrap() ? 0.0f : offset.x);
         return SyncReturn::Handled;
     }
 
@@ -2428,16 +3362,44 @@ namespace newui {
     // ListView
     // -----------------------------------------------------------------
 
-    ListView::ListView() : controller_(std::make_unique<ListController>()) {
+    ListView::ListView() : controller_(std::make_shared<ListController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &ListView::handleMouseDown);
         onMouseMove.add(this, &ListView::handleMouseMove);
         onMouseLeft.add(this, &ListView::handleMouseLeft);
+        onKeyDown.add(this, &ListView::handleKeyDown);
         onQueryContentSize.add(this, &ListView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &ListView::handleScrollOffsetChanged);
-        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+        onGotFocus.add(this, &ListView::handleGotFocus);
+        onLostFocus.add(this, &ListView::handleLostFocus);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+    }
+
+    ListView::~ListView() {
+        // controller_ may be shared and outlive this view - never leave it a dangling subscriber.
+        controller_->onDataChanged.remove(dataChangedConnection_);
+    }
+
+    SyncReturn ListView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn ListView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     void ListView::setHoverHighlightEnabled(bool value) {
@@ -2459,18 +3421,19 @@ namespace newui {
         style().markDirty();
     }
 
-    void ListView::setController(std::unique_ptr<ListController> controller) {
-        if (controller == nullptr) {
+    void ListView::setController(std::shared_ptr<ListController> controller) {
+        if (controller == nullptr || controller == controller_) {
             return;
         }
+        controller_->onDataChanged.remove(dataChangedConnection_);
         controller_ = std::move(controller);
-        controller_->onDataChanged.add(this, &ListView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &ListView::handleDataChanged);
         onContentSizeChanged(*this);
         style().markDirty();
     }
 
-    void ListView::setModel(ListModel* model) {
-        controller_->setModel(model);
+    void ListView::setModel(std::unique_ptr<ListModel> model) {
+        controller_->setModel(std::move(model));
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -2562,6 +3525,46 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below (matching
+        // TextControl::paint()'s own ordering) - not after the row loop.
+        // A hosting ScrollView's handleContentRequestScrollIntoView()
+        // updates scrollOffsetY_ synchronously (setValue() ->
+        // onValueChanged -> handleVBarValueChanged() ->
+        // onScrollOffsetChanged.syncCall() -> handleScrollOffsetChanged()
+        // above), so firing this first lets the very same paint() pass
+        // already draw rows at the corrected offset. Firing it after (the
+        // original ordering) meant this frame's rows were drawn with the
+        // stale pre-adjustment offset, and the corrected scroll position
+        // only became visible on the *next* paint() - a real, confirmed
+        // one-frame display lag on every arrow-key/selection-driven
+        // scroll (e.g. End wouldn't visibly scroll until a second
+        // keypress).
+        //
+        // Only fires when selectedIndex()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - a
+        // real, confirmed live bug otherwise: firing unconditionally
+        // every single paint() (whenever either had a value at all, not
+        // just on a real change) meant dragging this ListView's own
+        // hosting ScrollView's scrollbar - which itself triggers a
+        // repaint via handleScrollOffsetChanged()'s style().markDirty() -
+        // immediately snapped straight back to the still-selected row on
+        // the very next paint(), so a user could never actually scroll a
+        // selected row *out* of view at all.
+        std::optional<std::size_t> primaryForScroll = selectedIndex();
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedIndex_) {
+            Rect selectedRect(0.0f, controller_->itemOffset(*primaryForScroll), clientBounds.width(),
+                controller_->itemHeight(*primaryForScroll));
+            onRequestScrollIntoView(*this, selectedRect);
+        }
+        lastScrolledIntoViewSelectedIndex_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2622,18 +3625,6 @@ namespace newui {
         }
 
         ctx.restore();
-
-        std::optional<std::size_t> primary = selectedIndex();
-        if (primary.has_value()) {
-            Rect selectedRect(0.0f, controller_->itemOffset(*primary), clientBounds.width(),
-                controller_->itemHeight(*primary));
-            onRequestScrollIntoView(*this, selectedRect);
-        }
-        if (keyboardHighlightedIndex_.has_value()) {
-            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
-                controller_->itemHeight(*keyboardHighlightedIndex_));
-            onRequestScrollIntoView(*this, highlightedRect);
-        }
     }
 
     SyncReturn ListView::handleMouseDown(View& /*sender*/, const Point& pt, std::uint32_t /*btnMask*/, std::uint32_t keyMask) {
@@ -2684,6 +3675,115 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    std::size_t ListView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchor_.has_value()) {
+            return *selectionAnchor_;
+        }
+        if (auto sel = selectedIndex(); sel.has_value()) {
+            return *sel;
+        }
+        return 0;
+    }
+
+    // Intra-control behavior (which row is selected inside this already-
+    // focused ListView), local to this class - same "handled where the
+    // control's own state lives" convention TextController's own vkUpArrow/
+    // vkLeftArrow/etc. handling and DropDownList::handleKeyDown() already
+    // follow, not something UIInputManager (uiinputmanager.h) routes.
+    // UIInputManager owns *inter*-control policy instead (which View gets
+    // focus at all, Tab/Shift+Tab between them) - it would only come back
+    // into play here for a boundary spatial-jump to a different sibling
+    // View, which nothing in this codebase does anywhere yet (deliberately
+    // out of scope - see uiinputmanager.h's own class comment).
+    SyncReturn ListView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->itemCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // The other half of Ctrl+Arrow's "move a preview highlight
+            // without touching real selection" contract - toggles
+            // whatever's currently highlighted into/out of the real
+            // selection. A plain (non-Ctrl) Space is left alone - Control
+            // itself already treats a completed Space press like a click
+            // via its own onClick tracking, which this shouldn't fight.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(*keyboardHighlightedIndex_);
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Already at the first/last row - nothing left to do locally,
+            // so unlike every other case below (which always reports
+            // Handled even when next happens to equal the current
+            // selection already), this specifically reports Ignored -
+            // RootView::keyEvent's arrow-key routing (rootview.cpp) reads
+            // that as "the focused View didn't want this" and falls back
+            // to UIInputManager::routeArrowKeyDown()'s cross-control
+            // spatial jump (uiinputmanager.cpp) instead of silently
+            // re-selecting the same row. Shift/Ctrl-modified Up/Down
+            // deliberately stay Handled even at the boundary below -
+            // those are local selection-extension/preview gestures, not
+            // something that should eject focus out of this control
+            // mid-gesture.
+            return SyncReturn::Ignored;
+        }
+
+        if (ctrl && !shift) {
+            // Move only - see handleKeyDown()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchor_.has_value()) {
+                selectionAnchor_ = currentKeyboardLead();
+            }
+            selectRange(*selectionAnchor_, next);
+            // Tracks the moving edge so a repeated Shift+Arrow keeps
+            // extending from here, not resetting to the anchor every time -
+            // see currentKeyboardLead()'s own doc comment (controls.h).
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedIndex(next);
+            selectionAnchor_ = next;
+            setKeyboardHighlightedIndex(std::nullopt);
+			this->redraw();
+        }
+        return SyncReturn::Handled;
+    }
+
     SyncReturn ListView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         if (!hoveredIndex_.has_value()) {
             return SyncReturn::Ignored;
@@ -2714,30 +3814,70 @@ namespace newui {
     // TreeView
     // -----------------------------------------------------------------
 
-    TreeView::TreeView() : controller_(std::make_unique<TreeController>()) {
+    TreeView::TreeView() : controller_(std::make_shared<TreeController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &TreeView::handleMouseDown);
         onMouseMove.add(this, &TreeView::handleMouseMove);
         onMouseLeft.add(this, &TreeView::handleMouseLeft);
+        onKeyDown.add(this, &TreeView::handleKeyDown);
         onQueryContentSize.add(this, &TreeView::handleQueryContentSize);
         onScrollOffsetChanged.add(this, &TreeView::handleScrollOffsetChanged);
-        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+        onGotFocus.add(this, &TreeView::handleGotFocus);
+        onLostFocus.add(this, &TreeView::handleLostFocus);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
     }
 
-    void TreeView::setController(std::unique_ptr<TreeController> controller) {
-        if (controller == nullptr) {
+    TreeView::~TreeView() {
+        // controller_ may be shared and outlive this view - never leave it a dangling subscriber.
+        controller_->onDataChanged.remove(dataChangedConnection_);
+    }
+
+    void TreeView::setKeyboardHighlightedIndex(std::optional<std::size_t> index) {
+        if (index.has_value() && *index >= controller_->visibleCount()) {
+            index.reset();
+        }
+        if (index == keyboardHighlightedIndex_) {
             return;
         }
+        keyboardHighlightedIndex_ = index;
+        style().markDirty();
+    }
+
+    SyncReturn TreeView::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn TreeView::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    void TreeView::setController(std::shared_ptr<TreeController> controller) {
+        if (controller == nullptr || controller == controller_) {
+            return;
+        }
+        controller_->onDataChanged.remove(dataChangedConnection_);
         controller_ = std::move(controller);
-        controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
+        dataChangedConnection_ = controller_->onDataChanged.add(this, &TreeView::handleDataChanged);
         onContentSizeChanged(*this);
         style().markDirty();
     }
 
-    void TreeView::setModel(TreeModel* model) {
-        controller_->setModel(model);
+    void TreeView::setModel(std::unique_ptr<TreeModel> model) {
+        controller_->setModel(std::move(model));
         onContentSizeChanged(*this);
         style().markDirty();
     }
@@ -2842,6 +3982,36 @@ namespace newui {
             return;
         }
 
+        // Fired before scrollOffsetY_ is read below - see the matching
+        // comment in ListView::paint() for why (same synchronous
+        // scrollOffsetY_ update chain, same one-frame-lag bug otherwise).
+        //
+        // Only fires when selectedPath()/keyboardHighlightedIndex_ has
+        // actually *changed* since the last paint() that fired it - see
+        // ListView::paint()'s own comment (controls.cpp) for the real,
+        // confirmed live bug this fixes (scrolling the selected row out
+        // of view via this TreeView's own hosting ScrollView's scrollbar
+        // immediately snapped straight back to it on the very next
+        // paint(), since that repaint alone used to be enough to re-fire
+        // this unconditionally).
+        std::optional<std::vector<std::size_t>> primaryForScroll = selectedPath();
+        if (primaryForScroll.has_value() && primaryForScroll != lastScrolledIntoViewSelectedPath_) {
+            std::optional<std::size_t> primaryIndexForScroll = controller_->visibleIndexOf(*primaryForScroll);
+            if (primaryIndexForScroll.has_value()) {
+                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndexForScroll), clientBounds.width(),
+                    controller_->itemHeight(*primaryIndexForScroll));
+                onRequestScrollIntoView(*this, selectedRect);
+            }
+        }
+        lastScrolledIntoViewSelectedPath_ = primaryForScroll;
+
+        if (keyboardHighlightedIndex_.has_value() && keyboardHighlightedIndex_ != lastScrolledIntoViewHighlightedIndex_) {
+            Rect highlightedRect(0.0f, controller_->itemOffset(*keyboardHighlightedIndex_), clientBounds.width(),
+                controller_->itemHeight(*keyboardHighlightedIndex_));
+            onRequestScrollIntoView(*this, highlightedRect);
+        }
+        lastScrolledIntoViewHighlightedIndex_ = keyboardHighlightedIndex_;
+
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
         ctx.translate(0.0f, -scrollOffsetY_);
@@ -2856,7 +4026,8 @@ namespace newui {
             item->style().setView(this);
             item->setSelected(isSelected(path));
             item->setEnabled(isEnabled());
-            item->setHighlighted(hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i);
+            bool isKeyboardHighlighted = keyboardHighlightedIndex_.has_value() && *keyboardHighlightedIndex_ == i;
+            item->setHighlighted((hoverHighlightEnabled_ && hoveredVisibleIndex_.has_value() && *hoveredVisibleIndex_ == i) || isKeyboardHighlighted);
 
             float height = controller_->itemHeight(i);
             if (height <= 0.0f) {
@@ -2871,16 +4042,22 @@ namespace newui {
         }
 
         ctx.restore();
+    }
 
-        std::optional<std::vector<std::size_t>> primary = selectedPath();
-        if (primary.has_value()) {
-            std::optional<std::size_t> primaryIndex = controller_->visibleIndexOf(*primary);
-            if (primaryIndex.has_value()) {
-                Rect selectedRect(0.0f, controller_->itemOffset(*primaryIndex), clientBounds.width(),
-                    controller_->itemHeight(*primaryIndex));
-                onRequestScrollIntoView(*this, selectedRect);
-            }
+    std::optional<Rect> TreeView::rectForPath(const std::vector<std::size_t>& path) const {
+        std::optional<std::size_t> visibleIndex = controller_->visibleIndexOf(path);
+        if (!visibleIndex.has_value()) {
+            return std::nullopt;
         }
+
+        Rect clientBounds = getClientBounds();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return std::nullopt;
+        }
+
+        float y = controller_->itemOffset(*visibleIndex) - scrollOffsetY_;
+        float height = controller_->itemHeight(*visibleIndex);
+        return Rect(clientBounds.left(), clientBounds.top() + y, clientBounds.width(), height);
     }
 
     std::optional<std::size_t> TreeView::visibleIndexAtY(float localY) const {
@@ -2947,6 +4124,140 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
+    std::size_t TreeView::currentKeyboardLead() const {
+        if (keyboardHighlightedIndex_.has_value()) {
+            return *keyboardHighlightedIndex_;
+        }
+        if (selectionAnchorPath_.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*selectionAnchorPath_); idx.has_value()) {
+                return *idx;
+            }
+        }
+        if (auto sel = selectedPath(); sel.has_value()) {
+            if (auto idx = controller_->visibleIndexOf(*sel); idx.has_value()) {
+                return *idx;
+            }
+        }
+        return 0;
+    }
+
+    // Same "intra-control, not UIInputManager" reasoning as ListView::
+    // handleKeyDown()'s own doc comment (controls.h).
+    SyncReturn TreeView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+        std::size_t count = controller_->visibleCount();
+        if (count == 0) {
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkSpaceBar) {
+            // See ListView::handleKeyDown()'s own Ctrl+Space handling
+            // (controls.cpp) - same contract, path-keyed.
+            if ((keyMask & kmCtrl) != 0 && keyboardHighlightedIndex_.has_value()) {
+                toggleSelection(controller_->pathAt(*keyboardHighlightedIndex_));
+                return SyncReturn::Handled;
+            }
+            return SyncReturn::Ignored;
+        }
+
+        if (VKeyCode == vkLeftArrow || VKeyCode == vkRightArrow) {
+            std::vector<std::size_t> path = controller_->pathAt(currentKeyboardLead());
+            TreeModel* treeModel = controller_->model();
+            bool hasChildren = treeModel != nullptr && treeModel->hasChildren(path);
+            bool expanded = hasChildren && controller_->isExpanded(path);
+
+            if (VKeyCode == vkLeftArrow) {
+                if (expanded) {
+                    controller_->setExpanded(path, false);
+                    return SyncReturn::Handled;
+                }
+                // Already collapsed (or a leaf) - move to the parent path,
+                // if there is one. An empty path (path.size() == 1, a
+                // top-level node) has no parent - nothing left to do.
+                if (path.size() <= 1) {
+                    return SyncReturn::Ignored;
+                }
+                path.pop_back();
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+                return SyncReturn::Ignored;
+            }
+
+            // vkRightArrow
+            if (hasChildren && !expanded) {
+                controller_->setExpanded(path, true);
+                return SyncReturn::Handled;
+            }
+            if (expanded) {
+                path.push_back(0);
+                if (auto idx = controller_->visibleIndexOf(path); idx.has_value()) {
+                    setSelectedPath(path);
+                    selectionAnchorPath_ = path;
+                    setKeyboardHighlightedIndex(std::nullopt);
+                    return SyncReturn::Handled;
+                }
+            }
+            return SyncReturn::Ignored;
+        }
+
+        std::size_t next;
+        bool plainArrowAtOwnBoundary = false;
+        switch (VKeyCode) {
+            case vkUpArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead > 0) ? lead - 1 : 0;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkDownArrow: {
+                std::size_t lead = currentKeyboardLead();
+                next = (lead + 1 < count) ? lead + 1 : count - 1;
+                plainArrowAtOwnBoundary = (next == lead);
+                break;
+            }
+            case vkHome:
+                next = 0;
+                break;
+            case vkEnd:
+                next = count - 1;
+                break;
+            default:
+                return SyncReturn::Ignored;
+        }
+
+        bool shift = (keyMask & kmShift) != 0;
+        bool ctrl = (keyMask & kmCtrl) != 0;
+
+        if (!shift && !ctrl && plainArrowAtOwnBoundary) {
+            // Same "hand off to UIInputManager's cross-control spatial
+            // jump instead of silently re-selecting the same row" reasoning
+            // as ListView::handleKeyDown()'s own Up/Down boundary case
+            // (controls.cpp) - kept ahead of nextPath's own computation
+            // below since there's nothing to do with it in this case.
+            return SyncReturn::Ignored;
+        }
+
+        std::vector<std::size_t> nextPath = controller_->pathAt(next);
+
+        if (ctrl && !shift) {
+            setKeyboardHighlightedIndex(next);
+        } else if (shift) {
+            if (!selectionAnchorPath_.has_value()) {
+                selectionAnchorPath_ = controller_->pathAt(currentKeyboardLead());
+            }
+            selectRange(*selectionAnchorPath_, nextPath);
+            setKeyboardHighlightedIndex(next);
+        } else {
+            setSelectedPath(nextPath);
+            selectionAnchorPath_ = nextPath;
+            setKeyboardHighlightedIndex(std::nullopt);
+        }
+        return SyncReturn::Handled;
+    }
+
     SyncReturn TreeView::handleMouseLeft(View& /*sender*/, const Point& /*pt*/, std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/) {
         if (!hoveredVisibleIndex_.has_value()) {
             return SyncReturn::Ignored;
@@ -2977,12 +4288,34 @@ namespace newui {
     // DropDownList
     // -----------------------------------------------------------------
 
-    DropDownList::DropDownList() : controller_(std::make_unique<ListController>()) {
+    DropDownList::DropDownList() : controller_(std::make_shared<ListController>()) {
         setVisible(true);
-        setStyle(std::make_unique<ThemedEditStyle>());
+        setAcceptsFocus(true);
+
+        auto editStyle = std::make_unique<ThemedEditStyle>();
+        editStyle_ = editStyle.get();
+        setStyle(std::move(editStyle));
 
         onMouseDown.add(this, &DropDownList::handleMouseDown);
         onKeyDown.add(this, &DropDownList::handleKeyDown);
+        onGotFocus.add(this, &DropDownList::handleGotFocus);
+        onLostFocus.add(this, &DropDownList::handleLostFocus);
+    }
+
+    SyncReturn DropDownList::handleGotFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = true;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
+    }
+
+    SyncReturn DropDownList::handleLostFocus(View& /*sender*/) {
+        if (editStyle_ != nullptr) {
+            editStyle_->focused = false;
+            style().markDirty();
+        }
+        return SyncReturn::Handled;
     }
 
     DropDownList::~DropDownList() {
@@ -2995,13 +4328,32 @@ namespace newui {
         }
     }
 
-    void DropDownList::setModel(ListModel* model) {
-        controller_->setModel(model);
+    void DropDownList::setController(std::shared_ptr<ListController> controller) {
+        if (controller == nullptr || controller == controller_) {
+            return;
+        }
+        controller_ = std::move(controller);
+        ListModel* model = controller_->model();
         if (selectedIndex_.has_value() && (model == nullptr || *selectedIndex_ >= model->size())) {
             selectedIndex_.reset();
         }
         if (popupListView_ != nullptr) {
-            popupListView_->setModel(model);
+            popupListView_->setController(controller_);
+        }
+        style().markDirty();
+    }
+
+    void DropDownList::setModel(std::unique_ptr<ListModel> model) {
+        ListModel* attached = model.get();
+        controller_->setModel(std::move(model));
+        if (selectedIndex_.has_value() && (attached == nullptr || *selectedIndex_ >= attached->size())) {
+            selectedIndex_.reset();
+        }
+        // The popup list shares controller_, so it already sees the new model - it only needs a
+        // content-size refresh and a repaint.
+        if (popupListView_ != nullptr) {
+            popupListView_->onContentSizeChanged(*popupListView_);
+            popupListView_->style().markDirty();
         }
         style().markDirty();
     }
@@ -3109,8 +4461,14 @@ namespace newui {
         // RootView's own WS_CHILD HWND - same reasoning
         // MenuBarButtonClicked() (menus.cpp) already documents for
         // TrackPopupMenu's owner.
-        Frame* frame = root->getFrame();
-        if (frame == nullptr || frame->frameHandle() == nullptr) {
+        // A Frame-owned RootView's owner is its Frame. A standalone RootView (no Application/Frame, e.g. one hosted
+        // in another process's window - see RootView's HWND-parent constructor) has no Frame, so fall back to the
+        // top-level window its own HWND lives under; returning here instead meant the popup silently never opened.
+        HWND ownerHwnd = root->getFrame() != nullptr ? root->getFrame()->frameHandle() : nullptr;
+        if (ownerHwnd == nullptr) {
+            ownerHwnd = ::GetAncestor(root->windowHandle(), GA_ROOT);
+        }
+        if (ownerHwnd == nullptr) {
             return;
         }
 
@@ -3121,7 +4479,22 @@ namespace newui {
 
             popupListView_ = new ListView();
             popupListView_->setVisible(true);
-            popupListView_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+            // One controller, two views over the same data - so a custom Item class / row height /
+            // subclass set on this control's controller() applies to the popup rows too.
+            popupListView_->setController(controller_);
+
+            // Wrapped in a real ScrollView (not added to popup_->rootView() directly) so a popup
+            // taller than kMaxPopupHeight's worth of rows below gets a real vertical scrollbar and
+            // responds to the mouse wheel - real, live-reported gap (FontPropertyEditor's "name"
+            // dropdown, cpp_codetools, is the first DropDownList content long enough to overflow
+            // kMaxPopupHeight at all). ListView already answers onQueryContentSize (its own
+            // constructor) - same "virtualized content child" shape ScrollView::updateLayout()
+            // already handles for TextControl/TreeView - so it needs no LayoutParams of its own
+            // once it's popupScroll_'s content child; only popupScroll_ itself does, below.
+            popupScroll_ = new ScrollView();
+            popupScroll_->setVisible(true);
+            popupScroll_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+            popupScroll_->addChild(popupListView_);
 
             // A real Layout (not manual bounds-poking) is load-bearing
             // here, not just tidy - see the long comment on why in this
@@ -3129,7 +4502,7 @@ namespace newui {
             // already calls updateLayout() synchronously as part of
             // handling the real WM_SIZE that show()'s own ShowWindow()
             // triggers - giving popup_->rootView() a FlexLayout means
-            // popupListView_ gets arranged to fill it automatically, in
+            // popupScroll_ gets arranged to fill it automatically, in
             // that same synchronous call, with no separately-timed
             // setBounds() call of our own that could race show()'s
             // immediate forced repaint.
@@ -3137,7 +4510,7 @@ namespace newui {
             popupLayout->setSpacing(0.0f);
             popupLayout->setPadding(0.0f);
             popup_->rootView().setLayout(std::move(popupLayout));
-            popup_->rootView().addChild(popupListView_);
+            popup_->rootView().addChild(popupScroll_);
 
             // Without an explicit background, whatever's behind an
             // unpainted RootView shows through as a solid black rect
@@ -3147,7 +4520,10 @@ namespace newui {
                 UIColorManager::colorFor(UIColorRole::WindowBackground));
         }
 
-        popupListView_->setModel(controller_->model());
+        // popupListView_ shares controller_ (see setController() above), so it already has the
+        // model - just refresh its content size for the current row count.
+        popupListView_->onContentSizeChanged(*popupListView_);
+        popupListView_->style().markDirty();
 
         // Restore this control's own current selection into the popup's
         // ListView before wiring/re-triggering its own onSelectionChanged -
@@ -3189,7 +4565,7 @@ namespace newui {
         // doesn't actually fit in *either* direction, falls back to the
         // plain below placement rather than adding further clamping logic
         // nothing has asked for.
-        HMONITOR monitor = ::MonitorFromWindow(frame->frameHandle(), MONITOR_DEFAULTTONEAREST);
+        HMONITOR monitor = ::MonitorFromWindow(ownerHwnd, MONITOR_DEFAULTTONEAREST);
         MONITORINFO monitorInfo = {};
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (monitor != nullptr && ::GetMonitorInfo(monitor, &monitorInfo)) {
@@ -3204,8 +4580,9 @@ namespace newui {
 
         if (firstOpen) {
             popup_->setBounds(popupBounds);
-            if (!popup_->initialize(frame->frameHandle())) {
+            if (!popup_->initialize(ownerHwnd)) {
                 popup_.reset();
+                popupScroll_ = nullptr;
                 popupListView_ = nullptr;
                 return;
             }
@@ -3394,3 +4771,383 @@ namespace newui {
     }
 
 }
+
+// Internal to TabControl - not declared in tabcontrol.h, same "keep
+// implementation machinery out of the public header" convention
+// cursor.cpp/menus.cpp already use.
+namespace {
+
+constexpr float kHorizontalStripThickness = 28.0f;  // strip height when the strip is a horizontal row (Top/Bottom)
+constexpr float kVerticalStripThickness = 100.0f;    // strip width when the strip is a vertical column (Left/Right)
+constexpr float kButtonMainAxisPadding = 24.0f;      // extra width/height beyond the raw text extent
+
+class TabItemButtonView : public newui::SubView {
+public:
+    std::string text;
+
+    // Non-owning - points into the owning TabControl's own tree, which
+    // outlives this button (rebuilt/destroyed together in
+    // TabControl::addTab()/its own destroy() cascade).
+    newui::TabControl* owner = nullptr;
+    std::size_t tabIndex = 0;
+
+    void paint(BLContext& ctx) override {
+        newui::Font font = newui::FontManager::getSystemFont(newui::SystemUIFont::Message);
+        BLFont* blFont = font.blFont();
+        if (blFont == nullptr) {
+            return;
+        }
+
+        newui::TextMetrics tm = font.measureText(text);
+
+        newui::Rect bounds = getClientBounds();
+        float x = bounds.left() + (bounds.size().width - tm.width) * 0.5f;
+        float textHeight = tm.ascent + tm.descent;
+        float baselineY = bounds.top() + (bounds.size().height - textHeight) * 0.5f + tm.ascent;
+
+        COLORREF textColor = ::GetSysColor(COLOR_WINDOWTEXT);
+        ctx.set_fill_style(BLRgba32(GetRValue(textColor), GetGValue(textColor), GetBValue(textColor), 255));
+        ctx.fill_utf8_text(BLPoint(x, baselineY), *blFont, text.c_str());
+    }
+};
+
+// Needs no live window at all (unlike MenuBar's button click handler) -
+// selecting a tab just switches which already-built page is visible via
+// CardLayout, entirely in-process.
+newui::SyncReturn TabItemButtonClicked(newui::View& sender, const newui::Point&, std::uint32_t, std::uint32_t) {
+    auto& button = static_cast<TabItemButtonView&>(sender);
+    if (button.owner != nullptr) {
+        button.owner->selectTab(button.tabIndex);
+    }
+    return newui::SyncReturn::Handled;
+}
+
+bool IsHorizontalStrip(newui::ThemedTabItemStyle::TabAlignment alignment) {
+    return alignment == newui::ThemedTabItemStyle::TabAlignment::Top
+        || alignment == newui::ThemedTabItemStyle::TabAlignment::Bottom;
+}
+
+// Text, name and desired size all follow the label - used when a button is built and when its
+// page's title changes.
+void ApplyButtonText(TabItemButtonView& button, const std::string& text, bool stripHorizontal) {
+    button.text = text;
+    button.setName(text);
+    newui::Font font = newui::FontManager::getSystemFont(newui::SystemUIFont::Message);
+    newui::TextMetrics tm = font.measureText(text);
+    button.setDesiredSize(stripHorizontal
+        ? newui::Size(tm.width + kButtonMainAxisPadding, kHorizontalStripThickness)
+        : newui::Size(kVerticalStripThickness, tm.ascent + tm.descent + kButtonMainAxisPadding * 0.5f));
+}
+
+}  // namespace
+
+namespace newui {
+
+TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(alignment) {
+    setName("TabControl");
+    setVisible(true);
+    // The whole strip is one tab stop, like a real Win32 tab control -
+    // individual TabItemButtonView instances (addTab(), below) stay
+    // non-focusable; switching which tab is selected once this control
+    // has focus is a job for arrow keys, not Tab (see handleKeyDown()
+    // below), matching native tab control behavior.
+    setAcceptsFocus(true);
+    onKeyDown.add(this, &TabControl::handleKeyDown);
+    setStyle(std::make_unique<ThemedTabPaneStyle>());
+
+    const bool stripHorizontal = IsHorizontalStrip(alignment_);
+
+    // Top/Bottom: strip above/below the pages, stacked vertically.
+    // Left/Right: strip beside the pages, side by side horizontally.
+    setLayout(std::make_unique<FlexLayout>(stripHorizontal ? Orientation::Vertical : Orientation::Horizontal));
+
+    stripRow_ = new SubView();
+    stripRow_->setName("TabControlStrip");
+    stripRow_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+    stripRow_->setVisible(true);
+    stripRow_->setLayout(std::make_unique<FlexLayout>(stripHorizontal ? Orientation::Horizontal : Orientation::Vertical));
+    stripRow_->setLayoutParams(std::make_unique<FlexLayoutParams>(0.0f));
+    stripRow_->setDesiredSize(stripHorizontal
+        ? Size(0.0f, kHorizontalStripThickness)
+        : Size(kVerticalStripThickness, 0.0f));
+
+    pagesArea_ = new TabPageContainer();
+    pagesArea_->owner_ = this;
+    pagesArea_->setName("TabControlPages");
+    pagesArea_->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);  // its pages are the user's, not flagged
+    pagesArea_->setVisible(true);
+    pagesArea_->setLayout(std::make_unique<CardLayout>());
+    pagesArea_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
+
+    // Top/Left: strip comes first (visually above/left of the pages).
+    // Bottom/Right: pages come first.
+    const bool stripFirst = (alignment_ == ThemedTabItemStyle::TabAlignment::Top
+        || alignment_ == ThemedTabItemStyle::TabAlignment::Left);
+    if (stripFirst) {
+        addChild(stripRow_);
+        addChild(pagesArea_);
+    } else {
+        addChild(pagesArea_);
+        addChild(stripRow_);
+    }
+}
+
+SubView* TabControl::addTab(const std::string& text, SubView* page) {
+    if (auto* tabPage = dynamic_cast<TabPage*>(page)) {
+        tabPage->title_ = text;
+    }
+    pendingTabText_ = text;
+    hasPendingTabText_ = true;
+    pagesArea_->addChild(page);  // -> pageAdded() builds the matching button
+    hasPendingTabText_ = false;
+    return page;
+}
+
+void TabControl::pageAdded(SubView* page) {
+    const bool stripHorizontal = IsHorizontalStrip(alignment_);
+    const bool wasEmpty = stripRow_->childViews().empty();
+
+    std::string text;
+    if (hasPendingTabText_) {
+        text = pendingTabText_;
+    } else if (auto* tabPage = dynamic_cast<TabPage*>(page); tabPage != nullptr && !tabPage->title().empty()) {
+        text = tabPage->title();
+    } else {
+        text = "Tab " + std::to_string(stripRow_->childViews().size() + 1);
+    }
+
+    auto* button = new TabItemButtonView();
+    button->setDesignTimeFlag(DesignTimeFlags::Internal | DesignTimeFlags::NotSelectable);
+    button->setVisible(true);
+    button->owner = this;
+    button->tabIndex = stripRow_->childViews().size();
+    button->setStyle(std::make_unique<ThemedTabItemStyle>());
+    static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
+    ApplyButtonText(*button, text, stripHorizontal);
+
+    button->onMouseDown.add(&TabItemButtonClicked);
+
+    stripRow_->addChild(button);
+
+    updateTabPositions();
+
+    if (wasEmpty) {
+        selectTab(0);
+    }
+}
+
+void TabControl::pageRemoved(std::size_t index) {
+    const auto& buttons = stripRow_->childViews();
+    if (index >= buttons.size()) {
+        return;
+    }
+
+    SubView* button = buttons[index];
+    stripRow_->removeChild(button);
+    button->destroy();
+    delete button;
+
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        static_cast<TabItemButtonView*>(buttons[i])->tabIndex = i;
+    }
+    updateTabPositions();
+
+    if (buttons.empty()) {
+        selectedIndex_ = 0;
+    } else {
+        std::size_t next = selectedIndex_;
+        if (index < selectedIndex_) {
+            next = selectedIndex_ - 1;
+        } else if (next >= buttons.size()) {
+            next = buttons.size() - 1;
+        }
+        selectTab(next);
+    }
+}
+
+void TabControl::pageMoved(std::size_t from, std::size_t to) {
+    const auto& buttons = stripRow_->childViews();
+    if (from >= buttons.size() || to >= buttons.size()) {
+        return;
+    }
+
+    stripRow_->reorderChild(buttons[from], to);
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        static_cast<TabItemButtonView*>(buttons[i])->tabIndex = i;
+    }
+    updateTabPositions();
+
+    // The same tab stays selected: follow it to its new index.
+    std::size_t selected = selectedIndex_;
+    if (selected == from) {
+        selected = to;
+    } else if (from < selected && selected <= to) {
+        --selected;
+    } else if (to <= selected && selected < from) {
+        ++selected;
+    }
+    selectTab(selected);
+}
+
+void TabControl::refreshTabTitle(const TabPage* page) {
+    const auto& pages = pagesArea_->childViews();
+    const auto& buttons = stripRow_->childViews();
+    for (std::size_t i = 0; i < pages.size() && i < buttons.size(); ++i) {
+        if (pages[i] == page) {
+            ApplyButtonText(*static_cast<TabItemButtonView*>(buttons[i]), page->title(), IsHorizontalStrip(alignment_));
+            stripRow_->updateLayout();
+            buttons[i]->style().markDirty();
+            return;
+        }
+    }
+}
+
+SubView* TabControl::removeTab(std::size_t index) {
+    if (index >= pagesArea_->childViews().size()) {
+        return nullptr;
+    }
+
+    SubView* removedPage = pagesArea_->childViews()[index];
+    pagesArea_->removeChild(removedPage);  // -> pageRemoved() destroys the matching button
+    return removedPage;
+}
+
+TabPage::TabPage() {
+    setVisible(true);
+}
+
+void TabPage::setTitle(const std::string& title) {
+    title_ = title;
+    if (auto* container = dynamic_cast<TabPageContainer*>(parent()); container != nullptr && container->owner_ != nullptr) {
+        container->owner_->refreshTabTitle(this);
+    }
+}
+
+void TabPageContainer::addChild(SubView* child) {
+    SubView::addChild(child);
+    if (owner_ != nullptr) {
+        owner_->pageAdded(child);
+    }
+}
+
+void TabPageContainer::removeChild(SubView* child) {
+    bool found = false;
+    std::size_t index = 0;
+    for (; index < childViews().size(); ++index) {
+        if (childViews()[index] == child) {
+            found = true;
+            break;
+        }
+    }
+    SubView::removeChild(child);
+    if (found && owner_ != nullptr) {
+        owner_->pageRemoved(index);
+    }
+}
+
+void TabPageContainer::reorderChild(SubView* child, std::size_t newIndex) {
+    std::size_t from = childViews().size();
+    for (std::size_t i = 0; i < childViews().size(); ++i) {
+        if (childViews()[i] == child) {
+            from = i;
+            break;
+        }
+    }
+    SubView::reorderChild(child, newIndex);
+    if (owner_ == nullptr || from >= childViews().size()) {
+        return;
+    }
+    for (std::size_t i = 0; i < childViews().size(); ++i) {
+        if (childViews()[i] == child) {
+            if (i != from) {
+                owner_->pageMoved(from, i);
+            }
+            return;
+        }
+    }
+}
+
+std::size_t TabControl::tabCount() const {
+    return stripRow_->childViews().size();
+}
+
+SubView* TabControl::tabButton(std::size_t index) const {
+    const auto& buttons = stripRow_->childViews();
+    return index < buttons.size() ? buttons[index] : nullptr;
+}
+
+SubView* TabControl::page(std::size_t index) const {
+    const auto& pages = pagesArea_->childViews();
+    return index < pages.size() ? pages[index] : nullptr;
+}
+
+void TabControl::selectTab(std::size_t index) {
+    const auto& buttons = stripRow_->childViews();
+    if (index >= buttons.size()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        auto* style = dynamic_cast<ThemedTabItemStyle*>(&buttons[i]->style());
+        if (style == nullptr) {
+            continue;
+        }
+        style->selected = (i == index);
+        buttons[i]->style().markDirty();
+    }
+
+    selectedIndex_ = index;
+
+    auto* cardLayout = dynamic_cast<CardLayout*>(pagesArea_->layout());
+    if (cardLayout != nullptr) {
+        cardLayout->show(index);
+    }
+
+    onTabChanged.syncCall(*this, index);
+}
+
+SyncReturn TabControl::handleKeyDown(View& /*sender*/, std::uint32_t /*keyMask*/, int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode) {
+    const std::size_t count = tabCount();
+    if (count == 0) {
+        return SyncReturn::Ignored;
+    }
+
+    const bool horizontal = IsHorizontalStrip(alignment_);
+    const bool advance = VKeyCode == (horizontal ? vkRightArrow : vkDownArrow);
+    const bool retreat = VKeyCode == (horizontal ? vkLeftArrow : vkUpArrow);
+    if (!advance && !retreat) {
+        return SyncReturn::Ignored;
+    }
+
+    // Wraps at either end, matching native Win32 tab control behavior
+    // (and moveFocus()'s own Tab-wrap convention, uiinputmanager.cpp) -
+    // +count before the retreat's %count keeps the subtraction from ever
+    // going negative on an unsigned type when selectedIndex_ is 0.
+    std::size_t next = advance ? (selectedIndex_ + 1) % count : (selectedIndex_ + count - 1) % count;
+    selectTab(next);
+    return SyncReturn::Handled;
+}
+
+void TabControl::updateTabPositions() {
+    const auto& buttons = stripRow_->childViews();
+    const std::size_t count = buttons.size();
+
+    for (std::size_t i = 0; i < count; ++i) {
+        auto* style = dynamic_cast<ThemedTabItemStyle*>(&buttons[i]->style());
+        if (style == nullptr) {
+            continue;
+        }
+
+        if (count == 1) {
+            style->position = ThemedTabItemStyle::Position::Only;
+        } else if (i == 0) {
+            style->position = ThemedTabItemStyle::Position::Left;
+        } else if (i == count - 1) {
+            style->position = ThemedTabItemStyle::Position::Right;
+        } else {
+            style->position = ThemedTabItemStyle::Position::Middle;
+        }
+    }
+}
+
+}  // namespace newui

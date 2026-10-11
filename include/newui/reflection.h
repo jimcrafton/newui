@@ -82,6 +82,14 @@ namespace newui::reflection {
         // implementation that does.
         virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
         virtual void exitInstance(const Class* clazz, void* instancePtr) {}
+
+        // True while this writer is producing a design-time document (see
+        // Class::proxy()/proxyFor()'s own comments) - ObjectWriter
+        // (reflectionio.h) is the one real implementation that makes this
+        // settable; every other ClassWriter defaults to false (ordinary,
+        // non-design-time output), same "default no-op, only a real
+        // implementation overrides" shape as enterInstance() above.
+        virtual bool isDesignMode() const { return false; }
     };
 
 
@@ -116,6 +124,27 @@ namespace newui::reflection {
         // field that base ViewStyle doesn't have).
         virtual bool hasValue(const std::string& propertyName) const { return true; }
 
+        // Populates instancePtr from whatever this reader's own source data
+        // has for the *current* object scope (whatever beginObject() the
+        // caller already called most recently opened) - construct-or-reuse,
+        // then apply only whatever properties/fields the source actually
+        // has (Class::property()/field(), both walk parentClass()), not
+        // every registered member. instancePtr is in/out: null on entry
+        // means "construct a fresh instance of clazz" (instanceOnHeap is
+        // then set true, and instancePtr comes back holding the new
+        // instance, or stays null if clazz has no usable constructor);
+        // non-null on entry means "read into this existing instance"
+        // (instancePtr is returned unchanged - same identity, just
+        // mutated). clazz is assumed already resolved/validated by the
+        // caller (see Class::isOrDerivesFrom()) - this doesn't re-check it.
+        //
+        // This reader decides how to walk its own source format - Class/
+        // Property/Field stay passive lookup/storage targets it queries,
+        // not drivers. Recursion into a nested Class-typed property comes
+        // back through here too (via the same reader), so the whole object
+        // graph is read the same way top to bottom.
+        virtual void readInto(const Class* clazz, void*& instancePtr, bool& instanceOnHeap) = 0;
+
         // The resolved runtime Class (via its "type" tag) of whichever
         // collection element the *current* array position holds - unlike
         // beginObject(""), which also consumes/advances that position (it
@@ -138,6 +167,22 @@ namespace newui::reflection {
         // forced replacement - the conservative direction when there's
         // nothing definite to compare against.
         virtual const Class* peekElementType() const { return nullptr; }
+
+        // True when the source data at propertyName is a plain string rather
+        // than an object - lets a caller about to read a nested Class-typed
+        // property (TypedProperty<SourceT,ValueT>::read()/TypedMemberField::
+        // read(), below) check, before committing to beginObject()'s object-
+        // shaped protocol, whether the document actually holds the compact
+        // string form a Class::isStringValue() class also accepts (Color's
+        // "#rrggbbaa"/CSS-name/UIColorRole forms being the motivating case -
+        // see ClassBuilder<T>::stringValue()'s own comment). A pure peek,
+        // same non-mutating contract as peekElementType() - doesn't consume/
+        // advance anything, so the caller still has to call readString()/
+        // beginObject() itself afterward to actually consume the value.
+        // Defaults to false (every existing ClassReader implementation that
+        // never overrides this keeps its exact prior behavior: always treat
+        // a nested-Class property as object-shaped).
+        virtual bool valueIsString(const std::string& propertyName) const { return false; }
 
         virtual void readInt(const std::string& propertyName, std::int32_t& val) = 0;
         virtual void readString(const std::string& propertyName, std::string& val) = 0;
@@ -170,6 +215,12 @@ namespace newui::reflection {
         // enterInstance()'s own comment.
         virtual bool enterInstance(const Class* clazz, void* instancePtr) { return true; }
         virtual void exitInstance(const Class* clazz, void* instancePtr) {}
+
+        // See ClassWriter::isDesignMode()'s own comment - same shape, read
+        // side. TypedClass<T>::read() (below) consults this to decide
+        // whether a resolved "type" tag's Class::proxy() should be
+        // substituted in before constructing a fresh instance.
+        virtual bool isDesignMode() const { return false; }
     };
     // Forward-declared, never given a generic body - referencing
     // ClassAccess<T> for a T nobody ever explicitly specialized is a hard
@@ -192,6 +243,61 @@ namespace newui::reflection {
     // own name).
     namespace detail {
         template<typename T> struct ClassAccess;
+
+        // Reaches a private/protected data member without a friend
+        // declaration: explicit instantiation ignores access checks, so
+        // reflectgen emits `template struct AccessThief<Tag, &C::m_>;` and
+        // reads the pointer back through accessThiefGet(Tag). Used only for
+        // members marked "//@reflect connect=true" in a class that has no
+        // NEWUI_REFLECT_PRIVATE().
+        template<typename Tag, auto Member>
+        struct AccessThief {
+            friend constexpr auto accessThiefGet(Tag) { return Member; }
+        };
+
+        // typeid's name with only MSVC's leading "class "/"struct "/"enum "/"union " removed - the
+        // namespace stays (unlike demangleTypeName(), which drops it).
+        inline std::string qualifiedTypeName(const std::type_info& info) {
+            std::string name = info.name();
+            for (const char* prefix : { "class ", "struct ", "enum ", "union " }) {
+                const std::size_t length = std::char_traits<char>::length(prefix);
+                if (name.compare(0, length, prefix) == 0) {
+                    name.erase(0, length);
+                    break;
+                }
+            }
+            return name;
+        }
+
+        // T as C++ source spells it, minus references: "const newui::Size", "int*", "const View* const".
+        template<typename T>
+        std::string cppValueSpelling() {
+            if constexpr (std::is_pointer_v<T>) {
+                std::string spelling = cppValueSpelling<std::remove_pointer_t<T>>() + "*";
+                if constexpr (std::is_const_v<T>) {
+                    spelling += " const";
+                }
+                return spelling;
+            } else {
+                std::string spelling = qualifiedTypeName(typeid(std::remove_cv_t<T>));
+                if constexpr (std::is_const_v<T>) {
+                    spelling = "const " + spelling;
+                }
+                return spelling;
+            }
+        }
+
+        // T exactly as it would be written in a signature, references included.
+        template<typename T>
+        std::string cppTypeSpelling() {
+            std::string spelling = cppValueSpelling<std::remove_reference_t<T>>();
+            if constexpr (std::is_lvalue_reference_v<T>) {
+                spelling += "&";
+            } else if constexpr (std::is_rvalue_reference_v<T>) {
+                spelling += "&&";
+            }
+            return spelling;
+        }
     }
 
     // True when T has a callable, no-argument .destroy() member - used
@@ -212,6 +318,14 @@ namespace newui::reflection {
         struct has_destroy_method<T, std::void_t<decltype(std::declval<T&>().destroy())>> : std::true_type {};
         template<typename T>
         inline constexpr bool has_destroy_method_v = has_destroy_method<T>::value;
+
+        // True when T is a complete type (typeid(T) is ill-formed otherwise).
+        template<typename T, typename = void>
+        struct is_complete : std::false_type {};
+        template<typename T>
+        struct is_complete<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
+        template<typename T>
+        inline constexpr bool is_complete_v = is_complete<T>::value;
     }
 
     // container_traits<ContainerT> - one specialization per STL container
@@ -376,6 +490,11 @@ namespace newui::reflection {
     struct Argument {
         std::string name;
         std::type_index type;
+        // The argument's type as C++ source spells it, qualifiers included ("const newui::Size&"):
+        // `type` is a typeid, which drops const and references, so it can't be used to write a
+        // signature that matches. Only filled in where it is known at compile time (a delegate's
+        // Args...); empty otherwise.
+        std::string spelling;
     };
 
     // A member variable reached via direct storage access - a real
@@ -407,9 +526,10 @@ namespace newui::reflection {
     public:
         Field(std::string name, std::type_index type, Scope scope, void* address,
                std::any (*get)(), void (*set)(const std::any&),
-               PropertyFlags flags = PropertyFlags::None)
+               PropertyFlags flags = PropertyFlags::None,
+                std::any defVal = std::any{} )
             : name_(std::move(name)), type_(type), scope_(scope), flags_(flags),
-              address_(address), get_(get), set_(set) {}
+              address_(address), get_(get), set_(set), defaultVal_(std::move(defVal)) {}
 
         virtual ~Field() = default;
 
@@ -424,6 +544,21 @@ namespace newui::reflection {
         // TypedFieldCollection (a real pointer-to-data-member, needs one).
         bool isStatic() const { return (flags_ & PropertyFlags::Static) != PropertyFlags::None; }
 
+        // For a raw pointer-to-class field (e.g. `ProgressBar* progressBar_`)
+        // the pointee's type; typeid(void) otherwise. type() keeps the
+        // pointer type itself verbatim. Only TypedMemberField fills it in.
+        std::type_index pointeeType() const { return pointeeType_; }
+        bool isPointer() const { return pointeeType_ != std::type_index(typeid(void)); }
+        // The pointee's registered Class, or nullptr if this isn't a
+        // pointer field or the pointee was never registered. Resolved on
+        // each call - the pointee may register after this field does.
+        const Class* pointeeClass() const;
+
+        // From "//@reflect connect=true" on the member (reflectgen), or
+        // ClassBuilder::connect() - marks a pointer-to-View field that
+        // RootController::initialize() should bind by name.
+        bool needsConnection() const { return connect_; }
+
         virtual void* address(void* instance) const { return address_; }
         virtual std::any get(void* instance) const { return get_ ? get_() : std::any(); }
         virtual void set(void* instance, const std::any& value) const { if (set_) set_(value); }
@@ -436,6 +571,16 @@ namespace newui::reflection {
             return std::any_cast<T>(get(instance));
         }
 
+        //returns the default value for the field, might be empty
+        //otherwise should contain the default value
+        //might require more advanced parsing in reflectgen 
+        std::any defaultVal() const { return defaultVal_; }
+
+        void setDefaultVal(const std::any& val) {
+            defaultVal_ = val;
+        }
+
+
         // Base defaults are no-ops (same "every method has a do-nothing
         // default" idiom Property/PropertyCollection already use) -
         // TypedMemberField below is the one that actually does something;
@@ -443,6 +588,9 @@ namespace newui::reflection {
         // no-op for now, out of scope for this pass.
         virtual void write(void* instancePtr, ClassWriter* writer) const {}
         virtual void read(void* instancePtr, ClassReader* reader) const {}
+    protected:
+        void setPointeeType(std::type_index pointee) { pointeeType_ = pointee; }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -451,11 +599,14 @@ namespace newui::reflection {
 
         std::string name_;
         std::type_index type_;
+        std::type_index pointeeType_ = typeid(void);
+        bool connect_ = false;
         Scope scope_;
         PropertyFlags flags_;
         void* address_;
         GetFn get_;
         SetFn set_;
+        std::any defaultVal_;
     };
 
     // T-aware TypedField<ValueT> - a static class variable. The address is
@@ -469,7 +620,7 @@ namespace newui::reflection {
     template<typename ValueT>
     class TypedField : public Field {
     public:
-        TypedField(std::string name, Scope scope, ValueT* address)
+        TypedField(std::string name, Scope scope, ValueT* address, std::any defaultVal = std::any{})
             : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr, PropertyFlags::Static),
               address_(address) {}
 
@@ -495,7 +646,16 @@ namespace newui::reflection {
         using MemberPtr = ValueT SourceT::*;
 
         TypedMemberField(std::string name, Scope scope, MemberPtr member)
-            : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr), member_(member) {}
+            : Field(std::move(name), typeid(ValueT), scope, nullptr, nullptr, nullptr), member_(member) {
+            if constexpr (std::is_pointer_v<ValueT>) {
+                using PointeeT = std::remove_cv_t<std::remove_pointer_t<ValueT>>;
+                // typeid() needs a complete type; a forward-declared pointee
+                // just isn't recorded.
+                if constexpr (std::is_class_v<PointeeT> && detail::is_complete_v<PointeeT>) {
+                    setPointeeType(typeid(PointeeT));
+                }
+            }
+        }
 
         void* address(void* instance) const override {
             return &(static_cast<SourceT*>(instance)->*member_);
@@ -526,9 +686,16 @@ namespace newui::reflection {
 
         void read(void* instancePtr, ClassReader* reader) const override {
             if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
-                std::any existing(static_cast<ValueT*>(address(instancePtr)));
-                bool onHeap = false;
-                nestedClazz->read(reader, name(), existing, onHeap);
+                void* nestedPtr = address(instancePtr);
+                if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
+                    return;
+                }
+                const Class* resolvedClazz = reader->beginObject(name());
+                if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                    bool onHeap = false;
+                    reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                }
+                reader->endObject(name(), resolvedClazz);
                 return;
             }
             std::any val;
@@ -664,6 +831,15 @@ namespace newui::reflection {
         std::type_index type() const { return type_; }
         Scope scope() const { return scope_; }
         PropertyFlags flags() const { return flags_; }
+
+        // From "@reflect tags=..." (reflectgen.py) or set directly via
+        // ClassBuilder::property(...)'s trailing tags parameter - semantic
+        // hints a consumer can key an editor/behavior off directly, since
+        // this property's own type() (e.g. plain std::string) is often not
+        // distinctive enough alone. Empty for most properties.
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
+
         bool isCollection() const { return (flags_ & PropertyFlags::Collection) != PropertyFlags::None; }
         bool isAssociative() const { return (flags_ & PropertyFlags::Associative) != PropertyFlags::None; }
         bool shouldCreateOnHeap() const { return (flags_ & PropertyFlags::CreatedOnHeap) != PropertyFlags::None; }
@@ -672,6 +848,10 @@ namespace newui::reflection {
         virtual void* address(void* instance) const = 0;
         virtual std::any get(void* instance) const = 0;
         virtual void set(void* instance, const std::any& value) const = 0;
+
+        virtual std::any defaultVal() const = 0;
+
+        virtual void setDefaultVal(const std::any& val) = 0;
 
         // false for a by-value getter/setter property - the only case
         // where address() throws rather than returning something real
@@ -709,6 +889,25 @@ namespace newui::reflection {
         // for real in its RefGetter/PtrGetter branches only.
         virtual void* addressableValue(void* instance) const { return nullptr; }
 
+        // The Class that should actually be used to read/write/enumerate
+        // this property's *current* value on `instance`, resolved via its
+        // real runtime type rather than just its declared ValueT - e.g.
+        // Layout/LayoutParams, whose real data only ever lives on a
+        // concrete subclass like FlexLayout/AnchorLayoutParams, never the
+        // abstract base itself. See TypedProperty<T,U>::getClass() for the
+        // real implementation (the same "typeid on the real live pointer,
+        // not the declared type" technique write() already relies on
+        // internally, see its own runtimeClazz) and why it's safe - the
+        // pointee genuinely already is that runtime type, this just asks
+        // what it is via ordinary RTTI rather than fabricating a
+        // substitute the way the (rejected) proxy read-side substitution
+        // once tried to. Base default is nullptr, not classinfo(type()) -
+        // a caller can't tell "not overridden" apart from "genuinely no
+        // Class" otherwise, and every concrete Property today
+        // (TypedProperty) does override this for real.
+        // (Named getClass(), not class(), since class is a keyword.)
+        virtual const Class* getClass(void* instance) const { return nullptr; }
+
         // Convenience for a caller that already knows T at compile time -
         // just std::any_cast<T> on top of get(), still throws
         // std::bad_any_cast on a mismatch rather than silently misreading.
@@ -716,6 +915,10 @@ namespace newui::reflection {
         T getAs(void* instance) const {
             return std::any_cast<T>(get(instance));
         }
+
+
+        
+
 
         virtual void write(void* instancePtr, ClassWriter* writer) const = 0;
 
@@ -731,6 +934,8 @@ namespace newui::reflection {
         std::type_index type_;
         Scope scope_;
         PropertyFlags flags_;
+        std::vector<std::string> tags_;
+        
     };
 
     // T-aware TypedProperty<SourceT,ValueT> - the one place a void* instance
@@ -857,6 +1062,26 @@ namespace newui::reflection {
                 "' is a by-value getter/setter property, not addressable");
         }
 
+        // See Property::getClass()'s own comment - same typeid-on-the-
+        // real-live-pointer technique write() already uses internally
+        // (this->write()'s own runtimeClazz, further below), exposed here
+        // as the general-purpose override every TypedProperty gets for
+        // free. Harmless for a ValueT that isn't actually polymorphic in
+        // practice (typeid(*ptr) just resolves back to ValueT's own
+        // static type, identical to classinfo(type())) - no need to
+        // special-case which addressability mode this came from.
+        const Class* getClass(void* instance) const override {
+            if (!isAddressable()) {
+                return classinfo(type());
+            }
+            void* addr = address(instance);
+            if (addr == nullptr) {
+                return classinfo(type());
+            }
+            const Class* runtimeClazz = classinfo(typeid(*static_cast<ValueT*>(addr)));
+            return runtimeClazz != nullptr ? runtimeClazz : classinfo(type());
+        }
+
         // See Property::addressableValue()'s own comment for why this is
         // narrower than address() just above - member_ deliberately isn't
         // handled here (its address() is the pointer *slot*'s address, not
@@ -979,6 +1204,15 @@ namespace newui::reflection {
             set(&instance, std::any(value));
         }
 
+
+        virtual std::any defaultVal() const {
+            return std::any();
+        }
+
+        virtual void setDefaultVal(const std::any& val) {
+
+        }
+
         // When type() resolves to another registered Class, this recurses
         // directly (bypassing writeValue()'s own nested-Class branch,
         // which assumes whatever instancePtr it's handed is already live
@@ -1066,89 +1300,82 @@ namespace newui::reflection {
                 // through here instead of silently doing nothing just
                 // because ValueT as a whole can't be copied.
                 if (shouldCreateOnHeap()) {
-                    // hasValue() first - see its own doc comment
-                    // (ClassReader, reflection.h) for the real, reproduced
-                    // bug this guards against: without it, a property
-                    // that's simply *absent* from the source (an older
-                    // document predating this property becoming
-                    // reflected, or one written by hand) but whose ValueT
-                    // happens to be default-constructible would still get
-                    // unconditionally reconstructed from scratch below and
-                    // overwrite whatever real, already-live value this
-                    // property currently holds - never reads into
-                    // existing storage the way isAddressable()'s branch
-                    // does, so there is no "safe" version of that for a
-                    // PtrGetter/PtrSetter property; skipping entirely,
-                    // leaving the existing value untouched, is the only
-                    // correct response to "nothing here to read".
-                    if (!reader->hasValue(name())) {
-                        return;
-                    }
-                    // If there's already a live value here - ptrGetter_
-                    // makes shouldCreateOnHeap() mode addressable too, so
-                    // address() finds it (e.g. a Slider's thumb_ already
-                    // has its own real ThemedTrackbarThumbStyle from
-                    // Slider's own constructor, before any reading ever
-                    // starts) - peek the saved data's resolved runtime
-                    // type first (a throwaway beginObject()/endObject()
-                    // pair; side-effect-free and safe to repeat for a
-                    // *keyed* - not array-positional - lookup) and compare
-                    // it against the existing value's own real type:
-                    //   - same type: read the saved data straight INTO
-                    //     the existing object instead of constructing a
-                    //     new one - the existing object's *identity*
-                    //     never changes, so anything else non-owningly
-                    //     pointing at it (e.g. Slider::thumbStyle_) stays
-                    //     valid. Real, reproduced bug without this:
-                    //     reconstructing thumb_'s style via a fresh
-                    //     new/delete cycle left thumbStyle_ dangling,
-                    //     crashing the next time Slider touched it.
-                    //   - different type, or no live value yet: fall
-                    //     through to the ordinary construct-fresh-and-
-                    //     set() path below - a genuine type change has to
-                    //     replace the object; nothing else can safely
-                    //     have been relying on the old one's identity
-                    //     anyway.
-                    if (void* existingPtr = address(instancePtr); existingPtr != nullptr) {
-                        const Class* resolvedClazz = reader->beginObject(name());
-                        reader->endObject(name(), resolvedClazz);
-                        if (resolvedClazz != nullptr &&
-                                resolvedClazz == classinfo(typeid(*static_cast<ValueT*>(existingPtr)))) {
-                            std::any existing(static_cast<ValueT*>(existingPtr));
-                            bool onHeap = false;
-                            nestedClazz->read(reader, name(), existing, onHeap);
-                            return;
+                    // No Class::isStringValue() check in this branch - an
+                    // owned-pointer property (View::layout()/style()) is a
+                    // polymorphic-object-ownership shape a plain value type
+                    // like Color never actually uses in this codebase;
+                    // real, doable follow-on work if that ever changes, not
+                    // done here.
+                    //
+                    // Peek the saved data's resolved type first (unusable -
+                    // null, or not a genuine ValueT subclass - just means
+                    // this property can't be processed here; whatever
+                    // existing value there is stays untouched) and compare
+                    // it against any already-live value's own real type
+                    // before deciding whether to hand readInto() the
+                    // existing pointer (reuse in place) or null (construct
+                    // fresh):
+                    //   - same type: existingPtr passed as-is - readInto()
+                    //     reads the saved data straight INTO the existing
+                    //     object, whose *identity* never changes, so
+                    //     anything else non-owningly pointing at it (e.g.
+                    //     Slider::thumbStyle_) stays valid. Real, reproduced
+                    //     bug without this: reconstructing thumb_'s style
+                    //     via a fresh new/delete cycle left thumbStyle_
+                    //     dangling, crashing the next time Slider touched it.
+                    //   - different type, or no live value yet: null passed
+                    //     instead - readInto() constructs fresh; a genuine
+                    //     type change has to replace the object, nothing
+                    //     else can safely have been relying on the old
+                    //     one's identity anyway.
+                    const Class* resolvedClazz = reader->beginObject(name());
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        void* existingPtr = address(instancePtr);
+                        bool sameType = existingPtr != nullptr &&
+                            resolvedClazz == classinfo(typeid(*static_cast<ValueT*>(existingPtr)));
+                        void* nestedPtr = sameType ? existingPtr : nullptr;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                        // Only a freshly-constructed instance needs set() -
+                        // reusing existingPtr in place already mutated the
+                        // live object directly, nothing to reassign.
+                        if (!sameType && nestedPtr != nullptr) {
+                            set(instancePtr, std::any(static_cast<ValueT*>(nestedPtr)));
                         }
                     }
-                    // raw (a type-erased void*), not
-                    // std::any_cast<ValueT*>(fresh) - fresh may hold a
-                    // more-derived pointer than ValueT (nestedClazz->
-                    // read() can resolve a "type" tag naming a real
-                    // subclass, see TypedClass<T>::read()'s own
-                    // comment), and any_cast needs an exact type
-                    // match. static_cast<ValueT*>(raw) is well-defined
-                    // here for the same single-non-virtual-inheritance
-                    // reason TypedPropertyCollection::readFreshElement()'s
-                    // own pointer branch already relies on.
-                    std::any fresh;
-                    bool onHeap = false;
-                    void* raw = nullptr;
-                    nestedClazz->read(reader, name(), fresh, onHeap, &raw);
-                    if (raw != nullptr) {
-                        set(instancePtr, std::any(static_cast<ValueT*>(raw)));
-                    }
+                    reader->endObject(name(), resolvedClazz);
                 } else if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
-                        std::any existing(static_cast<ValueT*>(nestedPtr));
-                        bool onHeap = false;
-                        nestedClazz->read(reader, name(), existing, onHeap);
+                        if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
+                            return;
+                        }
+                        const Class* resolvedClazz = reader->beginObject(name());
+                        if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                            bool onHeap = false;
+                            reader->readInto(resolvedClazz, nestedPtr, onHeap);
+                        }
+                        reader->endObject(name(), resolvedClazz);
                     }
                 } else if constexpr (kCopyable && std::is_default_constructible_v<ValueT> && std::is_copy_assignable_v<ValueT>) {
+                    // The shape borderFill()/setBorderFill()-style plain
+                    // by-value getter/setter Color properties actually hit -
+                    // see ClassBuilder<T>::property()'s own "addressable"
+                    // constexpr (reflection.h): a getter WITH a real setter
+                    // is never addressable, regardless of what the getter
+                    // itself returns.
                     ValueT temp{};
-                    std::any boxedTemp(&temp);
-                    bool onHeap = false;
-                    nestedClazz->read(reader, name(), boxedTemp, onHeap);
-                    set(instancePtr, std::any(temp));
+                    if (tryReadStringValue(nestedClazz, &temp, name(), reader)) {
+                        set(instancePtr, std::any(temp));
+                        return;
+                    }
+                    const Class* resolvedClazz = reader->beginObject(name());
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        void* tempPtr = &temp;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, tempPtr, onHeap);
+                        set(instancePtr, std::any(temp));
+                    }
+                    reader->endObject(name(), resolvedClazz);
                 }
                 return;
             }
@@ -1499,6 +1726,14 @@ namespace newui::reflection {
             }
         }
 
+        virtual std::any defaultVal() const {
+            return std::any();
+        }
+
+        virtual void setDefaultVal(const std::any& val) {
+
+        }
+
         // boxedInstance is the whole container (built once by
         // PropertyCollection::write()), never re-derived here. For a
         // pointer-typed element (e.g. SubView* in a childViews-shaped
@@ -1629,13 +1864,17 @@ namespace newui::reflection {
                         // then delete" convention - see View::destroy()'s
                         // own childViews_ loop) before falling through to
                         // construct a proper replacement.
-                        const Class* resolvedClazz = reader->peekElementType();
+                        const Class* peekedClazz = reader->peekElementType();
                         const Class* existingClazz = classinfo(typeid(*existing));
-                        if (resolvedClazz == nullptr || resolvedClazz == existingClazz) {
+                        if (peekedClazz == nullptr || peekedClazz == existingClazz) {
                             if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                                std::any existingBoxed(existing);
-                                bool onHeap = false;
-                                nestedClazz->read(reader, "", existingBoxed, onHeap);
+                                const Class* resolvedClazz = reader->beginObject("");
+                                if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                                    void* existingPtr = existing;
+                                    bool onHeap = false;
+                                    reader->readInto(resolvedClazz, existingPtr, onHeap);
+                                }
+                                reader->endObject("", resolvedClazz);
                             }
                             reader->endElement(idx, std::any());
                             return;
@@ -1676,12 +1915,11 @@ namespace newui::reflection {
                 // or an existing one being fully replaced, never partially
                 // updated. Resolves the nested Class by the element's
                 // *static* declared pointee type (e.g. Shape) - that's
-                // only a starting point, though: nestedClazz->read() below
-                // (TypedClass<T>::read(), reflection.h) itself consults
-                // the source data's own "type" tag (via beginObject()'s
-                // return) and, when it names a genuine subclass, hands
-                // back an instance of *that* concrete type instead - see
-                // its own comment for the full mechanism. raw is a type-
+                // only a starting point, though: beginObject("") below
+                // consults the source data's own "type" tag, and (via
+                // isOrDerivesFrom()) readInto() ends up constructing an
+                // instance of *that* concrete type instead, when it names a
+                // genuine subclass. raw is a type-
                 // erased void*, not std::any_cast<PointeeT*>(fresh) - the
                 // any_cast would throw whenever polymorphic dispatch
                 // actually fired (fresh then holds e.g. Circle*, not
@@ -1696,10 +1934,13 @@ namespace newui::reflection {
                 // above already relies on for the write side).
                 using PointeeT = std::remove_pointer_t<ElementT>;
                 if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                    std::any fresh;
-                    bool onHeap = false;
+                    const Class* resolvedClazz = reader->beginObject("");
                     void* raw = nullptr;
-                    nestedClazz->read(reader, "", fresh, onHeap, &raw);
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, raw, onHeap);
+                    }
+                    reader->endObject("", resolvedClazz);
                     if (raw != nullptr) {
                         return std::any(static_cast<PointeeT*>(raw));
                     }
@@ -1708,9 +1949,13 @@ namespace newui::reflection {
             } else if (const Class* nestedClazz = classinfo(elementType()); nestedClazz != nullptr) {
                 if constexpr (std::is_default_constructible_v<ElementT> && std::is_copy_constructible_v<ElementT>) {
                     ElementT value{};
-                    std::any boxedTemp(&value);
-                    bool onHeap = false;
-                    nestedClazz->read(reader, "", boxedTemp, onHeap);
+                    const Class* resolvedClazz = reader->beginObject("");
+                    if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
+                        void* valuePtr = &value;
+                        bool onHeap = false;
+                        reader->readInto(resolvedClazz, valuePtr, onHeap);
+                    }
+                    reader->endObject("", resolvedClazz);
                     return std::any(value);
                 }
                 return std::any();
@@ -1870,7 +2115,14 @@ namespace newui::reflection {
         const std::string& name() const { return name_; }
         Scope scope() const { return scope_; }
         std::type_index senderType() const { return senderType_; }
+        // The sender type as C++ source spells it ("newui::Control"); empty for a hand-built Delegate.
+        const std::string& senderSpelling() const { return senderSpelling_; }
         const std::vector<Argument>& arguments() const { return arguments_; }
+
+        // From "@reflect tags=..." on the delegate member (reflectgen.py) -
+        // same semantic-hint role as Property::tags()/Class::tags().
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
 
         virtual void* address(void* instance) const { return address_ ? address_(instance) : nullptr; }
 
@@ -1918,6 +2170,25 @@ namespace newui::reflection {
             return false;
         }
 
+        // Records `descriptor` as a listener on senderInstance's delegate WITHOUT connecting it to
+        // anything: a no-op callback that only carries the descriptor, so describedListeners()
+        // reports it and a save writes it back out. This is what a design-time load uses to keep
+        // an event's recorded target (e.g. "this@SaveDialogController.onSaveButtonClick") alive
+        // when the target object doesn't exist in the designer's process. Already present ->
+        // nothing added. False if this base Delegate can't (only TypedDelegate can).
+        virtual bool addDescriptorListener(void* senderInstance, const std::string& descriptor) const {
+            return false;
+        }
+
+        // Undoes addDescriptorListener(): drops every listener on senderInstance's delegate carrying
+        // `descriptor`. False if this base Delegate can't (only TypedDelegate can).
+        virtual bool removeDescriptorListener(void* senderInstance, const std::string& descriptor) const {
+            return false;
+        }
+
+    protected:
+        void setSenderSpelling(std::string spelling) { senderSpelling_ = std::move(spelling); }
+
     private:
         template<typename T> friend class ClassBuilder;
 
@@ -1926,10 +2197,12 @@ namespace newui::reflection {
 
         std::string name_;
         Scope scope_;
+        std::string senderSpelling_;
         std::type_index senderType_;
         std::vector<Argument> arguments_;
         AddressFn address_;
         InvokeFn invoke_;
+        std::vector<std::string> tags_;
     };
 
     // T-aware TypedDelegate<SourceT,Args...> - stores a pointer-to-member
@@ -1944,8 +2217,11 @@ namespace newui::reflection {
         using MemberPtr = newui::Delegate<SourceT, Args...> SourceT::*;
 
         TypedDelegate(std::string name, Scope scope, MemberPtr member)
-            : Delegate(std::move(name), scope, typeid(SourceT), { Argument{"", typeid(Args)}... }, nullptr, nullptr),
-              member_(member) {}
+            : Delegate(std::move(name), scope, typeid(SourceT),
+                       { Argument{"", typeid(Args), detail::cppTypeSpelling<Args>()}... }, nullptr, nullptr),
+              member_(member) {
+            setSenderSpelling(detail::cppTypeSpelling<SourceT>());
+        }
 
         void* address(void* instance) const override {
             return &(static_cast<SourceT*>(instance)->*member_);
@@ -1958,6 +2234,30 @@ namespace newui::reflection {
         std::vector<std::string> describedListeners(void* instance) const override {
             SourceT* self = static_cast<SourceT*>(instance);
             return (self->*member_).describedListeners();
+        }
+
+        bool addDescriptorListener(void* senderInstance, const std::string& descriptor) const override {
+            if (senderInstance == nullptr || descriptor.empty()) {
+                return false;
+            }
+            newui::Delegate<SourceT, Args...>& delegate = static_cast<SourceT*>(senderInstance)->*member_;
+            for (const std::string& existing : delegate.describedListeners()) {
+                if (existing == descriptor) {
+                    return true;
+                }
+            }
+            delegate.add(descriptor, [](typename newui::Delegate<SourceT, Args...>::SenderRefT, Args...) {
+                return SyncReturn::Ignored;
+            });
+            return true;
+        }
+
+        bool removeDescriptorListener(void* senderInstance, const std::string& descriptor) const override {
+            if (senderInstance == nullptr || descriptor.empty()) {
+                return false;
+            }
+            (static_cast<SourceT*>(senderInstance)->*member_).removeDescribed(descriptor);
+            return true;
         }
 
         // See Delegate::connectListener()'s own comment for the signature
@@ -2318,9 +2618,114 @@ namespace newui::reflection {
         // has nothing to point at).
         const Class* parentClass() const { return parentClass_; }
 
+        // True if this class *is* base, or genuinely derives from it
+        // (walking parentClass()). Used to check a resolved-from-data class
+        // (a "type" tag) against a statically-expected one before
+        // constructing anything - a stray/wrong tag naming some unrelated
+        // registered class returns false here, same as one that doesn't
+        // resolve to any registered class at all; neither is usable.
+        bool isOrDerivesFrom(const Class* base) const {
+            for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+                if (c == base) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         std::type_index type() const { return type_; }
         const std::string& name() const { return name_; }
         const std::string& namespaceName() const { return namespaceName_; }
+
+        // From "@reflect tags=..." directly above the class declaration
+        // (reflectgen.py), or ClassBuilder::tags()'s own fluent call for a
+        // hand-written registration - same semantic-hint role as
+        // Property::tags()/Delegate::tags(), for cases where the type
+        // itself doesn't distinguish enough (e.g. tagging a designer-only
+        // helper class). Empty for most classes.
+        const std::vector<std::string>& tags() const { return tags_; }
+        void setTags(std::vector<std::string> tags) { tags_ = std::move(tags); }
+
+        // From "@reflect category=..." directly above the class
+        // declaration (reflectgen.py), or ClassBuilder::categories()'s own
+        // fluent call - same shape as tags() (comma-separated, a class can
+        // land in more than one grouping), just a different semantic role:
+        // groupings like "Basic"/"Data"/"Menu & Toolbar" a consumer like
+        // CodeToolsVsix::ToolboxRegistry enumerates ReflectionRegistry for,
+        // rather than hardcoding a per-class list by hand. Empty for a
+        // class that isn't meant to be browsed that way (most classes).
+        const std::vector<std::string>& categories() const { return categories_; }
+        void setCategories(std::vector<std::string> categories) { categories_ = std::move(categories); }
+
+        // From "@reflect proxy=<ClassName>" directly above the class
+        // declaration (reflectgen.py), or ClassBuilder::proxy()'s own
+        // fluent call - names this class's design-time stand-in (e.g.
+        // Frame's proxy() is "FrameProxy"), for a class that genuinely
+        // can't be nested as an ordinary SubView child (Frame/RootView -
+        // see FrameProxy/RootViewProxy's own class comments). A plain
+        // class-name string, not a resolved Class* - the proxy class is
+        // very likely registered *after* this one (reflectgen has no
+        // reason to order them any particular way relative to each
+        // other), so resolving eagerly here would hit the same forward-
+        // reference ordering problem ClassBuilder<T>::base<BaseT>() avoids
+        // by requiring bases registered first; resolve lazily instead, via
+        // ReflectionRegistry::getClass(name), only when actually needed
+        // (ObjectReader's design-mode dynamic-type substitution). Empty
+        // for every class with no proxy.
+        const std::string& proxy() const { return proxy_; }
+        void setProxy(std::string proxyClassName) { proxy_ = std::move(proxyClassName); }
+
+        // The header that defines this class, spelled the way a file includes it, delimiters and
+        // all - "<newui/controls.h>" - so `"#include " + header()` is a valid line. Set by reflectgen
+        // (the source file's path relative to the -I directory it sits under) or ClassBuilder::header();
+        // empty when unknown (a hand-registered class, or a source outside every -I directory). What a
+        // code generator adds to a file that names this class (see cpp_codetools' IncludeManager).
+        const std::string& header() const { return header_; }
+        void setHeader(std::string include) { header_ = std::move(include); }
+
+        // The inverse relationship - from "@reflect proxyfor=<ClassName>"
+        // on the proxy class itself (e.g. FrameProxy's proxyFor() is
+        // "Frame"). ObjectWriter consults this in design mode to write the
+        // *real* class's name as the "type" tag instead of the proxy's own
+        // name, so a file saved from a design-time proxy tree still reads
+        // as an ordinary Frame/RootView-shaped document to anything that
+        // doesn't know proxies exist.
+        const std::string& proxyFor() const { return proxyFor_; }
+        void setProxyFor(std::string realClassName) { proxyFor_ = std::move(realClassName); }
+
+        // Set only via ClassBuilder<T>::stringValue() - an explicit, per-
+        // class opt-in (see its own comment) rather than guessed from
+        // whether T merely *has* a toString()/fromString() pair somewhere:
+        // most reflected classes have those for unrelated reasons (logging,
+        // debugging) without meaning "read/write me as a single string
+        // instead of my own properties/fields" - same "shape alone isn't
+        // reliable signal" reasoning Enum::isFlags()/@reflect collection
+        // already use. True only for a genuine value type with its own
+        // total, round-trippable string form - Color's hex/CSS-name/
+        // UIColorRole forms (Color::fromString()/toString()) being the
+        // motivating, but not the only, case: a "borderFill: \"red\"" (or
+        // "WindowBackground") value in a .newui file resolves through this,
+        // instead of the usual nested "{type:\"Color\", r, g, b, a}" object -
+        // see TypedClass<T>::write()'s own write-side check, and
+        // TypedProperty<SourceT,ValueT>::read()/TypedMemberField::read()'s
+        // own read-side checks, both below.
+        bool isStringValue() const { return fromString_ != nullptr && toString_ != nullptr; }
+
+        // Parses str into *instancePtr (which must already point at a live
+        // T) via whatever T::fromString() ClassBuilder<T>::stringValue()
+        // wired in - false (instancePtr left untouched) if isStringValue()
+        // is false, or T's own fromString() itself rejected str (e.g. a
+        // typo'd color name).
+        bool parseFromString(const std::string& str, void* instancePtr) const {
+            return fromString_ != nullptr && fromString_(str, instancePtr);
+        }
+
+        // Formats *instancePtr (a live T) into outStr via whatever
+        // T::toString() ClassBuilder<T>::stringValue() wired in - false
+        // (outStr untouched) if isStringValue() is false.
+        bool formatToString(const void* instancePtr, std::string& outStr) const {
+            return toString_ != nullptr && toString_(instancePtr, outStr);
+        }
 
         // namespaceName() + name(), e.g. "newui::Rect" - namespaceName()
         // already carries its own trailing "::" (see extractNamespace()),
@@ -2469,22 +2874,54 @@ namespace newui::reflection {
         // to name itself; taking the string directly removes both.
         virtual void write(void* instancePtr, ClassWriter* writer, const std::string& name) const = 0;
 
-        // outRawInstance, when non-null, receives the same raw pointer
-        // outInstance ends up holding (as a type-erased void* rather than
-        // the std::any's own concretely-typed T*) - the only way a caller
-        // that doesn't know T can get a usable pointer back at all, since
-        // std::any_cast requires an exact type match and a generic caller
-        // has no T to cast to. Needed by ObjectReader::readObjects()
-        // (reflectionio.h): its pass 1 creates/reads every named object
-        // through this same Class::read() regardless of its concrete type,
-        // then pass 2 needs a real pointer for each to hand to Method::
-        // invoke()/Delegate::connectListener() while resolving delegate
-        // connections - both of which already take void*, not std::any.
-        // Defaulted so every existing call site is unaffected.
-        virtual void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
-                            bool& instanceOnHeap, void** outRawInstance = nullptr) const = 0;
+        // No read() counterpart to write() above any more - reading is
+        // driven entirely by the reader now (see ClassReader::readObject()'s
+        // own comment), not by Class. Class stays a passive lookup/factory
+        // surface for the read path: property()/field() (both walk
+        // parentClass()) and createInstance().
+
+        // Invokes a registered "setDesignTime" Method on instancePtr, if
+        // this class (or any of its parentClass() ancestors) has one - a
+        // no-op otherwise. Goes through the ordinary reflection Method
+        // lookup/invoke machinery (same as any other .method("...")->
+        // invoke() call site) rather than a dedicated virtual/SFINAE
+        // mechanism - reflection.h has no dependency on component.h and
+        // doesn't need one: Component::setDesignTime(bool) is already a
+        // plain registered Method (its @reflect ignore=true only excludes
+        // it from Property-pairing, not Method registration - see
+        // component.h), so this needs nothing new from any class, existing
+        // or future, beyond what registerReflectionData() already does.
+        // method() itself only searches this class's own methods_, not its
+        // ancestors (see its own definition, reflection.cpp) - hence the
+        // explicit parentClass() walk here, same most-derived-first search
+        // TypedClass<T>::allProperties()/Class::allDelegates() already use.
+        // Non-virtual and defined once on Class, not per-TypedClass<T> -
+        // nothing here depends on the compile-time T a caller started
+        // from, only on whichever real Class the caller already resolved.
+        // Used by ObjectReader's design-mode read path to propagate
+        // isDesignTime() onto every freshly-constructed instance - see
+        // TypedClass<T>::read()'s own call site. No explicit parentClass()
+        // walk needed here any more - method() itself now walks the chain
+        // (reflection.cpp).
+        void trySetDesignTime(void* instancePtr, bool value) const {
+            if (const Method* m = method("setDesignTime"); m != nullptr) {
+                m->invoke(instancePtr, { std::any(value) });
+            }
+        }
     private:
         template<typename T> friend class ClassBuilder;
+
+        // See isStringValue()/parseFromString()/formatToString() above -
+        // same plain-function-pointer type erasure Enum::toUInt64_/
+        // fromUInt64_ already use for the identical "only the T-aware
+        // builder that registered this knows the real T" reason. Declared
+        // up front (rather than alongside fromString_/toString_ below,
+        // where Enum's own ToUInt64Fn/FromUInt64Fn sit) since
+        // setStringConversion() just below needs the names already visible -
+        // a member function's own parameter-list types, unlike its body,
+        // aren't a complete-class context.
+        using FromStringFn = bool (*)(const std::string&, void*);
+        using ToStringFn = bool (*)(const void*, std::string&);
 
         void setIsDerived(bool v) {
             flags_ = (v == true) ? flags_ | ClassFlags::Derived : flags_ & ~ClassFlags::Derived;
@@ -2502,6 +2939,16 @@ namespace newui::reflection {
             flags_ = (v == true) ? flags_ | ClassFlags::Singleton : flags_ & ~ClassFlags::Singleton;
         }
 
+        // Only ClassBuilder<T>::stringValue() ever calls this - both
+        // function pointers are set together (isStringValue() checks both
+        // non-null) since a class either has a genuine, total string form
+        // or it doesn't; there's no real use for one direction without the
+        // other.
+        void setStringConversion(FromStringFn fromStr, ToStringFn toStr) {
+            fromString_ = fromStr;
+            toString_ = toStr;
+        }
+
         // Raw, non-owning pointer into the registry's own copy of the base
         // class's Class (set by ClassBuilder<T>::base<BaseT>(), never by
         // this class itself) - ~Class() must never delete this, unlike
@@ -2516,12 +2963,19 @@ namespace newui::reflection {
         std::type_index type_;
         std::uint32_t flags_;
         std::string name_;
-        std::string namespaceName_;        
+        std::string namespaceName_;
         std::vector<Property*> properties_;
         std::vector<Field*> fields_;
         std::vector<Method*> methods_;
         std::vector<Delegate*> delegates_;
         std::vector<Constructor*> constructors_;
+        std::vector<std::string> tags_;
+        std::vector<std::string> categories_;
+        std::string proxy_;
+        std::string header_;
+        std::string proxyFor_;
+        FromStringFn fromString_ = nullptr;
+        ToStringFn toString_ = nullptr;
     };
 
     // Every live pointer already reachable through one of `properties`' own
@@ -2555,6 +3009,30 @@ namespace newui::reflection {
             }
         }
         return reachable;
+    }
+
+    // Shared by every "about to read a nested Class-typed value" call site
+    // that already resolved nestedClazz via classinfo() - TypedMemberField::
+    // read()/TypedProperty<SourceT,ValueT>::read() (above - MSVC resolves
+    // this the same deferred way it already resolves their own classinfo()
+    // calls, textually later in this same header/namespace, see that
+    // function's own precedent). Returns true (value fully handled -
+    // *instancePtr already holds the parsed result) only when nestedClazz is
+    // genuinely a Class::isStringValue() class AND the document's own value
+    // at this key is a plain string rather than an object (ClassReader::
+    // valueIsString()). An ordinary nested object at this key is left
+    // completely untouched (false, nothing read) so the caller's own normal
+    // beginObject()/readInto() path runs exactly as it always has.
+    // instancePtr must already point at a live, default-constructed
+    // instance of nestedClazz's own T - same in-place-fill contract
+    // Class::parseFromString() itself already has.
+    inline bool tryReadStringValue(const Class* nestedClazz, void* instancePtr, const std::string& name, ClassReader* reader) {
+        if (!nestedClazz->isStringValue() || !reader->valueIsString(name)) {
+            return false;
+        }
+        std::string str;
+        reader->readString(name, str);
+        return nestedClazz->parseFromString(str, instancePtr);
     }
 
     // Adds T-aware construction convenience on top of Class's type-erased
@@ -2595,6 +3073,24 @@ namespace newui::reflection {
         }
 
         void write(void* instancePtr, ClassWriter* writer, const std::string& name) const override {
+            // A Class::isStringValue() class (ClassBuilder<T>::stringValue(),
+            // above) writes as its own compact string instead of the usual
+            // nested keyed object - checked first, before enterInstance()'s
+            // cycle tracking even runs, since a plain value type like Color
+            // can't participate in a reference cycle in the first place.
+            // Every call site that recurses into a nested Class (TypedProperty
+            // ::write()/TypedMemberField::write()/a PropertyCollection
+            // element/writeObjects()'s own named roots) ultimately reaches
+            // this same write() - so this one check covers all of them, no
+            // per-call-site duplication needed.
+            if (isStringValue()) {
+                std::string str;
+                if (formatToString(instancePtr, str)) {
+                    writer->writeString(name, str);
+                    return;
+                }
+            }
+
             // See ClassWriter::enterInstance()'s own comment - skips this
             // object (and everything nested under it) entirely when it's
             // already open somewhere up the current write() call chain,
@@ -2686,120 +3182,16 @@ namespace newui::reflection {
             writer->exitInstance(this, instancePtr);
         }
 
-        // outInstance already holding a value means the caller (a
-        // TypedProperty<SourceT,T>::read() addressable/stack-local branch,
-        // above) has somewhere real to write into already - a live
-        // sub-object's address(), or a throwaway stack local's - so this
-        // never allocates in that case, and instanceOnHeap is left exactly
-        // as the caller set it (this call didn't allocate anything, so it
-        // has nothing new to report). An empty outInstance only happens
-        // from the shouldCreateOnHeap() branch (or a future generic
-        // Reader's true top-level read(), which has no property/address
-        // context at all) - always heap, and (see below) not always this
-        // class's own registered constructor. createInstance() returning
-        // nothing (no matching constructor registered - e.g. Rect, which
-        // is never meant to be built this way in the first place, see
-        // TypedProperty::read()'s isAddressable()/stack-local branches)
-        // leaves instancePtr null rather than crashing on
-        // std::any_cast<T*> against an empty std::any.
-        //
-        // Polymorphic dispatch: beginObject() below already resolves and
-        // returns the *concrete* Class the data's own "type" tag names
-        // (ObjectReader::beginObject(), reflectionio.h) - only used here
-        // when actually constructing fresh (an already-live outInstance is
-        // already the correct, specific type its owner allocated it as -
-        // nothing to swap) and when that resolved class is a genuine
-        // registered subclass of T (walked via parentClass() below - a
-        // stray/bogus "type" tag naming some unrelated class is ignored,
-        // falling back to this class's own T, same as if beginObject() had
-        // resolved nothing at all). Without this, e.g. a Shape-typed
-        // collection element whose data says "type": "Circle" would always
-        // try to construct exactly Shape (abstract - createInstance()
-        // fails outright) and would only ever read Shape's own properties
-        // even if it could - Circle's centerX/centerY/radius would never
-        // be reached. clazz->createInstance(&raw)/allProperties()/
-        // allFields() (not this->...) is what actually reaches the
-        // concrete type's own constructor and full property/field set;
-        // see Constructor::invoke(args, outRaw)'s own comment for why a
-        // raw void* (not std::any_cast<T*>) is what crosses this
-        // particular boundary - clazz might not be T here.
-        void read(ClassReader* reader, const std::string& propertyName, std::any& outInstance,
-                    bool& instanceOnHeap, void** outRawInstance = nullptr) const override {
-            // Mirrors write()'s own beginObject()/endObject() bracketing
-            // above - was missing entirely before this pass, which meant a
-            // reader had no hook to descend into the propertyName-keyed
-            // sub-object at all before reading its properties (see
-            // ClassReader::beginObject()'s own doc comment for what a real
-            // implementation is expected to do with propertyName).
-            const Class* clazz = reader->beginObject(propertyName);
-
-            bool useResolvedClazz = false;
-            if (clazz != nullptr && clazz != static_cast<const Class*>(this) && !outInstance.has_value()) {
-                for (const Class* c = clazz; c != nullptr; c = c->parentClass()) {
-                    if (c == static_cast<const Class*>(this)) {
-                        useResolvedClazz = true;
-                        break;
-                    }
-                }
-            }
-            if (!useResolvedClazz) {
-                clazz = this;
-            }
-
-            void* instancePtr = nullptr;
-
-            if (outInstance.has_value()) {
-                instancePtr = std::any_cast<T*>(outInstance);
-            } else {
-                void* raw = nullptr;
-                outInstance = clazz->createInstance(&raw);
-                if (raw == nullptr) {
-                    if (outRawInstance) {
-                        *outRawInstance = nullptr;
-                    }
-                    reader->endObject(propertyName, this);
-                    return;
-                }
-                instancePtr = raw;
-                instanceOnHeap = true;
-            }
-
-            // See ClassReader::enterInstance()'s own comment - skips
-            // reading properties/fields into instancePtr when it's already
-            // being read somewhere up the current read() call chain,
-            // instead of recursing back into it and never returning;
-            // beginObject() already ran above, so endObject() still has to
-            // run below regardless of which branch this takes.
-            if (reader->enterInstance(clazz, instancePtr)) {
-                std::vector<const Property*> ordered;
-                clazz->allProperties(ordered);
-
-                for (const Property* property : ordered) {
-                    property->read(instancePtr, reader);
-                }
-
-                // Fields - the read-side mirror of write()'s own fields loop
-                // above. Public-only there because a private field was never
-                // written in the first place (matching scope, not required by
-                // anything on this side specifically) - there's simply no
-                // data under a private field's name to read back regardless,
-                // so this doesn't re-check scope() itself.
-                std::vector<const Field*> orderedFields;
-                clazz->allFields(orderedFields);
-
-                for (const Field* field : orderedFields) {
-                    field->read(instancePtr, reader);
-                }
-
-                reader->exitInstance(clazz, instancePtr);
-            }
-
-            if (outRawInstance) {
-                *outRawInstance = instancePtr;
-            }
-
-            reader->endObject(propertyName, clazz);
-        }
+        // No read() here any more - see Class::write()'s own comment just
+        // above the removed declaration. ClassReader::readObject()
+        // (reflection.h) now does what this used to: resolve a possibly-
+        // more-derived subclass from the source data's own "type" tag
+        // (walking parentClass(), same check this used to do inline),
+        // construct fresh via Class::createInstance() or reuse an existing
+        // instance, and walk only whatever properties/fields the source
+        // actually has (Class::property()/field(), both base-chain aware)
+        // - driven by the concrete reader (ObjectReader, reflectionio.h),
+        // not by this class.
     };
 
     // Fluent assembly for a Class - both hand-written registration and,
@@ -2854,6 +3246,37 @@ namespace newui::reflection {
         ClassBuilder& abstract(bool value = true) { class_->setIsAbstract(value); return *this; }
         ClassBuilder& isStruct(bool value = true) { class_->setIsStruct(value); return *this; }
         ClassBuilder& singleton(bool value = true) { class_->setIsSingleton(value); return *this; }
+        ClassBuilder& tags(std::vector<std::string> tags) { class_->setTags(std::move(tags)); return *this; }
+        ClassBuilder& categories(std::vector<std::string> categories) { class_->setCategories(std::move(categories)); return *this; }
+
+        // See Class::proxy()/proxyFor()'s own comments.
+        ClassBuilder& proxy(std::string proxyClassName) { class_->setProxy(std::move(proxyClassName)); return *this; }
+
+        // See Class::header().
+        ClassBuilder& header(std::string include) { class_->setHeader(std::move(include)); return *this; }
+        ClassBuilder& proxyFor(std::string realClassName) { class_->setProxyFor(std::move(realClassName)); return *this; }
+
+        // See Class::isStringValue()'s own comment - opts T into "string
+        // value" treatment: read/written as a single compact string
+        // (T::fromString()/toString()) wherever an ordinary nested object
+        // of T's own properties/fields would otherwise be expected. T must
+        // have exactly the shape Color already does - a `static bool
+        // fromString(const std::string&, T&)` and a `std::string
+        // toString() const` - for the two lambdas below to compile; nothing
+        // here guesses or falls back if either is missing, same as
+        // TypedConstructor<T,Args...> failing to compile for a T with no
+        // matching real constructor.
+        ClassBuilder& stringValue() {
+            class_->setStringConversion(
+                [](const std::string& str, void* instancePtr) -> bool {
+                    return T::fromString(str, *static_cast<T*>(instancePtr));
+                },
+                [](const void* instancePtr, std::string& outStr) -> bool {
+                    outStr = static_cast<const T*>(instancePtr)->toString();
+                    return true;
+                });
+            return *this;
+        }
 
         // Links this class to its base class BaseT's already-registered
         // Class (Class::parentClass()) and marks this class derived() -
@@ -2898,12 +3321,13 @@ namespace newui::reflection {
         // dedicated compile error, not a working property). Excluded
         // here so a member-function pointer only ever resolves there.
         template<typename ValueT, typename = std::enable_if_t<!std::is_function_v<ValueT>>>
-        ClassBuilder& property(std::string name, Scope scope, ValueT T::* member) {
+        ClassBuilder& property(std::string name, Scope scope, ValueT T::* member, std::vector<std::string> tags = {}) {
             if constexpr (detail::is_reflectable_collection_v<ValueT>) {
                 class_->properties_.push_back(new TypedPropertyCollection<T, ValueT>(std::move(name), scope, member));
             } else {
                 class_->properties_.push_back(new TypedProperty<T, ValueT>(std::move(name), scope, member));
             }
+            class_->properties_.back()->setTags(std::move(tags));
             return *this;
         }
 
@@ -2957,7 +3381,8 @@ namespace newui::reflection {
         // constructible() has determined isn't really copy-constructible.
         template<bool AssumeCopyable = true, typename GetterT, typename SetterT = std::nullptr_t,
                   typename = std::enable_if_t<!std::is_member_object_pointer_v<GetterT>>>
-        ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr) {
+        ClassBuilder& property(std::string name, Scope scope, GetterT getter, SetterT setter = nullptr,
+                                std::vector<std::string> tags = {}) {
             using RawResult = std::invoke_result_t<GetterT, T&>;
 
             // A non-const T&-returning getter paired with a setter that
@@ -3054,6 +3479,7 @@ namespace newui::reflection {
                     }
                 }
             }
+            class_->properties_.back()->setTags(std::move(tags));
             return *this;
         }
 
@@ -3164,14 +3590,24 @@ namespace newui::reflection {
         }
 
         ClassBuilder& field(std::string name, std::type_index type, Scope scope, void* address,
-                                 Field::GetFn get, Field::SetFn set) {
+                            Field::GetFn get, Field::SetFn set, std::any defaultVal = std::any{}) {
             class_->fields_.push_back(new Field(std::move(name), type, scope, address, get, set, PropertyFlags::Static));
+            return *this;
+        }
+
+        // Marks the most recently added field as needing a connection
+        // (Field::needsConnection()).
+        ClassBuilder& connect() {
+            if (class_->fields_.empty()) {
+                throw std::runtime_error("ClassBuilder::connect: no field registered yet");
+            }
+            class_->fields_.back()->connect_ = true;
             return *this;
         }
 
         // A static class variable - see TypedField's own comment.
         template<typename ValueT>
-        ClassBuilder& field(std::string name, Scope scope, ValueT* address) {
+        ClassBuilder& field(std::string name, Scope scope, ValueT* address, std::any defaultVal = std::any{}) {
             class_->fields_.push_back(new TypedField<ValueT>(std::move(name), scope, address));
             return *this;
         }
@@ -3189,7 +3625,7 @@ namespace newui::reflection {
         // registers as a TypedFieldCollection instead of a plain
         // TypedMemberField.
         template<typename ValueT, typename = std::enable_if_t<!std::is_function_v<ValueT>>>
-        ClassBuilder& field(std::string name, Scope scope, ValueT T::* member) {
+        ClassBuilder& field(std::string name, Scope scope, ValueT T::* member, std::any defaultVal = std::any{}) {
             if constexpr (detail::is_reflectable_collection_v<ValueT>) {
                 class_->fields_.push_back(new TypedFieldCollection<T, ValueT>(std::move(name), scope, member));
             } else {
@@ -3223,14 +3659,18 @@ namespace newui::reflection {
 
         ClassBuilder& delegate(std::string name, Scope scope, std::type_index senderType,
                                     std::vector<Argument> arguments,
-                                    Delegate::AddressFn address, Delegate::InvokeFn invoke) {
+                                    Delegate::AddressFn address, Delegate::InvokeFn invoke,
+                                    std::vector<std::string> tags = {}) {
             class_->delegates_.push_back(new Delegate(std::move(name), scope, senderType, std::move(arguments), address, invoke));
+            class_->delegates_.back()->setTags(std::move(tags));
             return *this;
         }
 
         template<typename... Args>
-        ClassBuilder& delegate(std::string name, Scope scope, newui::Delegate<T, Args...> T::* member) {
+        ClassBuilder& delegate(std::string name, Scope scope, newui::Delegate<T, Args...> T::* member,
+                                std::vector<std::string> tags = {}) {
             class_->delegates_.push_back(new TypedDelegate<T, Args...>(std::move(name), scope, member));
+            class_->delegates_.back()->setTags(std::move(tags));
             return *this;
         }
 
@@ -3360,6 +3800,24 @@ namespace newui::reflection {
         static const Class* getClass(std::type_index type);
         static const Class* getClass(const std::string& name);
 
+        // Every currently-registered Class, in unspecified order - for a
+        // consumer that needs to *scan* the registry rather than look up
+        // one class it already knows the name/type of. classesWithTag()/
+        // classesWithCategory() below are the same scan, pre-filtered on
+        // the query every real consumer so far actually wants (a specific
+        // known tag/category value, not "has any tag at all").
+        static std::vector<const Class*> allClasses();
+        static std::vector<const Class*> classesWithTag(const std::string& tag);
+        static std::vector<const Class*> classesWithCategory(const std::string& category);
+
+        // Every distinct tag/category value currently in use across all
+        // registered classes, sorted - lets a consumer (e.g.
+        // CodeToolsVsix::ToolboxRegistry) discover what categories()
+        // values actually exist without hardcoding the set, before
+        // grouping classesWithCategory() results under each one.
+        static std::vector<std::string> allTags();
+        static std::vector<std::string> allCategories();
+
         static const Enum* getEnum(std::type_index type);
         static const Enum* getEnum(const std::string& name);
 
@@ -3398,8 +3856,12 @@ namespace newui::reflection {
     }
 
     
-    inline const Class* classinfo(std::type_index type) {        
+    inline const Class* classinfo(std::type_index type) {
         const Class* found = ReflectionRegistry::getClass(type);
         return found;
+    }
+
+    inline const Class* Field::pointeeClass() const {
+        return isPointer() ? classinfo(pointeeType_) : nullptr;
     }
 }

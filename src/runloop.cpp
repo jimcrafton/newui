@@ -2,21 +2,88 @@
 #include "newui/action.h"
 #include "newui/keyboard_constants.h"
 #include "newui/utils.h"
-#include "newui/Application.h"
-#include "newui/Frame.h"
 #include <algorithm>
 #include <bitset>
+#include <unordered_map>
 
 
 namespace newui {
+    std::mutex g_runLoopMapMutex;
+    std::unordered_map<size_t, RunLoop*> g_runLoopMap;
 
-    thread_local RunLoop* RunLoop::t_currentRunLoop = nullptr;
+
+    RunLoop::RunLoop()
+    {
+        threadId_ = ::GetCurrentThreadId();
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
+        g_runLoopMap.emplace(threadId_, this);
+    }
+
+    RunLoop::~RunLoop()
+    {
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
+        g_runLoopMap.erase(threadId_);
+    }
+
+    void RunLoop::drainTasks() {
+        std::deque<std::function<void()>> pending;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pending.swap(tasks_);
+        }
+        for (auto& task : pending) {
+            task();
+        }
+    }
+
+    void RunLoop::waitForStart()
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!started_) {
+            startedCv_.wait(lock, [this] { return started_; });
+        }   
+    }
+
+    RunLoop& RunLoop::current()
+    {
+        thread_local RunLoop currentThreadRunLoop;
+        return currentThreadRunLoop;
+    }
+
+    RunLoop::RunLoopThread RunLoop::runThreaded()
+    {
+        std::promise<RunLoop*> loopPromise;
+        std::future<RunLoop*> loopFuture = loopPromise.get_future();
+
+        std::thread t([promise = std::move(loopPromise)]() mutable {
+            RunLoop& loop = RunLoop::current();
+            // threadId_ is already set (RunLoop::current()'s constructor
+            // ran above) - safe to hand the pointer out now, before
+            // run() itself has actually started pumping.
+            promise.set_value(&loop);
+            loop.run();
+            });
+
+        RunLoop* loop = loopFuture.get();
+        return RunLoopThread{ loop, std::move(t) };
+    }
+
+    RunLoop* RunLoop::runLoopFromThread(size_t threadId)
+    {
+        RunLoop* result = nullptr;
+
+        std::lock_guard<std::mutex> lock(g_runLoopMapMutex);
+        auto found = g_runLoopMap.find(threadId);
+        if (found != g_runLoopMap.end()) {
+            result = found->second;
+        }
+
+        return result;
+    }
 
     void RunLoop::run() {
 
-        threadId_ = ::GetCurrentThreadId();
-        t_currentRunLoop = this;
-
+        
         HRESULT hr = OleInitialize(NULL);
         if (!SUCCEEDED(hr)) {
             throw std::runtime_error("newui::RunLoop: OleInitialize failed");
@@ -100,18 +167,7 @@ namespace newui {
 
 							keyData.VKeyCode = translateVirtualKey(msg.wParam, 0);
 
-							auto [frameTarget,viewTarget] = Application::instance().getFrame()->getTarget(msg.hwnd);
-
 							bool msgConsumed = false;
-
-							if (frameTarget != nullptr) {
-								//do nothing ....
-							}
-							else if (viewTarget != nullptr) {
-								//figure out if the view or sub view handles things
-								//if they process the msg then
-								//msgConsumed = true
-							}
 
 							for (Action* action : actions_) {
 								if (action->matchesHotkey(static_cast<std::uint32_t>(keyData.VKeyCode), keyMask)) {
@@ -186,9 +242,14 @@ namespace newui {
             ::KillTimer(nullptr, entry.first);
         }
         timerTasks_.clear();
-        t_currentRunLoop = nullptr;
+        
 
 		onEnd(*this);
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            started_ = false;
+        }
     }
 
     void RunLoop::checkCalledFromLoopThread(const char* what) {
@@ -233,13 +294,12 @@ namespace newui {
     }
 
     void CALLBACK RunLoop::TimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
-        RunLoop* loop = t_currentRunLoop;
-        if (loop == nullptr) {
+        auto& loop = RunLoop::current();
+        if (!loop) {
             return;
         }
-
-        auto it = loop->timerTasks_.find(idEvent);
-        if (it == loop->timerTasks_.end()) {
+        auto it = loop.timerTasks_.find(idEvent);
+        if (it == loop.timerTasks_.end()) {
             return;
         }
 
@@ -253,7 +313,7 @@ namespace newui {
         bool finished = task();
         if (finished) {
             ::KillTimer(nullptr, idEvent);
-            loop->timerTasks_.erase(idEvent);
+            loop.timerTasks_.erase(idEvent);
         }
         // Not finished: ::SetTimer()'s own periodic re-arm already
         // schedules the next WM_TIMER at the same interval - nothing
@@ -293,14 +353,55 @@ namespace newui {
 
         onModalStart(*this);
 
+        HWND hwndTrueRoot = nullptr;
         if (ownerHandle != nullptr) {
-            ::EnableWindow(ownerHandle, FALSE);
+
+            
+            if (::GetCapture() != NULL)
+            {
+                ::ReleaseCapture();
+            }
+
+            //find root windows for app
+            hwndTrueRoot = GetAncestor(ownerHandle, GA_ROOT);
+            if (hwndTrueRoot != ::GetDesktopWindow()) {
+                ::EnableWindow(hwndTrueRoot, FALSE);
+            }
         }
+
+        
+        ShowWindow(modalHandle, SW_SHOWNORMAL);
+        UpdateWindow(modalHandle);
+        SetFocus(modalHandle);
 
         bool quitSeen = false;
         MSG msg;
+        bool isIdle = true;
         while (!isDone()) {
+            // Real, live-diagnosed bug: this loop used to go straight to a blocking GetMessage()
+            // with no way for a postIdle() task to ever run - and every real repaint funnels
+            // through exactly that (View::redraw()/RootView::markDirty() -> scheduleRepaint() ->
+            // RunLoop::current().postIdle(...), see rootview.cpp) - so a click that correctly
+            // updated a control's own state (confirmed live: SegmentedControl::selectedIndex_
+            // really did change) never got drawn, since the modal dialog's own message loop was
+            // the one running at the time and never gave that deferred task a turn. GetMessage()
+            // itself has no "queue's empty" signal to hook into (unlike PeekMessage) - this same
+            // "poll with PeekMessage, run idle work while the queue is empty" shape RunLoop::run()
+            // already uses (above) is what actually creates that opportunity.
+            while (isIdle && !::PeekMessage(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+                idleProcessing();
+                if (!hasIdleTasks()) {
+                    isIdle = false;
+                } else {
+                    // Same reasoning as run()'s own identical wait above - without this, an
+                    // idle-but-not-done modal loop (e.g. AnimationManager still registered) would
+                    // spin re-checking PeekMessage as fast as the CPU allows.
+                    ::MsgWaitForMultipleObjects(0, nullptr, FALSE, 1, QS_ALLINPUT);
+                }
+            }
+
             BOOL got = ::GetMessage(&msg, nullptr, 0, 0);
+            isIdle = true;  // a real message just arrived - give idle work another turn next pass
             if (got == 0 || got == -1) {
                 // WM_QUIT reached this thread (or GetMessage itself
                 // failed) - stop waiting rather than swallow it; re-post
@@ -356,8 +457,17 @@ namespace newui {
         }
 
         if (ownerHandle != nullptr) {
-            ::EnableWindow(ownerHandle, TRUE);
-            ::SetForegroundWindow(ownerHandle);
+
+            if (hwndTrueRoot != ::GetDesktopWindow()) {
+                //::EnableWindow(hwndTrueRoot, FALSE);
+
+                ::EnableWindow(hwndTrueRoot, TRUE);
+                ::SetForegroundWindow(hwndTrueRoot);
+                ::SetFocus(hwndTrueRoot);
+
+            }
+
+            
         }
 
         onModalEnd(*this);
@@ -393,4 +503,27 @@ namespace newui {
 		std::lock_guard<std::mutex> lock(mutex_);
 		return !idleTasks_.empty();
 	}
+
+    void RunLoop::runTillNotified(std::condition_variable& cv, std::mutex& mtx)
+    {
+        for (;;)
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            auto waitMs = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            auto success = cv.wait_until(lock, waitMs);
+
+
+            if (success == std::cv_status::no_timeout)
+            {
+                return;
+            }
+
+            MSG msg;
+            while (::PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            {
+                ::TranslateMessage(&msg);
+                ::DispatchMessageW(&msg);
+            }
+        }
+    }
 }

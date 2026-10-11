@@ -4,10 +4,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "newui/newui.h"
+#include "newui/component.h"
 #include "newui/delegate.h"
 
 
@@ -22,7 +24,7 @@ namespace newui {
     // Controller, controllers.h) exist for the more complex case: a widget
     // (or a whole screen, via ViewController) whose content is driven by
     // real data rather than just its own visual state.
-    class Model {
+    class Model : public Component {
     public:
         enum UpdateFlags {
             NoFlags = 0x00,
@@ -134,6 +136,35 @@ namespace newui {
         void setValueAt(std::size_t index, const std::any& newValue) { setValue(newValue, index); }
     };
 
+    // A ready-made ListModel of plain strings. items() is a reflected collection, so a design
+    // holding one saves and reloads its rows like any other property; addItem()/removeItem()/
+    // setValue()/clear() also fire onChanged so an attached view repaints.
+    class StringListModel : public ListModel {
+    public:
+        // Declared (not implicit) so reflectgen registers it - a design reload builds one through it.
+        StringListModel() = default;
+
+        // What reflection reads and restores the rows through - it bypasses onChanged, so use the
+        // members below to change a live model.
+        std::vector<std::string>& items() { return items_; }
+        const std::vector<std::string>& items() const { return items_; }
+
+        void addItem(const std::string& text);
+        // A no-op for an index past the end.
+        void removeItem(std::size_t index);
+
+        void clear() override;
+        bool empty() const override { return items_.empty(); }
+        std::size_t size() const override { return items_.size(); }
+
+        // key is a std::size_t row index; the value is a std::string. An unknown key gives an empty any.
+        std::any value(const std::any& key = std::any()) override;
+        void setValue(const std::any& newValue, const std::any& key = std::any()) override;
+
+    private:
+        std::vector<std::string> items_;
+    };
+
     // A Model that's hierarchical, addressed by path - the sequence of
     // child indices from the root down to a given node (an empty path is
     // the root itself) - the shape TreeController/TreeItem (controllers.h/
@@ -157,6 +188,59 @@ namespace newui {
     public:
         virtual std::size_t childCount(const std::vector<std::size_t>& path) const { return 0; }
         bool hasChildren(const std::vector<std::size_t>& path) const { return childCount(path) > 0; }
+    };
+
+    // One row of a StringTreeModel (below) - depth 0 is a root-level row; a row is a child of the
+    // nearest earlier row with depth - 1 (the shape a plain indented outline already has). Kept
+    // flat, not as a real linked node tree, so it reflects as an ordinary vector<TreeRow>
+    // collection (see rows()) the same way GridLayout's own vector<GridTrack> does - no
+    // self-referential unique_ptr-tree reflection (MenuItem's own children_ needs, but doesn't
+    // have) required.
+    struct TreeRow {
+        std::size_t depth = 0;
+        std::string text;
+    };
+
+    // A ready-made TreeModel of plain strings, addressed the same depth-list way TreeRow describes.
+    // rows() is a reflected collection, so a design holding one saves and reloads its rows like any
+    // other property; addItem()/removeLastItem()/setValue()/clear() also fire onChanged so an
+    // attached view repaints.
+    class StringTreeModel : public TreeModel {
+    public:
+        // Declared (not implicit) so reflectgen registers it - a design reload builds one through it.
+        StringTreeModel() = default;
+
+        // What reflection reads and restores the rows through - it bypasses onChanged, so use the
+        // members below to change a live model.
+        std::vector<TreeRow>& rows() { return rows_; }
+        const std::vector<TreeRow>& rows() const { return rows_; }
+
+        // Appends a new root-level (depth 0) row.
+        void addItem(const std::string& text);
+        // Removes the last row outright, regardless of its depth - a no-op if empty. Simple by
+        // design: this never has to decide what "last" means once a subtree is involved.
+        void removeLastItem();
+
+        void clear() override;
+        bool empty() const override { return rows_.empty(); }
+
+        std::size_t childCount(const std::vector<std::size_t>& path) const override;
+
+        // key is a std::vector<std::size_t> path; the value is a std::string. An unresolvable path
+        // gives an empty any.
+        std::any value(const std::any& key = std::any()) override;
+        void setValue(const std::any& newValue, const std::any& key = std::any()) override;
+
+    private:
+        // The row index path addresses, or rows_.size() if path doesn't resolve to a real row.
+        std::size_t rowIndexForPath(const std::vector<std::size_t>& path) const;
+        // Row indices that are direct children of the row at parentIndex (rows_.size() for the
+        // root) - the rows immediately after it at parentDepth + 1, stopping at the first row back
+        // at parentDepth or shallower (a deeper row in between is a grandchild, skipped here - it's
+        // listed once its own parent is walked into).
+        std::vector<std::size_t> childRowIndices(std::size_t parentIndex, std::size_t parentDepth) const;
+
+        std::vector<TreeRow> rows_;
     };
 
     // A Model that represents one open file - a text document, an image,
@@ -214,6 +298,21 @@ namespace newui {
         // to save to.
         bool save(const std::string& path = std::string());
 
+        // Back to a fresh, untitled, unmodified document (no filePath()) - e.g. a "New" that reuses
+        // this same Document. Fires onModifiedChanged() if it was modified. Deliberately keeps
+        // which paths were already backed up (see below), so New followed by reopening and saving
+        // the same file doesn't replace the original backup with this app's own output. Doesn't
+        // touch the document's own content - clearing that is the subclass's job.
+        void reset();
+
+        // Before save() first overwrites an existing file, the on-disk original is copied to
+        // "<path>.bak" - once per path per Document instance, so the backup keeps the version from
+        // before this app first touched the file (a rolling backup would lose it after two quick
+        // saves). Protects whatever a serializer doesn't round-trip (hand-written comments,
+        // formatting). On by default; best-effort - a failed backup never blocks the save.
+        bool backupBeforeFirstOverwrite() const { return backupBeforeFirstOverwrite_; }
+        void setBackupBeforeFirstOverwrite(bool value) { backupBeforeFirstOverwrite_ = value; }
+
         // Model: chains to Model::setValue() first (still fires
         // onChanged()), then markModified() - a Document counts as
         // "modified" any time its value changes through the normal
@@ -233,8 +332,11 @@ namespace newui {
         virtual bool writeToFile(const std::string& path) = 0;
 
     private:
-        void setModifiedFlag(bool value);        
+        void setModifiedFlag(bool value);
+        void backupIfFirstOverwrite(const std::string& target);
         std::string filePath_;
+        bool backupBeforeFirstOverwrite_ = true;
+        std::set<std::string> backupHandledPaths_;
         bool modified_ = false;
         bool loading_ = false;
     };

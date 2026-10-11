@@ -74,12 +74,6 @@ namespace {
         boxBlurPass(pixels, width, height, stride, radius);
     }
 
-    // How far past localBounds() a box-blurred mask can still show visible
-    // (> ~1/255 alpha) coverage, in units of softness - matches boxBlur3()
-    // above (3 passes of a radius derived 1:1 from softness), padded a
-    // little further since a box blur's own tail isn't infinitely sharp.
-    constexpr float kBlurPadFactor = 3.0f;
-
     bool rectsIntersect(const newui::Rect& a, const newui::Rect& b) {
         return a.left() < b.right() && a.right() > b.left()
             && a.top() < b.bottom() && a.bottom() > b.top();
@@ -321,8 +315,20 @@ namespace newui::shapes {
         float pad = style_.stroke().width() * 0.5f + softness * kBlurPadFactor + offsetMag + 2.0f;
 
         Rect maskBoundsLocal = bounds.deflate(-pad);
-        int maskW = int(std::ceil(maskBoundsLocal.width()));
-        int maskH = int(std::ceil(maskBoundsLocal.height()));
+        // Floored to a whole pixel - blit_image() below hands this
+        // straight to BLContext as its destination position, and a
+        // fractional one trips a real Blend2D JIT limitation: with no
+        // rotation/extend mode in play, FetchSimplePatternPart::_init_part()
+        // takes its "aligned blit" fast path (is_aligned_blit()) based only
+        // on scale/rotation, but a sub-pixel-offset blit still needs
+        // bilinear resampling - is_rect_fill() then disagrees, and
+        // BL_ASSERT(is_rect_fill()) fires in a debug build (rootview.cpp's
+        // own snappedToPixels() hit and documented this same assertion for
+        // its dirty-rect clip; this is the same fix, applied here instead).
+        double maskLeft = std::floor(maskBoundsLocal.left());
+        double maskTop = std::floor(maskBoundsLocal.top());
+        int maskW = int(std::ceil(maskBoundsLocal.right() - maskLeft));
+        int maskH = int(std::ceil(maskBoundsLocal.bottom() - maskTop));
         if (maskW <= 0 || maskH <= 0) {
             return;
         }
@@ -335,7 +341,7 @@ namespace newui::shapes {
         {
             BLContext maskCtx(mask);
             maskCtx.clear_all();
-            maskCtx.translate(double(-maskBoundsLocal.left() + offset.x), double(-maskBoundsLocal.top() + offset.y));
+            maskCtx.translate(double(-maskLeft + offset.x), double(-maskTop + offset.y));
 
             BLRgba32 solid = color.toBLRgba32();
             if (style_.fill().kind() != gfx::PaintKind::None) {
@@ -357,7 +363,7 @@ namespace newui::shapes {
         ctx.save();
         ctx.set_comp_op(toBLCompOp(compOp));
         ctx.set_global_alpha(double(amount));
-        ctx.blit_image(BLPoint(double(maskBoundsLocal.left()), double(maskBoundsLocal.top())), mask);
+        ctx.blit_image(BLPoint(maskLeft, maskTop), mask);
         ctx.restore();
     }
 
@@ -408,6 +414,104 @@ namespace newui::shapes {
 
     void RoundRect::buildPath(BLPath& path) const {
         path.add_round_rect(BLRoundRect(double(x()), double(y()), double(width()), double(height()), double(radiusX_), double(radiusY_)));
+    }
+
+    Rect CalloutRoundRect::localBounds() const {
+        float left = x();
+        float top = y();
+        float right = x() + width();
+        float bottom = y() + height();
+        switch (tailSide_) {
+            case TailSide::Top:    top -= tailHeight_; break;
+            case TailSide::Bottom: bottom += tailHeight_; break;
+            case TailSide::Left:   left -= tailHeight_; break;
+            case TailSide::Right:  right += tailHeight_; break;
+        }
+        return Rect(left, top, right - left, bottom - top);
+    }
+
+    void CalloutRoundRect::buildPath(BLPath& path) const {
+        double x0 = double(x());
+        double y0 = double(y());
+        double x1 = double(x() + width());
+        double y1 = double(y() + height());
+        double rad = double(radius_);
+        double half = double(tailWidth_) * 0.5;
+        double tip = double(tailHeight_);
+        double pos = (tailSide_ == TailSide::Top || tailSide_ == TailSide::Bottom)
+            ? x0 + double(tailPosition_) * (x1 - x0)
+            : y0 + double(tailPosition_) * (y1 - y0);
+
+        // Top edge: x0+rad -> x1-rad, at y0.
+        path.move_to(x0 + rad, y0);
+        if (tailSide_ == TailSide::Top) {
+            path.line_to(pos - half, y0);
+            path.line_to(pos, y0 - tip);
+            path.line_to(pos + half, y0);
+        }
+        path.line_to(x1 - rad, y0);
+        path.arc_quadrant_to(BLPoint(x1, y0), BLPoint(x1, y0 + rad));
+
+        // Right edge: y0+rad -> y1-rad, at x1.
+        if (tailSide_ == TailSide::Right) {
+            path.line_to(x1, pos - half);
+            path.line_to(x1 + tip, pos);
+            path.line_to(x1, pos + half);
+        }
+        path.line_to(x1, y1 - rad);
+        path.arc_quadrant_to(BLPoint(x1, y1), BLPoint(x1 - rad, y1));
+
+        // Bottom edge: x1-rad -> x0+rad, at y1 (right-to-left).
+        if (tailSide_ == TailSide::Bottom) {
+            path.line_to(pos + half, y1);
+            path.line_to(pos, y1 + tip);
+            path.line_to(pos - half, y1);
+        }
+        path.line_to(x0 + rad, y1);
+        path.arc_quadrant_to(BLPoint(x0, y1), BLPoint(x0, y1 - rad));
+
+        // Left edge: y1-rad -> y0+rad, at x0 (bottom-to-top).
+        if (tailSide_ == TailSide::Left) {
+            path.line_to(x0, pos + half);
+            path.line_to(x0 - tip, pos);
+            path.line_to(x0, pos - half);
+        }
+        path.line_to(x0, y0 + rad);
+        path.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + rad, y0));
+
+        path.close();
+    }
+
+    void buildPartiallyRoundedRectPath(BLPath& path, const Rect& r, float radius, bool roundTop, bool roundBottom) {
+        double x0 = double(r.left());
+        double y0 = double(r.top());
+        double x1 = double(r.right());
+        double y1 = double(r.bottom());
+        double rad = double(radius);
+
+        if (rad <= 0.0 || (!roundTop && !roundBottom)) {
+            path.add_rect(BLRect(x0, y0, r.size().width, r.size().height));
+            return;
+        }
+
+        path.move_to(roundTop ? x0 + rad : x0, y0);
+        path.line_to(roundTop ? x1 - rad : x1, y0);
+        if (roundTop) {
+            path.arc_quadrant_to(BLPoint(x1, y0), BLPoint(x1, y0 + rad));
+        }
+        path.line_to(x1, roundBottom ? y1 - rad : y1);
+        if (roundBottom) {
+            path.arc_quadrant_to(BLPoint(x1, y1), BLPoint(x1 - rad, y1));
+        }
+        path.line_to(roundBottom ? x0 + rad : x0, y1);
+        if (roundBottom) {
+            path.arc_quadrant_to(BLPoint(x0, y1), BLPoint(x0, y1 - rad));
+        }
+        path.line_to(x0, roundTop ? y0 + rad : y0);
+        if (roundTop) {
+            path.arc_quadrant_to(BLPoint(x0, y0), BLPoint(x0 + rad, y0));
+        }
+        path.close();
     }
 
     void Circle::buildPath(BLPath& path) const {

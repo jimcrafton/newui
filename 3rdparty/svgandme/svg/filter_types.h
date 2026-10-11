@@ -1,0 +1,727 @@
+// filter_types.h
+
+#pragma once
+
+//
+// This file provides access to types and enums
+// which are required by both filter builders
+// and executors.  It is a core piece that should 
+// be included in pretty much every filter related
+// file.
+// 
+
+
+#include "definitions.h"
+
+#include "bit_hacks.h"
+#include "core_geometry.h"
+#include "core_nametable.h"
+#include "coloring.h"
+#include "svgdatatypes.h"
+
+
+namespace waavs
+{
+    enum FilterColorInterpolation : uint32_t
+    {
+        FILTER_COLOR_INTERPOLATION_AUTO = 0,    // When there is not an authored value
+        FILTER_COLOR_INTERPOLATION_LINEAR_RGB,
+        FILTER_COLOR_INTERPOLATION_SRGB
+    };
+
+    // feBlend 'mode' attribute
+    enum FilterBlendMode : uint32_t
+    {
+        FILTER_BLEND_NORMAL = 0,
+        FILTER_BLEND_MULTIPLY,
+        FILTER_BLEND_SCREEN,
+        FILTER_BLEND_DARKEN,
+        FILTER_BLEND_LIGHTEN,
+        FILTER_BLEND_OVERLAY,
+        FILTER_BLEND_COLOR_DODGE,
+        FILTER_BLEND_COLOR_BURN,
+        FILTER_BLEND_HARD_LIGHT,
+        FILTER_BLEND_SOFT_LIGHT,
+        FILTER_BLEND_DIFFERENCE,
+        FILTER_BLEND_EXCLUSION
+    };
+
+    enum FilterCompositeOp : uint32_t
+    {
+        FILTER_COMPOSITE_OVER = 0,
+        FILTER_COMPOSITE_IN,
+        FILTER_COMPOSITE_OUT,
+        FILTER_COMPOSITE_ATOP,
+        FILTER_COMPOSITE_XOR,
+        FILTER_COMPOSITE_ARITHMETIC
+    };
+
+
+    enum FilterColorMatrixType : uint32_t
+    {
+        FILTER_COLOR_MATRIX_MATRIX = 0,
+        FILTER_COLOR_MATRIX_SATURATE,
+        FILTER_COLOR_MATRIX_HUE_ROTATE,
+        FILTER_COLOR_MATRIX_LUMINANCE_TO_ALPHA
+    };
+
+    enum FilterTransferFuncType : uint32_t
+    {
+        FILTER_TRANSFER_IDENTITY = 0,
+        FILTER_TRANSFER_TABLE,
+        FILTER_TRANSFER_DISCRETE,
+        FILTER_TRANSFER_LINEAR,
+        FILTER_TRANSFER_GAMMA
+    };
+
+    enum FilterMorphologyOp : uint32_t
+    {
+        FILTER_MORPHOLOGY_ERODE = 0,
+        FILTER_MORPHOLOGY_DILATE
+    };
+
+    enum FilterEdgeMode : uint32_t
+    {
+        FILTER_EDGE_DUPLICATE = 0,
+        FILTER_EDGE_WRAP,
+        FILTER_EDGE_NONE
+    };
+
+    enum FilterChannelSelector : uint32_t
+    {
+        FILTER_CHANNEL_R = 0,
+        FILTER_CHANNEL_G,
+        FILTER_CHANNEL_B,
+        FILTER_CHANNEL_A
+    };
+
+    enum FilterTurbulenceType : uint32_t
+    {
+        FILTER_TURBULENCE_TURBULENCE = 0,
+        FILTER_TURBULENCE_FRACTAL_NOISE
+    };
+
+    enum FilterLightType : uint32_t
+    {
+        FILTER_LIGHT_DISTANT = 1,
+        FILTER_LIGHT_POINT = 2,
+        FILTER_LIGHT_SPOT = 3
+    };
+}
+
+
+namespace waavs::filter
+{
+
+    // --------------------------------------------------------
+    // Common filter keys
+    // --------------------------------------------------------
+    INLINE InternedKey color_interpolation_filters() noexcept { static InternedKey k = WSNameSet::INTERN("color-interpolation-filters"); return k; }
+    INLINE InternedKey kColorInterp_linearRGB() noexcept { static InternedKey k = WSNameSet::INTERN("linearRGB"); return k; }
+    INLINE InternedKey kColorInterp_sRGB()      noexcept { static InternedKey k = WSNameSet::INTERN("sRGB");      return k; }
+
+
+    // Common filter primitive keys
+    INLINE InternedKey SourceGraphic() noexcept { static InternedKey k = WSNameSet::INTERN("SourceGraphic"); return k; }
+    INLINE InternedKey SourceAlpha() noexcept { static InternedKey k = WSNameSet::INTERN("SourceAlpha"); return k; }
+    INLINE InternedKey BackgroundImage() noexcept { static InternedKey k = WSNameSet::INTERN("BackgroundImage"); return k; }
+    INLINE InternedKey BackgroundAlpha() noexcept { static InternedKey k = WSNameSet::INTERN("BackgroundAlpha"); return k; }
+    INLINE InternedKey Filter_Last() noexcept { static InternedKey k = WSNameSet::INTERN("__last__"); return k; }
+
+
+    // all filter primitives have these common attributes
+    inline InternedKey in() { static InternedKey k = WSNameSet::INTERN("in"); return k; }
+    inline InternedKey in2() { static InternedKey k = WSNameSet::INTERN("in2"); return k; }
+    inline InternedKey result() { static InternedKey k = WSNameSet::INTERN("result"); return k; }
+
+    // feGaussianBlur
+    inline InternedKey stdDeviation() { static InternedKey k = WSNameSet::INTERN("stdDeviation"); return k; }
+
+    inline InternedKey flood_color() { static InternedKey k = WSNameSet::INTERN("flood-color"); return k; }
+    inline InternedKey flood_opacity() { static InternedKey k = WSNameSet::INTERN("flood-opacity"); return k; }
+
+    // feOffset
+    inline InternedKey feOffset_dx() { static InternedKey k = WSNameSet::INTERN("dx"); return k; }
+    inline InternedKey feOffset_dy() { static InternedKey k = WSNameSet::INTERN("dy"); return k; }
+
+    // feColorMatrix
+    inline InternedKey type_() { static InternedKey k = WSNameSet::INTERN("type"); return k; }
+    inline InternedKey values() { static InternedKey k = WSNameSet::INTERN("values"); return k; }
+
+    // feBlend
+    inline InternedKey mode() { static InternedKey k = WSNameSet::INTERN("mode"); return k; }
+    
+    // feBlend modes 
+    INLINE InternedKey kBlend_normal()   noexcept { static InternedKey k = WSNameSet::INTERN("normal");   return k; }
+    INLINE InternedKey kBlend_multiply() noexcept { static InternedKey k = WSNameSet::INTERN("multiply"); return k; }
+    INLINE InternedKey kBlend_screen()   noexcept { static InternedKey k = WSNameSet::INTERN("screen");   return k; }
+    INLINE InternedKey kBlend_overlay()  noexcept { static InternedKey k = WSNameSet::INTERN("overlay");  return k; }
+    INLINE InternedKey kBlend_darken()   noexcept { static InternedKey k = WSNameSet::INTERN("darken");   return k; }
+    INLINE InternedKey kBlend_lighten()  noexcept { static InternedKey k = WSNameSet::INTERN("lighten");  return k; }
+    INLINE InternedKey kBlend_color_dodge() noexcept { static InternedKey k = WSNameSet::INTERN("color-dodge"); return k; }
+    INLINE InternedKey kBlend_color_burn()   noexcept { static InternedKey k = WSNameSet::INTERN("color-burn");   return k; }
+    INLINE InternedKey kBlend_hard_light()  noexcept { static InternedKey k = WSNameSet::INTERN("hard-light");  return k; }
+    INLINE InternedKey kBlend_soft_light()  noexcept { static InternedKey k = WSNameSet::INTERN("soft-light");  return k; }
+    INLINE InternedKey kBlend_difference()  noexcept { static InternedKey k = WSNameSet::INTERN("difference");  return k; }
+    INLINE InternedKey kBlend_exclusion()   noexcept { static InternedKey k = WSNameSet::INTERN("exclusion");   return k; }
+
+
+
+    //static InternedKey kNormal = WSNameSet::INTERN("normal");
+    //static InternedKey kMultiply = WSNameSet::INTERN("multiply");
+    //static InternedKey kScreen = WSNameSet::INTERN("screen");
+    //static InternedKey kDarken = WSNameSet::INTERN("darken");
+    //static InternedKey kLighten = WSNameSet::INTERN("lighten");
+    //static InternedKey kOverlay = WSNameSet::INTERN("overlay");
+    //static InternedKey kColorDodge = WSNameSet::INTERN("color-dodge");
+    //static InternedKey kColorBurn = WSNameSet::INTERN("color-burn");
+    //static InternedKey kHardLight = WSNameSet::INTERN("hard-light");
+    //static InternedKey kSoftLight = WSNameSet::INTERN("soft-light");
+    //static InternedKey kDifference = WSNameSet::INTERN("difference");
+    //static InternedKey kExclusion = WSNameSet::INTERN("exclusion");
+
+
+    // feComposite
+    inline InternedKey operator_() { static InternedKey k = WSNameSet::INTERN("operator"); return k; }
+    inline InternedKey k1() { static InternedKey k = WSNameSet::INTERN("k1"); return k; }
+    inline InternedKey k2() { static InternedKey k = WSNameSet::INTERN("k2"); return k; }
+    inline InternedKey k3() { static InternedKey k = WSNameSet::INTERN("k3"); return k; }
+    inline InternedKey k4() { static InternedKey k = WSNameSet::INTERN("k4"); return k; }
+
+    // feComposite operator values
+    INLINE InternedKey kCompOp_over()       noexcept { static InternedKey k = WSNameSet::INTERN("over");       return k; }
+    INLINE InternedKey kCompOp_in()         noexcept { static InternedKey k = WSNameSet::INTERN("in");         return k; }
+    INLINE InternedKey kCompOp_out()        noexcept { static InternedKey k = WSNameSet::INTERN("out");        return k; }
+    INLINE InternedKey kCompOp_atop()       noexcept { static InternedKey k = WSNameSet::INTERN("atop");       return k; }
+    INLINE InternedKey kCompOp_xor()        noexcept { static InternedKey k = WSNameSet::INTERN("xor");        return k; }
+    INLINE InternedKey kCompOp_arithmetic() noexcept { static InternedKey k = WSNameSet::INTERN("arithmetic"); return k; }
+
+    // feComponentTransfer / feFunc*
+    inline InternedKey tableValues() { static InternedKey k = WSNameSet::INTERN("tableValues"); return k; }
+    inline InternedKey slope() { static InternedKey k = WSNameSet::INTERN("slope"); return k; }
+    inline InternedKey intercept() { static InternedKey k = WSNameSet::INTERN("intercept"); return k; }
+    inline InternedKey amplitude() { static InternedKey k = WSNameSet::INTERN("amplitude"); return k; }
+    inline InternedKey exponent() { static InternedKey k = WSNameSet::INTERN("exponent"); return k; }
+    inline InternedKey offset() { static InternedKey k = WSNameSet::INTERN("offset"); return k; }
+
+    inline InternedKey feFuncR() { static InternedKey k = WSNameSet::INTERN("feFuncR"); return k; }
+    inline InternedKey feFuncG() { static InternedKey k = WSNameSet::INTERN("feFuncG"); return k; }
+    inline InternedKey feFuncB() { static InternedKey k = WSNameSet::INTERN("feFuncB"); return k; }
+    inline InternedKey feFuncA() { static InternedKey k = WSNameSet::INTERN("feFuncA"); return k; }
+    
+    
+    static InternedKey kIdentity = WSNameSet::INTERN("identity");
+    static InternedKey kTable = WSNameSet::INTERN("table");
+    static InternedKey kDiscrete = WSNameSet::INTERN("discrete");
+    static InternedKey kLinear = WSNameSet::INTERN("linear");
+    static InternedKey kGamma = WSNameSet::INTERN("gamma");
+
+    // feConvolveMatrix
+    inline InternedKey order() { static InternedKey k = WSNameSet::INTERN("order"); return k; }
+    inline InternedKey kernelMatrix() { static InternedKey k = WSNameSet::INTERN("kernelMatrix"); return k; }
+    inline InternedKey divisor() { static InternedKey k = WSNameSet::INTERN("divisor"); return k; }
+    inline InternedKey bias() { static InternedKey k = WSNameSet::INTERN("bias"); return k; }
+    inline InternedKey targetX() { static InternedKey k = WSNameSet::INTERN("targetX"); return k; }
+    inline InternedKey targetY() { static InternedKey k = WSNameSet::INTERN("targetY"); return k; }
+    inline InternedKey edgeMode() { static InternedKey k = WSNameSet::INTERN("edgeMode"); return k; }
+    inline InternedKey kernelUnitLength() { static InternedKey k = WSNameSet::INTERN("kernelUnitLength"); return k; }
+    inline InternedKey preserveAlpha() { static InternedKey k = WSNameSet::INTERN("preserveAlpha"); return k; }
+
+    // feDisplacementMap
+    inline InternedKey scale() { static InternedKey k = WSNameSet::INTERN("scale"); return k; }
+    inline InternedKey xChannelSelector() { static InternedKey k = WSNameSet::INTERN("xChannelSelector"); return k; }
+    inline InternedKey yChannelSelector() { static InternedKey k = WSNameSet::INTERN("yChannelSelector"); return k; }
+
+    // feTurbulence
+    inline InternedKey baseFrequency() { static InternedKey k = WSNameSet::INTERN("baseFrequency"); return k; }
+    inline InternedKey numOctaves() { static InternedKey k = WSNameSet::INTERN("numOctaves"); return k; }
+    inline InternedKey seed() { static InternedKey k = WSNameSet::INTERN("seed"); return k; }
+    inline InternedKey stitchTiles() { static InternedKey k = WSNameSet::INTERN("stitchTiles"); return k; }
+
+    // lighting
+    inline InternedKey surfaceScale() { static InternedKey k = WSNameSet::INTERN("surfaceScale"); return k; }
+    inline InternedKey diffuseConstant() { static InternedKey k = WSNameSet::INTERN("diffuseConstant"); return k; }
+    inline InternedKey specularConstant() { static InternedKey k = WSNameSet::INTERN("specularConstant"); return k; }
+    inline InternedKey specularExponent() { static InternedKey k = WSNameSet::INTERN("specularExponent"); return k; }
+    inline InternedKey lighting_color() { static InternedKey k = WSNameSet::INTERN("lighting-color"); return k; }
+
+    inline InternedKey azimuth() { static InternedKey k = WSNameSet::INTERN("azimuth"); return k; }
+    inline InternedKey elevation() { static InternedKey k = WSNameSet::INTERN("elevation"); return k; }
+    inline InternedKey pointsAtX() { static InternedKey k = WSNameSet::INTERN("pointsAtX"); return k; }
+    inline InternedKey pointsAtY() { static InternedKey k = WSNameSet::INTERN("pointsAtY"); return k; }
+    inline InternedKey pointsAtZ() { static InternedKey k = WSNameSet::INTERN("pointsAtZ"); return k; }
+    inline InternedKey limitingConeAngle() { static InternedKey k = WSNameSet::INTERN("limitingConeAngle"); return k; }
+
+    // feDistantLight
+    inline InternedKey feDistantLight() { static InternedKey k = WSNameSet::INTERN("feDistantLight"); return k; }
+    inline InternedKey fePointLight() { static InternedKey k = WSNameSet::INTERN("fePointLight"); return k; }
+    inline InternedKey feSpotLight() { static InternedKey k = WSNameSet::INTERN("feSpotLight"); return k; }
+
+    // diffuse/specular lighting common
+    inline InternedKey x() { static InternedKey k = WSNameSet::INTERN("x"); return k; }
+    inline InternedKey y() { static InternedKey k = WSNameSet::INTERN("y"); return k; }
+    inline InternedKey z() { static InternedKey k = WSNameSet::INTERN("z"); return k; }
+
+    // feMorphology
+    inline InternedKey radius() { static InternedKey k = WSNameSet::INTERN("radius"); return k; }
+
+    // feMerge / feMergeNode
+    inline InternedKey feMergeNode_in() { static InternedKey k = WSNameSet::INTERN("in"); return k; }
+
+    // feImage
+    inline InternedKey href() { static InternedKey k = WSNameSet::INTERN("href"); return k; }
+    inline InternedKey xlink_href() { static InternedKey k = WSNameSet::INTERN("xlink:href"); return k; }
+
+}
+
+namespace waavs
+{
+    // A simple struct to hold a pair of numbers, 
+// with the possibility of the second being optional/implied.
+    struct SVGNumberPair
+    {
+        float a{ 0.0f };
+        float b{ 0.0f };
+        bool hasB{ false }; // if false, b is implied = a
+
+        void set(float v) { a = v; b = v; hasB = false; }
+    };
+
+
+    static INLINE bool lengthToFilterNumberOrPercent(const SVGLengthValue& inVal,
+        SVGNumberOrPercent& outVal,
+        double dpi = 96.0,
+        const BLFont* font = nullptr) noexcept
+    {
+        return lengthValueToNumberOrPercent(inVal, outVal, dpi, font, true);
+    }
+
+    // Parse: <number> [<number>]
+    // Note: negative numbers are treated as 0, per SVG spec.
+    // 
+    // Uses readNextNumber(), so it naturally accepts comma/space separators.
+    static INLINE bool parseNumberPair(ByteSpan s, SVGNumberPair& out) noexcept
+    {
+        bspan_skip_spaces(s);
+
+        if (!s) { out.set(0.0f); return false; }
+
+        double x = 0.0;
+        if (!number_list_read_next(s, x)) { out.set(0.0f); return false; }
+
+        double y = 0.0;
+        if (number_list_read_next(s, y)) {
+            out.a = (float)x;
+            out.b = (float)y;
+            out.hasB = true;
+        }
+        else {
+            out.set((float)x);
+        }
+
+        // SVG behavior: negative treated as 0
+        if (out.a < 0.0f) out.a = 0.0f;
+        if (out.b < 0.0f) out.b = 0.0f;
+
+        return true;
+    }
+
+    static INLINE bool parseF32Attr(const ByteSpan& s, float& out) noexcept
+    {
+        double v = 0.0;
+        if (!parseNumber(s, v))
+            return false;
+
+        out = static_cast<float>(v);
+
+        return true;
+    }
+
+    // Note: negative numbers are treated as 0, per SVG spec.
+    static INLINE bool parseU32Attr(const ByteSpan& s, uint32_t& out) noexcept
+    {
+        double v = 0.0;
+        if (!parseNumber(s, v))
+            return false;
+
+        if (v < 0.0)
+            v = 0.0;
+
+        out = static_cast<uint32_t>(v);
+
+        return true;
+    }
+
+    // Parse a pair of numbers
+    // Different from parseNumberPair in that the second value
+    // is NOT optional.
+    // Note: negative numbers are NOT treated as 0 here
+    static INLINE bool parseFloatPairAttr(const ByteSpan& s, float& a, float& b) noexcept
+    {
+        SVGTokenListView tv(s);
+        double x = 0.0;
+        double y = 0.0;
+
+        if (!tv.readANumber(x))
+            return false;
+
+        if (!tv.readANumber(y))
+            y = x;
+
+        a = (float)x;
+        b = (float)y;
+        return true;
+    }
+
+    static INLINE bool parseU32PairAttr(const ByteSpan& s, uint32_t& a, uint32_t& b) noexcept
+    {
+        SVGTokenListView tv(s);
+        double x = 0.0;
+        double y = 0.0;
+
+        if (!tv.readANumber(x))
+            return false;
+
+        if (!tv.readANumber(y))
+            y = x;
+
+        if (x < 1.0) x = 1.0;
+        if (y < 1.0) y = 1.0;
+
+        a = (uint32_t)x;
+        b = (uint32_t)y;
+        return true;
+    }
+
+    // Parse a list of numbers, e.g. for feColorMatrix values.
+    static INLINE bool parseFloatListAttr(const ByteSpan& s, std::vector<float>& out) noexcept
+    {
+        out.clear();
+
+        SVGTokenListView tv(s);
+        double v = 0.0;
+        while (tv.readANumber(v))
+            out.push_back((float)v);
+
+        return !out.empty();
+    }
+
+    // Parse a list of numbers, with an expected count. 
+    // Return false if the count doesn't match.
+    static INLINE bool parseFloatListExact(const ByteSpan& s, float* dst, size_t n) noexcept
+    {
+        SVGTokenListView tv(s);
+        double v = 0.0;
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (!tv.readANumber(v))
+                return false;
+            dst[i] = (float)v;
+        }
+
+        return true;
+    }
+
+}
+
+
+
+// Converting from string keys to enum values
+// for filter attributes that have a closed vocabulary
+namespace waavs
+{
+    // Parse an exact boolean value, which can be "true"/"false" 
+    // or a number (0=false, nonzero=true).
+    static INLINE bool parseBoolAttr(const ByteSpan& s, bool& out) noexcept
+    {
+        if (!s)
+            return false;
+
+        static InternedKey kTrue = WSNameSet::INTERN("true");
+        static InternedKey kFalse = WSNameSet::INTERN("false");
+        InternedKey k = WSNameSet::INTERN(s);
+
+        if (k == kTrue) {
+            out = true;
+            return true;
+        }
+
+        if (k == kFalse) {
+            out = false;
+            return true;
+        }
+
+        uint32_t v = 0;
+        if (!parseU32Attr(s, v))
+            return false;
+
+        out = (v != 0);
+        return true;
+    }
+
+    static INLINE bool parseStitchTilesAttr(const ByteSpan& s, bool& out) noexcept
+    {
+        if (!s)
+            return false;
+
+        static InternedKey kStitch = WSNameSet::INTERN("stitch");
+        static InternedKey kNoStitch = WSNameSet::INTERN("noStitch");
+        InternedKey k = WSNameSet::INTERN(s);
+
+        if (k == kStitch) {
+            out = true;
+            return true;
+        }
+
+        if (k == kNoStitch) {
+            out = false;
+            return true;
+        }
+
+        return false;
+    }
+
+    static INLINE FilterColorInterpolation parseFilterColorInterpolation(InternedKey k, FilterColorInterpolation def) noexcept
+    {
+        // Filter effects default to linearRGB.
+        if (!k) return def;
+
+        if (k == filter::kColorInterp_linearRGB()) return FILTER_COLOR_INTERPOLATION_LINEAR_RGB;
+        if (k == filter::kColorInterp_sRGB())      return FILTER_COLOR_INTERPOLATION_SRGB;
+
+        // If we admit "auto" later at parse time, collapse it here for now.
+        // if (k == filter::kColorInterp_auto()) return FILTER_COLOR_INTERPOLATION_LINEAR_RGB;
+
+        return def;
+    }
+
+
+    static INLINE FilterBlendMode parseFilterBlendMode(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_BLEND_NORMAL;
+
+
+        if (k == filter::kBlend_normal())     return FILTER_BLEND_NORMAL;
+        if (k == filter::kBlend_multiply())   return FILTER_BLEND_MULTIPLY;
+        if (k == filter::kBlend_screen())     return FILTER_BLEND_SCREEN;
+        if (k == filter::kBlend_darken())     return FILTER_BLEND_DARKEN;
+        if (k == filter::kBlend_lighten())    return FILTER_BLEND_LIGHTEN;
+        if (k == filter::kBlend_overlay())    return FILTER_BLEND_OVERLAY;
+        if (k == filter::kBlend_color_dodge()) return FILTER_BLEND_COLOR_DODGE;
+        if (k == filter::kBlend_color_burn())  return FILTER_BLEND_COLOR_BURN;
+        if (k == filter::kBlend_hard_light())  return FILTER_BLEND_HARD_LIGHT;
+        if (k == filter::kBlend_soft_light())  return FILTER_BLEND_SOFT_LIGHT;
+        if (k == filter::kBlend_difference()) return FILTER_BLEND_DIFFERENCE;
+        if (k == filter::kBlend_exclusion())  return FILTER_BLEND_EXCLUSION;
+
+        return FILTER_BLEND_NORMAL;
+    }
+
+    static INLINE FilterCompositeOp parseFilterCompositeOp(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_COMPOSITE_OVER;
+
+
+        if (k == filter::kCompOp_over())       return FILTER_COMPOSITE_OVER;
+        if (k == filter::kCompOp_in())         return FILTER_COMPOSITE_IN;
+        if (k == filter::kCompOp_out())        return FILTER_COMPOSITE_OUT;
+        if (k == filter::kCompOp_atop())       return FILTER_COMPOSITE_ATOP;
+        if (k == filter::kCompOp_xor())        return FILTER_COMPOSITE_XOR;
+        if (k == filter::kCompOp_arithmetic()) return FILTER_COMPOSITE_ARITHMETIC;
+
+        return FILTER_COMPOSITE_OVER;
+    }
+
+    static INLINE FilterColorMatrixType parseFilterColorMatrixType(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_COLOR_MATRIX_MATRIX;
+
+        static InternedKey kMatrix = WSNameSet::INTERN("matrix");
+        static InternedKey kSaturate = WSNameSet::INTERN("saturate");
+        static InternedKey kHueRotate = WSNameSet::INTERN("hueRotate");
+        static InternedKey kLuminanceToAlpha = WSNameSet::INTERN("luminanceToAlpha");
+
+        if (k == kMatrix)           return FILTER_COLOR_MATRIX_MATRIX;
+        if (k == kSaturate)         return FILTER_COLOR_MATRIX_SATURATE;
+        if (k == kHueRotate)        return FILTER_COLOR_MATRIX_HUE_ROTATE;
+        if (k == kLuminanceToAlpha) return FILTER_COLOR_MATRIX_LUMINANCE_TO_ALPHA;
+
+        return FILTER_COLOR_MATRIX_MATRIX;
+    }
+
+    static INLINE FilterTransferFuncType parseFilterTransferFuncType(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_TRANSFER_IDENTITY;
+
+        static InternedKey kIdentity = WSNameSet::INTERN("identity");
+        static InternedKey kTable = WSNameSet::INTERN("table");
+        static InternedKey kDiscrete = WSNameSet::INTERN("discrete");
+        static InternedKey kLinear = WSNameSet::INTERN("linear");
+        static InternedKey kGamma = WSNameSet::INTERN("gamma");
+
+        if (k == kIdentity) return FILTER_TRANSFER_IDENTITY;
+        if (k == kTable)    return FILTER_TRANSFER_TABLE;
+        if (k == kDiscrete) return FILTER_TRANSFER_DISCRETE;
+        if (k == kLinear)   return FILTER_TRANSFER_LINEAR;
+        if (k == kGamma)    return FILTER_TRANSFER_GAMMA;
+
+        return FILTER_TRANSFER_IDENTITY;
+    }
+
+    static INLINE FilterMorphologyOp parseFilterMorphologyOp(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_MORPHOLOGY_ERODE;
+
+        static InternedKey kErode = WSNameSet::INTERN("erode");
+        static InternedKey kDilate = WSNameSet::INTERN("dilate");
+
+        if (k == kErode)  return FILTER_MORPHOLOGY_ERODE;
+        if (k == kDilate) return FILTER_MORPHOLOGY_DILATE;
+
+        return FILTER_MORPHOLOGY_ERODE;
+    }
+
+    static INLINE FilterEdgeMode parseFilterEdgeMode(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_EDGE_DUPLICATE;
+
+        static InternedKey kDuplicate = WSNameSet::INTERN("duplicate");
+        static InternedKey kWrap = WSNameSet::INTERN("wrap");
+        static InternedKey kNone = WSNameSet::INTERN("none");
+
+        if (k == kDuplicate) return FILTER_EDGE_DUPLICATE;
+        if (k == kWrap)      return FILTER_EDGE_WRAP;
+        if (k == kNone)      return FILTER_EDGE_NONE;
+
+        return FILTER_EDGE_DUPLICATE;
+    }
+
+    static INLINE FilterChannelSelector parseFilterChannelSelector(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_CHANNEL_A;
+
+        static InternedKey kR = WSNameSet::INTERN("R");
+        static InternedKey kG = WSNameSet::INTERN("G");
+        static InternedKey kB = WSNameSet::INTERN("B");
+        static InternedKey kA = WSNameSet::INTERN("A");
+
+        if (k == kR) return FILTER_CHANNEL_R;
+        if (k == kG) return FILTER_CHANNEL_G;
+        if (k == kB) return FILTER_CHANNEL_B;
+        if (k == kA) return FILTER_CHANNEL_A;
+
+        return FILTER_CHANNEL_A;
+    }
+
+    static INLINE FilterTurbulenceType parseFilterTurbulenceType(InternedKey k) noexcept
+    {
+        if (!k) return FILTER_TURBULENCE_TURBULENCE;
+
+        static InternedKey kTurbulence = WSNameSet::INTERN("turbulence");
+        static InternedKey kFractalNoise = WSNameSet::INTERN("fractalNoise");
+
+        if (k == kTurbulence)   return FILTER_TURBULENCE_TURBULENCE;
+        if (k == kFractalNoise) return FILTER_TURBULENCE_FRACTAL_NOISE;
+
+        return FILTER_TURBULENCE_TURBULENCE;
+    }
+}
+
+
+
+namespace waavs
+{
+    // Optional spans for list payloads (reference impl uses heap scratch).
+    struct F32Span { const float* p{}; uint32_t n{}; };
+    struct KeySpan { const InternedKey* p{}; uint32_t n{}; };
+
+    // feComponentTransfer function specification for a single channel.
+    struct ComponentFunc {
+        FilterTransferFuncType type{ FILTER_TRANSFER_IDENTITY };
+        float p0{}, p1{}, p2{};
+        F32Span table{};
+    };
+
+    struct SVGComponentTransferFunc
+    {
+        FilterTransferFuncType fType{ FILTER_TRANSFER_IDENTITY };
+        float fP0{ 1.0f };
+        float fP1{ 0.0f };
+        float fP2{ 0.0f };
+        std::vector<float> fTable{};
+    };
+
+    // For feComposite, arithmetic operator parameters k1..k4 
+// often have special cases when they are zero.
+    enum ArithmeticCompositeKind : uint32_t
+    {
+        ARITH_ZERO = 0,
+        ARITH_K1_ONLY,
+        ARITH_K2_ONLY,
+        ARITH_K3_ONLY,
+        ARITH_K4_ONLY,
+        ARITH_K2_K3,
+        ARITH_K1_K2_K3,
+        ARITH_GENERAL
+    };
+
+    // Classify the arithmetic composite operator based on which of k1..k4 are zero.
+// Then use that later to specialize the inner loop for common cases.
+    static INLINE ArithmeticCompositeKind classifyArithmetic(
+        float k1, float k2, float k3, float k4) noexcept
+    {
+        const bool z1 = k1 == 0.0f;
+        const bool z2 = k2 == 0.0f;
+        const bool z3 = k3 == 0.0f;
+        const bool z4 = k4 == 0.0f;
+
+        if (z1 && z2 && z3 && z4) return ARITH_ZERO;
+        if (!z1 && z2 && z3 && z4) return ARITH_K1_ONLY;
+        if (z1 && !z2 && z3 && z4) return ARITH_K2_ONLY;
+        if (z1 && z2 && !z3 && z4) return ARITH_K3_ONLY;
+        if (z1 && z2 && z3 && !z4) return ARITH_K4_ONLY;
+        if (z1 && !z2 && !z3 && z4) return ARITH_K2_K3;
+        if (!z1 && !z2 && !z3 && z4) return ARITH_K1_K2_K3;
+
+        return ARITH_GENERAL;
+    }
+}
+
+namespace waavs
+{
+    struct LightPayload { float L[8]{}; };
+
+    struct PixelToFilterUserMap
+    {
+        // Tile-local surface dimensions only.
+        int surfaceW{ 0 };
+        int surfaceH{ 0 };
+
+        // Local semantic filter-space extent.
+        WGRectD filterExtentUS{};
+
+        float uxPerPixel{ 1.0f };
+        float uyPerPixel{ 1.0f };
+    };
+
+
+    static INLINE void pixelCenterToFilterUserStandalone(
+        const PixelToFilterUserMap& map,
+        int px, int py,
+        float& ux, float& uy) noexcept
+    {
+        //(void)map.surfaceW;
+        //(void)map.surfaceH;
+
+        // px/py are already tile-local pixel coordinates.
+        const float fx = float(px) + 0.5f;
+        const float fy = float(py) + 0.5f;
+
+        ux = float(map.filterExtentUS.x) + fx * map.uxPerPixel;
+        uy = float(map.filterExtentUS.y) + fy * map.uyPerPixel;
+    }
+
+}
+
+

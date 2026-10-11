@@ -36,6 +36,28 @@ rg.configure_libclang()
 # Pure string-logic helpers - no clang objects involved at all.
 # ---------------------------------------------------------------------------
 
+class IncludeSpellingTest(unittest.TestCase):
+    def test_is_the_path_under_the_include_dir_in_angle_brackets(self):
+        self.assertEqual(rg.include_spelling(os.path.join("C:/proj/include", "newui", "controls.h"), ["C:/proj/include"]),
+                         "<newui/controls.h>")
+
+    def test_uses_the_deepest_include_dir_that_contains_the_file(self):
+        self.assertEqual(rg.include_spelling("C:/proj/include/newui/controls.h", ["C:/proj", "C:/proj/include"]),
+                         "<newui/controls.h>")
+
+    def test_keeps_the_files_own_case_even_though_the_comparison_ignores_it(self):
+        self.assertEqual(rg.include_spelling("C:/Proj/Include/NewUI/MyControl.h", ["c:/proj/include"]),
+                         "<NewUI/MyControl.h>")
+
+    def test_is_empty_when_the_file_is_under_no_include_dir_or_unknown(self):
+        self.assertEqual(rg.include_spelling("C:/elsewhere/x.h", ["C:/proj/include"]), "")
+        self.assertEqual(rg.include_spelling("", ["C:/proj/include"]), "")
+        self.assertEqual(rg.include_spelling("C:/proj/include/x.h", []), "")
+
+    def test_a_sibling_directory_with_the_same_prefix_is_not_under_it(self):
+        self.assertEqual(rg.include_spelling("C:/proj/include2/x.h", ["C:/proj/include"]), "")
+
+
 class StripAccessorPrefixTest(unittest.TestCase):
     def test_camel_case_boundary(self):
         self.assertEqual(rg.strip_accessor_prefix("getTitle", "get"), ("Title", True))
@@ -579,6 +601,343 @@ class QualifiedNameTest(ClangSnippetTestCase):
     def test_global_scope(self):
         cursor = self.find("GlobalWidget")
         self.assertEqual(rg.qualified_name(cursor), "GlobalWidget")
+
+
+class ReflectAnnotationsTagsTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect tags=filepath,pathlike
+        class Thing {
+        public:
+            // @reflect tags=urlvalue
+            std::string getPath() const;
+            void setPath(std::string);
+
+            // @reflect ignore=true
+            int getSkipped() const;
+        };
+    }
+    """
+
+    def test_class_level_tags_are_parsed_as_a_comma_joined_value(self):
+        cursor = self.find("Thing")
+        self.assertEqual(rg.reflect_annotations(cursor).get("tags"), "filepath,pathlike")
+
+    def test_property_level_tags_are_parsed(self):
+        cursor = self.find("getPath")
+        self.assertEqual(rg.reflect_annotations(cursor).get("tags"), "urlvalue")
+
+    def test_broadened_value_charset_does_not_break_a_plain_annotation(self):
+        # REFLECT_ANNOTATION_PAIR_RE's value group now also allows "," (for
+        # tags=...) - confirms an ordinary identifier-shaped value (no
+        # comma at all) still parses exactly as before.
+        cursor = self.find("getSkipped")
+        self.assertEqual(rg.reflect_annotations(cursor).get("ignore"), "true")
+
+
+class CollectClassTagsTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        template<typename SenderT, typename... Args>
+        class Delegate {};
+
+        // @reflect tags=file,pathlike
+        class Document {
+        public:
+            // @reflect tags=filepath
+            std::string getPath() const;
+            void setPath(std::string);
+
+            // @reflect tags=notification
+            Delegate<Document> onChanged;
+        };
+    }
+    """
+
+    def test_class_level_tags_land_on_class_info(self):
+        info = rg.collect_class(self.find("Document"))
+        self.assertEqual(info.tags, ["file", "pathlike"])
+
+    def test_property_level_tags_land_on_the_accessor(self):
+        info = rg.collect_class(self.find("Document"))
+        matching = [pa for pa in info.property_accessors if pa.key == "path"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].tags, ["filepath"])
+
+    def test_delegate_level_tags_land_on_the_delegate_field(self):
+        info = rg.collect_class(self.find("Document"))
+        matching = [d for d in info.delegates if d.name == "onChanged"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].tags, ["notification"])
+
+    def test_emitted_registration_includes_all_three_tags_calls(self):
+        info = rg.collect_class(self.find("Document"))
+        source = rg.emit_register_function(info, [])
+        lines = source.splitlines()
+
+        self.assertIn('.tags({"file", "pathlike"})', source)
+
+        property_lines = [l for l in lines if '.property("path"' in l]
+        self.assertEqual(len(property_lines), 1)
+        self.assertIn('{"filepath"}', property_lines[0])
+
+        delegate_lines = [l for l in lines if '.delegate("onChanged"' in l]
+        self.assertEqual(len(delegate_lines), 1)
+        self.assertIn('{"notification"}', delegate_lines[0])
+
+
+class ReflectProxyAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect proxy=AppFrameProxy
+        class AppFrame {
+        public:
+            void setTitle(std::string);
+            std::string getTitle() const;
+        };
+
+        // @reflect proxyfor=AppFrame
+        class AppFrameProxy {
+        public:
+            void setTitle(std::string);
+            std::string getTitle() const;
+        };
+
+        // Neither annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    # NOTE: this snippet's real classes are deliberately named AppFrame/
+    # AppFrameProxy, not Frame/FrameProxy (which is what the real newui
+    # header uses) - #include <string> transitively pulls in MSVC's
+    # <setjmp.h>, whose x64 _JUMP_BUFFER struct has a real register-save
+    # field literally named "Frame". _find_named() (this file's own
+    # helper) matches by cursor spelling alone, any kind, anywhere in the
+    # parsed tree - so self.find("Frame") silently resolved to that field
+    # instead of this snippet's own class, a real, reproduced collision.
+
+    def test_proxy_annotation_is_parsed(self):
+        cursor = self.find("AppFrame")
+        self.assertEqual(rg.reflect_annotations(cursor).get("proxy"), "AppFrameProxy")
+
+    def test_proxyfor_annotation_is_parsed(self):
+        cursor = self.find("AppFrameProxy")
+        self.assertEqual(rg.reflect_annotations(cursor).get("proxyfor"), "AppFrame")
+
+    def test_proxy_lands_on_class_info(self):
+        info = rg.collect_class(self.find("AppFrame"))
+        self.assertEqual(info.proxy, "AppFrameProxy")
+        self.assertEqual(info.proxy_for, "")
+
+    def test_proxyfor_lands_on_class_info(self):
+        info = rg.collect_class(self.find("AppFrameProxy"))
+        self.assertEqual(info.proxy_for, "AppFrame")
+        self.assertEqual(info.proxy, "")
+
+    def test_neither_annotation_leaves_both_empty(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertEqual(info.proxy, "")
+        self.assertEqual(info.proxy_for, "")
+
+    def test_emitted_registration_includes_proxy_call(self):
+        info = rg.collect_class(self.find("AppFrame"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.proxy("AppFrameProxy")', source)
+        self.assertNotIn(".proxyFor(", source)
+
+    def test_emitted_registration_includes_proxyfor_call(self):
+        info = rg.collect_class(self.find("AppFrameProxy"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.proxyFor("AppFrame")', source)
+        self.assertNotIn(".proxy(", source)
+
+
+class ReflectCategoryAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    namespace newui {
+        // @reflect category=basic
+        class Widget {};
+
+        // @reflect category=basic,input
+        class MultiCategoryWidget {};
+
+        // No annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    def test_category_annotation_is_parsed(self):
+        cursor = self.find("Widget")
+        self.assertEqual(rg.reflect_annotations(cursor).get("category"), "basic")
+
+    def test_multi_category_annotation_is_parsed_as_a_comma_joined_value(self):
+        cursor = self.find("MultiCategoryWidget")
+        self.assertEqual(rg.reflect_annotations(cursor).get("category"), "basic,input")
+
+    def test_category_lands_on_class_info(self):
+        info = rg.collect_class(self.find("Widget"))
+        self.assertEqual(info.categories, ["basic"])
+
+    def test_multi_category_lands_on_class_info_as_a_list(self):
+        info = rg.collect_class(self.find("MultiCategoryWidget"))
+        self.assertEqual(info.categories, ["basic", "input"])
+
+    def test_missing_category_is_an_empty_list_not_none(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertEqual(info.categories, [])
+
+    def test_emitted_registration_includes_the_categories_call(self):
+        info = rg.collect_class(self.find("Widget"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.categories({"basic"})', source)
+
+    def test_emitted_registration_includes_all_categories(self):
+        info = rg.collect_class(self.find("MultiCategoryWidget"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn('.categories({"basic", "input"})', source)
+
+    def test_no_categories_call_emitted_when_there_are_no_categories(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        source = rg.emit_register_function(info, [])
+        self.assertNotIn(".categories(", source)
+
+
+class ReflectStringValueAnnotationTest(ClangSnippetTestCase):
+    SOURCE = """
+    #include <string>
+    namespace newui {
+        // @reflect stringvalue
+        class Coordinate {
+        public:
+            static bool fromString(const std::string& str, Coordinate& out);
+            std::string toString() const;
+
+            float x = 0.0f;
+            float y = 0.0f;
+        };
+
+        // No annotation - the common case.
+        class PlainThing {};
+    }
+    """
+
+    def test_stringvalue_annotation_is_parsed(self):
+        cursor = self.find("Coordinate")
+        self.assertEqual(rg.reflect_annotations(cursor).get("stringvalue"), "true")
+
+    def test_stringvalue_lands_on_class_info(self):
+        info = rg.collect_class(self.find("Coordinate"))
+        self.assertTrue(info.string_value)
+
+    def test_missing_stringvalue_defaults_false(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        self.assertFalse(info.string_value)
+
+    def test_emitted_registration_includes_the_stringvalue_call(self):
+        info = rg.collect_class(self.find("Coordinate"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn(".stringValue()", source)
+
+    def test_no_stringvalue_call_emitted_when_not_annotated(self):
+        info = rg.collect_class(self.find("PlainThing"))
+        source = rg.emit_register_function(info, [])
+        self.assertNotIn(".stringValue(", source)
+
+
+class ConstructorArityTest(ClangSnippetTestCase):
+    """A constructor with defaulted trailing parameters is callable with fewer arguments, so
+    every arity from the required count up to the full list must be registered - otherwise
+    Class::createInstance() with no arguments (the Toolbox, the .newui Reader, ...) finds nothing to
+    call for a class like `explicit TabControl(TabAlignment = Top)`."""
+
+    SOURCE = """
+    namespace newui {
+        enum class Align { Top, Bottom };
+
+        class AllDefaulted {
+        public:
+            explicit AllDefaulted(Align a = Align::Top);
+        };
+
+        class Mixed {
+        public:
+            Mixed(int required, float a = 1.0f, bool b = false);
+        };
+
+        // An explicit default constructor plus a one-argument one: no duplicates.
+        class PlainDefault {
+        public:
+            PlainDefault();
+            PlainDefault(int x);
+        };
+
+        class NoDefaults {
+        public:
+            NoDefaults(int a, int b);
+        };
+    }
+    """
+
+    def ctor_signatures(self, class_name):
+        info = rg.collect_class(self.find(class_name))
+        return [list(c.arg_types) for c in info.ctors]
+
+    def test_all_defaulted_constructor_also_registers_the_no_argument_form(self):
+        self.assertEqual(self.ctor_signatures("AllDefaulted"), [[], ["newui::Align"]])
+
+    def test_every_arity_from_the_required_count_up_is_registered(self):
+        self.assertEqual(self.ctor_signatures("Mixed"),
+                         [["int"], ["int", "float"], ["int", "float", "bool"]])
+
+    def test_explicit_default_constructor_is_not_registered_twice(self):
+        self.assertEqual(self.ctor_signatures("PlainDefault"), [[], ["int"]])
+
+    def test_constructor_without_defaults_registers_only_itself(self):
+        self.assertEqual(self.ctor_signatures("NoDefaults"), [["int", "int"]])
+
+    def test_emitted_registration_includes_the_no_argument_constructor(self):
+        info = rg.collect_class(self.find("AllDefaulted"))
+        source = rg.emit_register_function(info, [])
+        self.assertIn(".constructor<>()", source)
+        self.assertIn(".constructor<newui::Align>()", source)
+
+
+class GeneratedRegisterFunctionIsSelfGuardingTest(unittest.TestCase):
+    # Real bug this guards against: two independent call sites in
+    # cpp_codetools each called registerReflectionData() directly - the
+    # second call replaced (deleted) already-registered Class objects a
+    # consumer (CodeToolsVsix::ToolboxRegistry::categories()) had already
+    # cached const Class* pointers into. Fixed at the actual source (here,
+    # the generator) rather than in every consumer - the public function
+    # is now a thin, self-guarding wrapper around the real (renamed)
+    # registration work. Only this one aggregate function is guarded -
+    # each per-class register_*Reflection() function (emit_register_
+    # function(), tested elsewhere in this file) is untouched and still
+    # only ever called once, from inside the renamed Impl function.
+    def test_public_function_delegates_to_a_separate_impl_function(self):
+        source = rg.generate([], [], ["dummy.h"], [])
+        self.assertIn("void registerReflectionDataImpl()", source)
+        self.assertIn("void registerReflectionData()", source)
+
+    def test_public_function_only_calls_impl_once_via_a_static_guard(self):
+        source = rg.generate([], [], ["dummy.h"], [])
+        # The public function's own body - textually isolate it from
+        # registerReflectionDataImpl()'s (which legitimately calls every
+        # per-class register_*() function, unrelated to this guard).
+        public_fn_start = source.index("void registerReflectionData()\n")
+        public_fn_body = source[public_fn_start:]
+        self.assertIn("static bool registered", public_fn_body)
+        self.assertIn("registerReflectionDataImpl();", public_fn_body)
+
+    def test_respects_a_custom_register_function_name(self):
+        source = rg.generate([], [], ["dummy.h"], [], register_function_name="customRegister")
+        self.assertIn("void customRegisterImpl()", source)
+        self.assertIn("void customRegister()", source)
+        self.assertIn("customRegisterImpl();", source)
 
 
 if __name__ == "__main__":

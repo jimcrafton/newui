@@ -1,6 +1,8 @@
 #include "newui/controllers.h"
 #include "newui/controls.h"
 #include "newui/models.h"
+#include "newui/rootcontroller.h"
+#include "newui/rootview.h"
 #include "newui/subview.h"
 
 #include <string>
@@ -65,7 +67,138 @@ protected:
     void viewDidDisappear() override { if (log) log->push_back("viewDidDisappear"); }
 };
 
+// ---------------------------------------------------------------------
+// RootController test fixture - resolves a named child in internal_init(),
+// same shape a generated delegate-wiring Controller subclass would use.
+// ---------------------------------------------------------------------
+
+class RecordingRootController : public RootController {
+public:
+    using RootController::RootController;
+
+    SubView* resolvedChild = nullptr;
+    bool internalInitCalled = false;
+
+protected:
+    bool internal_init() override {
+        if (!Component::internal_init()) {
+            return false;
+        }
+        internalInitCalled = true;
+        resolvedChild = resolve<SubView>("child_");
+        return true;
+    }
+};
+
+// Reflected pointer fields for RootController's auto-binding. Registered by hand (what reflectgen
+// emits for a real class), lazily, once.
+class AutoBoundController : public RootController {
+public:
+    using RootController::RootController;
+
+    SubView* child_ = nullptr;         // bound: a SubView named "child"
+    Button* wrongType_ = nullptr;      // stays null: "wrongType" exists but is a plain SubView
+    SubView* missing_ = nullptr;       // stays null: no view named "missing"
+    int notAPointer_ = 0;
+    SubView* unflagged_ = nullptr;     // stays null: matching view exists but no connect=true
+    SubView* seenInInit = nullptr;     // child_ as observed inside internal_init()
+
+protected:
+    bool internal_init() override {
+        seenInInit = child_;
+        return Component::internal_init();
+    }
+};
+
+void registerAutoBoundController() {
+    static const bool registered = [] {
+        using namespace newui::reflection;
+        ClassBuilder<AutoBoundController> builder;
+        builder.clazz()
+            .field("child_", Scope::Public, &AutoBoundController::child_).connect()
+            .field("wrongType_", Scope::Public, &AutoBoundController::wrongType_).connect()
+            .field("missing_", Scope::Public, &AutoBoundController::missing_).connect()
+            .field("notAPointer_", Scope::Public, &AutoBoundController::notAPointer_)
+            .field("unflagged_", Scope::Public, &AutoBoundController::unflagged_);
+        ReflectionRegistry::registerClass(builder);
+        return true;
+    }();
+    (void)registered;
+}
+
+// A private connect field with no friend/macro, reached exactly the way reflectgen emits it
+// (detail::AccessThief) - proves the whole private path binds at runtime.
+class PrivateFieldController : public RootController {
+public:
+    using RootController::RootController;
+    SubView* panel() const { return panel_; }
+
+private:
+    SubView* panel_ = nullptr;
+};
+
 }  // namespace
+
+namespace newui::reflection::detail {
+struct AccessThiefTag_PrivateFieldController_panel_ {
+    friend constexpr auto accessThiefGet(AccessThiefTag_PrivateFieldController_panel_);
+};
+}
+template struct newui::reflection::detail::AccessThief<
+    newui::reflection::detail::AccessThiefTag_PrivateFieldController_panel_, &PrivateFieldController::panel_>;
+
+namespace {
+
+void registerPrivateFieldController() {
+    static const bool registered = [] {
+        using namespace newui::reflection;
+        ClassBuilder<PrivateFieldController> builder;
+        builder.clazz()
+            .field("panel_", Scope::Private,
+                   accessThiefGet(newui::reflection::detail::AccessThiefTag_PrivateFieldController_panel_{}))
+            .connect();
+        ReflectionRegistry::registerClass(builder);
+        return true;
+    }();
+    (void)registered;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------
+// Field::pointeeClass()
+// ---------------------------------------------------------------------
+
+TEST(FieldPointee, PointerFieldReportsItsPointeeClass) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    ASSERT_NE(clazz, nullptr);
+
+    const auto* child = clazz->field("child_");
+    ASSERT_NE(child, nullptr);
+    EXPECT_TRUE(child->isPointer());
+    EXPECT_TRUE(child->pointeeType() == std::type_index(typeid(SubView)));
+    EXPECT_EQ(child->pointeeClass(), newui::reflection::classinfo(std::type_index(typeid(SubView))));
+    // type() is still the pointer type itself
+    EXPECT_TRUE(child->type() == std::type_index(typeid(SubView*)));
+}
+
+TEST(FieldPointee, NonPointerFieldHasNoPointee) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    const auto* plain = clazz->field("notAPointer_");
+    ASSERT_NE(plain, nullptr);
+    EXPECT_FALSE(plain->isPointer());
+    EXPECT_EQ(plain->pointeeClass(), nullptr);
+}
+
+TEST(FieldPointee, ConnectFlagIsOnlySetWhereMarked) {
+    registerAutoBoundController();
+    const auto* clazz = newui::reflection::classinfo(std::type_index(typeid(AutoBoundController)));
+    EXPECT_TRUE(clazz->field("child_")->needsConnection());
+    EXPECT_FALSE(clazz->field("unflagged_")->needsConnection());
+    EXPECT_FALSE(clazz->field("notAPointer_")->needsConnection());
+}
 
 // ---------------------------------------------------------------------
 // Model
@@ -200,9 +333,10 @@ TEST(TreeModel, ChildCountAndHasChildrenAreOverridableByASubclass) {
 
 TEST(Controller, SetModelWiresModelChanged) {
     RecordingController controller;
-    Model model;
+    auto modelOwner = std::make_unique<Model>();
+    Model& model = *modelOwner;
 
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     EXPECT_EQ(controller.modelChangedCount, 0);
 
     model.setValue(std::any(42));
@@ -212,19 +346,54 @@ TEST(Controller, SetModelWiresModelChanged) {
     EXPECT_EQ(controller.modelChangedCount, 2);
 }
 
-TEST(Controller, ReplacingModelUnsubscribesFromThePrevious) {
+namespace {
+
+// Reports its own destruction, to check who owns a Model.
+class DestructionFlagModel : public Model {
+public:
+    explicit DestructionFlagModel(bool& destroyed) : destroyed_(destroyed) {}
+    ~DestructionFlagModel() override { destroyed_ = true; }
+
+private:
+    bool& destroyed_;
+};
+
+}  // namespace
+
+TEST(Controller, ReplacingModelDestroysThePreviousAndOnlyTheNewOneNotifies) {
     RecordingController controller;
-    Model modelA;
-    Model modelB;
+    bool previousDestroyed = false;
+    controller.setModel(std::make_unique<DestructionFlagModel>(previousDestroyed));
+    auto replacementOwner = std::make_unique<Model>();
+    Model& replacement = *replacementOwner;
 
-    controller.setModel(&modelA);
-    controller.setModel(&modelB);
+    controller.setModel(std::move(replacementOwner));
 
-    modelA.setValue(std::any(1));
-    EXPECT_EQ(controller.modelChangedCount, 0);
-
-    modelB.setValue(std::any(1));
+    EXPECT_TRUE(previousDestroyed);
+    EXPECT_EQ(controller.model(), &replacement);
+    replacement.setValue(std::any(1));
     EXPECT_EQ(controller.modelChangedCount, 1);
+}
+
+TEST(Controller, SettingNullDetachesAndDestroysTheModel) {
+    RecordingController controller;
+    bool destroyed = false;
+    controller.setModel(std::make_unique<DestructionFlagModel>(destroyed));
+
+    controller.setModel(nullptr);
+
+    EXPECT_TRUE(destroyed);
+    EXPECT_EQ(controller.model(), nullptr);
+}
+
+TEST(Controller, DestroyingTheControllerDestroysItsModel) {
+    bool destroyed = false;
+    {
+        RecordingController controller;
+        controller.setModel(std::make_unique<DestructionFlagModel>(destroyed));
+        EXPECT_FALSE(destroyed);
+    }
+    EXPECT_TRUE(destroyed);
 }
 
 // ---------------------------------------------------------------------
@@ -424,4 +593,113 @@ TEST(ViewController, RemoveFromParentControllerClearsContainment) {
     EXPECT_EQ(child.parentController(), nullptr);
     EXPECT_TRUE(parent.childControllers().empty());
     EXPECT_TRUE(parent.view()->childViews().empty());
+}
+
+// ---------------------------------------------------------------------
+// RootController
+// ---------------------------------------------------------------------
+
+TEST(RootController, ViewReturnsTheConstructorArgument) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    RootController controller(&root);
+
+    EXPECT_EQ(controller.view(), &root);
+
+    root.destroy();
+}
+
+TEST(RootController, ViewIsNullWhenConstructedWithNullptr) {
+    RootController controller(nullptr);
+
+    EXPECT_EQ(controller.view(), nullptr);
+}
+
+TEST(RootController, ResolveFindsANamedChildAndCastsIt) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child_");
+    root.addChild(child);
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_TRUE(controller.internalInitCalled);
+    EXPECT_EQ(controller.resolvedChild, child);
+
+    root.destroy();
+}
+
+TEST(RootController, ResolveReturnsNullptrForAMissingName) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.resolvedChild, nullptr);
+
+    root.destroy();
+}
+
+TEST(RootController, ResolveReturnsNullptrWithNoView) {
+    RecordingRootController controller(nullptr);
+
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.resolvedChild, nullptr);
+}
+
+TEST(RootController, InitializeAutoBindsReflectedViewFieldsByName) {
+    registerAutoBoundController();
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child");
+    root.addChild(child);
+    auto* other = new SubView();
+    other->setName("wrongType");
+    root.addChild(other);
+    auto* third = new SubView();
+    third->setName("unflagged");
+    root.addChild(third);
+
+    AutoBoundController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.unflagged_, nullptr);  // no connect=true, so never touched
+    EXPECT_EQ(controller.child_, child);
+    EXPECT_EQ(controller.wrongType_, nullptr);  // found view isn't a Button
+    EXPECT_EQ(controller.missing_, nullptr);
+    EXPECT_EQ(controller.seenInInit, child);    // bound before internal_init() ran
+
+    root.destroy();
+}
+
+TEST(RootController, AutoBindsAPrivateFieldWithoutAFriendMacro) {
+    registerPrivateFieldController();
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* panel = new SubView();
+    panel->setName("panel");
+    root.addChild(panel);
+
+    PrivateFieldController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+
+    EXPECT_EQ(controller.panel(), panel);
+
+    root.destroy();
+}
+
+TEST(RootController, InitializeIsIdempotent) {
+    RootView root(nullptr, nullptr, Rect(0, 0, 100, 100), "root");
+    auto* child = new SubView();
+    child->setName("child_");
+    root.addChild(child);
+
+    RecordingRootController controller(&root);
+    EXPECT_TRUE(controller.initialize());
+    controller.internalInitCalled = false;
+
+    EXPECT_TRUE(controller.initialize());
+    EXPECT_FALSE(controller.internalInitCalled);  // second call is a no-op, per Component::initialize()
+
+    root.destroy();
 }

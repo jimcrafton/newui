@@ -1,0 +1,473 @@
+#pragma once
+
+// References
+// https://razrfalcon.github.io/notes-on-svg-parsing/index.html
+//
+// Notes
+// Things not implemented
+// <filter> - only stubs to deal with most common
+// <flowroot> - a couple of stubs
+// <clip-path> - nodes are thrown away
+// <gradient> - only works for userSpaceOnUse, NOT objectSpace
+// 
+// Needs some work
+// <pattern>
+// <symbol> - needs to honor <use> node's width/height
+// <style>  - css needs to support more complex selectors
+// <g>      - should support local <defs>
+// <text>   - fix alignment
+// 
+// URL lookups - include external files
+// 
+//
+
+#include <functional>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+#include <sstream>
+
+
+#include "maths.h"
+
+
+#include "xml_scan.h"
+#include "xmlentity.h"
+
+#include "fonthandler.h"
+#include "svgcss.h"
+
+#include "svg_element_clip.h"
+#include "svgconditional.h"
+#include "svgdefs.h"
+#include "svg_element_flowroot.h"
+#include "svg_element_gradient.h"
+#include "svg_element_image.h"
+#include "svg_element_marker.h"
+#include "svg_element_mask.h"
+#include "svg_element_misc.h"
+#include "svgpaintserver.h"
+#include "svg_element_svg.h"
+#include "svg_element_group.h"
+#include "svg_element_shapes.h"
+#include "svg_element_solidcolor.h"
+#include "svg_element_style.h"
+#include "svg_element_symbol.h"
+#include "svg_element_text.h"
+#include "svg_element_pattern.h"
+#include "svgfilter.h"
+#include "svghyperlink.h"
+
+#include "svg_element_use.h"
+
+
+
+
+namespace waavs 
+{
+    // SVGDocument
+    // 
+    // This is the structure that represents an entire SVG file/document
+    // Each document may contain several top level <svg> elements
+    // But, you typically have only one root <svg> element.
+    // 
+    // This is not a generic DOM structure, but rather a structure
+    // meant for rendering SVG content.  A separate DOM structure
+    // can be created if what you want is to just traverse the XML tree.
+    // An SVGDocument is meant to be rendered to a canvas, so it is constructed
+    // with items such as the canvas size, dpi, etc.
+    // 
+    // The primary method to create an SVGDocument is to use the static
+    // createFromChunk(const ByteSpan& srcChunk, const double w, const double h, const double ppi)
+    // 
+    // Which will return a shared_ptr to an SVGDocument, or nullptr if there was
+    // any error.
+    // 
+    // As the core document makes use of ByteSpan references into memory,
+    // the initial source memory is copied into a MemBuff that is held
+    // onto for the life of the document.
+    //
+    struct SVGDocument : public  SVGGraphicsElement, public IAmGroot 
+    {
+        // create a memBuff from srcChunk
+        // since we use memory references, we need
+        // to keep the memory around for the duration of the 
+        // document's life
+        MemBuff fSourceMem{};
+                
+        // BUGBUG - this should go away
+        // Although there can be multiple <svg> elements in a document
+        // we track only the first one
+        // We only have a single root 'SVGSVGElement' for the whole document
+        std::shared_ptr<SVGSVGElement> fTopLevelNode = nullptr;
+
+        
+        // This is the style sheet for the entire document.
+        CSSStyleSheet fStyleSheet{};
+
+        // IAmGroot
+        // Information about the environment
+        double fDpi = 96;
+        double fCanvasWidth{};
+        double fCanvasHeight{};
+        
+        // Information from the document
+        double fDocumentWidth{};
+        double fDocumentHeight{};
+        
+        WGRectD fPortalFrame{};  // used to set viewport and objectframe before drawing
+        
+        //==========================================
+        // Construction / Destruction
+        //==========================================
+        SVGDocument() = default;
+        
+        SVGDocument(const double w, const double h, const double ppi)
+            :SVGGraphicsElement()
+            , fDpi(ppi)
+            , fCanvasWidth(w)
+            , fCanvasHeight(h)
+        {
+
+        }
+
+        ~SVGDocument() = default;
+
+        
+        void resetFromSpan(const ByteSpan& srcChunk, const double w, const double h, const double ppi=96)
+        {
+            // clear out the old document
+            //clear();
+
+            setDpi(ppi);
+            setCanvasSize(w, h);
+            fStyleSheet.reset();
+
+
+            // load the new document
+            loadFromChunk(srcChunk);
+        }
+        
+        
+        double dpi() const override { return fDpi; }
+        void setDpi(const double d) override { fDpi = d; }
+        
+        double canvasWidth() const override { return fCanvasWidth; }
+        double canvasHeight() const override { return fCanvasHeight; }
+        void setCanvasSize(const double w, const double h) noexcept { fCanvasWidth = w; fCanvasHeight = h; }
+        
+        const WGRectD viewPort() const noexcept
+        {
+            if (fTopLevelNode != nullptr)
+            {
+                return fTopLevelNode->viewPort();
+            }
+
+            if (fCanvasWidth <= 0 || fCanvasHeight <= 0)
+                return {};
+            
+            // Return the entire canvas as the viewport
+            WGRectD outFr = { 0, 0, fCanvasWidth, fCanvasHeight };
+
+            return outFr;
+        }
+
+        const WGRectD getObjectBoundingBox(IDrawGraphics* ctx, IAmGroot* groot) noexcept override
+        {
+            if (fTopLevelNode != nullptr)
+            {
+                return fTopLevelNode->getObjectBoundingBox(ctx, groot);
+            }
+
+            if (fCanvasWidth <= 0 || fCanvasHeight <= 0)
+                return {};
+
+            WGRectD outFr{ 0, 0, fCanvasWidth, fCanvasHeight };
+
+            return outFr;
+        }
+
+        const CSSStyleSheet& styleSheet() const override { return fStyleSheet; }
+        CSSStyleSheet& styleSheet() override { return fStyleSheet; }
+        
+
+        // retrieve root svg node
+        std::shared_ptr<SVGSVGElement> documentElement() const { return fTopLevelNode; }
+        
+        // return first child node, regardless of kind
+        std::shared_ptr<IViewable> rootNode() const 
+        {
+            if (fRenderNodes.empty())
+                return nullptr;
+            return fRenderNodes[0];
+        }
+
+        bool addNode(std::shared_ptr < IViewable > node, IAmGroot* groot) override
+        {            
+            if (!SVGGraphicsElement::addNode(node, groot))
+                return false;
+
+            if (!fTopLevelNode && node->nameAtom() == svgtag::tag_svg())
+            {
+                fTopLevelNode = std::dynamic_pointer_cast<SVGSVGElement>(node);
+                
+                if (fTopLevelNode != nullptr)
+                {
+                    fTopLevelNode->setTopLevel(true);
+                }
+            }
+            
+            return true;
+        }
+        
+        void onDocumentLoaded(IAmGroot* groot)
+        {
+            if (!groot)
+                return;
+
+            // 1) Normal DOM pass to resolve styles
+            this->resolveStyleSubtree(groot);
+        }
+
+        //
+        //
+
+        void loadInternalEntityDeclarations(const ByteSpan &inChunk)
+        {
+            ByteSpan subset = inChunk;
+
+            while (subset)
+            {
+                ByteSpan ent;
+                if (!bspan_find_span(subset, "<!ENTITY", ent))
+                    return;
+
+                subset.resetStart(ent.end());
+                bspan_ltrim_spaces(subset);
+
+                if (subset && *subset == '%')
+                {
+                    // Parameter entity. Skip declaration for now.
+                    (void)bspan_read_until(subset, '>');
+                    continue;
+                }
+
+                ByteSpan name = bspan_read_until(subset, chrWspChars);
+                bspan_ltrim_spaces(subset);
+
+                ByteSpan value{};
+                if (bspan_read_quoted(subset, value))
+                    addXmlEntity(name, value);
+
+                (void)bspan_read_until(subset, '>');
+            }
+        }
+
+        /*
+        void loadInternalEntityDeclarations(ByteSpan subset)
+        {
+            while (subset)
+            {
+                ByteSpan ent;
+                if (!bspan_find_span(subset, "<!ENTITY", ent))
+                    return;
+
+                subset.resetStart(ent.begin() + 8);
+
+                bspan_skip_spaces(subset);
+
+                if (subset && *subset == '%')
+                {
+                    // Parameter entity. Skip or ignore for now.
+                    continue;
+                }
+
+                ByteSpan name = bspan_read_until(subset, chrWspChars);
+                bspan_skip_spaces(subset);
+
+                ByteSpan value{};
+                if (bspan_read_quoted(subset, value))
+                {
+                    addXmlEntity(name, value);
+                }
+
+                ByteSpan endDecl = chunk_find_char(subset, '>');
+                if (!endDecl)
+                    return;
+
+                subset.resetStart(endDecl.begin() + 1);
+            }
+        }
+        */
+
+        // loadDocTypeNode
+        //
+        // Parse the DocType and apply entities if they exist
+        void loadDocTypeNode(const XmlElement& elem, IAmGroot* groot)
+        {
+            XmlDocTypeDecl decl{};
+            if (!docTypeDecl_parse(elem.data(), decl))
+                return;
+
+            if (decl.rootName != "svg")
+                return;
+
+            if (decl.internalSubset)
+                loadInternalEntityDeclarations(decl.internalSubset);
+        }
+
+
+
+        void loadDocumentFromXmlPull(XmlPull& iter, IAmGroot* groot)
+        {
+            while (iter.next())
+            {
+                const XmlElement& elem = *iter;
+
+                switch (elem.kind())
+                {
+                case XML_ELEMENT_TYPE_START_TAG:                    // <tag>
+                    loadStartTag(iter, groot);
+                    break;
+
+                case XML_ELEMENT_TYPE_SELF_CLOSING:                 // <tag/>
+                    loadSelfClosingNode(elem, groot);
+                    break;
+
+                case XML_ELEMENT_TYPE_DOCTYPE:                      // <!DOCTYPE greeting SYSTEM "hello.dtd">
+                    loadDocTypeNode(elem, groot);
+                    break;
+
+                /*
+                case XML_ELEMENT_TYPE_END_TAG:                      // </tag>
+                    this->loadEndTag(elem, groot);
+                    onEndTag(groot);
+                    break;
+
+                case XML_ELEMENT_TYPE_CONTENT:                      // <tag>content</tag>
+                    this->loadContentNode(elem, groot);
+                    break;
+                case XML_ELEMENT_TYPE_COMMENT:                      // <!-- comment -->
+                    this->loadComment(elem, groot);
+                    break;
+                case XML_ELEMENT_TYPE_CDATA:                        // <![CDATA[<greeting>Hello, world!</greeting>]]>
+                    this->loadCDataNode(elem, groot);
+                    break;
+                case XML_ELEMENT_TYPE_ENTITY:                       // <!ENTITY hello "Hello">
+                case XML_ELEMENT_TYPE_PROCESSING_INSTRUCTION:       // <?target data?>
+                case XML_ELEMENT_TYPE_XMLDECL:                      // <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                case XML_ELEMENT_TYPE_EMPTY_TAG:                    // <br>
+                */
+                default:
+                    // Ignore anything else
+                break;
+                }
+            }
+
+            setNeedsBinding(true);
+            onDocumentLoaded(this);
+        }
+ 
+        
+        // loadFromChunk
+        // 
+        // Assuming we've already got a document mapped into memory
+        // construct the SVGDocument from the given memory chunk
+        bool loadFromChunk(const ByteSpan &srcChunk)
+        {
+
+            if (!fSourceMem.resetFromData(srcChunk.data(), srcChunk.size()))
+                return false;
+            
+            // BUGBUG - It would be nice to take this opportunity to convert basic XML
+            // entities such as &amp; &lt; &gt; &quot; &#39; into their
+            // byte values.  It could simplify later processing.
+            // But... When to convert the entities is dependent on context
+            // So, it might be ok to do it early here, except, when doing XML 
+            // processing, having the entities converted will cause problems for the scanner.
+            // Although it seems like this would be a great place to do this, it's probably 
+            // better to either do it only when it matters, or at the scanner level.
+            // fSourceMem.resetFromSize(srcChunk.size());
+            // ByteSpan dstSpan = fSourceMem.span();
+            // size_t sz = expandXmlEntities(srcChunk, dstSpan);
+
+            // Create the XML Iterator we're going to use to parse the document
+            ByteSpan src(fSourceMem.data(), fSourceMem.size());
+            XmlPull iter(src);
+            loadDocumentFromXmlPull(iter, this);
+            
+            return true;
+        }
+
+
+        
+        // Bind to a context of a given size
+        // we are meant to do this once, per canvas size
+        // that we're eventually going to draw into
+        // This mimics what is done in drawing, but it's meant to 
+        // allow those things that need to do binding to do what they need
+        // and not actually do the drawing
+        virtual void bindChildrenToContext(IDrawGraphics* ctx, IAmGroot* groot)
+        {
+            for (auto& node : fRenderNodes)
+            {
+                node->bindToContext(ctx, groot);
+            }
+        }
+        
+        // Binding to a context gives the document a chance to fixup
+        // relative sizing
+        // 
+        void bindToContext(IDrawGraphics* ctx, IAmGroot* groot) noexcept override
+        {
+            fPortalFrame = { 0, 0, fCanvasWidth, fCanvasHeight };
+
+            ctx->state().setViewport(fPortalFrame);
+            ctx->state().setObjectFrame(fPortalFrame);
+
+            //this->bindSelfToContext(ctx, groot);
+            this->bindChildrenToContext(ctx, groot);
+
+            setNeedsBinding(false);
+        }
+
+        
+        void draw(IDrawGraphics* ctx, IAmGroot* groot, RenderFlags featureSet = RenderFeature::RF_All) override
+        {        
+            if (needsBinding())
+                this->bindToContext(ctx, groot);
+
+            ctx->push();
+
+            // To start, we need to set the viewport and object frame
+            // on the context, so binding can get the right sizes to start
+
+            ctx->state().setViewport(fPortalFrame);
+            ctx->state().setObjectFrame(fPortalFrame);
+
+            this->drawSelf(ctx, groot);
+            this->drawRenderSubtree(ctx, groot);
+
+            ctx->pop();
+        }
+
+
+        static std::shared_ptr<SVGDocument> createFromChunk(const ByteSpan& srcChunk, const double w, const double h, const double ppi)
+        {
+            auto doc = std::make_shared<SVGDocument>(w, h, ppi);
+            if (!doc->loadFromChunk(srcChunk))
+            {
+                printf("SVGFactory::CreateFromChunk() failed to load\n");
+                return nullptr;
+            }
+            return doc;
+        }
+
+    };
+
+    using SVGDocumentHandle = std::shared_ptr<SVGDocument>;
+
+}
+
+

@@ -2,17 +2,22 @@
 #include "newui/animation.h"
 #include "newui/application.h"
 #include "newui/dialogs.h"
+#include "newui/fontmanager.h"
 #include "newui/frame.h"
 #include "newui/reflectionio.h"
 #include "newui/rootview.h"
+#include "newui/rootviewproxy.h"
+#include "newui/svgimage.h"
 #include "newui/view.h"
 #include "newui/viewpath.h"
 #include "newui/viewstyle.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_input.hpp>
+#include <json5/json5_output.hpp>
 
 #include <any>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -51,6 +56,29 @@ namespace {
     bool fileExists(const std::string& path) {
         DWORD attrs = ::GetFileAttributesA(path.c_str());
         return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+    }
+
+    // Absolute-path analogs of loadTextFile()/writeTextFile() - no
+    // resourcesDir()/bundleName resolution. Shared by the *FromFile()/
+    // *ToFile() family below.
+    bool readTextFileAtPath(const std::string& path, std::string& outText) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            return false;
+        }
+        std::ostringstream contents;
+        contents << file.rdbuf();
+        outText = contents.str();
+        return true;
+    }
+
+    bool writeTextFileAtPath(const std::string& path, const std::string& contents) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file) {
+            return false;
+        }
+        file << contents;
+        return bool(file);
     }
 
     // Writes clazz's own properties and public fields for instancePtr
@@ -512,6 +540,12 @@ namespace newui {
         resourcesDir_ = executableDir_ + "\\Resources";
     }
 
+    void Bundle::setExecutableDirOverride(const std::string& dir) {
+        executableDir_ = dir.empty() ? directoryOf(getExecutablePath()) : dir;
+        resourcesDir_ = executableDir_ + "\\Resources";
+        infoLoaded_ = false;  // Info.json now resolves against the new root too
+    }
+
     Bundle& Bundle::instance() {
         static Bundle bundle;
         return bundle;
@@ -522,12 +556,51 @@ namespace newui {
         return fileExists(path) ? path : std::string();
     }
 
+    std::size_t Bundle::loadFonts(const std::string& relativeDir) const {
+        const std::string directory = resourcesDir_ + "\\" + relativeDir;
+        const DWORD attrs = ::GetFileAttributesA(directory.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            return 0;
+        }
+        return FontManager::addFontDirectory(directory);
+    }
+
     bool Bundle::loadImage(const std::string& relativePath, BLImage& outImage) const {
+        return loadImage(relativePath, outImage, kDefaultSvgRasterSize, kDefaultSvgRasterSize);
+    }
+
+    bool Bundle::loadImage(const std::string& relativePath, BLImage& outImage, int width, int height) const {
         std::string path = resourcePath(relativePath);
         if (path.empty()) {
             return false;
         }
+
+        const size_t extLen = std::strlen(".svg");
+        const bool isSvg = path.size() >= extLen && _stricmp(path.c_str() + (path.size() - extLen), ".svg") == 0;
+        if (isSvg) {
+            return renderSvgFile(path, width, height, outImage);
+        }
+
         return outImage.read_from_file(path.c_str()) == BL_SUCCESS;
+    }
+
+    bool Bundle::loadCachedImage(const std::string& relativePath, BLImage& outImage, int width, int height) const {
+        std::string key = relativePath + "@" + std::to_string(width) + "x" + std::to_string(height);
+
+        auto it = imageCache_.find(key);
+        if (it != imageCache_.end()) {
+            outImage = it->second;
+            return true;
+        }
+
+        BLImage image;
+        if (!loadImage(relativePath, image, width, height)) {
+            return false;
+        }
+
+        imageCache_.emplace(std::move(key), image);
+        outImage = std::move(image);
+        return true;
     }
 
     std::string Bundle::loadTextFile(const std::string& relativePath) const {
@@ -586,22 +659,102 @@ namespace newui {
     }
 
     bool Bundle::loadDialog(Dialog& dialog) const {
-        return loadFrame(dialog.frame());
+        return loadFrame(dialog);
     }
 
-    bool Bundle::loadRootView(RootView& rootView) const {
-        Frame* frame = rootView.getFrame();
-        if (frame == nullptr || frame->getName().empty()) {
+    bool Bundle::loadFrameFromFile(Frame& frame, const std::string& absolutePath) const {
+        std::string text;
+        if (!readTextFileAtPath(absolutePath, text) || text.empty()) {
+            return false;
+        }
+        return loadFrameFromText(frame, text);
+    }
+
+    bool Bundle::loadFrameFromText(Frame& frame, const std::string& text) const {
+        reflection::ObjectReader reader;
+        if (text.empty() || json5::from_string(text, reader.doc)) {
+            return false;
+        }
+
+        reader.read(&frame);
+        readAnimations(frame, reader);
+        return true;
+    }
+
+    template<typename T>
+    bool Bundle::loadRootView(T& target, const std::string& bundleName, bool designMode) const {
+        if (bundleName.empty()) {
             return false;
         }
 
         reflection::ObjectReader reader;
-        if (!parseNewuiFile(frame->getName(), reader)) {
+        if (!parseNewuiFile(bundleName, reader)) {
             return false;
         }
 
-        reader.readNested("rootView", &rootView);
+        reader.setDesignMode(designMode);
+        reader.readNested("rootView", &target);
         return true;
+    }
+
+    template bool Bundle::loadRootView<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::loadRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    bool Bundle::loadRootViewFromFile(T& target, const std::string& absolutePath, bool designMode) const {
+        if (absolutePath.empty()) {
+            return false;
+        }
+
+        std::string text;
+        if (!readTextFileAtPath(absolutePath, text) || text.empty()) {
+            return false;
+        }
+        return loadRootViewFromText(target, text, designMode);
+    }
+
+    template bool Bundle::loadRootViewFromFile<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::loadRootViewFromFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    bool Bundle::loadRootViewFromText(T& target, const std::string& text, bool designMode, std::string* error) const {
+        auto fail = [error](const std::string& message) {
+            if (error != nullptr) {
+                *error = message;
+            }
+            return false;
+        };
+        if (text.empty()) {
+            return fail("the document is empty");
+        }
+        reflection::ObjectReader reader;
+        if (json5::error parseError = json5::from_string(text, reader.doc)) {
+            return fail(json5::to_string(parseError));
+        }
+        bool hasRootView = false;
+        if (reader.doc.is_object()) {
+            for (const auto& [key, value] : json5::object_view(reader.doc)) {
+                if (std::string(key) == "rootView" && value.is_object()) {
+                    hasRootView = true;
+                }
+            }
+        }
+        if (!hasRootView) {
+            return fail("the document has no rootView object");
+        }
+
+        reader.setDesignMode(designMode);
+        reader.readNested("rootView", &target);
+        return true;
+    }
+
+    template bool Bundle::loadRootViewFromText<RootView>(RootView&, const std::string&, bool, std::string*) const;
+    template bool Bundle::loadRootViewFromText<RootViewProxy>(RootViewProxy&, const std::string&, bool, std::string*) const;
+    template bool Bundle::loadRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    bool Bundle::loadRootView(RootView& rootView) const {
+        Frame* frame = rootView.getFrame();
+        return loadRootView(rootView, frame ? frame->getName() : std::string());
     }
 
     bool Bundle::loadAnimations(Frame& frame) const {
@@ -678,7 +831,46 @@ namespace newui {
     }
 
     bool Bundle::writeDialog(Dialog& dialog) const {
-        return writeFrame(dialog.frame());
+        return writeFrame(dialog);
+    }
+
+    namespace {
+        // json5::builder only produces a valid, dereferenceable object/
+        // array payload once a build finishes (document::assign_root(),
+        // called from the outermost builder::pop()) - a value taken
+        // straight from an already-finalized *different* document can't
+        // just be attached by reference into a still-mid-construction one
+        // (confirmed the hard way - it corrupts the mid-construction
+        // index scheme and crashes in to_string()). So a foreign value
+        // has to be rebuilt through the destination's own builder
+        // instead - this walks it recursively, reading only leaf content
+        // (strings/numbers/bools) from source, never its raw payload.
+        json5::value rebuildValue(const json5::value& source, json5::builder& destBuilder) {
+            if (source.is_object()) {
+                destBuilder.push_object();
+                for (const auto& [key, value] : json5::object_view(source)) {
+                    destBuilder[key] = rebuildValue(value, destBuilder);
+                }
+                return destBuilder.pop();
+            }
+            if (source.is_array()) {
+                destBuilder.push_array();
+                for (const json5::value& element : json5::array_view(source)) {
+                    destBuilder += rebuildValue(element, destBuilder);
+                }
+                return destBuilder.pop();
+            }
+            if (source.is_string()) {
+                return destBuilder.new_string(source.get_c_str());
+            }
+            if (source.is_boolean()) {
+                return json5::value(source.get_bool());
+            }
+            if (source.is_number()) {
+                return json5::value(source.get<double>());
+            }
+            return json5::value(nullptr);
+        }
     }
 
     bool Bundle::writeView(View& view, const std::string& name) const {
@@ -696,6 +888,78 @@ namespace newui {
 
         return writeTextFile(name + ".newui", json5::to_string(writer.doc));
     }
+
+    template<typename T>
+    bool Bundle::writeRootView(T& target, const std::string& bundleName, bool designMode) const {
+        if (bundleName.empty()) {
+            return false;
+        }
+
+        json5::document existingDoc;
+        std::string existingText = loadTextFile(bundleName + ".newui");
+        bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
+
+        reflection::ObjectWriter writer;
+        writer.setDesignMode(designMode);
+        writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
+
+        if (hasExisting) {
+            for (const auto& [key, value] : json5::object_view(existingDoc)) {
+                std::string keyStr(key);
+                if (keyStr != "rootView" && keyStr != "meta") {
+                    writer.builder[keyStr] = rebuildValue(value, writer.builder);
+                }
+            }
+        }
+
+        writer.writeNested("rootView", &target);
+        writer.endObject(std::string(), nullptr);
+
+        return writeTextFile(bundleName + ".newui", json5::to_string(writer.doc));
+    }
+
+    template bool Bundle::writeRootView<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::writeRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    bool Bundle::writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode) const {
+        if (absolutePath.empty()) {
+            return false;
+        }
+
+        std::string existingText;
+        readTextFileAtPath(absolutePath, existingText);
+        return writeTextFileAtPath(absolutePath, writeRootViewToText(target, existingText, designMode));
+    }
+
+    template bool Bundle::writeRootViewToFile<RootView>(RootView&, const std::string&, bool) const;
+    template bool Bundle::writeRootViewToFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+
+    template<typename T>
+    std::string Bundle::writeRootViewToText(T& target, const std::string& existingText, bool designMode) const {
+        json5::document existingDoc;
+        bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
+
+        reflection::ObjectWriter writer;
+        writer.setDesignMode(designMode);
+        writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
+
+        if (hasExisting) {
+            for (const auto& [key, value] : json5::object_view(existingDoc)) {
+                std::string keyStr(key);
+                if (keyStr != "rootView" && keyStr != "meta") {
+                    writer.builder[keyStr] = rebuildValue(value, writer.builder);
+                }
+            }
+        }
+
+        writer.writeNested("rootView", &target);
+        writer.endObject(std::string(), nullptr);
+        return json5::to_string(writer.doc);
+    }
+
+    template std::string Bundle::writeRootViewToText<RootView>(RootView&, const std::string&, bool) const;
+    template std::string Bundle::writeRootViewToText<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
 
     void Bundle::ensureInfoLoaded() const {
         if (infoLoaded_) {

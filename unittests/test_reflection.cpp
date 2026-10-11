@@ -1,6 +1,7 @@
 #include "newui/reflection.h"
 #include "newui/controls.h"
 
+#include <algorithm>
 #include <array>
 #include <any>
 #include <map>
@@ -265,11 +266,336 @@ TEST(Reflection, BaseThrowsIfBaseClassNotYetRegistered) {
     EXPECT_THROW(builder.clazz().base<UnregisteredBase>(), std::logic_error);
 }
 
+// ---------------------------------------------------------------------
+// Property::getClass() / TypedProperty<T,U>::getClass() - resolves the
+// real *runtime* Class of a property's current value, not just its
+// declared ValueT. Matters for a property shaped like newui::View::
+// layout() (Layout* getter, unique_ptr<Layout> setter) - the declared
+// class (Layout) has no properties of its own, only a concrete subclass
+// (FlexLayout, here mirrored by ShapeBase/CircleShape) does.
+// ---------------------------------------------------------------------
+
+namespace {
+
+class ShapeBase {
+public:
+    virtual ~ShapeBase() = default;
+};
+
+class CircleShape : public ShapeBase {
+public:
+    float radius = 0.0f;
+};
+
+class ShapeHolder {
+public:
+    ShapeBase* shape() const { return shape_.get(); }
+    void setShape(std::unique_ptr<ShapeBase> shape) { shape_ = std::move(shape); }
+
+    // A plain by-value getter/setter property (not addressable at all) -
+    // see GetClassOnANonAddressablePropertyFallsBackToTheDeclaredClass.
+    std::string label() const { return label_; }
+    void setLabel(std::string v) { label_ = std::move(v); }
+
+private:
+    std::unique_ptr<ShapeBase> shape_;
+    std::string label_;
+};
+
+const Class* RegisterAndGetShapeBaseClass() {
+    static const Class* registered = [] {
+        ClassBuilder<ShapeBase> builder;
+        builder.clazz();  // no properties of its own, same as newui::Layout
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ShapeBase));
+    }();
+    return registered;
+}
+
+const Class* RegisterAndGetCircleShapeClass() {
+    RegisterAndGetShapeBaseClass();  // base<ShapeBase>() below needs this registered first
+    static const Class* registered = [] {
+        ClassBuilder<CircleShape> builder;
+        builder.clazz()
+            .base<ShapeBase>()
+            .property("radius", Scope::Public, &CircleShape::radius);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(CircleShape));
+    }();
+    return registered;
+}
+
+const Class* RegisterAndGetShapeHolderClass() {
+    RegisterAndGetCircleShapeClass();
+    static const Class* registered = [] {
+        ClassBuilder<ShapeHolder> builder;
+        builder.clazz()
+            .property("shape", Scope::Public, &ShapeHolder::shape, &ShapeHolder::setShape)
+            .property("label", Scope::Public, &ShapeHolder::label, &ShapeHolder::setLabel);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(ShapeHolder));
+    }();
+    return registered;
+}
+
+const Property* FindShapeHolderShapeProperty() {
+    std::vector<const Property*> props;
+    RegisterAndGetShapeHolderClass()->allProperties(props);
+    for (const Property* p : props) {
+        if (p->name() == "shape") {
+            return p;
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+TEST(Reflection, GetClassResolvesTheRuntimeSubclassBehindAPolymorphicPtrGetterProperty) {
+    const Property* shapeProp = FindShapeHolderShapeProperty();
+    ASSERT_NE(shapeProp, nullptr);
+    EXPECT_TRUE(shapeProp->isAddressable());
+
+    ShapeHolder holder;
+    holder.setShape(std::make_unique<CircleShape>());
+
+    // The declared type only ever resolves to ShapeBase, which has no
+    // properties - the real per-subclass data is unreachable through it.
+    const Class* declared = classinfo(shapeProp->type());
+    ASSERT_NE(declared, nullptr);
+    EXPECT_EQ(declared->name(), "ShapeBase");
+
+    const Class* runtime = shapeProp->getClass(&holder);
+    ASSERT_NE(runtime, nullptr);
+    EXPECT_EQ(runtime->name(), "CircleShape");
+    EXPECT_NE(runtime, declared);
+
+    std::vector<const Property*> radiusProps;
+    runtime->allProperties(radiusProps);
+    ASSERT_EQ(radiusProps.size(), 1u);
+    EXPECT_EQ(radiusProps[0]->name(), "radius");
+}
+
+TEST(Reflection, GetClassFallsBackToTheDeclaredClassWhenNothingIsAttached) {
+    const Property* shapeProp = FindShapeHolderShapeProperty();
+    ASSERT_NE(shapeProp, nullptr);
+
+    ShapeHolder holder;  // shape_ left null
+
+    const Class* runtime = shapeProp->getClass(&holder);
+    ASSERT_NE(runtime, nullptr);
+    EXPECT_EQ(runtime->name(), "ShapeBase");
+}
+
+TEST(Reflection, GetClassOnANonAddressablePropertyFallsBackToTheDeclaredClass) {
+    const Class* holderClass = RegisterAndGetShapeHolderClass();
+    std::vector<const Property*> props;
+    holderClass->allProperties(props);
+    const Property* labelProp = nullptr;
+    for (const Property* p : props) {
+        if (p->name() == "label") {
+            labelProp = p;
+        }
+    }
+    ASSERT_NE(labelProp, nullptr);
+    EXPECT_FALSE(labelProp->isAddressable());
+
+    ShapeHolder holder;
+    EXPECT_EQ(labelProp->getClass(&holder), classinfo(labelProp->type()));
+}
+
 TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
     PropertyFlags flags = PropertyFlags::Collection | PropertyFlags::Associative;
     EXPECT_TRUE((flags & PropertyFlags::Collection) != PropertyFlags::None);
     EXPECT_TRUE((flags & PropertyFlags::Associative) != PropertyFlags::None);
     EXPECT_TRUE((PropertyFlags::None & PropertyFlags::Collection) == PropertyFlags::None);
+}
+
+namespace {
+    // Hand-registered, same "small class registered by hand" pattern as
+    // ReflectedBase/ReflectedDerived above - isolated from real newui
+    // classes so this test doesn't depend on which of those happen to
+    // carry a real "@reflect tags=..." annotation (none do yet).
+    struct TaggedThing {
+        std::string path;
+        std::string getPath() const { return path; }
+        void setPath(std::string v) { path = std::move(v); }
+
+        newui::Delegate<TaggedThing> onChanged;
+    };
+}
+
+TEST(Reflection, TagsRoundTripOnClassPropertyAndDelegate) {
+    ClassBuilder<TaggedThing> builder;
+    builder.clazz()
+        .tags({"file", "pathlike"})
+        .property("path", Scope::Public, &TaggedThing::getPath, &TaggedThing::setPath, {"filepath"})
+        .delegate("onChanged", Scope::Public, &TaggedThing::onChanged, {"notification"});
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(TaggedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->tags(), (std::vector<std::string>{"file", "pathlike"}));
+
+    ASSERT_EQ(clazz->properties().size(), 1u);
+    EXPECT_EQ(clazz->properties()[0]->tags(), (std::vector<std::string>{"filepath"}));
+
+    ASSERT_EQ(clazz->delegates().size(), 1u);
+    EXPECT_EQ(clazz->delegates()[0]->tags(), (std::vector<std::string>{"notification"}));
+}
+
+namespace {
+    // Isolated from real newui classes, same reasoning as TaggedThing above.
+    struct CategorizedThing {};
+    struct UncategorizedThing {};
+}
+
+TEST(Reflection, CategoriesRoundTripsOnClass) {
+    ClassBuilder<CategorizedThing> builder;
+    builder.clazz().categories({"basic", "input"});
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(CategorizedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->categories(), (std::vector<std::string>{"basic", "input"}));
+}
+
+TEST(Reflection, CategoriesIsEmptyWhenNeverSet) {
+    ClassBuilder<UncategorizedThing> builder;
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(UncategorizedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->categories().empty());
+}
+
+namespace {
+    // ReflectionRegistry is a real process-wide singleton shared by every
+    // test in this binary - deliberately unique tag/category values below
+    // (not "basic"/"input", already used by CategorizedThing above) so
+    // these tests check for exactly the classes they themselves
+    // registered, not however many other classes elsewhere happen to
+    // share a common tag/category value.
+    struct QueryableWidgetA {};
+    struct QueryableWidgetB {};
+    struct QueryableWidgetUnrelated {};
+}
+
+TEST(ReflectionRegistry, ClassesWithTagFindsOnlyMatchingClasses) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().tags({"zzq_widget_tag"});
+    ReflectionRegistry::registerClass(a);
+
+    ClassBuilder<QueryableWidgetB> b;
+    b.clazz().tags({"zzq_widget_tag", "other"});
+    ReflectionRegistry::registerClass(b);
+
+    ClassBuilder<QueryableWidgetUnrelated> unrelated;
+    ReflectionRegistry::registerClass(unrelated);
+
+    std::vector<const Class*> found = ReflectionRegistry::classesWithTag("zzq_widget_tag");
+    EXPECT_EQ(found.size(), 2u);
+    EXPECT_NE(std::find(found.begin(), found.end(), classinfo(typeid(QueryableWidgetA))), found.end());
+    EXPECT_NE(std::find(found.begin(), found.end(), classinfo(typeid(QueryableWidgetB))), found.end());
+}
+
+TEST(ReflectionRegistry, ClassesWithCategoryFindsOnlyMatchingClasses) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().categories({"zzq_widget_category"});
+    ReflectionRegistry::registerClass(a);
+
+    ClassBuilder<QueryableWidgetUnrelated> unrelated;
+    ReflectionRegistry::registerClass(unrelated);
+
+    std::vector<const Class*> found = ReflectionRegistry::classesWithCategory("zzq_widget_category");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0], classinfo(typeid(QueryableWidgetA)));
+}
+
+TEST(ReflectionRegistry, AllClassesIncludesEverythingRegisteredSoFar) {
+    ClassBuilder<QueryableWidgetA> a;
+    ReflectionRegistry::registerClass(a);
+
+    std::vector<const Class*> all = ReflectionRegistry::allClasses();
+    EXPECT_NE(std::find(all.begin(), all.end(), classinfo(typeid(QueryableWidgetA))), all.end());
+}
+
+TEST(ReflectionRegistry, AllTagsAndAllCategoriesIncludeValuesJustRegistered) {
+    ClassBuilder<QueryableWidgetA> a;
+    a.clazz().tags({"zzq_only_tag"}).categories({"zzq_only_category"});
+    ReflectionRegistry::registerClass(a);
+
+    std::vector<std::string> tags = ReflectionRegistry::allTags();
+    std::vector<std::string> categories = ReflectionRegistry::allCategories();
+    EXPECT_NE(std::find(tags.begin(), tags.end(), "zzq_only_tag"), tags.end());
+    EXPECT_NE(std::find(categories.begin(), categories.end(), "zzq_only_category"), categories.end());
+}
+
+namespace {
+    struct DummyReal {};
+    struct DummyRealProxy {};
+}
+
+TEST(Reflection, ProxyAndProxyForRoundTripAndResolveByNameLazily) {
+    // Registered in "backwards" order deliberately - DummyRealProxy first,
+    // DummyReal second - to prove proxy()/proxyFor() store plain name
+    // strings, not eagerly-resolved Class* (which would require the
+    // referenced class to already be registered, same ordering
+    // requirement ClassBuilder<T>::base<BaseT>() has).
+    ClassBuilder<DummyRealProxy> proxyBuilder;
+    proxyBuilder.clazz().proxyFor("DummyReal");
+    ReflectionRegistry::registerClass(proxyBuilder);
+
+    ClassBuilder<DummyReal> realBuilder;
+    realBuilder.clazz().proxy("DummyRealProxy");
+    ReflectionRegistry::registerClass(realBuilder);
+
+    const Class* real = classinfo(typeid(DummyReal));
+    const Class* proxy = classinfo(typeid(DummyRealProxy));
+    ASSERT_NE(real, nullptr);
+    ASSERT_NE(proxy, nullptr);
+
+    EXPECT_EQ(real->proxy(), "DummyRealProxy");
+    EXPECT_TRUE(real->proxyFor().empty());
+    EXPECT_EQ(proxy->proxyFor(), "DummyReal");
+    EXPECT_TRUE(proxy->proxy().empty());
+
+    // The whole point - resolve lazily, by name, at actual use time.
+    EXPECT_EQ(ReflectionRegistry::getClass(real->proxy()), proxy);
+    EXPECT_EQ(ReflectionRegistry::getClass(proxy->proxyFor()), real);
+}
+
+TEST(Reflection, ProxyAndProxyForDefaultToEmptyWhenNotGiven) {
+    // A fresh, locally-registered struct, not TaggedThing (registered by a
+    // different TEST body above) - relying on that would only pass when
+    // tests run in file order, not under a filter that skips it.
+    struct UnproxiedThing {};
+    ClassBuilder<UnproxiedThing> builder;
+    builder.clazz();
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(UnproxiedThing));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->proxy().empty());
+    EXPECT_TRUE(clazz->proxyFor().empty());
+}
+
+TEST(Reflection, TagsDefaultToEmptyWhenNotGiven) {
+    struct Untagged {
+        int value = 0;
+        int getValue() const { return value; }
+        void setValue(int v) { value = v; }
+    };
+
+    ClassBuilder<Untagged> builder;
+    builder.clazz().property("value", Scope::Public, &Untagged::getValue, &Untagged::setValue);
+    ReflectionRegistry::registerClass(builder);
+
+    const Class* clazz = classinfo(typeid(Untagged));
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_TRUE(clazz->tags().empty());
+    ASSERT_EQ(clazz->properties().size(), 1u);
+    EXPECT_TRUE(clazz->properties()[0]->tags().empty());
 }
 
 // ---------------------------------------------------------------------
@@ -292,17 +618,20 @@ TEST(Reflection, PropertyFlagsCombineCollectionAndAssociative) {
 // ---------------------------------------------------------------------
 
 TEST(Reflection, GeneratedDataLinksViewControlButtonChain) {
+    const Class* componentClass = classinfo(typeid(newui::Component));
     const Class* viewClass = classinfo(typeid(newui::View));
     const Class* subViewClass = classinfo(typeid(newui::SubView));
     const Class* controlClass = classinfo(typeid(newui::Control));
     const Class* buttonClass = classinfo(typeid(newui::Button));
 
+    ASSERT_NE(componentClass, nullptr);
     ASSERT_NE(viewClass, nullptr);
     ASSERT_NE(subViewClass, nullptr);
     ASSERT_NE(controlClass, nullptr);
     ASSERT_NE(buttonClass, nullptr);
 
-    EXPECT_EQ(viewClass->parentClass(), nullptr);
+    EXPECT_EQ(componentClass->parentClass(), nullptr);
+    EXPECT_EQ(viewClass->parentClass(), componentClass);
     EXPECT_EQ(subViewClass->parentClass(), viewClass);
     EXPECT_EQ(controlClass->parentClass(), subViewClass);
     EXPECT_EQ(buttonClass->parentClass(), controlClass);
@@ -320,6 +649,38 @@ TEST(Reflection, GeneratedDataLinksViewStyleThemedButtonStyleChain) {
     EXPECT_EQ(viewStyleClass->parentClass(), nullptr);
     EXPECT_EQ(themedViewStyleClass->parentClass(), viewStyleClass);
     EXPECT_EQ(themedButtonStyleClass->parentClass(), themedViewStyleClass);
+}
+
+// ViewStyle::backgroundFill() is a getter-only, no-setter accessor - property()'s own addressable
+// check (reflection.h: is_lvalue_reference_v && !is_const_v && setter==nullptr) requires a
+// *non-const* lvalue reference, so this only works because ViewStyle has both a const and a
+// non-const backgroundFill() overload (same pair-shape as View::style()). A real bug caught live:
+// this was const-only for a while during the BLVar -> gfx::Fill migration, which made
+// isAddressable() false and PropertiesModel::classifyProperty() (cpp_codetools) fall through to
+// Kind::PropertyUnsupported even though gfx::Fill itself is a real, reflectable Class - nothing in
+// this suite (which only ever checked gfx::Fill's own reflection data, or ViewStyle's class
+// hierarchy, never backgroundFill's own addressability specifically) caught it. This test exists
+// so that regression can never be silent again.
+TEST(Reflection, ViewStyleBackgroundFillIsAddressableAndResolvesToFillsRealClass) {
+    const Class* viewStyleClass = classinfo(typeid(newui::ViewStyle));
+    ASSERT_NE(viewStyleClass, nullptr);
+
+    std::vector<const Property*> props;
+    viewStyleClass->allProperties(props);
+    const Property* backgroundFillProp = nullptr;
+    for (const Property* p : props) {
+        if (p->name() == "backgroundFill") {
+            backgroundFillProp = p;
+            break;
+        }
+    }
+    ASSERT_NE(backgroundFillProp, nullptr);
+    EXPECT_TRUE(backgroundFillProp->isAddressable());
+
+    newui::ViewStyle style;
+    const Class* fillClass = backgroundFillProp->getClass(&style);
+    ASSERT_NE(fillClass, nullptr);
+    EXPECT_EQ(fillClass, classinfo(typeid(newui::gfx::Fill)));
 }
 
 // classinfo(typeid(newui::Rect)) above is the type-erased-but-still-
@@ -367,4 +728,120 @@ TEST(Reflection, EnumLookupByFullyQualifiedName) {
     ASSERT_NE(byQualifiedName, nullptr);
     EXPECT_EQ(byBareName, orientationEnum);
     EXPECT_EQ(byQualifiedName, orientationEnum);
+}
+
+// Anchor is explicitly named in EnumBuilder<T>::flags()'s own comment as a real enum that needs
+// the explicit "@reflect flags" opt-in (layout.h) - Enum::isFlags()/decompose()'s own generic
+// contract is already covered by test_enumserialization.cpp's hand-built flags enum; this is a
+// narrow regression guard specifically for Anchor's own annotation, so it can't silently regress
+// back to unset (real property editor code, PropertiesGrid's own FlagsEnumPropertyEditor, depends
+// on this being true to render a real checkbox list instead of falling back to a raw number).
+TEST(Reflection, AnchorEnumIsRegisteredAsFlags) {
+    const Enum* anchorEnum = ReflectionRegistry::getEnum(typeid(newui::Anchor));
+    ASSERT_NE(anchorEnum, nullptr);
+    EXPECT_TRUE(anchorEnum->isFlags());
+
+    std::uint64_t leftTop = anchorEnum->toUInt64(std::any(newui::Anchor::Left | newui::Anchor::Top));
+    std::vector<std::string> names = anchorEnum->decompose(leftTop);
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_NE(std::find(names.begin(), names.end(), "Left"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "Top"), names.end());
+}
+
+// ---------------------------------------------------------------------
+// C++ type spelling - detail::cppTypeSpelling<T>() and the spellings recorded on a Delegate's
+// sender/arguments. typeid drops const and references, so these are what a generated handler
+// signature can actually be written from.
+// ---------------------------------------------------------------------
+
+TEST(TypeSpelling, KeepsConstReferencesAndPointersThatTypeidDrops) {
+    using detail::cppTypeSpelling;
+    EXPECT_EQ(cppTypeSpelling<int>(), "int");
+    EXPECT_EQ(cppTypeSpelling<unsigned int>(), "unsigned int");
+    EXPECT_EQ(cppTypeSpelling<bool>(), "bool");
+    EXPECT_EQ(cppTypeSpelling<newui::Size>(), "newui::Size");
+    EXPECT_EQ(cppTypeSpelling<const newui::Size&>(), "const newui::Size&");
+    EXPECT_EQ(cppTypeSpelling<newui::Size&>(), "newui::Size&");
+    EXPECT_EQ(cppTypeSpelling<newui::Size&&>(), "newui::Size&&");
+    EXPECT_EQ(cppTypeSpelling<const char*>(), "const char*");
+    EXPECT_EQ(cppTypeSpelling<const newui::View*>(), "const newui::View*");
+    EXPECT_EQ(cppTypeSpelling<newui::View* const>(), "newui::View* const");
+    EXPECT_EQ(cppTypeSpelling<const newui::View* const&>(), "const newui::View* const&");
+}
+
+TEST(TypeSpelling, ADelegatesSenderAndArgumentsAreSpelledExactly) {
+    const Class* subView = classinfo(std::string("SubView"));
+    ASSERT_NE(subView, nullptr);
+    std::vector<const Delegate*> delegates;
+    subView->allDelegates(delegates);
+
+    auto find = [&](const char* name) -> const Delegate* {
+        for (const Delegate* d : delegates) {
+            if (d->name() == name) {
+                return d;
+            }
+        }
+        return nullptr;
+    };
+
+    const Delegate* sizeChanged = find("onSizeChanged");  // Delegate<View, const Size&>
+    ASSERT_NE(sizeChanged, nullptr);
+    EXPECT_EQ(sizeChanged->senderSpelling(), "newui::View");
+    ASSERT_EQ(sizeChanged->arguments().size(), 1u);
+    EXPECT_EQ(sizeChanged->arguments()[0].spelling, "const newui::Size&");
+
+    const Delegate* mouseDown = find("onMouseDown");  // Delegate<View, const Point&, uint32_t, uint32_t>
+    ASSERT_NE(mouseDown, nullptr);
+    ASSERT_EQ(mouseDown->arguments().size(), 3u);
+    EXPECT_EQ(mouseDown->arguments()[0].spelling, "const newui::Point&");
+    EXPECT_EQ(mouseDown->arguments()[1].spelling, "unsigned int");
+
+    // typeid alone drops the const and the reference - that is why the spelling exists.
+    EXPECT_TRUE(sizeChanged->arguments()[0].type == std::type_index(typeid(newui::Size)));
+
+    // A delegate with a NON-const reference argument (Delegate<View, Size&>) isn't reflectable as a
+    // Delegate at all (reflectgen registers it as a plain field), so it is never offered for wiring.
+    EXPECT_EQ(find("onQueryContentSize"), nullptr);
+}
+
+TEST(TypeSpelling, EveryRegisteredControlDelegateHasASpelling) {
+    for (const char* name : { "Button", "SubView", "Toggle", "Label" }) {
+        const Class* clazz = classinfo(std::string(name));
+        if (clazz == nullptr) {
+            continue;
+        }
+        std::vector<const Delegate*> delegates;
+        clazz->allDelegates(delegates);
+        for (const Delegate* delegate : delegates) {
+            EXPECT_FALSE(delegate->senderSpelling().empty()) << name << "." << delegate->name();
+            for (const Argument& argument : delegate->arguments()) {
+                EXPECT_FALSE(argument.spelling.empty()) << name << "." << delegate->name();
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Class::header() - the header that defines a class, as a file includes it (set by reflectgen).
+// ---------------------------------------------------------------------
+
+TEST(ClassHeader, AGeneratedClassKnowsItsDefiningHeader) {
+    const Class* button = classinfo(std::string("Button"));
+    const Class* control = classinfo(std::string("Control"));
+    ASSERT_NE(button, nullptr);
+    ASSERT_NE(control, nullptr);
+    EXPECT_EQ(button->header(), "<newui/controls.h>");
+    EXPECT_EQ(control->header(), "<newui/controls.h>");
+}
+
+TEST(ClassHeader, EveryGeneratedClassHasOneAndItIsAnAngleBracketedNewuiPath) {
+    for (const char* name : { "SubView", "RootView", "Label", "Toggle", "Rect", "Size", "Point" }) {
+        const Class* clazz = classinfo(std::string(name));
+        ASSERT_NE(clazz, nullptr) << name;
+        const std::string& header = clazz->header();
+        ASSERT_GT(header.size(), 9u) << name;
+        EXPECT_EQ(header.rfind("<newui/", 0), 0u) << name << ": " << header;
+        EXPECT_EQ(header.back(), '>') << name;
+        EXPECT_NE(header.find(".h"), std::string::npos) << name;
+    }
 }

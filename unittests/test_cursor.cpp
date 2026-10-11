@@ -1,9 +1,13 @@
 #include "newui/cursor.h"
+#include "newui/reflection.h"
+#include "newui/view.h"
 
 #include <gtest/gtest.h>
 
 #include <blend2d/blend2d.h>
 
+#include <any>
+#include <fstream>
 #include <utility>
 
 // View's own use of Cursor (cursor()/setCursor(Cursor)/cursorKind()/
@@ -223,7 +227,7 @@ TEST(CursorClass, SetCursorKindClearsAPreviouslySetPath) {
     WriteTestPNG(path, 16, 16);
 
     newui::Cursor cursor;
-    ASSERT_TRUE(cursor.setPath(path));
+    ASSERT_TRUE(cursor.loadPath(path));
 
     cursor.setCursorKind(newui::CursorKind::Wait);
 
@@ -239,7 +243,7 @@ TEST(CursorClass, SetCursorKindClearsAPreviouslySetPath) {
 TEST(CursorClass, SetPathFailureLeavesTheCursorEntirelyUnchanged) {
     newui::Cursor cursor(newui::CursorKind::Wait);
 
-    EXPECT_FALSE(cursor.setPath("NoSuchCursorFile.png"));
+    EXPECT_FALSE(cursor.loadPath("NoSuchCursorFile.png"));
 
     EXPECT_EQ(cursor.kind(), newui::CursorKind::Wait);
     EXPECT_TRUE(cursor.path().empty());
@@ -250,7 +254,7 @@ TEST(CursorClass, MoveConstructorTransfersStateAndLeavesSourceAsDefault) {
     WriteTestPNG(path, 16, 16);
 
     newui::Cursor source;
-    ASSERT_TRUE(source.setPath(path));
+    ASSERT_TRUE(source.loadPath(path));
     HCURSOR handle = source.handle();
 
     newui::Cursor moved(std::move(source));
@@ -273,10 +277,10 @@ TEST(CursorClass, MoveAssignmentReleasesTheTargetsOwnedHandleFirst) {
     WriteTestPNG(path2, 16, 16);
 
     newui::Cursor a;
-    ASSERT_TRUE(a.setPath(path1));  // a owns an HCURSOR here
+    ASSERT_TRUE(a.loadPath(path1));  // a owns an HCURSOR here
 
     newui::Cursor b;
-    ASSERT_TRUE(b.setPath(path2));
+    ASSERT_TRUE(b.loadPath(path2));
     HCURSOR bHandle = b.handle();
 
     // a's originally-owned handle should be destroyed here, not leaked -
@@ -289,4 +293,162 @@ TEST(CursorClass, MoveAssignmentReleasesTheTargetsOwnedHandleFirst) {
 
     ::DeleteFileA(path1.c_str());
     ::DeleteFileA(path2.c_str());
+}
+
+TEST(Cursor, KindIsASettableReflectedPropertyThatIgnoresCustom) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
+    ASSERT_NE(clazz, nullptr);
+    const newui::reflection::Property* kind = clazz->property("kind");
+    ASSERT_NE(kind, nullptr);
+
+    newui::Cursor cursor;
+    kind->set(&cursor, std::any(newui::CursorKind::Hand));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
+
+    // Custom only ever comes from setPath()/setImage() - choosing it here must not leave a
+    // "custom" cursor with no handle behind it.
+    kind->set(&cursor, std::any(newui::CursorKind::Custom));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
+}
+
+TEST(Cursor, DerivedIsNullIsNotAReflectedProperty) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->property("null"), nullptr);  // a computed predicate, not state
+    EXPECT_NE(clazz->property("kind"), nullptr);
+}
+
+TEST(ViewReflection, DerivedAndScrollStateAreNotReflectedProperties) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("View");
+    ASSERT_NE(clazz, nullptr);
+    EXPECT_EQ(clazz->property("clientBounds"), nullptr);  // computed from style + bounds
+    EXPECT_EQ(clazz->property("origin"), nullptr);        // transient scroll offset
+    EXPECT_NE(clazz->property("childViews"), nullptr);    // still serialized - the tree depends on it
+    EXPECT_NE(clazz->property("bounds"), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// SVG cursors, and the reflected path() setter.
+// ---------------------------------------------------------------------------
+
+namespace {
+    void WriteTestSVG(const std::string& path) {
+        std::ofstream file(path, std::ios::binary);
+        file << R"(<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">)"
+             << R"(<rect x="2" y="2" width="28" height="28" fill="red"/></svg>)";
+    }
+}
+
+TEST(Cursor, ASvgFileLoadsAsACustomCursor) {
+    const std::string path = "cursor_test_svg.svg";
+    WriteTestSVG(path);
+
+    // Blend2D has no SVG codec, so this is why the loader has to pick the rasterizer by extension
+    // instead of trying read_from_file() first.
+    BLImage direct;
+    EXPECT_NE(direct.read_from_file(path.c_str()), BL_SUCCESS);
+
+    newui::Cursor cursor;
+    ASSERT_TRUE(cursor.loadPath(path));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    EXPECT_EQ(cursor.path(), path);
+    EXPECT_NE(cursor.handle(), nullptr);
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Cursor, TheSvgExtensionIsMatchedCaseInsensitivelyAndOnlyAtTheEnd) {
+    const std::string upper = "cursor_test_upper.SVG";
+    WriteTestSVG(upper);
+    newui::Cursor a;
+    EXPECT_TRUE(a.loadPath(upper));
+    ::DeleteFileA(upper.c_str());
+
+    // ".svg" appearing mid-name must not route a real PNG through the SVG rasterizer.
+    const std::string tricky = "cursor_test.svg.png";
+    WriteTestPNG(tricky, 16, 16);
+    newui::Cursor b;
+    EXPECT_TRUE(b.loadPath(tricky));
+    ::DeleteFileA(tricky.c_str());
+}
+
+TEST(Cursor, SetPathLoadsPngAndSvgAndSwitchesTheKindToCustom) {
+    const std::string png = "cursor_setpath.png";
+    const std::string svg = "cursor_setpath.svg";
+    WriteTestPNG(png, 16, 16);
+    WriteTestSVG(svg);
+
+    newui::Cursor cursor(newui::CursorKind::Hand);
+    cursor.setPath(png);
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    EXPECT_EQ(cursor.path(), png);
+
+    cursor.setPath(svg);
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    EXPECT_EQ(cursor.path(), svg);
+
+    ::DeleteFileA(png.c_str());
+    ::DeleteFileA(svg.c_str());
+}
+
+TEST(Cursor, SetPathWithAnUnloadableFileLeavesTheCursorUnchanged) {
+    newui::Cursor cursor(newui::CursorKind::Hand);
+    cursor.setPath("NoSuchCursorFile.svg");
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);
+    EXPECT_TRUE(cursor.path().empty());
+}
+
+TEST(Cursor, AnEmptyPathRevertsAFileCursorToTheArrowButLeavesOtherKindsAlone) {
+    const std::string path = "cursor_setpath_clear.png";
+    WriteTestPNG(path, 16, 16);
+
+    newui::Cursor fileCursor;
+    ASSERT_TRUE(fileCursor.loadPath(path));
+    fileCursor.setPath("");
+    EXPECT_EQ(fileCursor.kind(), newui::CursorKind::Arrow);
+    EXPECT_TRUE(fileCursor.path().empty());
+
+    newui::Cursor hand(newui::CursorKind::Hand);
+    hand.setPath("");   // e.g. reading a saved file's empty "path" after its "kind"
+    EXPECT_EQ(hand.kind(), newui::CursorKind::Hand);
+
+    newui::Cursor imageCursor(MakeTestImage(16, 16));
+    ASSERT_EQ(imageCursor.kind(), newui::CursorKind::Custom);
+    imageCursor.setPath("");
+    EXPECT_EQ(imageCursor.kind(), newui::CursorKind::Custom);
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Cursor, ClearingThePathReturnsToTheKindTheCursorHadBeforeItWentCustom) {
+    const std::string path = "cursor_setpath_fallback.png";
+    WriteTestPNG(path, 16, 16);
+
+    newui::Cursor cursor(newui::CursorKind::Hand);
+    cursor.setPath(path);
+    ASSERT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    cursor.setPath("");
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Hand);  // what an undo of the path edit restores
+
+    // ...and it survives a move.
+    cursor.setPath(path);
+    newui::Cursor moved(std::move(cursor));
+    moved.setPath("");
+    EXPECT_EQ(moved.kind(), newui::CursorKind::Hand);
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(Cursor, PathIsASettableReflectedProperty) {
+    const newui::reflection::Class* clazz = newui::reflection::classinfo("Cursor");
+    ASSERT_NE(clazz, nullptr);
+    const newui::reflection::Property* path = clazz->property("path");
+    ASSERT_NE(path, nullptr);
+
+    const std::string file = "cursor_reflected.svg";
+    WriteTestSVG(file);
+    newui::Cursor cursor;
+    path->set(&cursor, std::any(file));
+    EXPECT_EQ(cursor.kind(), newui::CursorKind::Custom);
+    EXPECT_EQ(cursor.path(), file);
+    ::DeleteFileA(file.c_str());
 }

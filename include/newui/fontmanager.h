@@ -19,6 +19,7 @@ namespace newui {
     struct SystemFontInfo {
         std::string name;
         std::string filePath;
+        bool bundled = false;   // registered with addFontFile()/addFontDirectory(), not installed in Windows
     };
 
     // Which of Windows' standard UI fonts to fetch via
@@ -42,7 +43,7 @@ namespace newui {
     // instances it hands out.
     class FontManager {
     public:
-        // The system's installed fonts that blend2d could actually load as
+        // The fonts blend2d could actually load as
         // a BLFontFace. Blend2D itself only supports TrueType/OpenType
         // (see BLFontFaceType - it has no other font face type), so a
         // successful load is proof enough that a font qualifies; anything
@@ -67,6 +68,39 @@ namespace newui {
         // a WM_SETTINGCHANGE for a theme/DPI change). Returns a
         // default-constructed Font if SystemParametersInfo() fails.
         static Font getSystemFont(SystemUIFont which = SystemUIFont::Message);
+
+        // Whether a font family is installed in Windows itself, as opposed to only registered here (see
+        // addFontFile()).
+        static bool isInstalled(const std::string& name);
+
+        // Whether a font family can be drawn at all: installed, or registered here.
+        static bool isAvailable(const std::string& name);
+
+        // Registers a font file the application ships, so createFont(), getFont() and listFonts() find it by its
+        // names: its full name ("Cascadia Mono Italic"), its family plus style ("Cascadia Mono" + "Italic"), and
+        // for a regular face the family alone ("Cascadia Mono"). Font::blFont() folds bold/italic into the name
+        // the same way, so a family's whole set of faces resolves. A registered font wins over an installed one
+        // of the same name. Returns false if blend2d cannot load the file (TrueType/OpenType only; the file is
+        // memory-mapped, so a large font costs little to register).
+        //
+        // Text drawn by blend2d (BLFont) finds these through createFont()/getFont(); text shaped by DirectWrite
+        // (every text control) finds them through DirectWriteResources::fontCollection(), which adds them to the
+        // system's fonts. Register before the first lookup of a name: a font already handed out by getFont() is
+        // cached and does not change. Call from the UI thread.
+        static bool addFontFile(const std::string& path);
+
+        // The files addFontFile() registered, in order, and a number that changes with each one - what a cache of
+        // anything built from them (DirectWrite's font collection) compares to know it is stale.
+        static const std::vector<std::string>& registeredFontFiles();
+        static unsigned registeredFontVersion();
+
+
+        // addFontFile() for every .ttf / .otf under directory, subfolders too. Returns how many it registered.
+        static std::size_t addFontDirectory(const std::string& directory);
+
+        // A monospaced font for source code: the first available of Cascadia Mono (Visual
+        // Studio's default), Consolas, Lucida Console and Courier New.
+        static Font monospaceFont(float size = 14.0f);
 
         // The process-wide FontManager singleton.
         static FontManager& instance();

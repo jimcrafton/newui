@@ -21,6 +21,33 @@ isn't spellable from the free `register...Enum()` function reflectgen
 emits, so those are skipped). Static methods, templates, and operator
 overloads are explicitly out of scope for now.
 
+## `@reflect` annotations at a glance
+
+Every annotation lives in a `//`/`/* */` comment directly above the
+declaration it applies to (`-fparse-all-comments` is passed to clang
+automatically so a plain `//` comment is seen at all - see the note near
+the bottom of this file), in the form `@reflect key=value` (a bare `key`
+with no `=value` is shorthand for `key=true`), and multiple `key=value`
+pairs can share one annotation (`@reflect property=title tags=filepath`).
+
+| Annotation | Goes above | Effect |
+| --- | --- | --- |
+| `@reflect ignore=true` | a class/struct | Excludes the whole class from generation entirely. |
+| `@reflect ignore=true` | a method (getter, setter, or plain method) | Opts that one method out of automatic getter/setter-property detection, without touching the rest of the class. |
+| `@reflect property` / `@reflect property=name` | a getter | Forces a method the heuristic wouldn't have picked up into a `.property(...)` entry, or renames the derived key. |
+| `@reflect collection` / `@reflect collection=name` | a whole-container-returning getter | Registers a `.propertyCollection(...)` entry (opt-in only - never guessed from shape). |
+| `add=methodName` | same comment as `@reflect collection` | Names the real add method to wire into that collection property. |
+| `remove=methodName` | same comment as `@reflect collection` | Names the real remove method to wire into that collection property. |
+| `@reflect tags=a,b` | a class, a property's getter, or a delegate member | Attaches comma-separated semantic hints (`Class`/`Property`/`Delegate::tags()`) for a consumer like an editor to key off of. |
+| `@reflect category=a,b` | a class | Groups the class for toolbox/browsing UI (`Class::categories()`), comma-separated. |
+| `@reflect proxy=ClassName` | a class | Names that class's design-time stand-in (`Class::proxy()`), e.g. `Frame` → `FrameProxy`. |
+| `@reflect proxyfor=ClassName` | a class (the proxy itself) | Inverse of `proxy=` - names the real class this one stands in for (`Class::proxyFor()`). |
+| `@reflect flags` | an `enum`/`enum class` | Opts the enum into array-of-decomposed-flag-names read/write treatment (`Enum::isFlags()`), always explicit, never guessed. |
+| `@reflect connect=true` | a pointer-to-class data member (private is fine) | Registers the field with `Field::needsConnection()` set, so `RootController::initialize()` binds it to the child view named after it minus a trailing `_` (`progressBar_` → `"progressBar"`). Works without `NEWUI_REFLECT_PRIVATE()` - see "Private members" below. Warns if the member isn't a pointer to a class. |
+| `@reflect stringvalue` | a class/struct | Opts the class into single-compact-string read/write treatment (`Class::isStringValue()`) instead of a nested keyed object of its own properties/fields - requires a matching `fromString()`/`toString()` pair (see below), always explicit, never guessed. |
+
+Each is covered in more detail, with a full example, below.
+
 **Getter/setter properties (detected automatically):** a public
 getter-shaped method (zero args, non-`void` return) is registered as a
 `.property(...)` entry instead of a `.method(...)` one whenever it matches
@@ -134,6 +161,132 @@ there's nothing for `base<BaseT>()` to usefully link to, but `isDerived()`
 still reflects the truth. Multiple public bases aren't representable
 (`Class::parentClass()` is a single pointer) - only the first is reflected,
 with a warning on stderr naming the ones that were dropped.
+
+**`@reflect tags=...`** attaches free-form semantic hints - read back via
+`Class::tags()`/`Property::tags()`/`Delegate::tags()` (`reflection.h`) by a
+consumer like cpp_codetools' `PropertyEditorRegistry`, never used by
+reflectgen itself - to a class declaration, a property's getter, or a
+delegate member. Comma-separated, no whitespace around the commas:
+
+```cpp
+// @reflect tags=file,pathlike
+class Document {
+public:
+    // @reflect tags=filepath
+    std::string getPath() const;
+    void setPath(std::string path);
+
+    // @reflect tags=notification
+    Delegate<Document> onChanged;
+};
+```
+
+emits `.tags({"file", "pathlike"})` on `Document`'s own registration,
+`{"filepath"}` as the trailing arg on `.property("path", ...)`, and
+`{"notification"}` as the trailing arg on `.delegate("onChanged", ...)`.
+Empty for the overwhelming majority of properties/delegates/classes - most
+types don't need a hint beyond their own C++ type.
+
+**`@reflect category=...`** groups a class for toolbox/browsing UI (e.g.
+cpp_codetools' `ToolboxRegistry` enumerating `ReflectionRegistry` by
+grouping rather than a hardcoded per-class list) - class-level only, same
+comma-separated shape as `tags`:
+
+```cpp
+// @reflect category=basic
+class Button : public Control { ... };
+
+// @reflect category=basic,input
+class TextBox : public Control { ... };
+```
+
+emits `.categories({"basic"})` / `.categories({"basic", "input"})`.
+`Class::allCategories()`-shaped enumeration (`reflection.h`) lets a
+consumer discover the live set of values actually in use rather than
+hardcoding one.
+
+**`@reflect proxy=<ClassName>`/`@reflect proxyfor=<ClassName>`** name a
+design-time stand-in relationship for a class that can't be nested as an
+ordinary `SubView` child (`Frame`/`RootView` own an `HWND` directly - see
+`FrameProxy`/`RootViewProxy`'s own class comments for why a design-time
+tree needs a substitute):
+
+```cpp
+// @reflect proxy=FrameProxy
+class Frame { ... };
+
+// @reflect proxyfor=Frame
+class FrameProxy { ... };
+```
+
+emits `.proxy("FrameProxy")` on `Frame`'s registration and
+`.proxyFor("Frame")` on `FrameProxy`'s - nothing but a plain class-name
+string either direction, resolved to a real `Class*` only when actually
+needed (`ObjectReader`'s design-mode dynamic-type substitution,
+`ObjectWriter`'s design-mode "write the real class's name, not the
+proxy's" behavior - both `reflectionio.h`). See `Class::proxy()`/
+`proxyFor()`'s own comments in `reflection.h`.
+
+**`@reflect flags`** directly above an `enum`/`enum class` opts it into
+`ObjectWriter`/`ObjectReader`'s "flags" treatment (a JSON5 array of
+decomposed flag names instead of one plain name - `reflectionio.h`) -
+always explicit, never guessed from the enum's own values/name/operators.
+Every shape-based heuristic considered (power-of-two values, an
+`operator|` overload, a `Mask`/`Flags` name suffix) either misses a real
+flags enum in this project's own headers or misclassifies an ordinary
+sequential enum whose small values are individually powers of two by pure
+coincidence (`DialogResult`'s `Ok=1`/`Cancel=2`/`No=4`, where `Abort=5`
+would decompose into the nonsensical `"Ok"|"No"`):
+
+```cpp
+// @reflect flags
+enum class Anchor : std::uint8_t {
+    None    = 0,
+    Left    = 1 << 0,
+    Top     = 1 << 1,
+    Right   = 1 << 2,
+    Bottom  = 1 << 3,
+};
+```
+
+emits the enum's ordinary `EnumBuilder<Anchor>("Anchor")` registration
+plus a trailing `.flags(true)`, so `Enum::isFlags()` reports true.
+
+**`@reflect stringvalue`** directly above a class/struct opts it into
+`ClassBuilder<T>::stringValue()` (`reflection.h`) - read/written as one
+compact string wherever an ordinary nested `{type:"...", ...}` object of
+its own properties/fields would otherwise be expected, instead of the
+usual per-property recursion. Always explicit, same "never guessed"
+reasoning as `@reflect flags` above - most classes that happen to have a
+`toString()` (for logging, debugging, ...) don't mean "read/write me as a
+single string", so this is never inferred from a class merely having one.
+`T` must have exactly the shape `newui::Color` does for the generated
+`.stringValue()` call to compile:
+
+```cpp
+// @reflect stringvalue
+class Coordinate {
+public:
+    static bool fromString(const std::string& str, Coordinate& out);
+    std::string toString() const;
+
+    float x = 0.0f;
+    float y = 0.0f;
+};
+```
+
+emits the class's ordinary field/property/method registration (`x`/`y`
+still get their own `.field(...)` entries, so direct introspection/editing
+still works) plus a leading `.stringValue()` call. A real example already
+in this codebase: `newui::Color` (`color.h`) - a `borderFill`/`textColor`/
+etc. property reads/writes as `"#ff0000ff"`/`"red"`/`"WindowBackground"`
+(hex, a CSS color name, or a live `UIColorRole` name - see
+`Color::fromString()`'s own comment) in a `.newui` file instead of the
+`{type:"Color", r, g, b, a}` object every other reflected value type still
+uses. An old file already written with that nested-object form still reads
+correctly either way - `stringvalue` only adds an *alternate* accepted
+input shape and a more compact write, it doesn't remove support for the
+object shape.
 
 ## Setup
 
@@ -272,9 +425,31 @@ header that really is on the path you passed. Fix is either quoting
 (`-Id:/code/newui/include`, which Clang accepts natively and PowerShell
 doesn't mangle).
 
+### Private members
+
 Only classes with a `NEWUI_REFLECT_PRIVATE()` in their body get their
 private/protected members reflected; classes without it are still
 scanned, but only their public members are emitted.
+
+The one exception is a member marked `@reflect connect=true`: it is
+reflected even when private, in a class with no `NEWUI_REFLECT_PRIVATE()`.
+Nothing else in that class's private section is reflected.
+
+```cpp
+class SaveDialogController : public newui::RootController {
+private:
+    //@reflect connect=true
+    newui::Button* saveButton_ = nullptr;   // bound to the child named "saveButton"
+    int notReflected_ = 0;                  // private, unmarked: left alone
+};
+```
+
+Since `&Class::privateMember` is an access error outside the class,
+reflectgen reaches such a member with `detail::AccessThief` (reflection.h):
+an explicit template instantiation, which the standard exempts from access
+checks. The generated tag struct has to sit in `newui::reflection::detail`
+(where the thief's friend function is defined), which reflectgen does for
+you; a hand-written registration needs to do the same.
 
 A class/struct can opt out of generation entirely with a `// @reflect
 ignore=true` comment directly above its declaration:

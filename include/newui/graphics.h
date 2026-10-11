@@ -46,7 +46,27 @@ namespace newui::gfx {
         // BL_FORMAT_PRGB32 first if the decoded image isn't already that
         // format. isValid() is false afterward if the file couldn't be
         // read/decoded.
+        //
+        // A ".svg" path instead rasterizes via renderSvgFile() (svgimage.h)
+        // at a fixed kDefaultSvgRasterSize x kDefaultSvgRasterSize default -
+        // svgandme (the vendored parser/renderer) has no reliable, canvas-
+        // independent way to ask an SVG for its own "natural" size, so this
+        // doesn't attempt to guess one.
+        // Use the (path, width, height) constructor below for an actual
+        // target size - the common case for a toolbar/button icon, since
+        // those are almost always requested at a specific pixel size
+        // anyway.
         explicit Image(const std::string& path);
+
+        // Same decode as above, but rasterized/resized to an explicit
+        // width x height instead of whatever size the source naturally
+        // is. For a ".svg" path this is the real rasterization target
+        // (renderSvgFile() renders directly at width x height - not a
+        // post-hoc scale); for any other format, the file is decoded at
+        // its native size first and then scaled into width x height via a
+        // BLContext blit. isValid() is false afterward on any failure,
+        // including a non-positive width or height.
+        Image(const std::string& path, int width, int height);
 
         // Copies source's pixel data into a fresh DIB-backed buffer
         // (converting to BL_FORMAT_PRGB32 first if needed) - source keeps
@@ -212,23 +232,38 @@ namespace newui::gfx {
         GradientKind kind() const { return kind_; }
         void setKind(GradientKind kind) { kind_ = kind; }
 
-        // Linear
+        // Linear - start()/end() are proportional [0,1] fractions of whatever local box this
+        // gradient is eventually resolved against (toBLVar()'s own localBounds - the same box a
+        // Shape's paintFillAndStroke()/a View's ViewStyle::paint() already pass their own current
+        // size as), not absolute pixel coordinates - resolved to real pixels fresh every
+        // toBLVar() call, the same "always current, never a stale snapshot" contract
+        // rasterizePoints()'s own localBounds-driven rescale already gives Point kind. A gradient
+        // authored once this way keeps looking right across any resize of whatever it's painted
+        // onto - matching GradientStop's own offset(), already [0,1] along the gradient's other
+        // axis. Default spans the box's full width, left to right, along its top edge.
         const Point& linearStart() const { return linearStart_; }
         void setLinearStart(const Point& p) { linearStart_ = p; }
         const Point& linearEnd() const { return linearEnd_; }
         void setLinearEnd(const Point& p) { linearEnd_ = p; }
 
-        // Radial
+        // Radial - center()/focalOffset() are proportional [0,1] fractions of the box, same
+        // convention as Linear's start/end above; radius() is instead a fraction of the box's
+        // *shorter* side (so radius() == 0.5, the default, always reaches exactly the box's
+        // nearer edge - a circle, never stretched into an ellipse just because the box isn't
+        // square).
         const Point& radialCenter() const { return radialCenter_; }
         void setRadialCenter(const Point& p) { radialCenter_ = p; }
-        // Offset from radialCenter() - (0,0) means the focal point sits
-        // exactly on the center (no hotspot skew).
+        // Offset from radialCenter() - (0,0) means the focal point sits exactly on the center (no
+        // hotspot skew). Same box-fraction convention as radialCenter() itself (not radius()-
+        // relative) - an offset of (0.1, 0) always shifts the focal point by 10% of the box's own
+        // width, regardless of its height/aspect.
         const Point& radialFocalOffset() const { return radialFocalOffset_; }
         void setRadialFocalOffset(const Point& p) { radialFocalOffset_ = p; }
         float radialRadius() const { return radialRadius_; }
         void setRadialRadius(float r) { radialRadius_ = r; }
 
-        // Conic
+        // Conic - center() is a proportional [0,1] fraction of the box, same convention as
+        // Linear/Radial above.
         const Point& conicCenter() const { return conicCenter_; }
         void setConicCenter(const Point& p) { conicCenter_ = p; }
         float conicAngle() const { return conicAngle_; }  // radians - where the stops' 0.0 offset starts
@@ -263,14 +298,16 @@ namespace newui::gfx {
         // per-paint cost; fine for an occasional design accent, worth
         // revisiting with a dirty-flagged cache if it's ever driven at
         // 60fps). localBounds is the shape's own local-space bounding
-        // box - only used by the Point kind, to size/position the baked
-        // raster; Linear/Radial/Conic ignore it (their own start/end/
-        // center/radius fields already carry absolute local-space
-        // coordinates, same as blend2d's own gradient values do).
+        // box - every kind resolves its own proportional geometry against
+        // it fresh on every call (Linear/Radial/Conic's own start/end/
+        // center/radius fields above; Point already did, via
+        // rasterizePoints()) - so the exact same Gradient always looks
+        // right regardless of what size localBounds turns out to be, this
+        // call and the next.
         BLVar toBLVar(const Rect& localBounds) const;
 
     private:
-        BLGradient toBLGradient() const;
+        BLGradient toBLGradient(const Rect& localBounds) const;
 
         // A plain BLImage, not a gfx::Image - toBLVar() wraps this
         // straight into a BLPattern and hands it back inside the
@@ -293,13 +330,13 @@ namespace newui::gfx {
         GradientKind kind_ = GradientKind::Linear;
 
         Point linearStart_;
-        Point linearEnd_{100.0f, 0.0f};
+        Point linearEnd_{1.0f, 0.0f};
 
-        Point radialCenter_;
+        Point radialCenter_{0.5f, 0.5f};
         Point radialFocalOffset_;
-        float radialRadius_ = 50.0f;
+        float radialRadius_ = 0.5f;
 
-        Point conicCenter_;
+        Point conicCenter_{0.5f, 0.5f};
         float conicAngle_ = 0.0f;
         float conicRepeat_ = 1.0f;
 
@@ -371,6 +408,17 @@ namespace newui::gfx {
         // decoded and cached by toBLVar() - see resolvedImage().
         const std::string& imagePath() const { return imagePath_; }
         void setImagePath(const std::string& path) { imagePath_ = path; imageCacheValid_ = false; }
+
+        // Sets resolvedImage()'s own cache directly from an already-decoded BLImage, bypassing
+        // read_from_file() entirely - for a caller that already has real pixels in memory with no
+        // file on disk to reflect a path to at all (e.g. ViewStyle::setBackgroundImage(const
+        // BLImage&), a programmatically-generated background - see its own comment for why it
+        // can't just take a path like the string overload does). imagePath() itself is cleared -
+        // there's no real path behind this fill any more, so leaving a stale one would be
+        // misleading were this ever serialized/rebuilt from it - same "kind_ left untouched,
+        // caller sets it separately" convention setImagePath()/setColor()/setGradient() already
+        // follow (see this class's own kind_ comment for why).
+        void setImage(const BLImage& image) { imageCache_ = image; imageCacheValid_ = true; imagePath_.clear(); }
 
         float opacity() const { return opacity_; }
         void setOpacity(float opacity) { opacity_ = opacity; }

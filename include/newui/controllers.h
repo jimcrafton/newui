@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "newui/newui.h"
+#include "newui/component.h"
 #include "newui/models.h"
 
 namespace newui {
@@ -33,17 +35,19 @@ namespace newui {
     // collaborators rather than one class doing both jobs. ViewController
     // is the one place this codebase does inherit from Controller directly:
     // a screen-level controller genuinely *is* one, not just "has one."
-    class Controller {
+    class Controller : public Component {
     public:
         Controller() = default;
         virtual ~Controller();
 
-        // Non-owning - same convention Model::views_ already uses for the
-        // reverse relationship (a View doesn't own its Model either).
-        void setModel(Model* val);
+        // The controller owns its model: it is destroyed when replaced (or nullptr is passed) or
+        // when the controller goes away. A caller that needs to keep using the model afterwards
+        // holds a plain observing pointer (keep model() or take raw() before handing it over).
+        // Subclasses narrow this to their own model type but hold nothing of their own.
+        void setModel(std::unique_ptr<Model> val);
 
-        const Model* model() const { return model_; }
-        Model* model() { return model_; }
+        const Model* model() const { return model_.get(); }
+        Model* model() { return model_.get(); }
 
         // Fired whenever model()'s onChanged fires, once a Model is set
         // (see setModel()). Override to react; returning
@@ -54,7 +58,7 @@ namespace newui {
         virtual SyncReturn modelChanged(Model&) { return SyncReturn::Ignored; }
 
     private:
-        Model* model_ = nullptr;
+        std::unique_ptr<Model> model_;
         Connection modelChangedConnection_;
     };
 
@@ -204,12 +208,15 @@ namespace newui {
     // itself (`new MyTextDocument()`) and hands it to addDocument()/
     // openDocument().
     //
-    // Deliberately does *not* prompt about unsaved changes itself -
-    // closeDocument() just closes. Checking document->isModified() and
-    // showing whatever confirmation UI is appropriate (a Dialog, a custom
-    // View, ...) is the caller's job, same "give hooks, don't force a
-    // specific UI policy" principle as Model::updateAllViews() not
-    // dictating what "repaint to reflect new data" looks like either.
+    // closeDocument() itself never prompts - it just closes. Unsaved-
+    // changes protection is the separate, opt-in confirmDiscardChanges()/
+    // closeDocumentWithPrompt() below - anything about to throw a modified
+    // Document away (close, New, Open over it) should go through one of
+    // them. The prompt UI is a replaceable policy (setUnsavedChangesHandler()
+    // / setSavePathProvider()), defaulting to a Yes/No/Cancel message box
+    // and a Save As file dialog - same "give hooks, don't force a specific
+    // UI policy" principle as Model::updateAllViews() not dictating what
+    // "repaint to reflect new data" looks like either.
     //
     // Not itself wired to any particular View (e.g. a TabControl showing
     // one tab per document) - subscribe onDocumentAdded()/
@@ -218,9 +225,35 @@ namespace newui {
     // DocumentController ignorant of which widget that is is what lets a
     // single-window (tabbed) app and a future multi-window app share it
     // unchanged.
+    // What the user chose when asked about a modified Document's unsaved changes.
+    enum class UnsavedChangesChoice {
+        Save,
+        Discard,
+        Cancel,
+    };
+
     class DocumentController : public Controller {
     public:
         DocumentController() = default;
+
+        typedef std::function<UnsavedChangesChoice(Document&)> UnsavedChangesHandler;
+        // Returns the path to save an untitled Document to, or "" if the user cancelled.
+        typedef std::function<std::string(Document&)> SavePathProvider;
+
+        // Replace the default UI (message box / Save As dialog) - e.g. a custom in-app View, or a
+        // canned answer for tests. Passing an empty function restores the default.
+        void setUnsavedChangesHandler(UnsavedChangesHandler handler) { unsavedChangesHandler_ = std::move(handler); }
+        void setSavePathProvider(SavePathProvider provider) { savePathProvider_ = std::move(provider); }
+
+        // True if it's fine to proceed with throwing document's current state away: it isn't
+        // modified, or the user chose Discard, or chose Save and the save succeeded. False if the
+        // user cancelled, cancelled the Save As picker, or the save failed (the document is left
+        // untouched, still modified). Never modifies documents() itself.
+        bool confirmDiscardChanges(Document& document);
+
+        // confirmDiscardChanges(*document), then closeDocument(document) if allowed. Returns false
+        // (document left open) if it wasn't. A null/unregistered document is a no-op returning true.
+        bool closeDocumentWithPrompt(Document* document);
 
         // Deletes every still-open Document without notifying anything
         // (no onDocumentWillClose()) - same "quiet, non-virtual cleanup"
@@ -281,6 +314,8 @@ namespace newui {
     private:
         std::vector<Document*> documents_;
         Document* activeDocument_ = nullptr;
+        UnsavedChangesHandler unsavedChangesHandler_;
+        SavePathProvider savePathProvider_;
     };
 
     // Owns/recycles Item instances (items.h) for a widget walking a
@@ -317,6 +352,22 @@ namespace newui {
         // this point on, same as if it had just constructed it itself. A
         // no-op for nullptr.
         virtual void releaseItem(Item* item);
+
+        // The pixel size (both dimensions) an icon returned by iconFor()
+        // (declared per-shape on ListController/TreeController/
+        // TableController below, not here - see their own comments for
+        // why) should be rasterized/painted at, and the gap left between
+        // it and the text that follows. Shape-independent, so it lives
+        // here rather than being duplicated per subclass; a subclass
+        // overrides these instead of iconFor() alone if it wants a
+        // different icon size for its own rows. ListItem/TreeItem/
+        // TableItem's own default paint() (items.cpp) is the only thing
+        // that actually calls these - a fully custom Item::paint()
+        // override (ToolboxItem, e.g.) is free to ignore both and lay out
+        // however it likes, including calling paintItemIcon() itself with
+        // its own numbers.
+        virtual float iconSize() const { return 0.0f; }
+        virtual float iconGap() const { return 6.0f; }
 
     protected:
         // Reflection-based construction: looks up className via
@@ -363,24 +414,33 @@ namespace newui {
         // mixed in among ordinary data rows).
         virtual ListItem* createItem(std::size_t index);
 
-        // Narrows Controller's own model()/setModel(Model*) (a moment
-        // above, in Controller) to ListModel* specifically - hides (not
-        // overrides; no covariant relationship between a plain Model*
-        // and a ListModel*) Controller::model()/setModel() for any caller
-        // holding this as a ListController, giving a compile-time
-        // guarantee that whatever's attached is genuinely list-shaped
-        // (models.h - ListModel's own class comment) for any caller going
-        // through *this* pair. Controller::model()/Controller::setModel()
-        // are non-virtual, though, so they're still reachable - and the
-        // compile-time guarantee bypassable - via a Controller&/Controller*
-        // to this same object (e.g. Controller::setModel() called on a
-        // ListController through a plain Controller reference). model()
-        // below uses dynamic_cast (not static_cast) specifically to catch
-        // that: a real, non-null Model that isn't actually a ListModel
-        // throws rather than silently handing back a pointer that isn't
-        // really of the type it claims - the same "fail loud on a
-        // genuinely broken invariant" convention Button::paint()'s own
-        // font check already uses (throw std::runtime_error, controls.cpp).
+        // A Bundle-relative resource path (see Bundle::resourcePath()) to
+        // paint alongside index's own row, or std::nullopt for no icon -
+        // default. Deliberately controller-level, not Model-level: an
+        // icon is a presentation decision (which glyph represents this
+        // row), not data the row's own Model actually holds, matching
+        // Controller's existing "behavior/presentation policy, not
+        // content" role here (createItem() picks which Item class to use
+        // per the same reasoning). ListItem::paint()'s own default
+        // (items.cpp) is the only thing that calls this.
+        virtual std::optional<std::string> iconFor(std::size_t index) const { return std::nullopt; }
+
+        // Narrows Controller's own model()/setModel() to ListModel
+        // specifically - hides (not overrides; no covariant relationship
+        // between a plain Model* and a ListModel*) Controller::model()/
+        // setModel() for any caller holding this as a ListController,
+        // giving a compile-time guarantee that whatever's attached is
+        // genuinely list-shaped (models.h - ListModel's own class comment)
+        // for any caller going through *this* pair. Controller::model()/
+        // Controller::setModel() are non-virtual, though, so they're still
+        // reachable - and the compile-time guarantee bypassable - via a
+        // Controller&/Controller* to this same object. model() below uses
+        // dynamic_cast (not static_cast) specifically to catch that: a
+        // real, non-null Model that isn't actually a ListModel throws
+        // rather than silently handing back a pointer that isn't really of
+        // the type it claims - the same "fail loud on a genuinely broken
+        // invariant" convention Button::paint()'s own font check already
+        // uses (throw std::runtime_error, controls.cpp).
         ListModel* model() {
             Model* base = Controller::model();
             if (base == nullptr) {
@@ -405,18 +465,11 @@ namespace newui {
             return asListModel;
         }
 
-        // Belt-and-suspenders alongside model()'s own dynamic_cast above:
-        // model already being ListModel* at the call site means this can
-        // only fail via memory corruption or similar undefined behavior
-        // elsewhere - real protection against the actual reachable bypass
-        // (Controller::setModel(Model*) called through a Controller&) is
-        // model()'s own check, above, which runs on every read regardless
-        // of which path the Model was originally attached through.
-        void setModel(ListModel* model) {
-            if (model != nullptr && dynamic_cast<ListModel*>(model) == nullptr) {
-                throw std::runtime_error("ListController::setModel: model is not a ListModel");
-            }
-            Controller::setModel(model);
+        // Takes ownership (Controller::setModel()'s contract, narrowed to a ListModel). This is
+        // also the setter reflection uses, so a saved design's model is rebuilt and attached on
+        // load.
+        void setModel(std::unique_ptr<ListModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
         }
 
         // "How many rows" - a plain forwarder to Model::size() (models.h),
@@ -499,7 +552,11 @@ namespace newui {
         // own comment.
         virtual TreeItem* createItem(const std::vector<std::size_t>& path);
 
-        // Narrows Controller's own model()/setModel(Model*) to TreeModel*
+        // See ListController::iconFor()'s own comment - same reasoning,
+        // just keyed by path instead of a flat index.
+        virtual std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const { return std::nullopt; }
+
+        // Narrows Controller's own model()/setModel() to TreeModel
         // specifically - same dynamic_cast+throw pattern
         // ListController::model()/setModel() already use (their own doc
         // comment explains the non-virtual-Controller::setModel()-bypass
@@ -528,11 +585,9 @@ namespace newui {
             return asTreeModel;
         }
 
-        void setModel(TreeModel* model) {
-            if (model != nullptr && dynamic_cast<TreeModel*>(model) == nullptr) {
-                throw std::runtime_error("TreeController::setModel: model is not a TreeModel");
-            }
-            Controller::setModel(model);
+        // Takes ownership (Controller::setModel()'s contract, narrowed to a TreeModel).
+        void setModel(std::unique_ptr<TreeModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
             invalidateVisibleList();
         }
 
@@ -673,6 +728,10 @@ namespace newui {
         // Default ignores row/col entirely - see ListController::createItem()'s
         // own comment.
         virtual TableItem* createItem(std::size_t row, std::size_t col);
+
+        // See ListController::iconFor()'s own comment - same reasoning,
+        // just keyed by (row, col) instead of a flat index.
+        virtual std::optional<std::string> iconFor(std::size_t row, std::size_t col) const { return std::nullopt; }
     };
 
 } // namespace newui

@@ -1,7 +1,10 @@
 #include "newui/cursor.h"
 #include "newui/bundle.h"
+#include "newui/svgimage.h"
 
+#include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 // Implementation details private to Cursor - resolveCursor()/
@@ -153,12 +156,25 @@ namespace {
     // Returns nullptr on any failure: not found either way, undecodable
     // format, or an oversized image (see createCursorFromImage()).
     HCURSOR loadCursorFromFile(const std::string& path, int hotspotX, int hotspotY, int maxSize) {
-        BLImage image;
-        if (image.read_from_file(path.c_str()) != BL_SUCCESS) {
-            std::string bundlePath = newui::Bundle::instance().resourcePath("Cursors/" + path);
-            if (bundlePath.empty() || image.read_from_file(bundlePath.c_str()) != BL_SUCCESS) {
+        // The literal path if it exists, else the Bundle-relative Resources/Cursors/ one.
+        std::string resolved = path;
+        if (!std::filesystem::exists(resolved)) {
+            resolved = newui::Bundle::instance().resourcePath("Cursors/" + path);
+            if (resolved.empty() || !std::filesystem::exists(resolved)) {
                 return nullptr;
             }
+        }
+
+        BLImage image;
+        std::string extension = std::filesystem::path(resolved).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+        if (extension == ".svg") {
+            // Blend2D can't decode SVG - rasterize it at the cursor's size instead.
+            if (!newui::renderSvgFile(resolved, maxSize, maxSize, image)) {
+                return nullptr;
+            }
+        } else if (image.read_from_file(resolved.c_str()) != BL_SUCCESS) {
+            return nullptr;
         }
 
         return createCursorFromImage(image, hotspotX, hotspotY, maxSize);
@@ -168,7 +184,7 @@ namespace {
 
 namespace newui {
 
-    bool Cursor::setPath(const std::string& path, int hotspotX, int hotspotY, int maxSize) {
+    bool Cursor::loadPath(const std::string& path, int hotspotX, int hotspotY, int maxSize) {
         if (maxSize > Cursor::MaxCursorSize) {
             return false;
         }
@@ -179,10 +195,25 @@ namespace newui {
         }
 
         releaseOwnedHandle();
+        if (kind_ != CursorKind::Custom) {
+            fallbackKind_ = kind_;
+        }
         kind_ = CursorKind::Custom;
         path_ = path;
         handle_ = loaded;
         return true;
+    }
+
+    void Cursor::setPath(const std::string& path) {
+        if (path.empty()) {
+            // Clearing a file-based custom cursor goes back to the system kind it had before; a
+            // system kind or an image-built cursor has no path to clear, so it is left alone.
+            if (kind_ == CursorKind::Custom && !path_.empty()) {
+                setCursorKind(fallbackKind_);
+            }
+            return;
+        }
+        loadPath(path);  // on failure the cursor is unchanged; on success kind() becomes Custom
     }
 
     bool Cursor::setImage(const BLImage& image, int hotspotX, int hotspotY, int maxSize) {
@@ -192,6 +223,9 @@ namespace newui {
         }
 
         releaseOwnedHandle();
+        if (kind_ != CursorKind::Custom) {
+            fallbackKind_ = kind_;
+        }
         kind_ = CursorKind::Custom;
         path_.clear();
         handle_ = loaded;
@@ -199,7 +233,15 @@ namespace newui {
     }
 
     HCURSOR Cursor::handle() const {
-        return resolveCursor(kind_, handle_);
+        // Custom already has its real handle sitting in handle_ - nothing to resolve/cache.
+        // Otherwise, resolve once and cache into handle_ itself (see its own comment, cursor.h) -
+        // a kind change (setCursorKind()/setPath()/setImage()) already clears handle_ via
+        // releaseOwnedHandle(), so a stale cached shape can never survive past whatever change
+        // would invalidate it.
+        if (kind_ != CursorKind::Custom && handle_ == nullptr) {
+            handle_ = resolveCursor(kind_, nullptr);
+        }
+        return handle_;
     }
 
     void Cursor::releaseOwnedHandle() {

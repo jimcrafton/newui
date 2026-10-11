@@ -9,6 +9,7 @@
 
 namespace newui {
 
+// @reflect proxy=FrameProxy
 class Frame {
 public:
     Frame();
@@ -113,7 +114,7 @@ public:
 	bool frameCreated();
 	void destroy();
 
-    private:
+    protected:
     std::string title_;
 	std::string name_;
 	Rect bounds_;

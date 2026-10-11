@@ -303,8 +303,7 @@ void Application::run() {
 		//runLoop_.onEnding += Application::runLoopEnding;
 		//runLoop_.onEnd += Application::runLoopDone;
 
-
-		runLoop_.run();
+		RunLoop::current().run();
 
 		if (bufferedPaintInitialized) {
 			::BufferedPaintUnInit();

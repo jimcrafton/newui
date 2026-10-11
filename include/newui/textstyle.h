@@ -1,0 +1,153 @@
+#pragma once
+
+#include "newui/color.h"
+#include "newui/component.h"
+#include "newui/text.h"
+
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace newui {
+
+    // How one color is laid over another (the separable operators Blend2D's BLCompOp has, by the same names), source
+    // being the overlay and backdrop the color already there. See composite().
+    enum class CompositeMode {
+        SrcOver,    // the source at its own alpha over the backdrop: a plain fade
+        Src,        // the source replaces the backdrop
+        Multiply,   // darkens: channels multiplied
+        Screen,     // lightens: the inverse of Multiply on the inverses
+        Darken,     // the darker channel
+        Lighten,    // the lighter channel
+        Plus,       // channels added, clamped
+    };
+
+    // `source` composited over `backdrop` with `mode`, in straight (not premultiplied) alpha, the way a color is held here.
+    Color composite(const Color& source, const Color& backdrop, CompositeMode mode);
+
+    // A reusable look for ranges of text - ViewStyle's counterpart for text, the way a CSS class
+    // is. A TextControl's styled ranges name a style; the style says how those ranges look.
+    // Every property that isn't set leaves the control's own value alone: an empty fontName, a
+    // fontSize of 0 and a null color all mean "inherit". Its name (Component) is how ranges and
+    // TextStyleSheet find it.
+    class TextStyle : public Component {
+    public:
+        TextStyle() = default;
+        explicit TextStyle(const std::string& name) { setName(name); }
+
+        const std::string& fontName() const { return fontName_; }
+        void setFontName(const std::string& fontName) { fontName_ = fontName; }
+
+        float fontSize() const { return fontSize_; }
+        void setFontSize(float fontSize) { fontSize_ = fontSize; }
+
+        bool isBold() const { return bold_; }
+        void setBold(bool bold) { bold_ = bold; }
+
+        bool isItalic() const { return italic_; }
+        void setItalic(bool italic) { italic_ = italic; }
+
+        bool isUnderline() const { return underline_; }
+        void setUnderline(bool underline) { underline_ = underline; }
+
+        bool isStrikethrough() const { return strikethrough_; }
+        void setStrikethrough(bool strikethrough) { strikethrough_ = strikethrough; }
+
+        const Color& color() const { return color_; }
+        void setColor(const Color& color) { color_ = color; }
+
+        // Null: no fill behind the text.
+        const Color& backgroundColor() const { return backgroundColor_; }
+        void setBackgroundColor(const Color& color) { backgroundColor_ = color; }
+
+        // None: no squiggle, box, ... (see text::TextDecoration).
+        text::TextDecorationKind decoration() const { return decoration_; }
+        void setDecoration(text::TextDecorationKind decoration) { decoration_ = decoration; }
+
+        const Color& decorationColor() const { return decorationColor_; }
+        void setDecorationColor(const Color& color) { decorationColor_ = color; }
+
+        // Null: nothing. Else the whole line a range of this style starts on is tinted this color
+        // (text::LineAnnotation::lineBackground) - how an error line stands out.
+        const Color& lineBackgroundColor() const { return lineBackgroundColor_; }
+        void setLineBackgroundColor(const Color& color) { lineBackgroundColor_ = color; }
+
+        // Null: nothing. Else the text in a range of this style is drawn in this color composited (overlayComposite())
+        // over the color it would have had without it - the color of the range's own style, or of another range
+        // there, or the control's text color. A translucent background color in SrcOver fades the text toward the
+        // background and keeps its hue, which a plain `color` cannot do. Where two overlays cover the same text the
+        // later one wins.
+        const Color& overlayColor() const { return overlayColor_; }
+        void setOverlayColor(const Color& color) { overlayColor_ = color; }
+
+        CompositeMode overlayComposite() const { return overlayComposite_; }
+        void setOverlayComposite(CompositeMode mode) { overlayComposite_ = mode; }
+
+    private:
+        std::string fontName_;
+        float fontSize_ = 0.0f;
+        bool bold_ = false;
+        bool italic_ = false;
+        bool underline_ = false;
+        bool strikethrough_ = false;
+        Color color_ = Color::null();
+        Color backgroundColor_ = Color::null();
+        text::TextDecorationKind decoration_ = text::TextDecorationKind::None;
+        Color decorationColor_ = Color::null();
+        Color lineBackgroundColor_ = Color::null();
+        Color overlayColor_ = Color::null();
+        CompositeMode overlayComposite_ = CompositeMode::SrcOver;
+    };
+
+    // Named TextStyles - a theme, say ("keyword", "string", "comment", ...). Owns its styles the
+    // way a View owns its children.
+    class TextStyleSheet : public Component {
+    public:
+        TextStyleSheet() = default;
+        ~TextStyleSheet() override;
+        TextStyleSheet(const TextStyleSheet&) = delete;
+        TextStyleSheet& operator=(const TextStyleSheet&) = delete;
+
+        // @reflect collection add=addStyle remove=removeStyle
+        const std::vector<TextStyle*>& styles() const { return styles_; }
+        // Takes ownership.
+        void addStyle(TextStyle* style);
+        // Detaches without deleting - the caller owns style again.
+        void removeStyle(TextStyle* style);
+
+        // The style named name, or nullptr (the first, if several share it).
+        TextStyle* style(const std::string& name) const;
+
+    private:
+        std::vector<TextStyle*> styles_;
+    };
+
+    namespace text {
+
+        // A range of text and the name of the TextStyle it's drawn in. A non-empty annotation is also
+        // shown after the end of the line the range starts on (see LineAnnotation), in the style's
+        // decoration color - or its text color when it has none. A style with a lineBackgroundColor()
+        // tints that line too, annotation or not.
+        struct TextStyleRange {
+            std::size_t start = 0;
+            std::size_t length = 0;
+            std::string style;
+            std::string annotation;
+        };
+
+        // What a TextControl draws for a set of styled ranges.
+        struct ExpandedTextStyles {
+            std::vector<TextColorRun> colorRuns;
+            std::vector<TextFontRun> fontRuns;
+            std::vector<TextDecoration> decorations;
+            std::vector<LineAnnotation> annotations;
+        };
+
+        // Resolves each range's style in sheet (ranges naming no style are skipped) into color runs,
+        // font runs and decorations - a background color becomes a Background decoration.
+        // `baseColor` is the color text has where no range colors it (the control's text color); with it null, an
+        // overlay (TextStyle::overlayColor()) has nothing to composite over there and leaves that text alone.
+        ExpandedTextStyles expandTextStyles(const TextStyleSheet& sheet, const std::vector<TextStyleRange>& ranges,
+                                            const Color& baseColor = Color::null());
+    }
+}

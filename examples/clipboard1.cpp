@@ -188,8 +188,8 @@ int main() {
     sourceSwatch->setDesiredSize(newui::Size(74.0f, 74.0f));
     sourceSwatch->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
     sourceSwatch->style().setBackgroundImage(sourceImage);
-    sourceSwatch->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    sourceSwatch->style().borderWidth = 1.0f;
+    sourceSwatch->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+    sourceSwatch->style().setBorderWidth(1.0f);
     imageRow->addChild(sourceSwatch);
 
     auto* copyImageButton = new newui::Button();
@@ -207,8 +207,8 @@ int main() {
     pastedSwatch->setDesiredSize(newui::Size(74.0f, 74.0f));
     pastedSwatch->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
     pastedSwatch->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-    pastedSwatch->style().borderFill = newui::Color::fromName("dimgray").toBLRgba32();
-    pastedSwatch->style().borderWidth = 1.0f;
+    pastedSwatch->style().setBorderFill(newui::Color::fromName("dimgray").toBLRgba32());
+    pastedSwatch->style().setBorderWidth(1.0f);
     imageRow->addChild(pastedSwatch);
 
     auto* resultRow = makeRow(28.0f);

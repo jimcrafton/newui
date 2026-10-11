@@ -1,8 +1,10 @@
 #include "newui/items.h"
+#include "newui/bundle.h"
 #include "newui/controllers.h"
 #include "newui/models.h"
 
 #include <any>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -92,6 +94,27 @@ TEST(TableController, DefaultItemClassNameIsTableItem) {
     EXPECT_EQ(controller.defaultItemClassName(), "TableItem");
 }
 
+// iconFor()/iconSize()/iconGap() - a plain ItemController/ListController/
+// TreeController/TableController has no icons at all by default (nullopt/
+// 0.0f), same "no behavior change for any existing caller" contract every
+// other virtual added to these classes has kept.
+TEST(ListController, IconForDefaultsToNulloptAndIconSizeIsZero) {
+    ListController controller;
+    EXPECT_FALSE(controller.iconFor(0).has_value());
+    EXPECT_FLOAT_EQ(controller.iconSize(), 0.0f);
+    EXPECT_FLOAT_EQ(controller.iconGap(), 6.0f);
+}
+
+TEST(TreeController, IconForDefaultsToNullopt) {
+    TreeController controller;
+    EXPECT_FALSE(controller.iconFor({0u}).has_value());
+}
+
+TEST(TableController, IconForDefaultsToNullopt) {
+    TableController controller;
+    EXPECT_FALSE(controller.iconFor(0, 0).has_value());
+}
+
 TEST(ListController, CreateItemReturnsNonNull) {
     ListController controller;
     ListItem* item = controller.createItem(0);
@@ -153,9 +176,10 @@ TEST(TreeController, CreateItemPoolsAndReuses) {
 // ---------------------------------------------------------------------
 
 TEST(TreeController, VisibleCountIsRootChildCountByDefaultAllCollapsed) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     ASSERT_EQ(controller.visibleCount(), 2u);
     EXPECT_EQ(controller.pathAt(0), (std::vector<std::size_t>{ 0u }));
@@ -163,9 +187,10 @@ TEST(TreeController, VisibleCountIsRootChildCountByDefaultAllCollapsed) {
 }
 
 TEST(TreeController, ExpandingANodeRevealsItsChildrenInPlace) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     controller.setExpanded({ 0u }, true);
 
@@ -177,9 +202,10 @@ TEST(TreeController, ExpandingANodeRevealsItsChildrenInPlace) {
 }
 
 TEST(TreeController, CollapsingHidesChildrenAgain) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     controller.toggleExpanded({ 0u });
     ASSERT_EQ(controller.visibleCount(), 4u);
@@ -189,9 +215,10 @@ TEST(TreeController, CollapsingHidesChildrenAgain) {
 }
 
 TEST(TreeController, VisibleIndexOfFindsAVisiblePathAndNulloptForAHiddenOne) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     EXPECT_EQ(controller.visibleIndexOf({ 0u, 0u }), std::nullopt) << "0/0 is hidden while 0 is collapsed";
 
@@ -201,9 +228,10 @@ TEST(TreeController, VisibleIndexOfFindsAVisiblePathAndNulloptForAHiddenOne) {
 }
 
 TEST(TreeController, OnDataChangedFiresWhenExpandStateActuallyChanges) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     int dataChangedCount = 0;
     controller.onDataChanged.add([&](TreeController&) {
@@ -222,9 +250,10 @@ TEST(TreeController, OnDataChangedFiresWhenExpandStateActuallyChanges) {
 }
 
 TEST(TreeController, TotalHeightItemOffsetAndIndexAtOverVisibleRows) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
     controller.setExpanded({ 0u }, true);  // 4 visible rows now
 
@@ -240,17 +269,19 @@ TEST(ListController, ItemCountIsZeroWithNoModel) {
 }
 
 TEST(ListController, ItemCountForwardsToModelSize) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     EXPECT_EQ(controller.itemCount(), model.rows.size());
 }
 
 TEST(ListController, OnDataChangedFiresWhenModelChanges) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     int dataChangedCount = 0;
     controller.onDataChanged.add([&](ListController&) {
@@ -278,9 +309,10 @@ TEST(ListController, ItemHeightDefaultsToDefaultItemHeightForEveryIndex) {
 }
 
 TEST(ListController, TotalHeightItemOffsetAndIndexAtAgreeForAUniformHeightList) {
-    StubListModel model;  // 3 rows
+    auto modelOwner = std::make_unique<StubListModel>();  // 3 rows
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
 
     EXPECT_FLOAT_EQ(controller.totalHeight(), 60.0f);
@@ -310,9 +342,10 @@ public:
 }  // namespace
 
 TEST(ListController, CustomizedItemHeightChangesTotalHeightItemOffsetAndIndexAt) {
-    StubListModel model;  // 3 rows: 0, 1, 2
+    auto modelOwner = std::make_unique<StubListModel>();  // 3 rows: 0, 1, 2
+    StubListModel& model = *modelOwner;
     DoubleHeightSecondRowController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setDefaultItemHeight(20.0f);
 
     // Row 0: [0, 20), row 1 (doubled): [20, 60), row 2: [60, 80).
@@ -338,14 +371,71 @@ TEST(ListItem, PaintWithNoModelDoesNotCrash) {
 }
 
 TEST(ListItem, PaintWithStubModelDoesNotCrash) {
-    StubListModel model;
+    auto modelOwner = std::make_unique<StubListModel>();
+    StubListModel& model = *modelOwner;
     ListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     ListItem* item = controller.createItem(1);
     ASSERT_NE(item, nullptr);
 
     item->paint(SharedContext(), Rect(0.0f, 0.0f, 64.0f, 20.0f), 1, controller);
+
+    controller.releaseItem(item);
+}
+
+// A ListController that actually returns an icon - real Bundle-resolved
+// SVG resource, same temp-file-under-resourcesDir() pattern test_bundle.cpp
+// uses for its own SVG tests. Written/removed per-test (via
+// IconReturningListModelFixture below) rather than once for the whole
+// file, so no test here depends on file-system state another test left
+// behind.
+class IconReturningListController : public ListController {
+public:
+    std::optional<std::string> iconFor(std::size_t /*index*/) const override {
+        return std::string("paintItemIconTest.svg");
+    }
+    float iconSize() const override { return 12.0f; }
+};
+
+class PaintItemIconFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        Bundle& bundle = Bundle::instance();
+        ::CreateDirectoryA(bundle.resourcesDir().c_str(), nullptr);
+        filePath_ = bundle.resourcesDir() + "\\paintItemIconTest.svg";
+        std::ofstream file(filePath_, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">"
+                "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    void TearDown() override {
+        ::DeleteFileA(filePath_.c_str());
+        ::RemoveDirectoryA(Bundle::instance().resourcesDir().c_str());
+    }
+
+    std::string filePath_;
+};
+
+TEST_F(PaintItemIconFixture, PaintItemIconReturnsZeroForNoResource) {
+    EXPECT_EQ(Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::nullopt, 12.0f, 6.0f), 0.0);
+}
+
+TEST_F(PaintItemIconFixture, PaintItemIconReturnsZeroForAResourceThatFailsToLoad) {
+    EXPECT_EQ(Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::string("NoSuchIcon.svg"), 12.0f, 6.0f), 0.0);
+}
+
+TEST_F(PaintItemIconFixture, PaintItemIconReturnsIconSizePlusGapForARealResource) {
+    double consumed = Item::paintItemIcon(SharedContext(), 0.0, 0.0, std::string("paintItemIconTest.svg"), 12.0f, 6.0f);
+    EXPECT_DOUBLE_EQ(consumed, 18.0);
+}
+
+TEST_F(PaintItemIconFixture, ListItemPaintWithAnIconReturningControllerDoesNotCrash) {
+    IconReturningListController controller;
+    ListItem* item = controller.createItem(0);
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedContext(), Rect(0.0f, 0.0f, 64.0f, 20.0f), 0, controller);
 
     controller.releaseItem(item);
 }
@@ -381,9 +471,10 @@ TEST(TreeItem, PaintWithNoModelDoesNotCrash) {
 }
 
 TEST(TreeItem, PaintForALeafAndAnExpandableNodeBothDoNotCrash) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     // Path {0} has children (expandable, draws a glyph); path {1} is a
     // leaf (no glyph, same reserved indent space).
@@ -399,13 +490,34 @@ TEST(TreeItem, PaintForALeafAndAnExpandableNodeBothDoNotCrash) {
 }
 
 TEST(TreeItem, PaintAtADeeperPathDoesNotCrash) {
-    StubTreeModel model;
+    auto modelOwner = std::make_unique<StubTreeModel>();
+    StubTreeModel& model = *modelOwner;
     TreeController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     controller.setExpanded({ 0u }, true);
 
     TreeItem* item = controller.createItem({ 0u, 1u });
     ASSERT_NE(item, nullptr);
     item->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), { 0u, 1u }, controller);
+    controller.releaseItem(item);
+}
+
+namespace {
+class IconReturningTreeController : public TreeController {
+public:
+    std::optional<std::string> iconFor(const std::vector<std::size_t>& /*path*/) const override {
+        return std::string("paintItemIconTest.svg");
+    }
+    float iconSize() const override { return 12.0f; }
+};
+}  // namespace
+
+TEST_F(PaintItemIconFixture, TreeItemPaintWithAnIconReturningControllerDoesNotCrash) {
+    IconReturningTreeController controller;
+    TreeItem* item = controller.createItem({});
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedContext(), Rect(0.0f, 0.0f, 100.0f, 20.0f), {}, controller);
+
     controller.releaseItem(item);
 }

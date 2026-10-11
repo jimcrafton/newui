@@ -134,12 +134,6 @@ SCOPE_NAMES = {
 }
 
 
-def same_file(cursor_file, path):
-    if cursor_file is None:
-        return False
-    return os.path.normcase(os.path.abspath(cursor_file.name)) == os.path.normcase(os.path.abspath(path))
-
-
 def qualified_name(cursor):
     parts = []
     node = cursor
@@ -316,6 +310,13 @@ def invoke_arg_type_unsupported(t):
     return not is_copy_constructible(t)
 
 
+# Whether a PARM_DECL cursor has a default argument - libclang's python binding exposes no
+# direct flag for it, but a default always shows up as a `=` token inside the parameter's own
+# extent (a parameter declaration has no other use for one).
+def has_default_argument(param_cursor):
+    return any(token.spelling == "=" for token in param_cursor.get_tokens())
+
+
 def has_unsupported_invoke_arg(cursor):
     return any(invoke_arg_type_unsupported(arg.type) for arg in cursor.get_arguments())
 
@@ -477,8 +478,12 @@ def has_reflect_friend(class_cursor):
 # "@reflect ignore=true" and "@reflect property"/"@reflect collection") -
 # a bare key's captured value is None, mapped to "true" by
 # reflect_annotations() below, same as an explicit "=true" would be.
+# Value group also allows "," (unlike a bare key) - needed for
+# "@reflect tags=filepath,pathlike" (see PropertyAccessor.tags); every
+# other annotation's value stays a plain identifier, and "," in one just
+# rides along unused.
 REFLECT_ANNOTATION_PAIR_RE = re.compile(
-    r"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*([A-Za-z_][A-Za-z_0-9]*))?"
+    r"([A-Za-z_][A-Za-z_0-9]*)(?:\s*=\s*([A-Za-z_][A-Za-z_0-9,]*))?"
 )
 
 
@@ -533,17 +538,44 @@ def is_reflect_flags(cursor):
     return reflect_annotations(cursor).get("flags", "").lower() == "true"
 
 
+# "@reflect stringvalue" right above a class/struct opts it into
+# ClassBuilder<T>::stringValue() (reflection.h) - a genuine value type with
+# its own total, round-trippable single-string form (e.g. Color's
+# "#rrggbbaa"/CSS-name/UIColorRole forms - Color::fromString()/toString())
+# reads/writes as that plain string wherever an ordinary nested object of
+# its own properties/fields would otherwise be expected, instead of the
+# usual "{type:...}" object. Same "always explicit, never guessed" reasoning
+# is_reflect_flags() above already uses - merely *having* a toString()/
+# fromString() pair (for unrelated reasons, e.g. logging/debugging) doesn't
+# imply this; T must actually have the exact `static bool fromString(const
+# std::string&, T&)` / `std::string toString() const` shape ClassBuilder<T>::
+# stringValue() requires, or the generated registration simply fails to
+# compile - reflectgen doesn't verify that shape itself, same as it doesn't
+# verify a constructor annotation names a real constructor.
+def is_reflect_string_value(cursor):
+    return reflect_annotations(cursor).get("stringvalue", "").lower() == "true"
+
+
 class Field:
-    def __init__(self, name, scope, is_static):
+    def __init__(self, name, scope, is_static, connect=False, via_thief=False, defVal=None):
         self.name = name
         self.scope = scope
         self.is_static = is_static
+        # From "//@reflect connect=true" - see Field::needsConnection().
+        self.connect = connect
+        # A non-public connect field in a class with no NEWUI_REFLECT_PRIVATE():
+        # reached through detail::AccessThief instead of a friend ClassAccess.
+        self.via_thief = via_thief
+        self.defVal = defVal
 
 
 class DelegateField:
-    def __init__(self, name, scope):
+    def __init__(self, name, scope, tags=None):
         self.name = name
         self.scope = scope
+        # From "@reflect tags=..." on the delegate field itself - see
+        # PropertyAccessor.tags's own comment.
+        self.tags = tags or []
 
 
 class Method:
@@ -576,7 +608,7 @@ class BaseInfo:
 class PropertyAccessor:
     def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous,
                  setter_name, setter_arg_type=None, setter_ambiguous=False, setter_is_const=False,
-                 assume_copyable=True):
+                 assume_copyable=True, tags=None):
         self.key = key  # the property's own name, e.g. "name", "visible", "bounds"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "getName", "isVisible", "style"
@@ -606,6 +638,12 @@ class PropertyAccessor:
         # collect_property_accessors()'s own comment on why this only ever
         # happens for an addressable getter.
         self.assume_copyable = assume_copyable
+        # From "@reflect tags=filepath,pathlike" on the getter - semantic
+        # hints a consumer (e.g. cpp_codetools's PropertyEditorRegistry)
+        # can key an editor off directly, since the property's own C++
+        # type (e.g. plain std::string) often isn't distinctive enough on
+        # its own. Empty for the overwhelming majority of properties.
+        self.tags = tags or []
 
 
 # A collection reachable only through a whole-container-returning accessor
@@ -619,7 +657,8 @@ class PropertyAccessor:
 # a getter/add/remove triple can't be told apart from three unrelated
 # methods by shape alone.
 class CollectionAccessor:
-    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, add_name, remove_name):
+    def __init__(self, key, scope, getter_name, getter_return_type, getter_is_const, ambiguous, add_name, remove_name,
+                 add_expr=None, remove_expr=None):
         self.key = key  # the collection's own name, e.g. "childViews"
         self.scope = scope
         self.getter_name = getter_name  # real C++ method name, e.g. "childViews"
@@ -628,6 +667,10 @@ class CollectionAccessor:
         self.ambiguous = ambiguous  # see PropertyAccessor.ambiguous - same selectOverload<>() reasoning
         self.add_name = add_name  # real C++ method name, or None (enumerate-only, no add)
         self.remove_name = remove_name  # real C++ method name, or None (enumerate-only, no remove)
+        # Member-pointer expressions for add/remove - selectOverload<>()-wrapped when the name is
+        # overloaded (e.g. MenuItem::addChild(MenuItem*) beside addChild(unique_ptr<MenuItem>)).
+        self.add_expr = add_expr
+        self.remove_expr = remove_expr
 
 
 class ClassInfo:
@@ -641,6 +684,26 @@ class ClassInfo:
         self.collection_accessors = []
         self.ctors = []
         self.bases = []
+        # From "@reflect tags=..." directly above the class declaration -
+        # see PropertyAccessor.tags's own comment for the general idea.
+        self.tags = []
+        # From "@reflect category=..." directly above the class
+        # declaration - see Class::categories()'s own comment
+        # (reflection.h). Same comma-separated shape as self.tags.
+        self.categories = []
+        # From "@reflect proxy=<ClassName>"/"@reflect proxyfor=<ClassName>" -
+        # see Class::proxy()/proxyFor()'s own comments (reflection.h).
+        # Empty string ("") for a class with no proxy relationship, same
+        # "absent means empty, not None" convention self.tags already uses.
+        self.proxy = ""
+        self.proxy_for = ""
+        # The file the class is defined in, and (set by generate()) how a file includes it.
+        self.header_file = ""
+        self.header = ""
+        # From "@reflect stringvalue" directly above the class declaration -
+        # see Class::isStringValue()'s own comment (reflection.h) and
+        # is_reflect_string_value()'s own comment above.
+        self.string_value = False
 
 
 class EnumValue:
@@ -1149,8 +1212,10 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             if not has_matching_backing_member(stem, getter_cursor.result_type.spelling, fields):
                 continue  # not enough signal - stays a plain .method()
 
-        annotation_value = reflect_annotations(getter_cursor).get("property", "true")
+        annotations = reflect_annotations(getter_cursor)
+        annotation_value = annotations.get("property", "true")
         key = derive_property_key(getter_name) if annotation_value.lower() == "true" else annotation_value
+        tags = [t for t in annotations.get("tags", "").split(",") if t]
 
         # setter_ambiguous covers both the ordinary "this setter name also
         # has other overloads" case and the same-name-as-the-getter
@@ -1184,6 +1249,7 @@ def collect_property_accessors(method_cursors_by_name, fields, consumed, class_n
             setter_ambiguous=setter_ambiguous,
             setter_is_const=setter_is_const,
             assume_copyable=assume_copyable,
+            tags=tags,
         ))
 
         # Every overload sharing getter_name (not just the chosen one) - a
@@ -1236,7 +1302,7 @@ def is_add_remove_shaped(cursor):
 # and the shape being assembled (getter+add+remove vs. getter+setter) are
 # different enough that sharing the loop body would need as much branching
 # as just writing two loops.
-def collect_collection_accessors(method_cursors_by_name, consumed):
+def collect_collection_accessors(method_cursors_by_name, consumed, class_name):
     accessors = []
 
     for getter_name, cursors in method_cursors_by_name.items():
@@ -1267,6 +1333,16 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
         add_cursor = find_method(annotations.get("add"))
         remove_cursor = find_method(annotations.get("remove"))
 
+        def member_expr(cursor):
+            if cursor is None:
+                return None
+            target = f"&{class_name}::{cursor.spelling}"
+            if len(method_cursors_by_name.get(cursor.spelling, [])) <= 1:
+                return target
+            arg_type = qualify_type_spelling(next(cursor.get_arguments()).type)
+            const_suffix = " const" if cursor.is_const_method() else ""
+            return f"selectOverload<void ({class_name}::*)({arg_type}){const_suffix}>({target})"
+
         accessors.append(CollectionAccessor(
             key=key,
             scope=SCOPE_NAMES[AccessSpecifier.PUBLIC],
@@ -1276,6 +1352,8 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
             ambiguous=len(cursors) > 1,
             add_name=add_cursor.spelling if add_cursor else None,
             remove_name=remove_cursor.spelling if remove_cursor else None,
+            add_expr=member_expr(add_cursor),
+            remove_expr=member_expr(remove_cursor),
         ))
 
         consumed.update(cursors)
@@ -1286,11 +1364,63 @@ def collect_collection_accessors(method_cursors_by_name, consumed):
 
     return accessors
 
+def get_initializer_string(cursor):
+    """
+    Extracts the source tokens for the initialization part of a field,
+    ignoring NamespaceRef, TypeRef, and TemplateRef children.
+    """
+    tokens = list(cursor.get_tokens())
+    children = list(cursor.get_children())
+    
+    if not children:
+        return None
+
+    # Filter out type/namespace reference nodes to find the actual expression
+    ignored_kinds = {
+        CursorKind.NAMESPACE_REF,
+        CursorKind.TYPE_REF,
+        CursorKind.TEMPLATE_REF
+    }
+    
+    # The initializer expression is typically the last child, 
+    # or the first child that isn't a type/namespace reference.
+    expr_child = None
+    for child in children:
+        if child.kind not in ignored_kinds:
+            expr_child = child
+            break
+
+    if not expr_child:
+        return None
+
+    # Get the source range of the actual initializer expression
+    init_range = expr_child.extent
+    
+    # Extract only the tokens that fall within the initializer's range
+    init_tokens = []
+    for token in tokens:
+        if token.extent.start.offset >= init_range.start.offset and \
+           token.extent.end.offset <= init_range.end.offset:
+            init_tokens.append(token.spelling.strip())
+            
+    # Clean up formatting for brace initializers if needed
+    result = "".join(init_tokens)
+    # Simple formatting cleanup for braced/assignment init
+    result = result.replace("{ ", "{").replace(" }", "}").strip()
+    
+    return result
+
 
 def collect_class(cursor):
     name = qualified_name(cursor)
     has_friend = has_reflect_friend(cursor)
     info = ClassInfo(name, has_friend)
+    info.tags = [t for t in reflect_annotations(cursor).get("tags", "").split(",") if t]
+    info.categories = [c for c in reflect_annotations(cursor).get("category", "").split(",") if c]
+    info.proxy = reflect_annotations(cursor).get("proxy", "")
+    info.proxy_for = reflect_annotations(cursor).get("proxyfor", "")
+    info.header_file = cursor.location.file.name if cursor.location.file else ""
+    info.string_value = is_reflect_string_value(cursor)
 
     method_name_counts = {}
     method_cursors = []
@@ -1316,15 +1446,22 @@ def collect_class(cursor):
 
     consumed_by_accessors = set()
     info.property_accessors = collect_property_accessors(method_cursors_by_name, field_cursors, consumed_by_accessors, name)
-    info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors)
+    info.collection_accessors = collect_collection_accessors(method_cursors_by_name, consumed_by_accessors, name)
 
     for child in cursor.get_children():
         kind = child.kind
         access = child.access_specifier
 
         if kind == CursorKind.FIELD_DECL:
-            if access != AccessSpecifier.PUBLIC and not info.has_friend:
+            connect = reflect_annotations(child).get("connect", "").lower() == "true"
+            if access != AccessSpecifier.PUBLIC and not info.has_friend and not connect:
                 continue
+            via_thief = connect and access != AccessSpecifier.PUBLIC and not info.has_friend
+            if connect and not is_pointer_to_class(child.type):
+                sys.stderr.write(
+                    f"reflectgen: '{name}.{child.spelling}' is marked connect=true but isn't a "
+                    "pointer to a class; RootController won't bind it.\n"
+                )
             if child.type.is_const_qualified():
                 # ClassBuilder::field()'s ValueT T::* overload (reflection.h)
                 # always builds a TypedMemberField<T, ValueT> - unconditionally
@@ -1371,7 +1508,8 @@ def collect_class(cursor):
             ):
                 # Never a Property, even though it's a member variable -
                 # see Delegate's class comment in reflection.h.
-                info.delegates.append(DelegateField(child.spelling, SCOPE_NAMES[access]))
+                delegate_tags = [t for t in reflect_annotations(child).get("tags", "").split(",") if t]
+                info.delegates.append(DelegateField(child.spelling, SCOPE_NAMES[access], tags=delegate_tags))
             elif is_delegate_field_type(child.type):
                 # Still a real Delegate<...> field, just either with a
                 # Sender fixed to some other class (see
@@ -1386,7 +1524,12 @@ def collect_class(cursor):
                 # Delegate-specific connect/invoke API.
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
             else:
-                info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False))
+                defaultval = get_initializer_string(child)
+                if defaultval is not None:
+                    sys.stderr.write(f"'{name}.{child.spelling}' default val: {defaultval}\n");
+
+                info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=False,
+                                         connect=connect, via_thief=via_thief, defVal=defaultval))
 
         elif kind == CursorKind.VAR_DECL and child.semantic_parent == cursor:
             if access == AccessSpecifier.PUBLIC or info.has_friend:
@@ -1400,6 +1543,7 @@ def collect_class(cursor):
                         "ClassBuilder::field() has no read-only variant; not registered.\n"
                     )
                     continue
+
                 info.fields.append(Field(child.spelling, SCOPE_NAMES[access], is_static=True))
 
         elif kind == CursorKind.CXX_METHOD and child in method_cursors:
@@ -1466,8 +1610,19 @@ def collect_class(cursor):
                     "isn't copy-constructible); not registered.\n"
                 )
                 continue
-            arg_types = [qualify_type_spelling(a.type) for a in child.get_arguments()]
-            info.ctors.append(Ctor(arg_types))
+            args = list(child.get_arguments())
+            arg_types = [qualify_type_spelling(a.type) for a in args]
+            # A constructor with defaulted trailing parameters is callable with fewer
+            # arguments too - `explicit TabControl(TabAlignment = Top)` is also a default
+            # constructor - so register every arity from the required count up to the full list.
+            # Without this, Class::createInstance() with no arguments (the Toolbox, the .newui
+            # Reader, ...) finds nothing to call for such a class. Prefixes of a supported
+            # signature are always supported themselves, and duplicates (an explicit T() beside a
+            # defaulted one) collapse to one entry.
+            required = sum(1 for a in args if not has_default_argument(a))
+            for arity in range(required, len(arg_types) + 1):
+                if not any(existing.arg_types == arg_types[:arity] for existing in info.ctors):
+                    info.ctors.append(Ctor(arg_types[:arity]))
 
         elif kind == CursorKind.CXX_BASE_SPECIFIER:
             # child.type is the base *as named in the specifier* (e.g. could
@@ -1525,11 +1680,25 @@ def collect_enum(cursor):
     return info
 
 
-def find_declarations(tu, path):
-    classes = []
-    enums = []
+# Walks the combined TU exactly once for every input file, instead of once
+# per file - find_declarations() used to take a single `path` and re-run
+# visit(tu.cursor) from scratch for each of main()'s valid_paths, filtering
+# by same_file() at the leaves; that's O(len(valid_paths) x size of the
+# whole combined TU) instead of O(size of the TU), and dominated real
+# reflectgen runs (60+ files -> 60x redundant top-to-bottom walks of every
+# namespace, including everything pulled in by the shared newui.h/STL/
+# Windows.h preamble). One pass here buckets each matched class/enum by
+# its own declaring file up front instead.
+def find_declarations(tu, valid_paths):
+    path_by_key = {os.path.normcase(os.path.abspath(p)): p for p in valid_paths}
+    results = {p: ([], []) for p in valid_paths}
 
-    def collect_nested_enums(class_cursor):
+    def path_for(cursor_file):
+        if cursor_file is None:
+            return None
+        return path_by_key.get(os.path.normcase(os.path.abspath(cursor_file.name)))
+
+    def collect_nested_enums(class_cursor, enums):
         for child in class_cursor.get_children():
             if child.kind == CursorKind.ENUM_DECL and child.is_definition():
                 # A private/protected nested enum's name isn't spellable
@@ -1558,26 +1727,53 @@ def find_declarations(tu, path):
                 if is_reflect_ignored(child):
                     continue
 
-                if child.is_definition() and same_file(child.location.file, path):
-                    classes.append(collect_class(child))
-                    collect_nested_enums(child)
+                if child.is_definition():
+                    path = path_for(child.location.file)
+                    if path is not None:
+                        classes, enums = results[path]
+                        classes.append(collect_class(child))
+                        collect_nested_enums(child, enums)
             elif child.kind == CursorKind.ENUM_DECL:
-                if child.is_definition() and same_file(child.location.file, path):
-                    enums.append(collect_enum(child))
+                if child.is_definition():
+                    path = path_for(child.location.file)
+                    if path is not None:
+                        results[path][1].append(collect_enum(child))
             elif child.kind in (CursorKind.NAMESPACE, CursorKind.TRANSLATION_UNIT):
                 visit(child)
 
     visit(tu.cursor)
-    return classes, enums
+    return results
+
+
+def is_pointer_to_class(clang_type):
+    canonical = clang_type.get_canonical()
+    if canonical.kind != cindex.TypeKind.POINTER:
+        return False
+    return canonical.get_pointee().get_canonical().kind == cindex.TypeKind.RECORD
+
+
+def thief_tag(info, m):
+    return "AccessThiefTag_" + re.sub(r"\W", "_", info.name) + "_" + m.name
 
 
 def emit_class_access(info):
     private_members = [m for m in (info.fields + info.delegates) if m.scope != "Scope::Public"]
     if not private_members:
         return ""
-    lines = [f"template<> struct newui::reflection::detail::ClassAccess<{info.name}> {{"]
+    lines = []
+    # Explicit instantiation ignores access checks - see detail::AccessThief.
     for m in private_members:
-        lines.append(f"    static constexpr auto {m.name}() {{ return &{info.name}::{m.name}; }}")
+        if getattr(m, "via_thief", False):
+            tag = thief_tag(info, m)
+            # The tag must live in the same namespace as AccessThief's friend definition.
+            lines.append(f"namespace newui::reflection::detail {{ struct {tag} {{ friend constexpr auto accessThiefGet({tag}); }}; }}")
+            lines.append(f"template struct newui::reflection::detail::AccessThief<newui::reflection::detail::{tag}, &{info.name}::{m.name}>;")
+    lines.append(f"template<> struct newui::reflection::detail::ClassAccess<{info.name}> {{")
+    for m in private_members:
+        if getattr(m, "via_thief", False):
+            lines.append(f"    static constexpr auto {m.name}() {{ return accessThiefGet(newui::reflection::detail::{thief_tag(info, m)}{{}}); }}")
+        else:
+            lines.append(f"    static constexpr auto {m.name}() {{ return &{info.name}::{m.name}; }}")
     lines.append("};")
     return "\n".join(lines) + "\n\n"
 
@@ -1686,6 +1882,24 @@ def emit_register_function(info,function_listing):
         # as a hand-written registration function would via derived(true).
         chain.append(".derived(true)")
 
+    if info.tags:
+        tags_expr = "{" + ", ".join(f'"{t}"' for t in info.tags) + "}"
+        chain.append(f".tags({tags_expr})")
+
+    if info.categories:
+        categories_expr = "{" + ", ".join(f'"{c}"' for c in info.categories) + "}"
+        chain.append(f".categories({categories_expr})")
+
+    if info.proxy:
+        chain.append(f'.proxy("{info.proxy}")')
+    if info.proxy_for:
+        chain.append(f'.proxyFor("{info.proxy_for}")')
+    if info.header:
+        chain.append(f'.header("{info.header}")')
+
+    if info.string_value:
+        chain.append(".stringValue()")
+
     # A plain member variable with no accessor methods at all - static or
     # not - is a Field, never a Property (see Field's own "raw access,
     # never through a method" comment in reflection.h) - `&Class::name`
@@ -1696,16 +1910,26 @@ def emit_register_function(info,function_listing):
     # anymore, only is_static's value (kept on Field for anyone reading
     # collect_class()'s output, unused in codegen past this point).
     for f in info.fields:
-        if f.scope == "Scope::Public":
-            chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+        if f.defVal is None:
+            if f.scope == "Scope::Public":
+                chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+            else:
+                chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
         else:
-            chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
+            if f.scope == "Scope::Public":
+                chain.append(f'.field("{f.name}", {f.scope}, &{info.name}::{f.name})')
+            else:
+                chain.append(f'.field("{f.name}", {f.scope}, detail::ClassAccess<{info.name}>::{f.name}())')
+        if f.connect:
+            chain.append(".connect()")
 
     for d in info.delegates:
-        if d.scope == "Scope::Public":
-            chain.append(f'.delegate("{d.name}", {d.scope}, &{info.name}::{d.name})')
+        delegate_ref = f"&{info.name}::{d.name}" if d.scope == "Scope::Public" else f"detail::ClassAccess<{info.name}>::{d.name}()"
+        if d.tags:
+            tags_expr = "{" + ", ".join(f'"{t}"' for t in d.tags) + "}"
+            chain.append(f'.delegate("{d.name}", {d.scope}, {delegate_ref}, {tags_expr})')
         else:
-            chain.append(f'.delegate("{d.name}", {d.scope}, detail::ClassAccess<{info.name}>::{d.name}())')
+            chain.append(f'.delegate("{d.name}", {d.scope}, {delegate_ref})')
 
     for pa in info.property_accessors:
         getter_expr = emit_property_getter_expr(info, pa)
@@ -1713,11 +1937,20 @@ def emit_register_function(info,function_listing):
         # TypedProperty AssumeCopyable override off - see PropertyAccessor.
         # assume_copyable's own comment for when/why.
         property_call = ".property" if pa.assume_copyable else ".property<false>"
+        tags_expr = None
+        if pa.tags:
+            tags_expr = "{" + ", ".join(f'"{t}"' for t in pa.tags) + "}"
         if pa.setter_name:
             setter_expr = emit_property_setter_expr(info, pa)
-            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr}, {setter_expr})')
+            args = [f'"{pa.key}"', pa.scope, getter_expr, setter_expr]
         else:
-            chain.append(f'{property_call}("{pa.key}", {pa.scope}, {getter_expr})')
+            # tags needs the setter slot filled explicitly to reach its
+            # own trailing position - ClassBuilder::property()'s setter
+            # parameter comes before tags positionally (reflection.h).
+            args = [f'"{pa.key}"', pa.scope, getter_expr] + (["nullptr"] if tags_expr else [])
+        if tags_expr:
+            args.append(tags_expr)
+        chain.append(f'{property_call}({", ".join(args)})')
 
     # add_name without remove_name (or vice versa) is legal - a read-only
     # add, or an enumerate-only collection with neither - so args is built
@@ -1729,7 +1962,7 @@ def emit_register_function(info,function_listing):
         getter_expr = emit_property_getter_expr(info, ca)
         args = [f'"{ca.key}"', ca.scope, getter_expr]
         if ca.add_name:
-            args.append(f"&{info.name}::{ca.add_name}")
+            args.append(ca.add_expr or f"&{info.name}::{ca.add_name}")
         if ca.remove_name:
             if not ca.add_name:
                 # ClassBuilder::propertyCollection()'s remove parameter
@@ -1737,7 +1970,7 @@ def emit_register_function(info,function_listing):
                 # (no add_name) still has to fill that slot with an
                 # explicit nullptr to reach remove.
                 args.append("nullptr")
-            args.append(f"&{info.name}::{ca.remove_name}")
+            args.append(ca.remove_expr or f"&{info.name}::{ca.remove_name}")
         chain.append(f".propertyCollection({', '.join(args)})")
 
     for m in info.methods:
@@ -1825,7 +2058,30 @@ def enclosing_namespace(qualified_name_str):
     return qualified_name_str.rsplit("::", 1)[0]
 
 
-def generate(classes, enums, sources, extra_includes, register_function_name=DEFAULT_REGISTER_FUNCTION_NAME):
+def include_spelling(header_file, include_dirs):
+    """How a file includes header_file: its path relative to the deepest of include_dirs (the -I
+    directories) that contains it, in angle brackets - "<newui/controls.h>". "" if it is under none of
+    them (no honest spelling exists then). The path keeps its own case; only the comparison ignores it."""
+    if not header_file:
+        return ""
+    target = os.path.abspath(header_file)
+    target_key = os.path.normcase(target)
+    best = None
+    for directory in include_dirs:
+        base_key = os.path.normcase(os.path.abspath(directory)) + os.sep
+        if target_key.startswith(base_key):
+            relative = target[len(base_key):]
+            if best is None or len(relative) < len(best):
+                best = relative
+    if best is None:
+        return ""
+    return "<" + best.replace(os.sep, "/") + ">"
+
+
+def generate(classes, enums, sources, extra_includes, register_function_name=DEFAULT_REGISTER_FUNCTION_NAME,
+             include_dirs=()):
+    for info in classes:
+        info.header = include_spelling(info.header_file, include_dirs)
     out = []
     out.append("// Generated by reflectgen (tools/reflectgen) - see tools/reflectgen/README.md.")
     out.append("// Source: " + ", ".join(sources))
@@ -1900,7 +2156,7 @@ def generate(classes, enums, sources, extra_includes, register_function_name=DEF
 
     out.append("")
 
-    out.append(f"void {register_function_name}()")
+    out.append(f"void {register_function_name}Impl()")
     out.append("{\n")
 
     for funcname in order_registration_calls(function_listing):
@@ -1909,6 +2165,26 @@ def generate(classes, enums, sources, extra_includes, register_function_name=DEF
     #out.append("\n")
     #out.append(f"\tReflectionRegistry::addInitFunction(&{register_function_name});")
 
+    out.append("}\n\n")
+
+    # Guards against being called more than once per process -
+    # ReflectionRegistry::registerClass() replaces (deletes) an already-
+    # registered Class on a second call, which would dangle any const
+    # Class* a caller captured from the first registration (real bug: two
+    # independent call sites in cpp_codetools each called this directly,
+    # and the second replaced Class objects CodeToolsVsix::
+    # ToolboxRegistry::categories() had already cached pointers into). A
+    # function-local static's initializer is guaranteed exactly-once and
+    # thread-safe by the C++11 standard itself - no separate mutex needed,
+    # unlike a hand-rolled "if (!flag) { flag = true; ... }" guard, which
+    # would race under concurrent first calls.
+    out.append(f"void {register_function_name}()")
+    out.append("{")
+    out.append("\tstatic bool registered = []() {")
+    out.append(f"\t\t{register_function_name}Impl();")
+    out.append("\t\treturn true;")
+    out.append("\t}();")
+    out.append("\t(void)registered;")
     out.append("}\n\n")
     return "\n".join(out)
 
@@ -2135,6 +2411,13 @@ def main():
         # system libclang is 19.1.0. See reflectgen's README for the
         # LLVM-upgrade alternative to this bypass.
         clang_args = clang_args + ["-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH"]
+    if not any("_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION" in a for a in clang_args):
+        # Newer MSVC STLs (14.51+, __msvc_doom_core.hpp) define their
+        # "doom function" as __builtin_verbose_trap whenever __clang__ is
+        # set - a libclang too old to know that builtin (e.g. the PyPI
+        # fallback) then fails to parse <xmemory>/<xcall_once.h>. We only
+        # parse, never compile, so route it through abort() instead.
+        clang_args = clang_args + ["-D_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION"]
     if "-fparse-all-comments" not in clang_args:
         # Without this, libclang only attaches a "doxygen-style" comment
         # (///, /** */, //!) to a cursor's raw_comment - a plain "//"
@@ -2167,7 +2450,7 @@ def main():
     # being parsed as their own standalone translation unit the way this
     # function used to. Combining everything into one prelude gives every
     # type the same visibility a real translation unit already has -
-    # find_declarations()'s existing same_file() check still correctly
+    # find_declarations()'s own per-declaration file check still correctly
     # attributes each declaration back to its own real source file
     # afterward, so per-file output is unaffected, only *how* parsing gets
     # there. (Also meaningfully faster in practice - libclang parses the
@@ -2214,8 +2497,9 @@ def main():
             )
             sys.exit(1)
 
+        declarations_by_path = find_declarations(tu, valid_paths)
         for path in valid_paths:
-            classes, enums = find_declarations(tu, path)
+            classes, enums = declarations_by_path[path]
             all_classes.extend(classes)
             all_enums.extend(enums)
     finally:
@@ -2233,7 +2517,8 @@ def main():
     # regardless of how many inputs (files or directories) were scanned.
     # The "Source:" comment lists what was passed on the command line
     # (args.inputs), not the (possibly much longer) expanded file list.
-    output = generate(all_classes, all_enums, args.inputs, args.include, args.register_function)
+    include_dirs = [a[2:] for a in clang_args if a.startswith("-I") and len(a) > 2]
+    output = generate(all_classes, all_enums, args.inputs, args.include, args.register_function, include_dirs)
 
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(output)

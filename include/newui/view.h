@@ -7,8 +7,10 @@
 
 #include <newui/newui.h>
 #include <newui/command.h>
+#include <newui/component.h>
 #include <newui/cursor.h>
 #include <newui/delegate.h>
+#include <newui/displayunit.h>
 #include <newui/dragndrop.h>
 #include <newui/geometry.h>
 #include <newui/layout.h>
@@ -28,8 +30,17 @@ namespace newui {
     // owns via a raw pointer (a parent's childViews_, PropertyManager's
     // properties_, Frame's rootView_, ...) and frees explicitly - see
     // View::destroy().
-    class View {
+    class View : public Component {
     public:
+        // Both write parent_ directly (a plain protected-field assignment, not routed through
+        // setParent() - see that method's own comment for why) in their own addChild()/
+        // removeChild() overrides - RootView/SubView are sibling classes, so without this,
+        // C++'s protected-access rule ("only through an object of the accessing class's own
+        // type or further derived") blocks RootView from touching a field it only inherits
+        // via the common View base when reached through a SubView* (a real, compiler-caught
+        // error, not a style choice).
+        friend class RootView;
+        friend class SubView;
 
         View();
 
@@ -91,20 +102,43 @@ namespace newui {
             visible_ = visible;
         }
 
+        // Whether the layout of this View's parent leaves it out entirely. An ignored child stays
+        // in childViews() - so it is painted in child order (add it last to have it on top) and
+        // hit-tested by its own bounds like any other child - but no Layout positions it, sizes it,
+        // counts it (flex lines, grid tracks, card pages) or hides it: it just sits at exactly the
+        // bounds it was given. For an overlay that floats over a laid-out area (a find bar over an
+        // editor), placed by whoever owns it. Off by default. Changing it re-runs the parent's
+        // layout, so the other children reflow to fill (or give up) the space. A reflected property,
+        // so a saved document and the designer can set it.
+        bool isLayoutIgnored() const {
+            return layoutIgnored_;
+        }
+        void setLayoutIgnored(bool ignored);
+
         // If this View is already attached to a RootView (rootView() !=
         // nullptr) and name is non-empty, reserves it in that RootView's
         // NameManager (rootView()->nameManager()) so a later auto-
         // generated default name (see RootView::generateDefaultName())
         // never collides with a hand-assigned one - see view.cpp; needs
         // RootView's full definition, so this can't stay inline here.
+        // Overrides Component::setName() to also reserve the name in
+        // this View's RootView (if attached) - defined in view.cpp,
+        // needs RootView's full definition. Redeclares name() too so
+        // reflectgen pairs a real getter+setter on View itself, same
+        // reason setBounds()/setVisible() above are redeclared here.
         void setName(const std::string& name);
-
-        std::string name() const {
-            return name_;
-        }
+        std::string name() const { return Component::name(); }
 
         virtual void addChild(SubView* child);
         virtual void removeChild(SubView* child);
+
+        // Moves an already-attached child to a new index within childViews(), without
+        // detaching/reattaching it - needed for a reorder gesture (e.g. dragging a
+        // FlexLayout sibling past another) to change order alone, not identity/focus/
+        // selection the way a removeChild()+addChild() pair would. newIndex is clamped
+        // to the valid range after the move; a no-op if child isn't a direct child of
+        // this View. Calls updateLayout() same as addChild()/removeChild().
+        virtual void reorderChild(SubView* child, std::size_t newIndex);
 
         // Read-only view of this View's direct children, in the order
         // addChild() attached them - what a Layout arranges (see
@@ -131,6 +165,17 @@ namespace newui {
         View* findView(const std::string& name);
         const View* findView(const std::string& name) const;
 
+        // findView() and a dynamic_cast in one call: nullptr if nothing is named name or the
+        // match isn't a T.
+        template<typename T>
+        T* findView(const std::string& name) {
+            return dynamic_cast<T*>(findView(name));
+        }
+        template<typename T>
+        const T* findView(const std::string& name) const {
+            return dynamic_cast<const T*>(findView(name));
+        }
+
         Layout* layout() const {
             return layout_.get();
         }
@@ -150,7 +195,39 @@ namespace newui {
         // never needs to call this directly; it's exposed for the rare
         // case of forcing a re-arrange without either of those (e.g.
         // after mutating a child's LayoutParams in place).
-        void updateLayout();
+        // Virtual so a view that arranges its own chrome (ScrollView) gets the full update however
+        // it's called - through a View& included.
+        virtual void updateLayout();
+
+        // True while this View's updateLayout() is running. A child's setVisible() re-runs its parent's
+        // layout (a hidden child is left out of it), but not from inside a pass that is already
+        // positioning it - Layout::arrange() implementations (CardLayout) and ScrollView toggle child
+        // visibility as part of the pass itself.
+        bool isLayingOut() const {
+            return layingOut_;
+        }
+
+        // Marks `view` as laying out for its scope. Every updateLayout() that does real work holds one
+        // (the base one, and ScrollView's override).
+        class LayoutPass {
+        public:
+            explicit LayoutPass(View& view) : view_(view), outer_(view.layingOut_) {
+                view_.layingOut_ = true;
+            }
+            ~LayoutPass() {
+                view_.layingOut_ = outer_;
+            }
+            LayoutPass(const LayoutPass&) = delete;
+            LayoutPass& operator=(const LayoutPass&) = delete;
+
+        private:
+            View& view_;
+            bool outer_;
+        };
+
+        // Marks this View and every descendant Destroying (Component::isDestroying()) - destroy()
+        // does this first, so tearing the tree down never lays out or resizes what is going away.
+        void markDestroying();
 
         ViewStyle& style() {
             return *style_;
@@ -178,12 +255,41 @@ namespace newui {
             return highlighted_;
         }
 
-        // Draws background/border/highlight from style() - see ViewStyle.
-        // Called automatically before paint() by whatever's orchestrating
-        // the draw (paintChildren() for children, RootView::repaint() for
-        // itself), so it always runs first without subclasses needing to
-        // remember to call it.
+        // Whether this View is the RootView's current focusedSubView()
+        // (rootview.h) right now - computed live from that, not a stored
+        // flag, so it can never drift out of sync with the real focus
+        // state the way a cached bool toggled from onGotFocus/onLostFocus
+        // could. Needs RootView's full definition, so this can't stay
+        // inline here - same reasoning setName() above is out-of-line
+        // (view.cpp). ViewStyle::postPaint()'s own default implementation
+        // (viewstyle.h) uses this (via its view() back-reference) to
+        // decide whether to draw the focus ring - not the same thing as
+        // Control::StateFlags::Focused (controls.h), which is a separate,
+        // currently-unused bit that can't cover this anyway
+        // (SegmentedControl/TabControl accept focus - view.h's
+        // acceptsFocus() - without being a Control at all).
+        bool isFocused() const;
+
+        // The three-phase style paint sequence - see ViewStyle::
+        // prePaint()/paint()/postPaint() (viewstyle.h) for what each
+        // phase is for. All three are called automatically by whatever's
+        // orchestrating the draw (paintChildren() for children,
+        // RootView::repaint() for itself - the latter only ever calls
+        // paintStyle() directly, since a RootView is never itself
+        // isFocused() and has never needed a pre-paint effect either),
+        // so subclasses never need to remember to call any of them.
+        //
+        // prePaintStyle()/postPaintStyle() are deliberately separate
+        // calls from paintStyle(), not folded into one method that calls
+        // all three ViewStyle phases back to back - paintChildren() needs
+        // to open and close a *different* ctx clip scope around each
+        // (unclipped for pre/post, clipped to this View's own bounds for
+        // the paintStyle()/paint()/paintChildren() run in between), so
+        // the phases have to be genuinely separate calls the caller can
+        // wrap independently.
+        void prePaintStyle(BLContext& ctx);
         void paintStyle(BLContext& ctx);
+        void postPaintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)
         // left over for content/children after style()'s chrome (border,
@@ -193,6 +299,7 @@ namespace newui {
         // having run - safe to call from Layout::arrange() (see Layout's
         // class comment) or anywhere else that needs it before the first
         // paint.
+        //@reflect ignore=true
         Rect getClientBounds() const {
             return style_ ? style_->computeClientBounds(bounds_.size())
                            : Rect(0.0f, 0.0f, bounds_.size().width, bounds_.size().height);
@@ -273,6 +380,8 @@ namespace newui {
         //but it could be less than this
         virtual void redraw();
 
+		virtual void computePrePaintBounds(Rect& outDirtyBounds) const;
+
         // How far this view's own children are shifted when painted/hit-
         // tested - a scroll offset, not this view's own position (that's
         // still bounds()/setBounds(), untouched). (0,0) (the default) is a
@@ -285,10 +394,12 @@ namespace newui {
         // hosts scrollable content (see controls.h's ScrollView), not on
         // itself, so its own always-visible chrome (scrollbars) stays put
         // regardless of scroll position.
+        //@reflect ignore=true
         const Point& origin() const {
             return origin_;
         }
 
+        //@reflect ignore=true
         void setOrigin(const Point& origin) {
             origin_ = origin;
         }
@@ -335,7 +446,7 @@ namespace newui {
         // actually calls ::SetCursor(resolvedCursor()) once per hovered/
         // captured View. Mutate cursor() in place for anything Cursor
         // supports (view->cursor().setCursorKind(CursorKind::Hand),
-        // view->cursor().setPath("hand.png"), view->cursor().setImage(img)),
+        // view->cursor().loadPath("hand.png"), view->cursor().setImage(img)),
         // or replace it wholesale via setCursor(Cursor) below.
         Cursor& cursor() {
             return cursor_;
@@ -349,7 +460,7 @@ namespace newui {
         // view->setCursor(newui::Cursor(newui::CursorKind::Hand)); or
         // view->setCursor(newui::Cursor("hand.png")). For a load that
         // might fail and needs checking, mutate in place instead:
-        // if (!view->cursor().setPath("hand.png")) { ... }
+        // if (!view->cursor().loadPath("hand.png")) { ... }
         void setCursor(Cursor cursor) {
             cursor_ = std::move(cursor);
         }
@@ -438,6 +549,74 @@ namespace newui {
         KeyEventDelegate onKeyDown;
         KeyEventDelegate onKeyUp;
 
+        // Whether this View is even a *candidate* for keyboard focus at
+        // all - checked by canBecomeFocused() below, and what
+        // UIInputManager (uiinputmanager.h) consults to decide which View
+        // a mouse click should actually focus (walking up parent() past
+        // any that answer false - see resolveClickFocusTarget()) and which
+        // Views Tab/Shift+Tab should ever land on (see moveFocus()).
+        // False by default - a plain SubView (a container/decoration) has
+        // nothing to do with a key press or a tab stop. Button/Toggle/
+        // TextField/etc. (controls.h) set this true in their own
+        // constructors; reflectgen pairs this getter with setAcceptsFocus()
+        // below into a real read/write "acceptsFocus" property, so a
+        // .newui file can flip it per-instance with no code change.
+        bool acceptsFocus() const {
+            return acceptsFocus_;
+        }
+
+        void setAcceptsFocus(bool value) {
+            acceptsFocus_ = value;
+        }
+
+        // Traps Tab/Shift+Tab cycling to this View's own subtree - the
+        // "Scoped Geometric Hierarchy" "UIInputManager possible
+        // implementation notes.docx" describes for complex/creative apps
+        // (a properties panel, an inspector, a timeline): pressing Tab
+        // while focus is anywhere inside a View with isFocusScope() true
+        // only ever cycles among *its own* focusable descendants
+        // (UIInputManager::moveFocus(), uiinputmanager.h) - it can never
+        // leak out into unrelated parts of the same window the way plain
+        // geometric ordering otherwise would. Scopes nest: a focus scope
+        // inside another one becomes a single Tab stop from its parent
+        // scope's own cycle (its descendants only become reachable once
+        // something inside it is actually focused - typically by a mouse
+        // click - not by Tabbing "into" it from outside; see moveFocus()'s
+        // own comment for why entering a non-focusable scope purely via
+        // Tab isn't supported). False by default - most Views (and every
+        // plain SubView) aren't scope boundaries at all, same "opt-in,
+        // costs nothing until used" reasoning acceptsFocus() above has.
+        //
+        // Distinct from RootView's own already-existing modal isolation
+        // (a Dialog/PopupFrame is a genuinely separate HWND/RootView, so
+        // Tab already can't cross that boundary regardless of this flag) -
+        // this is for scoping *within* a single RootView's own tree, which
+        // nothing here handled before.
+        bool isFocusScope() const {
+            return isFocusScope_;
+        }
+
+        void setFocusScope(bool value) {
+            isFocusScope_ = value;
+        }
+
+        // Lets this View's own onKeyDown/onKeyPress see a real Tab
+        // keystroke instead of UIInputManager::moveFocus() swallowing it
+        // for navigation (RootView::keyEvent(), rootview.cpp checks this
+        // on whichever View currently has focus before intercepting Tab
+        // at all) - for a future multi-line code/text editor that wants to
+        // insert a literal tab character rather than move focus, the same
+        // "WantsTabKey" escape hatch the docx's own IView sketch has.
+        // False by default; TextControl sets it (a multi-line
+        // TextController then types the tab). Ctrl+Tab still moves focus.
+        bool wantsTabKey() const {
+            return wantsTabKey_;
+        }
+
+        void setWantsTabKey(bool value) {
+            wantsTabKey_ = value;
+        }
+
         // Asked by RootView::setFocusedSubView() (rootview.h) before
         // taking focus away from this View / handing it to this View,
         // respectively - default true (no veto) so existing overrides
@@ -446,7 +625,7 @@ namespace newui {
         // e.g. a control mid-validation with an invalid value can
         // refuse to give up focus until that's resolved.
         virtual bool canResignFocus() const { return true; }
-        virtual bool canBecomeFocused() const { return true; }
+        virtual bool canBecomeFocused() const { return acceptsFocus_ && !isDesignTime(); }
 
         // Answers whether this View itself (not its children) can
         // currently carry out cmd - default false, so a View that
@@ -481,6 +660,18 @@ namespace newui {
 
         virtual bool initialize();
         virtual void destroy();
+
+    protected:
+        // Cascades the Component::initialize() dispatch this override chains into (see
+        // view.cpp) onto every existing child, so a subtree several levels deep - not just this
+        // View itself - gets initialize()'d in one call. Covers RootView's own directly-attached
+        // children too (this lives once on View, not duplicated onto SubView/RootView
+        // separately), unlike SubView::addChild()/RootView::addChild()'s own explicit
+        // child->initialize() call (needed for a child attached to an already-initialized live
+        // parent, which this loop alone can't reach since nothing re-triggers it then).
+        bool internal_init() override;
+
+    public:
 
         // Non-owning upward back-reference (RootView::addChild()/
         // propagateRootView() set it, never this View) - reachable downward
@@ -525,9 +716,62 @@ namespace newui {
             return parent_;
         }
 
-        void setParent(View* newParent) {
-            parent_ = newParent;
-        }
+        // Safely moves this View to become newParent's child, detaching it from its current
+        // parent() first if one exists - addChild()/removeChild()'s own bookkeeping still sets
+        // parent_ directly (a plain protected-field write at their two call sites, not routed
+        // through this) so calling this never recurses back into itself. newParent == nullptr
+        // detaches this View entirely, leaving it parentless - a legitimate way to remove it
+        // from the tree without deleting it. Refuses (returns false, no-op) if this View is a
+        // RootView (never anyone's child) or if newParent is this View itself or one of its
+        // own descendants (would corrupt the tree into a cycle). Always appends at newParent's
+        // own addChild()-determined position (the end), never taking an index itself - a
+        // plain single-View* parameter fits a normal reflection Property setter shape; call
+        // reorderChild() separately afterward if a specific position is actually needed.
+        bool setParent(View* newParent);
+
+        // Coordinate mapping. A View's "local" space has its own top-left as (0,0) - the same
+        // space its own bounds().size() and every onMouse*() localPt are in. Root space is the
+        // owning RootView's window-client space; screen space is real desktop coordinates.
+        //
+        // localToRoot()/rootToLocal() walk the parent() chain, undoing each parent's own
+        // origin() (scroll) shift at every level - the exact inverse of paintChildren()'s
+        // per-level translate. They need no live window, and work on a detached subtree too
+        // (relative to its topmost ancestor). localToScreen()/screenToLocal() additionally need
+        // a live rootView()->windowHandle(); without one they degrade to the root-space result.
+        //
+        // @reflect ignore=true
+        Point localToRoot(const Point& localPt) const;
+        // @reflect ignore=true
+        Point rootToLocal(const Point& rootPt) const;
+        // @reflect ignore=true
+        Point localToScreen(const Point& localPt) const;
+        // @reflect ignore=true
+        Point screenToLocal(const Point& screenPt) const;
+        // @reflect ignore=true
+        Rect localToScreen(const Rect& localRect) const;
+        // @reflect ignore=true
+        Rect screenToLocal(const Rect& screenRect) const;
+
+        // This View's own whole bounds (0,0,width,height in local space) in screen coordinates.
+        // @reflect ignore=true
+        Rect screenBounds() const;
+
+        // This View's own effective DisplayMetrics (newui/displayunit.h):
+        // rootView()'s cached instance, or DisplayMetrics::forDpi(96) if
+        // this View isn't attached to a RootView yet - same "degrade
+        // gracefully without a live window" shape localToScreen()/
+        // screenToLocal() above already use. Cheap - a cached lookup on the
+        // RootView side, not a fresh GetDpiForWindow/font-load - so safe to
+        // call per-item in a layout/paint pass (e.g. once per mark drawn).
+        // @reflect ignore=true
+        DisplayMetrics displayMetrics() const;
+
+        // Maps a point/rect from this View's local space into target's - via root space when
+        // both share a rootView(), via screen space otherwise (e.g. across two windows).
+        // @reflect ignore=true
+        Point mapTo(const View& target, const Point& localPt) const;
+        // @reflect ignore=true
+        Rect mapTo(const View& target, const Rect& localRect) const;
 
         // Sets rootView() on this View and recurses into every descendant
         // already in childViews_ - so attaching/detaching a SubView (sub)
@@ -542,12 +786,23 @@ namespace newui {
     protected:
         Rect bounds_;
         bool visible_ = false;
-        std::string name_;
+        // Backs isLayoutIgnored()/setLayoutIgnored() above.
+        bool layoutIgnored_ = false;
+        // Backs isLayingOut().
+        bool layingOut_ = false;
 
         std::optional<Size> desiredSizeOverride_;
 
         std::unique_ptr<ViewStyle> style_ = std::make_unique<ViewStyle>();
         bool highlighted_ = false;
+
+        // Backs acceptsFocus()/setAcceptsFocus() above.
+        bool acceptsFocus_ = false;
+
+        // Backs isFocusScope()/setFocusScope() and wantsTabKey()/
+        // setWantsTabKey() above.
+        bool isFocusScope_ = false;
+        bool wantsTabKey_ = false;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for
@@ -563,9 +818,28 @@ namespace newui {
 
         Point origin_;
 
+        // The part of this view's own local space (0,0 to its size) that can currently be seen - i.e. that
+        // isn't clipped away by this view's own bounds or by any ancestor's. Set by the parent's
+        // paintChildren() (RootView::repaint() for the root) right before it paints this view, so that
+        // this view's own paintChildren() can skip a child that lies entirely outside it. Meaningful only
+        // while hasVisibleRegion_ is true; when it's false (never set - a view painted some other way)
+        // everything counts as visible, so such a view is never culled by mistake.
+        Rect visibleRegion_;
+        bool hasVisibleRegion_ = false;
+
         View* parent_ = nullptr;
 
         RootView* rootView_ = nullptr;
+
+        // The one place parent_ is ever written outside of setParent() itself -
+        // SubView::addChild()/removeChild() and RootView::addChild()/removeChild() (their own
+        // real tree-mutation entry points) call this directly as their own bookkeeping, via
+        // the friend declarations above (needed since RootView/SubView are siblings - see
+        // those). Never routed through setParent(), which calls addChild()/removeChild()
+        // itself - that would recurse.
+        void internal_setParent(View* newParent) {
+            parent_ = newParent;
+        }
     };
 
 }

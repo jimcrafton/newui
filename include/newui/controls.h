@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 
 #include <newui/newui.h>
 #include <newui/action.h>
@@ -13,6 +14,7 @@
 #include <newui/geometry.h>
 #include <newui/subview.h>
 #include <newui/text.h>
+#include <newui/textstyle.h>
 #include <newui/viewstyle.h>
 
 #include <blend2d/blend2d.h>
@@ -86,6 +88,14 @@ namespace newui {
 
         bool isEnabled() const { return state_.isEnabled(); }
 
+        // A disabled Control is never a valid focus target - by mouse
+        // click (UIInputManager::resolveClickFocusTarget()) or by Tab
+        // (UIInputManager::moveFocus()) - even if acceptsFocus() is true,
+        // matching how a real disabled Win32 control is skipped in tab
+        // order. View::canBecomeFocused() already covers acceptsFocus()/
+        // isDesignTime(); this only adds the isEnabled() gate on top.
+        bool canBecomeFocused() const override { return View::canBecomeFocused() && isEnabled(); }
+
         // Non-owning - see Action's own class comment. Setting this does
         // not by itself wire this Control's onClick to action's
         // perform(), nor register action with a RunLoop for hotkey
@@ -123,6 +133,7 @@ namespace newui {
     // only ever gets set on whichever SubView RootView actually considers
     // hovered. Drawing text directly in this Button's own paint() means
     // there's nothing else that could steal the hover.
+    // @reflect category=basic
     class Button : public Control {
     public:
         Button();
@@ -177,13 +188,13 @@ namespace newui {
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleClicked(Control& sender);
+        SyncReturn handleStateChanged(Control& sender);
 
         std::string text_;
         BLVar textColor_;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A checkable Control drawn as a native checkbox (BUTTON/BP_CHECKBOX)
@@ -210,6 +221,7 @@ namespace newui {
     // a caller wanting real radio-group behavior across several Toggles
     // wires that up itself, e.g. each Toggle's onCheckedChanged calling
     // setChecked(false) on the rest of the group.
+    // @reflect category=basic
     class Toggle : public Control {
     public:
         Toggle();
@@ -233,8 +245,12 @@ namespace newui {
         // pressing_/isEnabled() over into it - called once from the
         // constructor and again on every setRadioStyle() change.
         void rebuildStyle();
-        // Pushes checked_/pressing_/isEnabled() into whichever of
-        // checkBoxStyle_/radioButtonStyle_ is currently installed.
+        // Pushes checked_/pressing_/isEnabled() into style() - a
+        // dynamic_cast<ThemedRadioButtonStyle*>/<ThemedCheckBoxStyle*> to
+        // whichever one it actually currently is, not a cached typed
+        // pointer (same "style() can be swapped out from under this
+        // Control" reasoning Button::updatePressedVisual()'s own comment,
+        // controls.cpp, gives).
         void updateStyleFields();
 
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -245,10 +261,6 @@ namespace newui {
         bool radioStyle_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        // Only one of these two is ever non-null at a time - whichever
-        // matches the currently-installed style() (see rebuildStyle()).
-        ThemedCheckBoxStyle* checkBoxStyle_ = nullptr;
-        ThemedRadioButtonStyle* radioButtonStyle_ = nullptr;
     };
 
     // A text-only Control - own style() is a LabelStyle (which already
@@ -278,6 +290,7 @@ namespace newui {
     // hover, regardless of hotLink() - matches Control's own "no clicks
     // while disabled" behavior extending to "no hyperlink invitation
     // either".
+    // @reflect category=basic
     class Label : public Control {
     public:
         Label();
@@ -285,6 +298,10 @@ namespace newui {
 
         const std::string& text() const { return text_; }
         void setText(const std::string& text);
+
+        // Centered by default.
+        TextAlignment textAlignment() const { return labelStyle_->textAlignment(); }
+        void setTextAlignment(TextAlignment value) { labelStyle_->setTextAlignment(value); style().markDirty(); }
 
         bool isHotLink() const { return hotLink_; }
         void setHotLink(bool value);
@@ -301,7 +318,13 @@ namespace newui {
         LinkClickedDelegate onLinkClicked;
 
     private:
-        void updateTextColor();
+        // Applies the state-derived color (disabled/link/hovered-link/normal) to the style's
+        // textColor - unless something else (e.g. the Properties grid) set a non-null
+        // LabelStyle::textColor that Label didn't write itself, which counts as a manual
+        // override and is left alone (set it back to Color::null() to resume state-driven
+        // color). force = true (Label's own setTextColor()/setLinkColor()/... setters) always
+        // applies, clearing any override.
+        void updateTextColor(bool force = false);
         SyncReturn handleMouseEntered(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleStateChanged(Control& sender);
@@ -310,10 +333,51 @@ namespace newui {
         std::string text_;
         bool hotLink_ = false;
         bool hovering_ = false;
+        Color lastAppliedTextColor_ = Color::null();  // what updateTextColor() itself last wrote
         BLVar textColor_;
         BLVar linkColor_;
         BLVar hoveredLinkColor_;
         LabelStyle* labelStyle_ = nullptr;
+    };
+
+    // A bordered frame grouping related sibling content, with an
+    // optional caption in its top-left corner - the same "fieldset/
+    // legend" idea a native Win32 GroupBox (BUTTON/BP_GROUPBOX) uses,
+    // though not pixel-identical to it (see paint()'s own comment,
+    // controls.cpp, for why the caption sits fully inside the frame here
+    // rather than straddling the border line the way a real one does).
+    // Own style() is ThemedGroupBoxStyle (chrome only, no text - same
+    // "chrome vs. content" split Button/ToolbarButton's own class
+    // comments already describe); this Control draws the caption text
+    // itself on top of the border, the same way Button/ToolbarButton
+    // draw their own text on top of their own chrome.
+    //
+    // Purely a container - real content is added as ordinary child
+    // SubViews via addChild(), positioned however the caller likes (a
+    // Layout, or by hand) within getClientBounds() (already deflated for
+    // the frame's own border - see ThemedGroupBoxStyle::computeClientBounds()).
+    // No focus/click handling of its own (acceptsFocus() stays Control's
+    // own default, false) - a GroupBox is a passive grouping frame, not
+    // itself a target, matching a real Win32 GroupBox (which never sets
+    // WS_TABSTOP).
+    class GroupBox : public Control {
+    public:
+        GroupBox();
+        virtual ~GroupBox() {}
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text);
+
+        // Drawn on top of the border - see this class's own comment.
+        void setTextColor(BLRgba32 color);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        SyncReturn handleStateChanged(Control& sender);
+
+        std::string text_;
+        BLVar textColor_;
     };
 
     // A read-only status Control - not really interactive (still inherits
@@ -334,6 +398,7 @@ namespace newui {
     // doc comment: "how much of the bar is filled isn't a field there -
     // that's the caller's job via ordinary bounds" - this class is that
     // caller.
+    // @reflect category=textinput
     class Progress : public Control {
     public:
         Progress();
@@ -353,8 +418,27 @@ namespace newui {
         void setHorizontal(bool value);
 
         // PBFS_NORMAL/ERROR/PAUSED - see ThemedProgressBarFillStyle::FillState.
-        ThemedProgressBarFillStyle::FillState fillState() const { return fillStyle_->state; }
-        void setFillState(ThemedProgressBarFillStyle::FillState state) { fillStyle_->state = state; style().markDirty(); }
+        // dynamic_cast, not a cached typed pointer - see Button::
+        // updatePressedVisual()'s own comment (controls.cpp) for why:
+        // fill()'s own doc comment above explicitly invites a caller to
+        // fill()->setStyle() a different ThemedProgressBarFillStyle
+        // subclass (e.g. FluentProgressBarFillStyle), which a cached
+        // pointer here would then dangle into.
+        ThemedProgressBarFillStyle::FillState fillState() const {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::fillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            return fillStyle->state;
+        }
+        void setFillState(ThemedProgressBarFillStyle::FillState state) {
+            auto* fillStyle = dynamic_cast<ThemedProgressBarFillStyle*>(&fill_->style());
+            if (fillStyle == nullptr) {
+                throw std::runtime_error("Progress::setFillState: fill()'s style() is not a ThemedProgressBarFillStyle");
+            }
+            fillStyle->state = state;
+            style().markDirty();
+        }
 
         // The child SubView representing the filled portion - exposed
         // read-only in case a caller wants to reach past this class's own
@@ -374,8 +458,6 @@ namespace newui {
         float value_ = 0.0f;
         bool horizontal_ = true;
         SubView* fill_ = nullptr;
-        ThemedProgressBarTrackStyle* trackStyle_ = nullptr;
-        ThemedProgressBarFillStyle* fillStyle_ = nullptr;
     };
 
     // A draggable value control - native trackbar groove
@@ -400,6 +482,7 @@ namespace newui {
     // string) - a caller wanting to show the current value pairs this
     // with its own Label, refreshed from onValueChanged(), the same way
     // controls1.cpp's demo already pairs a Progress with a caption Label.
+    // @reflect category=textinput
     class Slider : public Control {
     public:
         Slider();
@@ -559,9 +642,6 @@ namespace newui {
         bool showTicks_ = false;
         SubView* thumb_ = nullptr;
         SubView* ticks_ = nullptr;
-        ThemedTrackbarTrackStyle* trackStyle_ = nullptr;
-        ThemedTrackbarThumbStyle* thumbStyle_ = nullptr;
-        ThemedTrackbarTicksStyle* ticksStyle_ = nullptr;
     };
 
     // A real, interactive scrollbar (SCROLLBAR/SBP_ARROWBTN +
@@ -774,6 +854,7 @@ namespace newui {
     // Pair with a sibling EditControl/Label showing the live value() the
     // same way a caller is expected to pair Slider with its own value
     // display (see its class comment) - Stepper draws no text of its own.
+    // @reflect category=textinput
     class Stepper : public Control {
     public:
         Stepper();
@@ -883,6 +964,7 @@ namespace newui {
     // hooks, not policy" spirit as DocumentController not dictating
     // unsaved-changes UI - the caller (who actually knows their content's
     // real size) sets it explicitly, once, whenever it changes.
+    // @reflect category=containers
     class ScrollView : public Control {
     public:
         ScrollView();
@@ -890,6 +972,7 @@ namespace newui {
 
         void addChild(SubView* child) override;
         void removeChild(SubView* child) override;
+        void reorderChild(SubView* child, std::size_t newIndex) override;
 
         // Not an override of View::contentSize() above (that one's
         // non-virtual, deliberately - see its own doc comment) - just the
@@ -921,6 +1004,15 @@ namespace newui {
         int wheelLines() const { return wheelLines_; }
         void setWheelLines(int lines) { wheelLines_ = lines; }
 
+        // What one "line" of vertical scrolling is, in pixels - a wheel notch scrolls wheelLines() of
+        // them and an arrow-button click one. Unless set here it follows the content: the row height
+        // of a ListView/TreeView, else kDefaultLineStep.
+        static constexpr float kDefaultLineStep = 20.0f;
+        void setLineStep(float lineStep) {
+            lineStepOverridden_ = true;
+            vBar_->setLineStep(lineStep);
+        }
+
         // Still reflectgen-registered (both) - same reasoning as Slider::
         // thumb()'s own comment: the write-time dedup (reflection.h), not
         // an ignore annotation, keeps vBar_/hBar_ (also real childViews
@@ -938,13 +1030,13 @@ namespace newui {
         // corresponding scrolling need on).
         Point contentOrigin() const;
 
-    private:
         // Recomputes which of vBar_/hBar_ are needed for the current
         // contentSize_ vs. this ScrollView's own bounds, each visible
         // bar's range()/pageSize(), and viewport_'s bounds (client area
         // minus whichever bar(s) end up reserved) - called from
-        // handleSizeChanged(), setContentSize(), and addChild()/
-        // removeChild(), every place that can change the answer.
+        // setBounds() (via View), handleSizeChanged(), setContentSize(),
+        // and addChild()/removeChild(), every place that can change the
+        // answer. A no-op until the constructor has created the chrome.
         //
         // First re-derives contentSize_ itself when !contentSizeOverridden_
         // and viewport_ has exactly one content child: queries that
@@ -967,7 +1059,9 @@ namespace newui {
         // small enough (pinned to viewport size) that shifting anything
         // via origin() would just be shifting it out of its own clip
         // rect for no reason.
-        void updateLayout();
+        void updateLayout() override;
+
+    private:
 
         // viewport_'s sole content child, if (and only if) it answers
         // View::onQueryContentSize (view.h) - nullptr for zero, several,
@@ -1002,6 +1096,24 @@ namespace newui {
         // rely on (see this class's own constructor).
         SyncReturn handleContentChildContentSizeChanged(View& sender);
 
+        // Subscribed to every real content child's own
+        // onRequestScrollIntoView (view.h) in addChild() below - a
+        // content-space rect a caret (TextControl), a selected row
+        // (ListView), or a keyboard-highlighted row/node (ListView/
+        // TreeView, and everything's Ctrl+Arrow preview highlight) wants
+        // scrolled fully into view. Nudges vBar_/hBar_'s own value() just
+        // far enough (never further - already-visible is left alone) via
+        // their normal setValue(), which is what actually moves the
+        // scroll position (see handleVBarValueChanged()/
+        // handleHBarValueChanged() above - the exact same path a real
+        // scrollbar drag already goes through), so this never needs to
+        // touch viewport_'s origin()/the virtualized child's
+        // onScrollOffsetChanged directly itself. A bar that isn't
+        // currently visible() (content fits on that axis already) is
+        // left untouched - there's nothing to scroll there regardless of
+        // what requestedRect says.
+        SyncReturn handleContentRequestScrollIntoView(View& sender, const Rect& requestedRect);
+
         Size contentSize_;
         // False (the default) until setContentSize() is called explicitly
         // at least once - see updateLayout()'s own comment for what that
@@ -1016,6 +1128,7 @@ namespace newui {
         // value just happened to match."
         bool contentSizeOverridden_ = false;
         int wheelLines_ = 3;
+        bool lineStepOverridden_ = false;
 
         // Real content lives here, not directly under this ScrollView -
         // origin() (View's own scroll-offset primitive - see its doc
@@ -1038,6 +1151,7 @@ namespace newui {
     // would - imageFillMode()/imageAlignment() below are just this
     // control's own typed view onto that style's inherited
     // ViewStyle::imageFillMode/imageAlignment fields.
+    // @reflect category=basic
     class Image : public Control {
     public:
         Image();
@@ -1063,10 +1177,10 @@ namespace newui {
         // ViewStyle's own base default of Tile - a control meant to show
         // one picture/icon should show it once, centered, not repeated,
         // unless asked otherwise.
-        ImageFillMode imageFillMode() const { return style().imageFillMode; }
+        ImageFillMode imageFillMode() const { return style().imageFillMode(); }
         void setImageFillMode(ImageFillMode mode);
 
-        ImageAlignment imageAlignment() const { return style().imageAlignment; }
+        ImageAlignment imageAlignment() const { return style().imageAlignment(); }
         void setImageAlignment(ImageAlignment align);
 
 
@@ -1087,8 +1201,12 @@ namespace newui {
     // reason Button is: the toggle behavior needs Control's own click-
     // tracking (onMouseDown/onMouseUp -> onClick on a down-then-up-
     // inside gesture), not something worth reimplementing here.
+    // @reflect category=menutoolbar
     class ToolbarButton : public Control {
     public:
+        static constexpr float kIconSize = 16.0f;
+        static constexpr float kIconGap = 6.0f;
+
         ToolbarButton();
         virtual ~ToolbarButton() {}
 
@@ -1096,6 +1214,13 @@ namespace newui {
         void setText(const std::string& text);
 
         void setTextColor(BLRgba32 color);
+
+        // Resources/-relative path (Bundle::resourcePath()) - "" means no
+        // icon (text-only, unchanged behavior). Painted via Item::
+        // paintItemIcon() (items.h), same shared cache/blit every other
+        // icon-bearing control in this framework uses.
+        const std::string& icon() const { return icon_; }
+        void setIcon(const std::string& resourceName);
 
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
@@ -1116,13 +1241,14 @@ namespace newui {
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleClicked(Control& sender);
+        SyncReturn handleStateChanged(Control& sender);
 
         std::string text_;
         BLVar textColor_;
+        std::string icon_;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
-        ThemedToolbarButtonStyle* buttonStyle_ = nullptr;
     };
 
     // A toolbar separator (TOOLBAR/TP_SEPARATOR or TP_SEPARATORVERT, via
@@ -1135,6 +1261,7 @@ namespace newui {
     // dividing line - see ThemedToolbarSeparatorStyle's own doc comment);
     // Toolbar's addChild() doesn't enforce this since a ToolbarSeparator
     // is just an ordinary child from Toolbar's point of view.
+    // @reflect category=menutoolbar
     class ToolbarSeparator : public SubView {
     public:
         ToolbarSeparator();
@@ -1159,6 +1286,7 @@ namespace newui {
     // Background is ThemedRebarBandStyle (REBAR/RP_BAND) - the same
     // native chrome a real toolbar sits inside of when hosted in a
     // rebar control.
+    // @reflect category=menutoolbar
     class Toolbar : public SubView {
     public:
         explicit Toolbar(Orientation orientation = Orientation::Horizontal);
@@ -1189,12 +1317,11 @@ namespace newui {
     // "the C in MVC" for a text-editing Control, same as Controller's own
     // doc comment describes, just with real hit-testing/coordinate-
     // translation responsibilities layered on top via subclassing.
-    // model()/setModel() below narrow Controller's own generic Model*-based
+    // model()/setModel() below narrow Controller's own generic Model-based
     // pair (controllers.h) to the concrete text::TextModel every caller
-    // here actually wants, and additionally own the TextModel instance
-    // itself (ownedModel_, heap, RAII) - Controller's own model_ stays
-    // non-owning throughout, same contract as always; TextController is
-    // simply always the one supplying what it points at.
+    // here actually wants. Ownership is Controller's own (it holds the
+    // model in a unique_ptr) - TextController adds only the wiring a
+    // TextModel needs (addView(), the vetoable Before handlers).
     //
     // Deliberately does NOT own paint(), TextRenderer, or any of the
     // ScrollView-hosting delegates (onQueryContentSize/onScrollOffsetChanged/
@@ -1249,25 +1376,11 @@ namespace newui {
     public:
         explicit TextController(Control& owner);
 
-        // NOT = default, and NOT safe to leave implicit - C++ destroys a
-        // derived object's own members (ownedModel_ included) BEFORE its
-        // base class destructor runs, so by the time ~Controller() would
-        // run its own "unsubscribe from model_->onChanged" cleanup
-        // (controllers.cpp), ownedModel_ - the very object model_ (a raw,
-        // non-owning pointer inherited from Controller) still points at -
-        // would already be destroyed: a real, confirmed use-after-free
-        // (a debug-heap free-pattern read inside Delegate<Model>::remove(),
-        // caught live while adding this class's own test coverage). This
-        // destructor's body runs before member destruction even begins,
-        // so it detaches from the model (Controller::setModel(nullptr))
-        // and unregisters from it (Model::removeView()) while ownedModel_
-        // is still perfectly valid - by the time ~Controller() itself
-        // later runs, its own model_ is already nullptr and its cleanup
-        // is a no-op.
+        // Unregisters owner_ from the model (Model::removeView()) while both are still alive - the
+        // model itself is destroyed later, by ~Controller().
         ~TextController();
 
-        // Narrows Controller's own model()/setModel(Model*) (controllers.h,
-        // a non-owning Model* pair) to the concrete text::TextModel every
+        // Narrows Controller's own model()/setModel() (controllers.h) to the concrete text::TextModel every
         // caller here actually wants - hides (doesn't override; a
         // pointer-to-reference/Model-to-TextModel return type isn't
         // covariant) Controller::model()/setModel() for any caller
@@ -1281,38 +1394,29 @@ namespace newui {
         // Swaps in a different TextModel (e.g. a custom subclass) - a
         // no-op for nullptr, since Controller::model() is never null here
         // (every handler below dereferences it directly, via model()
-        // above). Tears down the old model's registration/subscriptions
-        // (Model::removeView(), onBeforeChar/onBeforeRangeChanged) before
-        // dropping it, then wires the new one up exactly the same way the
-        // constructor already does for the default instance - including
-        // Controller::setModel() itself, which handles the onChanged-to-
-        // modelChanged() subscription TextController inherits but doesn't
-        // currently use (addView() below is the real repaint-on-change
-        // path here; modelChanged() stays available for a subclass that
-        // wants it).
+        // above). Unregisters owner_ from the old model (Model::
+        // removeView()) before Controller::setModel() destroys it, then
+        // wires the new one up exactly the same way the constructor
+        // already does for the default instance. Controller::setModel()
+        // also handles the onChanged-to-modelChanged() subscription
+        // TextController inherits but doesn't currently use (addView()
+        // below is the real repaint-on-change path here; modelChanged()
+        // stays available for a subclass that wants it).
         void setModel(std::unique_ptr<text::TextModel> model) {
             if (model == nullptr) {
                 return;
             }
             if (Controller::model() != nullptr) {
-                // Order matters: unsubscribe from the OLD model's
-                // onChanged (Controller::setModel(nullptr)) before
-                // ownedModel_ = std::move(model) below destroys it (a
-                // move-assignment destroys the previously-held object) -
-                // otherwise Controller's own modelChangedConnection_ is
-                // left pointing into a Delegate that's about to be torn
-                // down along with it, the same use-after-free this
-                // class's own destructor works around (controls.h/.cpp -
-                // see ~TextController()'s doc comment for the real crash
-                // this pattern caused, confirmed live).
                 this->model().removeView(&owner_);
-                Controller::setModel(nullptr);
             }
-            ownedModel_ = std::move(model);
-            Controller::setModel(ownedModel_.get());
-            ownedModel_->addView(&owner_);
-            ownedModel_->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
-            ownedModel_->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            text::TextModel* attached = model.get();
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
+            attached->addView(&owner_);
+            attached->onBeforeChar.add(this, &TextController::handleModelBeforeChar);
+            attached->onBeforeRangeChanged.add(this, &TextController::handleModelBeforeRangeChanged);
+            attached->onAfterChar.add(this, &TextController::handleModelAfterChar);
+            attached->onAfterRangeChanged.add(this, &TextController::handleModelAfterRangeChanged);
+            modelAttached(*attached);
             owner_.style().markDirty();
         }
 
@@ -1321,6 +1425,16 @@ namespace newui {
 
         text::Caret& caret() { return caret_; }
         const text::Caret& caret() const { return caret_; }
+
+        // Overwrite mode: typing replaces the character after the caret (never a line break)
+        // instead of inserting, and the caret is drawn as a block. Insert toggles it.
+        bool isOverwriteMode() const { return overwriteMode_; }
+        void setOverwriteMode(bool overwrite);
+
+        // Fired when the caret moves, the selection changes or overwrite mode flips - what a
+        // status bar shows.
+        typedef Delegate<TextController> EditStateChangedDelegate;
+        EditStateChangedDelegate onEditStateChanged;
 
         text::TextInputTraits& inputTraits() { return traits_; }
         const text::TextInputTraits& inputTraits() const { return traits_; }
@@ -1331,8 +1445,78 @@ namespace newui {
         const Color& textColor() const { return textColor_; }
         void setTextColor(const Color& color) { textColor_ = color; owner_.style().markDirty(); }
 
+        // Per-range colors over textColor() (text::TextColorRun) - e.g. syntax highlighting; empty =
+        // plain text. Edits move them along (see adjustRunsForEdit()), so they stay on the right
+        // characters until the caller next sets them - e.g. a highlighter that re-runs after typing
+        // pauses.
+        //@reflect ignore=true
+        const std::vector<text::TextColorRun>& colorRuns() const { return colorRuns_; }
+        //@reflect ignore=true
+        void setColorRuns(std::vector<text::TextColorRun> runs) { colorRuns_ = std::move(runs); owner_.style().markDirty(); }
+
+        // Bold / italic / underline / strikethrough ranges (text::TextFontRun) - applied to the
+        // one layout that's both drawn and hit-tested, so the caret stays on the glyphs. Same
+        // keep-in-step contract as setColorRuns(); bold can change the content size.
+        //@reflect ignore=true
+        const std::vector<text::TextFontRun>& fontRuns() const { return fontRuns_; }
+        //@reflect ignore=true
+        void setFontRuns(std::vector<text::TextFontRun> runs) { fontRuns_ = std::move(runs); owner_.style().markDirty(); }
+
+        // The layout this controller draws and hit-tests against - current as of the last
+        // ensureLayoutUpToDate().
+        //@reflect ignore=true
+        const text::TextLayoutEngine& layoutEngine() const { return layoutEngine_; }
+
+        // Squiggles, underlines, boxes and background fills over ranges of the text
+        // (text::TextDecoration) - same keep-in-step contract as setColorRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextDecoration>& decorations() const { return decorations_; }
+        //@reflect ignore=true
+        void setDecorations(std::vector<text::TextDecoration> decorations) { decorations_ = std::move(decorations); owner_.style().markDirty(); }
+
+        // Messages after, and tints behind, the lines holding each one's offset (text::LineAnnotation)
+        // - same keep-in-step contract as setDecorations(): the offsets move with edits. One of each is
+        // drawn per line (the first listed that has one).
+        //@reflect ignore=true
+        const std::vector<text::LineAnnotation>& lineAnnotations() const { return lineAnnotations_; }
+        //@reflect ignore=true
+        void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { lineAnnotations_ = std::move(annotations); owner_.style().markDirty(); }
+
+        // The index into lineAnnotations() of the message shown under localPt (this control's own
+        // coordinates), or npos. Same one-per-line rule as drawLineAnnotations().
+        static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+        std::size_t annotationAt(const Point& localPt) const;
+
+        // A click on a message (it doesn't move the caret), and the pointer entering one / leaving it
+        // (npos): the index into lineAnnotations().
+        typedef Delegate<TextController, std::size_t> AnnotationDelegate;
+        AnnotationDelegate onAnnotationClicked;
+        AnnotationDelegate onAnnotationHovered;
+
+        // Whether spaces (a dot), tabs (an arrow) and line endings (CR / LF / CRLF) are marked.
+        bool showsWhitespace() const { return showsWhitespace_; }
+        void setShowsWhitespace(bool shows) { showsWhitespace_ = shows; owner_.style().markDirty(); }
+
+        // Whether the caret's own line gets a faint full-width background tint (VS/VS Code-style
+        // "current line highlight") - see drawCurrentLineHighlight()'s own comment for why this
+        // needs to be a dedicated draw call rather than a TextDecoration (a Background decoration
+        // only ever covers the *text's* own extent on that line, never the full control width, and
+        // this needs to span it regardless of how short the line's actual text is).
+        bool highlightsCurrentLine() const { return highlightsCurrentLine_; }
+        void setHighlightsCurrentLine(bool highlight) { highlightsCurrentLine_ = highlight; owner_.style().markDirty(); }
+
+        // Tab stops every tabWidth() characters (default 4; 0: DirectWrite's default).
+        std::size_t tabWidth() const { return tabWidth_; }
+        void setTabWidth(std::size_t width) { tabWidth_ = width; owner_.style().markDirty(); }
+
         bool isMultiline() const { return multiline_; }
         void setMultiline(bool value) { multiline_ = value; }
+
+        // Whether a multiline text wraps at the control's width (the default). Off, each line stays on
+        // one row however long it is, and the view scrolls sideways (scrollOffsetX()) - a code editor's
+        // way. Meaningless for a single-line control, which never wraps.
+        bool wordWrap() const { return wordWrap_; }
+        void setWordWrap(bool wrap);
 
         // Rebuilds layoutEngine_ against the owner's own current
         // getClientBounds() (width/height) and multiline_ (wordWrap) if
@@ -1347,6 +1531,10 @@ namespace newui {
         // before hosting it, e.g. - see TextControl::handleQueryContentSize(),
         // controls.cpp).
         void ensureLayoutUpToDate();
+
+        // Where the text goes within the owner: its client bounds, less any margin a subclass
+        // keeps (TextFoldingController's gutter). Layout, hit-testing and drawing all use it.
+        virtual Rect textArea() const { return owner_.getClientBounds(); }
 
         // The full height layoutEngine_'s current content actually needs
         // - see TextLayoutEngine::contentHeight()'s own doc comment
@@ -1363,6 +1551,10 @@ namespace newui {
         // is a plain member here, and setScrollOffsetY() below for the
         // only place it's ever written.
         float scrollOffsetY() const { return scrollOffsetY_; }
+        // How far the text is scrolled sideways (only ever non-zero with wordWrap() off): the layout
+        // keeps its own coordinates and the whole text area is drawn this far to the left.
+        float scrollOffsetX() const { return scrollOffsetX_; }
+        void setScrollOffsetX(float x);
         void setScrollOffsetY(float y);
 
         // caret_'s own current on-screen rect, in layoutEngine_'s native
@@ -1391,6 +1583,28 @@ namespace newui {
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
         void drawCaret(BLContext& ctx) const;
+        // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
+        // text's own extent, which is what makes this a dedicated draw call rather than a
+        // Background TextDecoration (see highlightsCurrentLine()'s own comment). A no-op if
+        // highlightsCurrentLine() is off or there's no laid-out caret position yet - NOT suppressed
+        // by an active selection (e.g. a double-click word-select still keeps it). Call before
+        // drawSelection() (same "chrome first"
+        // ordering every other draw* method here follows) so selection/text/decorations all still
+        // read clearly on top of it.
+        void drawCurrentLineHighlight(BLContext& ctx) const;
+        // backgrounds: the Background decorations (drawn under the selection and text); otherwise
+        // every other kind (drawn over the text).
+        void drawDecorations(BLContext& ctx, bool backgrounds) const;
+        // lineAnnotations()' tints: the whole line, behind the text (before the selection too).
+        void drawLineBackgrounds(BLContext& ctx, float visibleWidth, float visibleHeight) const;
+        // lineAnnotations()' messages: each in a smaller italic after its line's last character, over
+        // the text.
+        // visibleWidth/visibleHeight: the text area, to skip what's off it.
+        static constexpr float kAnnotationGap = 24.0f;       // between the line's text and its annotation
+        static constexpr float kAnnotationFontScale = 0.9f;  // of the control's font size
+        void drawLineAnnotations(BLContext& ctx, float visibleWidth, float visibleHeight) const;
+        // Marks for spaces, tabs and line endings (showsWhitespace()), faintly over the text.
+        void drawWhitespace(BLContext& ctx, float visibleHeight) const;
 
         // Every one of these mirrors the identically-named View delegate
         // (minus the View& sender parameter, which this class has no use
@@ -1408,6 +1622,7 @@ namespace newui {
         virtual SyncReturn handleMouseDown(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         virtual SyncReturn handleMouseMove(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         virtual SyncReturn handleMouseUp(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        virtual SyncReturn handleMouseLeft(const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         // Windows has no triple-click message of its own (WM_LBUTTONDBLCLK
         // only ever covers a *second* click) - handleMouseDown() tracks
         // clickCount_/lastClickTime_/lastClickPos_ itself (using
@@ -1423,7 +1638,36 @@ namespace newui {
         // onReturnPressed-style hook to react to.
         virtual SyncReturn handleKeyDown(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
-    private:
+        // Selects the whole text, caret at the end (handleMouseDown()'s
+        // triple-click; also for callers that want a field ready to type over).
+        void selectAll();
+
+        // Undo/redo through the model (a HistoryTextModel remembers edits; the plain TextModel
+        // has none, so these are false). Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo. On success
+        // the caret moves to the end of the text that was put back, with no selection.
+        bool canUndo() const { return model().canUndo(); }
+        bool canRedo() const { return model().canRedo(); }
+        bool undo();
+        bool redo();
+
+        // Plain-text clipboard. copy() puts the selection on it (false with no selection, and never
+        // for a secure-entry field); cut() also removes it (false for a read-only field); paste()
+        // replaces the selection - or inserts at the caret - with what's on it (false when there's
+        // no text there). A single-line control turns line breaks in pasted text into spaces.
+        // Ctrl+C / X / V / A, Ctrl+Insert, Shift+Insert and Shift+Delete do these.
+        bool copy();
+        bool cut();
+        bool paste();
+
+    protected:
+        Control& owner() const { return owner_; }
+
+        // Folds laid out by ensureLayoutUpToDate() - none here; TextFoldingController has them.
+        virtual const std::vector<text::TextFold>& layoutFolds() const;
+
+        // Called once model is attached (setModel()), for a subclass to subscribe to it too.
+        virtual void modelAttached(text::TextModel& model) {}
+
         // Maps a point in the owner's own local space (as delivered by
         // onMouseDown/onMouseMove/onMouseUp/onMouseDblClick) into
         // layoutEngine_'s own coordinate space, anchored at
@@ -1456,6 +1700,8 @@ namespace newui {
         // relying on some other event to do it.
         void moveCaret(size_t newOffset, bool extendSelection, bool resetPreferredColumn = true);
 
+    private:
+
         // vkUpArrow/vkDownArrow - hit-tests one line above/below the
         // caret's current on-screen position (via two existing
         // TextLayoutEngine queries, hitTestPosition() then
@@ -1477,10 +1723,6 @@ namespace newui {
         // lands on a non-word character.
         void selectWordAt(const Point& localPt);
 
-        // handleMouseDown()'s own triple-click behavior - see its own
-        // doc comment above.
-        void selectAll();
-
         // caret_'s blink timer flips isVisible() on its own schedule,
         // independent of any Windows message - without this, that new
         // state never reaches the screen until something else incidentally
@@ -1489,6 +1731,14 @@ namespace newui {
         // while the mouse was moving). See Caret::onVisibilityChanged's
         // own doc comment.
         SyncReturn handleCaretVisibilityChanged(text::Caret& sender);
+        SyncReturn handleCaretPositionChanged(text::Caret& sender);
+        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind);
+        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement);
+        // Moves colorRuns_, fontRuns_ and decorations_ through an edit replacing removed characters
+        // at start with inserted ones: after it they shift, one it lands inside grows or shrinks,
+        // one it swallows goes.
+        void adjustRunsForEdit(std::size_t start, std::size_t removed, std::size_t inserted);
+        SyncReturn handleSelectionChanged(text::TextSelection& sender, const text::TextRange& range);
 
         // traits_ enforcement lives here, not in the key handlers above -
         // subscribing to model_'s own vetoable Before events means every
@@ -1502,6 +1752,8 @@ namespace newui {
 
         Control& owner_;
         bool multiline_ = false;
+        bool wordWrap_ = true;
+        float scrollOffsetX_ = 0.0f;
 
         // This control's own current scroll position, in document
         // (unscrolled, layoutEngine_-native) coordinates - see this
@@ -1513,14 +1765,6 @@ namespace newui {
 
         text::TextLayoutEngine layoutEngine_;
 
-        // Owned here (heap, RAII) - Controller's own model_ (controllers.h,
-        // private to Controller) stays non-owning as always; setModel()
-        // above is what points Controller::model() at this. See this
-        // class's own class comment for why TextController holds the
-        // real Model-owning responsibility instead of the more usual
-        // "caller constructs it externally, Controller just observes"
-        // split every other Controller in this codebase uses.
-        std::unique_ptr<text::TextModel> ownedModel_;
         text::TextSelection selection_;
         text::Caret caret_;
         text::TextInputTraits traits_;
@@ -1540,6 +1784,15 @@ namespace newui {
 
         Font font_;
         Color textColor_;
+        std::vector<text::TextColorRun> colorRuns_;
+        std::vector<text::TextFontRun> fontRuns_;
+        std::vector<text::TextDecoration> decorations_;
+        std::vector<text::LineAnnotation> lineAnnotations_;
+        std::size_t hoveredAnnotation_ = npos;
+        bool overwriteMode_ = false;
+        std::size_t tabWidth_ = 4;
+        bool showsWhitespace_ = false;
+        bool highlightsCurrentLine_ = false;
     };
 
     // A single-line text editing control - a thin View-integration shim
@@ -1571,6 +1824,7 @@ namespace newui {
     // (rootview.cpp) automatically selecting whichever SubView a click
     // hit-tests to - this class only reacts to the resulting onGotFocus/
     // onLostFocus, it doesn't request focus itself.
+    // @reflect category=textinput
     class TextField : public Control {
     public:
         TextField();
@@ -1614,6 +1868,13 @@ namespace newui {
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        bool canUndo() const { return controller_->canUndo(); }
+        bool canRedo() const { return controller_->canRedo(); }
+        bool undo() { return controller_->undo(); }
+        bool redo() { return controller_->redo(); }
+        bool copy() { return controller_->copy(); }
+        bool cut() { return controller_->cut(); }
+        bool paste() { return controller_->paste(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -1640,6 +1901,11 @@ namespace newui {
         // inserts a newline into model() - that's TextControl's own
         // behavior for the same key.
         ReturnPressedDelegate onReturnPressed;
+
+        // A hint drawn ghosted (the theme's disabled-text color) while the field is empty - "Search",
+        // say. Gone as soon as there's text; back if it's cleared. Never part of text().
+        const std::string& placeholder() const { return placeholder_; }
+        void setPlaceholder(const std::string& placeholder) { placeholder_ = placeholder; style().markDirty(); }
 
         // Draws into getClientBounds(), on top of whatever paintStyle()
         // already drew for editStyle_'s own native background/border -
@@ -1674,6 +1940,7 @@ namespace newui {
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+        std::string placeholder_;
     };
 
     // A multi-line text editing control - TextField's own class comment
@@ -1706,6 +1973,7 @@ namespace newui {
     // onQueryContentSize) reach an actual scrollbar - see ScrollView's
     // own class comment (controls.h) for how it detects and drives a
     // virtualized child.
+    // @reflect category=textinput
     class TextControl : public Control {
     public:
         TextControl();
@@ -1728,6 +1996,8 @@ namespace newui {
                 return;
             }
             controller_ = std::move(controller);
+            // A TextControl is always multi-line - without this a swapped-in controller ignores Return.
+            controller_->setMultiline(true);
             controller_->model().onChanged.add(this, &TextControl::handleModelChanged);
             style().markDirty();
             onContentSizeChanged(*this);
@@ -1752,6 +2022,13 @@ namespace newui {
 
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        bool canUndo() const { return controller_->canUndo(); }
+        bool canRedo() const { return controller_->canRedo(); }
+        bool undo() { return controller_->undo(); }
+        bool redo() { return controller_->redo(); }
+        bool copy() { return controller_->copy(); }
+        bool cut() { return controller_->cut(); }
+        bool paste() { return controller_->paste(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -1770,8 +2047,67 @@ namespace newui {
         // text change.
         void setFont(const Font& font) { controller_->setFont(font); onContentSizeChanged(*this); }
 
+        // See TextController::showsWhitespace().
+        bool showsWhitespace() const { return controller_->showsWhitespace(); }
+        void setShowsWhitespace(bool shows) { controller_->setShowsWhitespace(shows); }
+
+        // See TextController::highlightsCurrentLine().
+        bool highlightsCurrentLine() const { return controller_->highlightsCurrentLine(); }
+        void setHighlightsCurrentLine(bool highlight) { controller_->setHighlightsCurrentLine(highlight); }
+
+        // See TextController::tabWidth().
+        std::size_t tabWidth() const { return controller_->tabWidth(); }
+        void setTabWidth(std::size_t width) { controller_->setTabWidth(width); onContentSizeChanged(*this); }
+
         const Color& textColor() const { return controller_->textColor(); }
         void setTextColor(const Color& color) { controller_->setTextColor(color); }
+
+        // See TextController::setColorRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextColorRun>& colorRuns() const { return controller_->colorRuns(); }
+        //@reflect ignore=true
+        void setColorRuns(std::vector<text::TextColorRun> runs) { controller_->setColorRuns(std::move(runs)); }
+
+        // See TextController::setFontRuns().
+        //@reflect ignore=true
+        const std::vector<text::TextFontRun>& fontRuns() const { return controller_->fontRuns(); }
+        //@reflect ignore=true
+        void setFontRuns(std::vector<text::TextFontRun> runs) { controller_->setFontRuns(std::move(runs)); onContentSizeChanged(*this); }
+
+        // Styling by name instead of raw runs: ranges name TextStyles in the sheet, and are
+        // expanded into color runs, font runs and decorations (text::expandTextStyles()), replacing
+        // whatever those held. Swapping the sheet (a light/dark theme, say) restyles the same
+        // ranges; so does restyle() after editing a style in place. The sheet may be shared.
+        //@reflect ignore=true
+        void setStyleSheet(std::shared_ptr<const TextStyleSheet> sheet) { styleSheet_ = std::move(sheet); restyle(); }
+        //@reflect ignore=true
+        const std::shared_ptr<const TextStyleSheet>& styleSheet() const { return styleSheet_; }
+        //@reflect ignore=true
+        void setStyledRanges(std::vector<text::TextStyleRange> ranges) { styledRanges_ = std::move(ranges); restyle(); }
+        //@reflect ignore=true
+        const std::vector<text::TextStyleRange>& styledRanges() const { return styledRanges_; }
+        void restyle();
+
+        // See TextController::setDecorations().
+        //@reflect ignore=true
+        const std::vector<text::TextDecoration>& decorations() const { return controller_->decorations(); }
+        //@reflect ignore=true
+        void setDecorations(std::vector<text::TextDecoration> decorations) { controller_->setDecorations(std::move(decorations)); }
+
+        // See TextController::setLineAnnotations(); setStyledRanges() fills them from the ranges'
+        // annotations.
+        //@reflect ignore=true
+        const std::vector<text::LineAnnotation>& lineAnnotations() const { return controller_->lineAnnotations(); }
+        //@reflect ignore=true
+        void setLineAnnotations(std::vector<text::LineAnnotation> annotations) { controller_->setLineAnnotations(std::move(annotations)); }
+
+        // Wrapping at the control's width (the default), or - off - one row per line with the view
+        // scrolling sideways when hosted in a ScrollView: it reports the longest line's width as its
+        // content width, and draws itself shifted by the horizontal scroll offset it is given. See
+        // TextController::setWordWrap().
+        static constexpr float kNoWrapRightMargin = 24.0f;   // room past the longest line for the caret
+        bool wordWrap() const { return controller_->wordWrap(); }
+        void setWordWrap(bool wrap) { controller_->setWordWrap(wrap); }
 
         // Draws into getClientBounds(): selection_'s highlight, then
         // this control's own word-wrapped text (renderer_.render(),
@@ -1791,6 +2127,7 @@ namespace newui {
         SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDown(pt, btnMask, keyMask); }
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseMove(pt, btnMask, keyMask); }
         SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseUp(pt, btnMask, keyMask); }
+        SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseLeft(pt, btnMask, keyMask); }
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode); }
@@ -1815,8 +2152,20 @@ namespace newui {
         SyncReturn handleModelChanged(Model& sender);
 
         std::unique_ptr<TextController> controller_;
+        std::shared_ptr<const TextStyleSheet> styleSheet_;
+        std::vector<text::TextStyleRange> styledRanges_;
         text::TextRenderer renderer_;
         ThemedEditStyle* editStyle_ = nullptr;
+
+        // What paint() last fired onRequestScrollIntoView() for - same
+        // "only fire on a real change, not every paint()" fix as
+        // ListView/TreeView's own pair (controls.h) - see ListView::
+        // paint()'s own doc comment (controls.cpp) for the real,
+        // confirmed live bug this guards against (scrolling this
+        // TextControl's own hosting ScrollView away from the caret via
+        // its scrollbar got immediately undone by the very next repaint,
+        // which paint() firing unconditionally caused on its own).
+        std::optional<Rect> lastScrolledIntoViewCaretRect_;
     };
 
     // The first real consumer of the Item/Controller foundation (items.h/
@@ -1855,10 +2204,11 @@ namespace newui {
     // error, no visible clue why. Call `extern void registerReflectionData();
     // registerReflectionData();` once at application startup (before
     // constructing any ListView) if nothing else in the app already does.
+    // @reflect category=data
     class ListView : public Control {
     public:
         ListView();
-        virtual ~ListView() {}
+        virtual ~ListView();
 
         ListController& controller() { return *controller_; }
         const ListController& controller() const { return *controller_; }
@@ -1870,19 +2220,21 @@ namespace newui {
         // subscription only ever pointed at the old instance" reasoning
         // TextControl::setController() already has for its own model()
         // onChanged subscription.
-        void setController(std::unique_ptr<ListController> controller);
+        //
+        // Shared ownership: one controller can back several views over the same data (a
+        // DropDownList and its popup list do exactly that). A std::unique_ptr<Derived> argument
+        // still converts implicitly, so existing call sites are unchanged.
+        void setController(std::shared_ptr<ListController> controller);
+        std::shared_ptr<ListController> sharedController() const { return controller_; }
 
         ListModel* model() const { return controller_->model(); }
 
-        // Controller::setModel()'s own non-owning contract, unchanged -
-        // this class never takes ownership of model, same as every other
-        // Controller in this codebase except TextController (see its own
-        // class comment for why that one's different). ListModel*
-        // specifically, not plain Model* - see ListController::model()/
-        // setModel()'s own doc comment (controllers.h) for why. Fires
-        // onContentSizeChanged (view.h) - itemCount() almost certainly
-        // just changed - and repaints.
-        void setModel(ListModel* model);
+        // Hands model to this view's controller, which owns it from here on (Controller::
+        // setModel()'s contract) - keep model() (or a pointer taken before the call) to go on
+        // using it. ListModel specifically, not plain Model - see ListController::model()/
+        // setModel()'s own doc comment (controllers.h) for why. Fires onContentSizeChanged
+        // (view.h) - itemCount() almost certainly just changed - and repaints.
+        void setModel(std::unique_ptr<ListModel> model);
 
         // Whether the row currently under the mouse gets a lighter
         // highlight (Item::setHighlighted(), items.h) - on by default,
@@ -1995,6 +2347,28 @@ namespace newui {
         // !hoverHighlightEnabled(), so nothing to undo when it's turned
         // back on mid-hover.
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down/Home/End move/extend/preview selection the same way
+        // handleMouseDown()'s own Shift/Ctrl handling does, just relative
+        // to whichever row is "current" (keyboardHighlightedIndex_ if a
+        // Ctrl-Arrow preview is in progress, else selectionAnchor_, else
+        // selectedIndex(), else row 0) instead of a clicked row:
+        //  - plain: replaces selectedIndices_ with just the new row
+        //    (setSelectedIndex()) and moves selectionAnchor_ to it - same
+        //    as a plain click.
+        //  - Shift: extends from selectionAnchor_ to the new row
+        //    (selectRange()) - same as Shift+click; repeated presses keep
+        //    extending from the new row (tracked via
+        //    keyboardHighlightedIndex_), not resetting to the anchor.
+        //  - Ctrl: moves keyboardHighlightedIndex_ only - real selection
+        //    is untouched until Ctrl+Space toggles it (see below) - same
+        //    "move a preview highlight, not the real selection" contract
+        //    DropDownList::moveKeyboardHighlight() already established for
+        //    its own popup ListView, just driven by this ListView's own
+        //    real keyboard focus instead of a synthetic one.
+        // Ctrl+Space toggles selection at keyboardHighlightedIndex_ (a
+        // no-op if nothing's currently highlighted) - the other half of
+        // classic Win32 listbox keyboard multi-select.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         // Clears hoveredIndex_ - the cursor has left this control
         // entirely, so no row is hovered regardless of where it last was.
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -2013,6 +2387,13 @@ namespace newui {
         // TextControl::handleModelChanged() already documents for a text
         // edit.
         SyncReturn handleDataChanged(ListController& sender);
+        // Keeps editStyle_->focused (ThemedEditStyle, viewstyle.h) in sync
+        // with real keyboard focus, the same way TextController::
+        // handleGotFocus()/handleLostFocus() (controls.cpp) already does
+        // for TextField/TextControl - this class has no TextController to
+        // share that fix with, so it gets its own pair instead.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         // Common "did this actually change the selection" tail shared by
         // setSelectedIndex()/addToSelection()/removeFromSelection()/
@@ -2022,7 +2403,16 @@ namespace newui {
         // onSelectionChanged.
         void replaceSelection(std::set<std::size_t> newSelection);
 
-        std::unique_ptr<ListController> controller_;
+        // The row Up/Down/Home/End in handleKeyDown() treats as "here
+        // right now" before applying a move - keyboardHighlightedIndex_ if
+        // a Ctrl-Arrow preview is already in progress, else
+        // selectionAnchor_, else selectedIndex(), else row 0 (never
+        // itemCount(), by construction - handleKeyDown() already returns
+        // early when itemCount() == 0).
+        std::size_t currentKeyboardLead() const;
+
+        std::shared_ptr<ListController> controller_;
+        Connection dataChangedConnection_;  // to controller_->onDataChanged; removed on swap/destroy
         float scrollOffsetY_ = 0.0f;
         std::set<std::size_t> selectedIndices_;
 
@@ -2037,6 +2427,27 @@ namespace newui {
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredIndex_;
         std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // What paint() last fired onRequestScrollIntoView() for - a real,
+        // confirmed live bug otherwise: paint() used to fire it every
+        // single call whenever selectedIndex()/keyboardHighlightedIndex_
+        // had a value at all, not just when either one actually *changed*
+        // since the last paint(). Since dragging this ListView's own
+        // hosting ScrollView's scrollbar triggers a repaint itself
+        // (ScrollBar::onValueChanged -> handleScrollOffsetChanged() ->
+        // style().markDirty()), that unconditional firing meant every
+        // drag attempt to scroll the selected row *out* of view
+        // immediately snapped straight back to it on the very next
+        // paint() - the user could never actually scroll away from a
+        // selected row at all. paint() now only fires again when
+        // selectedIndex()/keyboardHighlightedIndex_ no longer matches
+        // what's stored here.
+        std::optional<std::size_t> lastScrolledIntoViewSelectedIndex_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
+
+        // Captured from style() at construction (ListView::ListView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     // The hierarchical counterpart to ListView (above) - same overall
@@ -2061,10 +2472,11 @@ namespace newui {
     // Same registerReflectionData() trap ListView's own class comment
     // documents applies here too - TreeController::createItem() also
     // constructs its Item via reflection.
+    // @reflect category=data
     class TreeView : public Control {
     public:
         TreeView();
-        virtual ~TreeView() {}
+        virtual ~TreeView();
 
         TreeController& controller() { return *controller_; }
         const TreeController& controller() const { return *controller_; }
@@ -2072,18 +2484,30 @@ namespace newui {
         // Swaps in a different TreeController (e.g. a custom subclass
         // overriding createItem() or itemHeight()) - a no-op for nullptr.
         // Re-wires onDataChanged against the new controller, same
-        // reasoning ListView::setController() already has.
-        void setController(std::unique_ptr<TreeController> controller);
+        // reasoning ListView::setController() already has - including its shared ownership
+        // (see there).
+        void setController(std::shared_ptr<TreeController> controller);
+        std::shared_ptr<TreeController> sharedController() const { return controller_; }
 
         TreeModel* model() const { return controller_->model(); }
 
-        // Controller::setModel()'s own non-owning contract - see
-        // ListView::setModel()'s own doc comment for the same reasoning,
-        // TreeModel* in place of ListModel*.
-        void setModel(TreeModel* model);
+        // The controller owns model from here on - see ListView::setModel()'s own doc comment
+        // for the same reasoning, TreeModel in place of ListModel.
+        void setModel(std::unique_ptr<TreeModel> model);
 
         bool hoverHighlightEnabled() const { return hoverHighlightEnabled_; }
         void setHoverHighlightEnabled(bool value);
+
+        // A second, independent highlight driven by Ctrl+Arrow (see
+        // handleKeyDown(), controls.cpp) - same "moved but not yet
+        // selected" contract as ListView::keyboardHighlightedIndex(), a
+        // visible-row index (controller_->pathAt()'s own index space, not
+        // a tree path) for the same reason paint() already needs one to
+        // look up itemOffset()/itemHeight(). Clamped to a valid index (or
+        // cleared if visibleCount() is 0) - never left pointing past the
+        // end.
+        std::optional<std::size_t> keyboardHighlightedIndex() const { return keyboardHighlightedIndex_; }
+        void setKeyboardHighlightedIndex(std::optional<std::size_t> index);
 
         float rowHeight() const { return controller_->defaultItemHeight(); }
         void setRowHeight(float height);
@@ -2120,6 +2544,21 @@ namespace newui {
         // highlighted set the same way, released immediately after.
         void paint(BLContext& ctx) override;
 
+        // Where visible row path is drawn right now, in this TreeView's
+        // own local coordinate space - the same space a live child SubView
+        // added directly to it (addChild()/setBounds()) would expect,
+        // already accounting for the current scroll offset the same way
+        // paint()'s own per-row loop does (see handleScrollOffsetChanged()).
+        // std::nullopt if path isn't currently visible (collapsed away,
+        // doesn't exist, or this TreeView currently has degenerate client
+        // bounds) - same "not visible right now" contract as
+        // TreeController::visibleIndexOf(). A real, generically useful
+        // query - any TreeView consumer wanting "where is row X right now"
+        // (a live editor widget overlaid on a selected row, a tooltip, a
+        // drag indicator) needs exactly this, not anything specific to one
+        // particular caller.
+        std::optional<Rect> rectForPath(const std::vector<std::size_t>& path) const;
+
     private:
         // Row index + path for whatever visible row pt's Y lands on -
         // shared by handleMouseDown()/handleMouseMove() so the same
@@ -2138,18 +2577,61 @@ namespace newui {
         SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        // Up/Down move/extend/preview selection the same way ListView::
+        // handleKeyDown() does (see its own doc comment, controls.h) -
+        // plain replaces, Shift extends from selectionAnchorPath_, Ctrl
+        // moves keyboardHighlightedIndex_ only (Ctrl+Space toggles it into
+        // the real selection) - all keyed by visible row index, converted
+        // to/from a tree path via controller_->pathAt()/visibleIndexOf().
+        // Left/Right add the classic tree-specific pair on top: collapse
+        // (if expanded) or go to the parent path (if not); expand (if
+        // collapsed and has children) or go to the first child path (if
+        // already expanded) - see TreeController::isExpanded()/
+        // hasChildren().
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
         SyncReturn handleQueryContentSize(View& sender, Size& outSize);
         SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
         SyncReturn handleDataChanged(TreeController& sender);
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView's own pair (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
 
         void replaceSelection(std::set<std::vector<std::size_t>> newSelection);
 
-        std::unique_ptr<TreeController> controller_;
+        // The visible row handleKeyDown()'s Up/Down treats as "here right
+        // now" before applying a move - same shape as ListView::
+        // currentKeyboardLead(), just resolving selectionAnchorPath_/
+        // selectedPath() to a visible index via controller_->
+        // visibleIndexOf() first (a path can't be compared/offset
+        // directly the way a flat index can). Falls back to row 0 if
+        // nothing resolves to a currently-visible row (e.g. the anchor
+        // path got collapsed away) - never visibleCount(), by
+        // construction (handleKeyDown() already returns early when
+        // visibleCount() == 0).
+        std::size_t currentKeyboardLead() const;
+
+        std::shared_ptr<TreeController> controller_;
+        Connection dataChangedConnection_;  // to controller_->onDataChanged; removed on swap/destroy
         float scrollOffsetY_ = 0.0f;
         std::set<std::vector<std::size_t>> selectedPaths_;
         std::optional<std::vector<std::size_t>> selectionAnchorPath_;
         bool hoverHighlightEnabled_ = true;
         std::optional<std::size_t> hoveredVisibleIndex_;
+        std::optional<std::size_t> keyboardHighlightedIndex_;
+
+        // Same "only fire onRequestScrollIntoView() on a real change, not
+        // every paint()" fix as ListView's own pair (controls.h) - see
+        // its own doc comment for the full reasoning (same scrollbar-
+        // fighting-the-user bug, same fix shape).
+        std::optional<std::vector<std::size_t>> lastScrolledIntoViewSelectedPath_;
+        std::optional<std::size_t> lastScrolledIntoViewHighlightedIndex_;
+
+        // Captured from style() at construction (TreeView::TreeView()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
     };
 
     class PopupFrame;
@@ -2170,19 +2652,28 @@ namespace newui {
     // Item::setStyle()). Persistent afterward (see PopupFrame's own class
     // comment) - opening/closing repeatedly just shows/hides the same
     // window rather than recreating it.
+    // @reflect category=textinput
     class DropDownList : public Control {
     public:
         DropDownList();
         ~DropDownList() override;
 
+        // The same controller the popup list uses (shared, not a copy) - so this is where to
+        // customize the rows: controller().setDefaultItemClassName("MyItem"), a custom subclass via
+        // setController(), row height, ... all apply to the popup too.
         ListController& controller() { return *controller_; }
         const ListController& controller() const { return *controller_; }
+        // Swaps the controller, including in the popup list if it already exists. A no-op for
+        // nullptr or the current one. Clears selectedIndex() if it's no longer valid against the
+        // new controller's model.
+        void setController(std::shared_ptr<ListController> controller);
+        std::shared_ptr<ListController> sharedController() const { return controller_; }
 
         ListModel* model() const { return controller_->model(); }
-        // Same non-owning ListModel* contract as ListView::setModel() -
-        // see its own doc comment (controls.h). Clears selectedIndex() if
-        // it's no longer valid against the new model's size().
-        void setModel(ListModel* model);
+        // Same ownership as ListView::setModel() - the (shared) controller owns model. See its
+        // own doc comment (controls.h). Clears selectedIndex() if it's no longer valid against
+        // the new model's size().
+        void setModel(std::unique_ptr<ListModel> model);
 
         std::optional<std::size_t> selectedIndex() const { return selectedIndex_; }
         // A no-op if unchanged. Does not itself validate index against
@@ -2194,6 +2685,7 @@ namespace newui {
 
         typedef Delegate<DropDownList> SelectionChangedDelegate;
         SelectionChangedDelegate onSelectionChanged;
+
 
         bool isOpen() const;
 
@@ -2246,6 +2738,16 @@ namespace newui {
         // extra focus-handling needed here.
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
+        // Same "no shared TextController to fix this in once" reasoning
+        // as ListView/TreeView's own pairs (controls.h) - see
+        // TextController::handleGotFocus()/handleLostFocus() (controls.cpp)
+        // for the original fix these mirror. This is the outer combo box
+        // control itself, not popupListView_ - see moveKeyboardHighlight()'s
+        // own comment above for why popupListView_ never reliably holds
+        // real keyboard focus at all.
+        SyncReturn handleGotFocus(View& sender);
+        SyncReturn handleLostFocus(View& sender);
+
         // Moves popupListView_'s keyboardHighlightedIndex() by delta
         // (clamped to a valid row, never wrapping) - starts from
         // selectedIndex_ the first time (seeded in openPopup()), so the
@@ -2253,10 +2755,22 @@ namespace newui {
         // already-selected row rather than an arbitrary one.
         void moveKeyboardHighlight(int delta);
 
-        std::unique_ptr<ListController> controller_;
+        std::shared_ptr<ListController> controller_;  // shared with popupListView_
         std::unique_ptr<PopupFrame> popup_;
-        ListView* popupListView_ = nullptr;  // owned by popup_->rootView()'s normal addChild(), not by this class directly
+        // popupListView_ is wrapped in popupScroll_ (a real ScrollView, not the plain FlexLayout
+        // arrangement this used before) so a popup taller than kMaxPopupHeight's worth of rows
+        // (openPopup(), controls.cpp) gets a real vertical scrollbar and responds to the mouse
+        // wheel - ListView already answers onQueryContentSize (its own constructor), so it needs
+        // no LayoutParams of its own once it's ScrollView's content child; only popupScroll_ does
+        // (to fill popup_->rootView()'s own vertical FlexLayout). Both owned by popup_->rootView()'s
+        // normal addChild() chain, not by this class directly.
+        ScrollView* popupScroll_ = nullptr;
+        ListView* popupListView_ = nullptr;
         std::optional<std::size_t> selectedIndex_;
+
+        // Captured from style() at construction (DropDownList::DropDownList()) -
+        // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
 
         // Guards openPopup()'s own restore of the popup ListView's
         // selection (to match selectedIndex_ on reopen) from being
@@ -2264,5 +2778,137 @@ namespace newui {
         // would fire handlePopupListSelectionChanged(), which calls
         // closePopup(), closing the popup in the middle of opening it.
         bool restoringPopupSelection_ = false;
+    };
+
+    class TabControl;
+
+    // A TabControl page that carries its own tab label, so the label is saved and loaded with
+    // the page (a tab button itself is rebuilt, never serialized). Setting title() on an
+    // attached page relabels its button. Any SubView still works as a page - TabPage is what
+    // the designer creates, and what a saved file's tabs come back as.
+    // @reflect
+    class TabPage : public SubView {
+    public:
+        TabPage();
+
+        std::string title() const { return title_; }
+        void setTitle(const std::string& title);
+
+    private:
+        friend class TabControl;
+        std::string title_;
+    };
+
+    // A TabControl's pages area: a plain SubView, except that attaching, detaching or reordering a
+    // page here - by TabControl::addTab()/removeTab(), or by anything that reaches it through
+    // childViews (a file being loaded, a designer) - keeps the owning TabControl's tab buttons in
+    // step. Internal to TabControl; reflected only so a saved TabControl reads back into it.
+    // @reflect
+    class TabPageContainer : public SubView {
+    public:
+        void addChild(SubView* child) override;
+        void removeChild(SubView* child) override;
+        void reorderChild(SubView* child, std::size_t newIndex) override;
+
+    private:
+        friend class TabControl;
+        friend class TabPage;
+        TabControl* owner_ = nullptr;
+    };
+
+    // A themed tab strip (ThemedTabItemStyle buttons) plus a
+    // CardLayout-driven content area (one page per tab, all but the
+    // selected one hidden) combined into a single composite control -
+    // same "SubView owning a themed strip of button-like children" shape
+    // MenuBar (menus.h) already established. Unlike MenuBar's buttons
+    // (which have to open a native ContextMenu popup), a tab click just
+    // switches which already-built page is visible - no live window
+    // needed at all for that, so (unlike MenuBar/ContextMenu) TabControl
+    // is fully headlessly testable.
+    //
+    // Heap-only, like every other SubView (see View's class comment) -
+    // construct with new TabControl(...), add into your own tree via
+    // addChild() exactly like any other SubView.
+    // @reflect category=containers
+    class TabControl : public Control {
+    public:
+        explicit TabControl(ThemedTabItemStyle::TabAlignment alignment = ThemedTabItemStyle::TabAlignment::Top);
+
+        // Appends one tab: a themed ThemedTabItemStyle button labeled
+        // text in the strip, and page (already heap-allocated - same
+        // caller-builds/TabControl-takes-ownership-via-addChild()
+        // convention as every other SubView tree in this codebase, not a
+        // unique_ptr) as its matching content - both index-aligned. The
+        // first tab added auto-selects (a tab control should never show
+        // nothing). Returns page.
+        SubView* addTab(const std::string& text, SubView* page);
+
+        // Inverse of addTab(): destroys the Nth tab's button and detaches
+        // (does not destroy) its page, returning it - the caller now owns
+        // it (destroy()+delete it, or hand it back to addTab() to
+        // restore the tab). nullptr, changing nothing, if index is out of
+        // range. Selection follows the tabs: removing a tab before the
+        // selected one keeps the same tab selected, removing the selected
+        // one selects its successor (or the new last tab).
+        SubView* removeTab(std::size_t index);
+
+        std::size_t tabCount() const;
+
+        // The Nth tab's own button/page SubView (addTab() order),
+        // nullptr if index is out of range - e.g. to wire up further
+        // customization (a tooltip, an icon) after the fact, or (tests)
+        // to drive the button's already-wired onMouseDown directly
+        // without a real HWND/message pump.
+        SubView* tabButton(std::size_t index) const;
+        SubView* page(std::size_t index) const;
+
+        std::size_t selectedIndex() const {
+            return selectedIndex_;
+        }
+
+        // No-op if index is out of range.
+        void selectTab(std::size_t index);
+
+        ThemedTabItemStyle::TabAlignment alignment() const {
+            return alignment_;
+        }
+
+        typedef Delegate<TabControl, std::size_t> TabChangedDelegate;
+        TabChangedDelegate onTabChanged;  // fires from selectTab() (including from a tab click)
+
+    private:
+        ThemedTabItemStyle::TabAlignment alignment_;
+        friend class TabPage;
+        friend class TabPageContainer;
+
+        std::size_t selectedIndex_ = 0;
+        SubView* stripRow_;   // the row/column of tab-item buttons
+        TabPageContainer* pagesArea_;  // CardLayout container - one page per tab
+
+        // The one place a tab button is built, removed or moved - reached from pagesArea_'s own
+        // addChild()/removeChild()/reorderChild(), so every way a page can come or go (addTab(),
+        // removeTab(), a file being loaded, a designer) keeps buttons and pages index-aligned.
+        void pageAdded(SubView* page);
+        void pageRemoved(std::size_t index);
+        void pageMoved(std::size_t from, std::size_t to);
+        void refreshTabTitle(const TabPage* page);
+
+        // addTab()'s label for the page it is attaching, consumed by pageAdded().
+        std::string pendingTabText_;
+        bool hasPendingTabText_ = false;
+
+        // Recomputes every tab button's ThemedTabItemStyle::position
+        // (Left/Right/Middle/Only) from scratch - has to re-run on every
+        // addTab() call, since which button is first/last changes.
+        void updateTabPositions();
+
+        // Left/Right (Top/Bottom alignment - a horizontal strip) or
+        // Up/Down (Left/Right alignment - a vertical strip) switches the
+        // selected tab, wrapping at either end - matching native Win32
+        // tab control behavior once the strip itself has focus (see the
+        // constructor's own comment on why the whole strip, not each
+        // button, is the one Tab stop). Any other key is ignored, not
+        // consumed.
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
     };
 }

@@ -24,6 +24,10 @@
 #include "newui/newui.h"
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
+#include "newui/color.h"
+#include "newui/subview.h"
+#include "newui/uicolormanager.h"
+#include "newui/viewstyle.h"
 
 #include <any>
 #include <string>
@@ -448,4 +452,301 @@ TEST(ReflectionIO, ReadTerminatesOnASelfReferentialAddressableProperty) {
     reader.read(&fresh);  // would stack-overflow without the enterInstance() guard
 
     EXPECT_EQ(&fresh.self(), &fresh);
+}
+
+namespace {
+
+struct ProxiedReal {};
+
+struct ProxyStandIn {};
+
+const Class* RegisterProxyClasses() {
+    static const Class* registered = [] {
+        ClassBuilder<ProxyStandIn> standInBuilder;
+        standInBuilder.clazz().proxyFor("ProxiedReal");
+        ReflectionRegistry::registerClass(standInBuilder);
+
+        ClassBuilder<ProxiedReal> realBuilder;
+        realBuilder.clazz().proxy("ProxyStandIn");
+        ReflectionRegistry::registerClass(realBuilder);
+
+        return classinfo(typeid(ProxiedReal));
+    }();
+    return registered;
+}
+
+// A minimal type with a real, registered "setDesignTime" Method, standing
+// in for newui::Component without this test file needing to depend on it -
+// Class::trySetDesignTime() (reflection.h) looks the method up by name
+// through the ordinary reflection API, same as Component::setDesignTime()
+// itself already is (its own @reflect ignore=true only excludes it from
+// Property-pairing, not Method registration - see component.h and the
+// generated newui_reflection_generated.cpp, which already emits
+// .method("setDesignTime", ...) for it).
+struct DesignAwareThing {
+    bool designTime = false;
+    void setDesignTime(bool v) { designTime = v; }
+};
+
+const Class* RegisterDesignAwareThing() {
+    static const Class* registered = [] {
+        ClassBuilder<DesignAwareThing> builder;
+        builder.clazz()
+            .constructor<>()
+            .method("setDesignTime", Scope::Public, &DesignAwareThing::setDesignTime);
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(DesignAwareThing));
+    }();
+    return registered;
+}
+
+// Base/derived pair mirroring the real Component/View relationship -
+// setDesignTime lives only on the base, never redeclared on the derived
+// class, so trySetDesignTime() must walk parentClass() to find it.
+struct DesignAwareBase {
+    bool designTime = false;
+    void setDesignTime(bool v) { designTime = v; }
+};
+
+struct DesignAwareDerived : DesignAwareBase {};
+
+void RegisterDesignAwareBaseAndDerived() {
+    static bool done = [] {
+        ClassBuilder<DesignAwareBase> baseBuilder;
+        baseBuilder.clazz()
+            .constructor<>()
+            .method("setDesignTime", Scope::Public, &DesignAwareBase::setDesignTime);
+        ReflectionRegistry::registerClass(baseBuilder);
+
+        ClassBuilder<DesignAwareDerived> derivedBuilder;
+        derivedBuilder.clazz().constructor<>().base<DesignAwareBase>();
+        ReflectionRegistry::registerClass(derivedBuilder);
+        return true;
+    }();
+    (void)done;
+}
+
+}  // namespace
+
+TEST(ReflectionIO, TrySetDesignTimeWalksParentClassToFindTheMethod) {
+    RegisterDesignAwareBaseAndDerived();
+
+    DesignAwareDerived instance;
+    const Class* derivedClazz = classinfo(typeid(DesignAwareDerived));
+    ASSERT_NE(derivedClazz, nullptr);
+
+    // Class::method() itself now walks parentClass() (reflection.cpp), so
+    // a method declared only on the base resolves through the derived
+    // class too - confirming that here isn't just incidental, it's the
+    // same lookup trySetDesignTime() below now relies on directly (no
+    // separate parentClass() walk of its own any more - see its own
+    // comment).
+    ASSERT_NE(derivedClazz->method("setDesignTime"), nullptr);
+
+    derivedClazz->trySetDesignTime(&instance, true);
+    EXPECT_TRUE(instance.designTime);
+}
+
+TEST(ReflectionIO, DesignModeWriteSubstitutesProxyForRealClassName) {
+    RegisterProxyClasses();
+    ProxyStandIn instance;
+
+    ObjectWriter writer;
+    writer.setDesignMode(true);
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"ProxiedReal\""), std::string::npos);
+    EXPECT_EQ(text.find("ProxyStandIn"), std::string::npos);
+}
+
+TEST(ReflectionIO, NonDesignModeWriteKeepsTheProxysOwnClassName) {
+    RegisterProxyClasses();
+    ProxyStandIn instance;
+
+    ObjectWriter writer;  // setDesignMode() never called - defaults to false
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"ProxyStandIn\""), std::string::npos);
+}
+
+TEST(ReflectionIO, WriteWithNoProxyForIsUnaffectedByDesignMode) {
+    RegisterDesignAwareThing();
+    DesignAwareThing instance;
+
+    ObjectWriter writer;
+    writer.setDesignMode(true);
+    writer.write(&instance);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("type: \"DesignAwareThing\""), std::string::npos);
+}
+
+TEST(ReflectionIO, DesignModeReadNewPropagatesDesignTimeOntoFreshInstance) {
+    const Class* clazz = RegisterDesignAwareThing();
+    DesignAwareThing written;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    reader.setDesignMode(true);
+    DesignAwareThing* fresh = reader.readNew<DesignAwareThing>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->designTime);
+    delete fresh;
+    (void)clazz;
+}
+
+TEST(ReflectionIO, NonDesignModeReadNewLeavesDesignTimeUnset) {
+    RegisterDesignAwareThing();
+    DesignAwareThing written;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    // setDesignMode() never called - defaults to false.
+    DesignAwareThing* fresh = reader.readNew<DesignAwareThing>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_FALSE(fresh->designTime);
+    delete fresh;
+}
+
+// ---------------------------------------------------------------------
+// Class::isStringValue() (ClassBuilder<T>::stringValue(), reflection.h) -
+// Color is the one real class registered with it (see the "@reflect
+// stringvalue" comment directly above `class Color`, color.h), so these
+// exercise the real, generated newui::Color registration directly rather
+// than a test-only stand-in, through ViewStyle::borderFill() - a genuine
+// plain by-value getter/setter Color property (the "neither addressable
+// nor heap" branch of TypedProperty<SourceT,ValueT>::read()/write(),
+// reflection.h) - the exact shape a "borderFill: \"red\"" value in a real
+// .newui file goes through.
+// ---------------------------------------------------------------------
+
+using newui::Color;
+using newui::ViewStyle;
+
+TEST(ColorStringValue, WriteEmitsACompactStringInsteadOfANestedObject) {
+    ViewStyle style;
+    style.setBorderFill(Color(1.0f, 0.0f, 0.0f, 1.0f));  // opaque red
+
+    ObjectWriter writer;
+    writer.write(&style);
+
+    std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("borderFill: \"#ff0000ff\""), std::string::npos) << text;
+    // The old nested-object form ("borderFill":{"type":"Color",...}) must
+    // be gone, not merely coexisting alongside the new string form.
+    EXPECT_EQ(text.find("borderFill: {"), std::string::npos) << text;
+}
+
+TEST(ColorStringValue, ReadAcceptsAHexStringForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"#00ff00ff\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color(0.0f, 1.0f, 0.0f, 1.0f));
+}
+
+TEST(ColorStringValue, ReadAcceptsACssNamedColorForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"red\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color::fromName("red"));
+}
+
+TEST(ColorStringValue, ReadAcceptsAUIColorRoleNameForBorderFill) {
+    ObjectReader reader;
+    json5::error err = json5::from_string("{ borderFill: \"WindowBackground\" }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    // Live-resolved, same as Color::fromString() itself would - not a
+    // hardcoded expectation, since which actual RGB this is depends on the
+    // test machine's current Light/Dark mode setting (UIColorManager).
+    Color expected;
+    ASSERT_TRUE(Color::fromUIColorRoleName("WindowBackground", expected));
+    EXPECT_EQ(style.borderFill(), expected);
+}
+
+TEST(ColorStringValue, ReadStillAcceptsTheOldNestedObjectFormForBackwardCompatibility) {
+    ObjectReader reader;
+    json5::error err = json5::from_string(
+        "{ borderFill: { type: \"Color\", r: 0, g: 1, b: 0, a: 1 } }", reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle style;
+    reader.read(&style);
+
+    EXPECT_EQ(style.borderFill(), Color(0.0f, 1.0f, 0.0f, 1.0f));
+}
+
+TEST(ColorStringValue, WriteThenReadRoundTripsExactly) {
+    ViewStyle written;
+    // Starts from an already hex-quantized string (not an arbitrary float
+    // triple) so the round trip is exact - Color::toString() always
+    // quantizes to 8 bits/channel, so e.g. Color(0.25f, ...) wouldn't
+    // compare == after going through it, purely from that lossy
+    // float<->byte conversion, nothing to do with this test's own subject.
+    written.setBorderFill(Color(std::string("#4080c0ff")));
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    ViewStyle fresh;
+    reader.read(&fresh);
+
+    EXPECT_EQ(fresh.borderFill(), written.borderFill());
+}
+
+// View::isLayoutIgnored()/setLayoutIgnored() are paired by reflectgen into the real "layoutIgnored"
+// property, so a saved document (and the designer) can carry it.
+TEST(ReflectionIO, ViewLayoutIgnoredIsARealPropertyThatRoundTripsAndDefaultsToFalse) {
+    auto* view = new newui::SubView();
+    view->setLayoutIgnored(true);
+
+    ObjectWriter writer;
+    writer.write(view);
+    const std::string text = json5::to_string(writer.doc);
+    EXPECT_NE(text.find("layoutIgnored: true"), std::string::npos) << text;
+
+    ObjectReader reader;
+    ASSERT_FALSE(json5::from_string(text, reader.doc));
+    newui::View* fresh = reader.readNew<newui::View>();
+    ASSERT_NE(fresh, nullptr);
+    EXPECT_TRUE(fresh->isLayoutIgnored());
+
+    // Omitting the key leaves the default: an existing saved document is unaffected.
+    ObjectReader plain;
+    ASSERT_FALSE(json5::from_string("{ type: \"SubView\" }", plain.doc));
+    newui::View* defaulted = plain.readNew<newui::View>();
+    ASSERT_NE(defaulted, nullptr);
+    EXPECT_FALSE(defaulted->isLayoutIgnored());
+
+    for (newui::View* v : { fresh, defaulted, static_cast<newui::View*>(view) }) {
+        v->destroy();
+        delete v;
+    }
 }

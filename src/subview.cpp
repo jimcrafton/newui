@@ -11,11 +11,18 @@ SubView::~SubView()
 
 
 void SubView::setBounds(const Rect& bounds) {
-    if (bounds == bounds_) {
+    if (bounds == bounds_ || isDestroying()) {
         return;
     }
 
+    // Both the area this view leaves and the area it moves into need repainting - redraw() invalidates
+    // wherever bounds_ says the view currently is, so once before the change and once after. Without this
+    // a moved/resized view was only ever shown in its new place (and its old place only cleaned up) when
+    // something *else* happened to repaint; RepaintMode::Full masked that by redrawing everything each time,
+    // RepaintMode::Dirty would leave it stale (see RootView::repaintVerifyMismatches()).
+    redraw();
     bounds_ = bounds;
+    redraw();
     onSizeChanged(*this, bounds_.size());
     updateLayout();
 }
@@ -27,16 +34,41 @@ void SubView::setVisible(bool visible) {
 
     visible_ = visible;
     onVisibilityChanged(*this);
+    // Layout skips invisible children, so showing or hiding one changes where its siblings go and
+    // where it goes itself - without this a child shown after the last layout kept stale bounds
+    // (confirmed: a right-anchored status-bar label that appeared after layout sat at x = 0). Not from
+    // inside the parent's own pass (CardLayout/ScrollView toggle visibility as part of it).
+    if (parent_ != nullptr && !parent_->isLayingOut()) {
+        parent_->updateLayout();
+    }
+    // Same real, confirmed live bug (and same fix) as View::addChild()/
+    // removeChild()/reorderChild() (view.cpp) - a real caller (CardLayout::
+    // arrange(), layout.cpp, switching which page is the active tab)
+    // toggles this correctly, but nothing else ever invalidated the
+    // region either the just-hidden or just-shown child occupies, so the
+    // old page's pixels stayed on screen until some *unrelated* later
+    // event (a mouse move, say) happened to repaint over them - the
+    // control's own internal state (which page is active) was already
+    // correct the whole time, only the pixels were stale.
+    redraw();
 }
 
 void SubView::addChild(SubView* child) {
-    child->setParent(this);
-	View::addChild(child);	
+    // Raw parent_ bookkeeping via internal_setParent() (view.h) - not the real, safe
+    // View::setParent(), which calls addChild()/removeChild() itself (to support an
+    // already-attached child moving between containers); routing this through it would
+    // recurse forever.
+    child->internal_setParent(this);
+	View::addChild(child);
 	// propagateRootView(), not setRootView(): child may already have its
 	// own subtree (built before being attached here), and every
 	// descendant in it needs to pick up this rootView() too, not just
 	// child itself.
 	child->propagateRootView(rootView());
+	// initialize() is idempotent (Component::initialize()) - needed here for a child attached
+	// to an already-initialized live parent, which View::internal_init()'s own childViews_
+	// cascade can't reach on its own (nothing re-triggers that cascade after the fact).
+	child->initialize();
 }
 
 void SubView::removeChild(SubView* child) {
@@ -54,17 +86,18 @@ void SubView::removeChild(SubView* child) {
     }
 
     View::removeChild(child);
-    child->setParent(nullptr);
+    child->internal_setParent(nullptr);  // see addChild()'s own comment on why not setParent()
     child->propagateRootView(nullptr);
 }
 
 bool SubView::initialize()
 {
-    return true;
+    return View::initialize();
 }
 
 void SubView::destroy()
 {
+	markDestroying();   // before detaching - the parent's relayout must not touch this subtree
 	parentView_ = nullptr;
 
     // Remove this SubView from its parent's children list if it has a parent

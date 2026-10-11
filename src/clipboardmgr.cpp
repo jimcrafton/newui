@@ -174,28 +174,37 @@ UINT ClipboardManager::registerCustomFormat(const std::wstring& formatName) {
     return ::RegisterClipboardFormatW(formatName.c_str());
 }
 
+namespace {
+
+// Copies data into a fresh global block and hands it to the (already open, already emptied)
+// clipboard under format. Throws std::runtime_error from the allocation helpers.
+bool putOnOpenClipboard(UINT format, const std::vector<std::uint8_t>& data) {
+    // GlobalAlloc(GHND, 0)/SetClipboardData() don't reliably round-trip
+    // a genuine zero-byte block (confirmed live - SetClipboardData()
+    // fails for one) - allocate at least 1 byte regardless of data's
+    // real size.
+    detail::GlobalMemoryHandle handle = detail::allocGlobalMemory(GHND, data.empty() ? 1 : data.size());
+    if (!data.empty()) {
+        detail::GlobalMemoryLock lock = detail::lockGlobalMemory(handle.get());
+        std::memcpy(lock.get(), data.data(), data.size());
+    }
+
+    if (!::SetClipboardData(format, handle.get())) {
+        return false;
+    }
+    handle.release();
+    return true;
+}
+
+}  // namespace
+
 bool ClipboardManager::setCustomData(UINT format, const std::vector<std::uint8_t>& data, View* owner) {
     try {
         detail::ClipboardScope scope(detail::windowHandleOf(owner));
         if (!::EmptyClipboard()) {
             return false;
         }
-
-        // GlobalAlloc(GHND, 0)/SetClipboardData() don't reliably round-trip
-        // a genuine zero-byte block (confirmed live - SetClipboardData()
-        // fails for one) - allocate at least 1 byte regardless of data's
-        // real size.
-        detail::GlobalMemoryHandle handle = detail::allocGlobalMemory(GHND, data.empty() ? 1 : data.size());
-        if (!data.empty()) {
-            detail::GlobalMemoryLock lock = detail::lockGlobalMemory(handle.get());
-            std::memcpy(lock.get(), data.data(), data.size());
-        }
-
-        if (!::SetClipboardData(format, handle.get())) {
-            return false;
-        }
-        handle.release();
-        return true;
+        return putOnOpenClipboard(format, data);
     } catch (const std::runtime_error&) {
         return false;
     }
@@ -375,6 +384,42 @@ bool ClipboardManager::setMimeData(const std::wstring& mimeType, const std::vect
         return false;
     }
     return setCustomData(format, mimeType == L"text/html" ? detail::wrapCfHtml(data) : data, owner);
+}
+
+bool ClipboardManager::setMimeDataSet(const std::vector<MimeData>& items, View* owner) {
+    if (items.empty()) {
+        return false;
+    }
+    // Resolve every format before touching the clipboard, so a bad one leaves it untouched.
+    std::vector<UINT> formats;
+    for (const MimeData& item : items) {
+        UINT format = getOrRegisterFormat(item.first);
+        if (format == 0) {
+            return false;
+        }
+        formats.push_back(format);
+    }
+
+    try {
+        detail::ClipboardScope scope(detail::windowHandleOf(owner));
+        if (!::EmptyClipboard()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const MimeData& item = items[i];
+            if (!putOnOpenClipboard(formats[i], item.first == L"text/html" ? detail::wrapCfHtml(item.second) : item.second)) {
+                return false;
+            }
+        }
+        return true;
+    } catch (const std::runtime_error&) {
+        return false;
+    }
+}
+
+std::vector<std::uint8_t> ClipboardManager::textMimeData(const std::wstring& text) {
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(text.c_str());
+    return std::vector<std::uint8_t>(bytes, bytes + (text.size() + 1) * sizeof(wchar_t));
 }
 
 bool ClipboardManager::getMimeData(const std::wstring& mimeType, std::vector<std::uint8_t>& outData) {

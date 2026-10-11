@@ -1,3 +1,4 @@
+#include "newui/layout.h"
 #include "newui/subview.h"
 #include "newui/viewstyle.h"
 
@@ -58,7 +59,7 @@ TEST(ViewGetClientBounds, ReflectsStyleImmediatelyAfterSetStyle) {
     view->setBounds(newui::Rect(0, 0, 100, 50));
 
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 5.0f;
+    style->setBorderWidth(5.0f);
     view->setStyle(std::move(style));
 
     const newui::Rect clientBounds = view->getClientBounds();
@@ -71,7 +72,7 @@ TEST(ViewGetClientBounds, ReflectsStyleImmediatelyAfterSetStyle) {
 TEST(ViewGetClientBounds, ReflectsBoundsChangeWithoutAPriorPaint) {
     auto* view = new newui::SubView();
     auto style = std::make_unique<newui::ViewStyle>();
-    style->borderWidth = 2.0f;
+    style->setBorderWidth(2.0f);
     view->setStyle(std::move(style));
 
     view->setBounds(newui::Rect(0, 0, 64, 64));
@@ -239,7 +240,7 @@ TEST(ViewCursor, SettingCursorKindAfterCustomClearsTheCustomHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// cursor().setPath() - the PNG-loading path plumbed through View via its
+// cursor().loadPath() - the PNG-loading path plumbed through View via its
 // Cursor member, including Cursor owning (and releasing, via its own
 // destructor - see cursor.h) whatever it loads. Writes a real, tiny PNG
 // to disk via BLImage::write_to_file() for each case - same "create the
@@ -265,7 +266,7 @@ TEST(ViewCursor, SetPathAdoptsTheLoadedCursorAsCustom) {
     WriteTestCursorPNG(path, 16, 16);
 
     auto* view = new newui::SubView();
-    EXPECT_TRUE(view->cursor().setPath(path));
+    EXPECT_TRUE(view->cursor().loadPath(path));
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Custom);
     EXPECT_EQ(view->cursor().path(), path);
     EXPECT_NE(view->resolvedCursor(), nullptr);
@@ -278,7 +279,7 @@ TEST(ViewCursor, SetPathFailureLeavesTheExistingCursorUnchanged) {
     auto* view = new newui::SubView();
     view->cursor().setCursorKind(newui::CursorKind::Wait);
 
-    EXPECT_FALSE(view->cursor().setPath("NoSuchCursorFile.png"));
+    EXPECT_FALSE(view->cursor().loadPath("NoSuchCursorFile.png"));
 
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Wait);
     EXPECT_EQ(view->resolvedCursor(), ::LoadCursorW(nullptr, IDC_WAIT));
@@ -291,7 +292,7 @@ TEST(ViewCursor, SetPathFailsWhenThePNGExceedsMaxSize) {
     WriteTestCursorPNG(path, 40, 40);
 
     auto* view = new newui::SubView();
-    EXPECT_FALSE(view->cursor().setPath(path));
+    EXPECT_FALSE(view->cursor().loadPath(path));
     EXPECT_EQ(view->cursorKind(), newui::CursorKind::Arrow);  // untouched default
 
     delete view;
@@ -303,7 +304,7 @@ TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
     WriteTestCursorPNG(path, 16, 16);
 
     auto* view = new newui::SubView();
-    ASSERT_TRUE(view->cursor().setPath(path));
+    ASSERT_TRUE(view->cursor().loadPath(path));
 
     // Should ::DestroyCursor() the previously-owned handle rather than
     // leaking it - no direct observable side effect here beyond "doesn't
@@ -316,6 +317,66 @@ TEST(ViewCursor, ReplacingASetPathCursorReleasesTheOwnedHandle) {
 
     delete view;
     ::DeleteFileA(path.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// isFocused() - computed live from rootView()->focusedSubView() (view.cpp),
+// not a stored flag. Used by ViewStyle::postPaint()'s own default
+// implementation (viewstyle.h/.cpp) to decide whether to draw the focus
+// ring - see RootViewFocusPolicy in test_rootview.cpp for the fuller
+// Tab/click-driven focus routing this reads from.
+// ---------------------------------------------------------------------------
+
+TEST(ViewIsFocused, FalseWithNoRootView) {
+    auto* view = new newui::SubView();
+
+    EXPECT_FALSE(view->isFocused());
+
+    delete view;
+}
+
+TEST(ViewIsFocused, FalseWhenAttachedButNothingIsFocused) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* view = new newui::SubView();
+    view->setBounds(newui::Rect(0, 0, 50, 50));
+    view->setVisible(true);
+    root->addChild(view);
+
+    EXPECT_FALSE(view->isFocused());
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewIsFocused, TrueOnlyForTheRootViewsCurrentFocusedSubView) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+
+    auto* first = new newui::SubView();
+    first->setBounds(newui::Rect(0, 0, 50, 50));
+    first->setVisible(true);
+    first->setAcceptsFocus(true);
+    root->addChild(first);
+
+    auto* second = new newui::SubView();
+    second->setBounds(newui::Rect(60, 0, 50, 50));
+    second->setVisible(true);
+    second->setAcceptsFocus(true);
+    root->addChild(second);
+
+    root->setFocusedSubView(first);
+    EXPECT_TRUE(first->isFocused());
+    EXPECT_FALSE(second->isFocused());
+
+    root->setFocusedSubView(second);
+    EXPECT_FALSE(first->isFocused());
+    EXPECT_TRUE(second->isFocused());
+
+    root->setFocusedSubView(nullptr);
+    EXPECT_FALSE(first->isFocused());
+    EXPECT_FALSE(second->isFocused());
+
+    root->destroy();
+    delete root;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +515,199 @@ TEST(HitTestChildren, PointOverParentButOutsideNestedChildReturnsParent) {
 }
 
 // ---------------------------------------------------------------------------
+// reorderChild() - moves a child within childViews() without detaching it.
+// ---------------------------------------------------------------------------
+
+TEST(ReorderChild, MovesChildToALaterIndex) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    auto* c = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+    container->addChild(c);
+
+    container->reorderChild(a, 2);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], c);
+    EXPECT_EQ(container->childViews()[2], a);
+
+    delete container;
+}
+
+TEST(ReorderChild, MovesChildToAnEarlierIndex) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    auto* c = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+    container->addChild(c);
+
+    container->reorderChild(c, 0);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], c);
+    EXPECT_EQ(container->childViews()[1], a);
+    EXPECT_EQ(container->childViews()[2], b);
+
+    delete container;
+}
+
+TEST(ReorderChild, IndexPastTheEndClampsToTheLastPosition) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* b = new newui::SubView();
+    container->addChild(a);
+    container->addChild(b);
+
+    container->reorderChild(a, 100);
+
+    ASSERT_EQ(container->childViews().size(), 2u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], a);
+
+    delete container;
+}
+
+TEST(ReorderChild, IsANoOpForAViewThatIsNotADirectChild) {
+    auto* container = new newui::SubView();
+    auto* a = new newui::SubView();
+    auto* stranger = new newui::SubView();
+    container->addChild(a);
+
+    container->reorderChild(stranger, 0);
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], a);
+
+    delete stranger;
+    delete container;
+}
+
+TEST(ReorderChild, TriggersARelayoutOfTheNewOrder) {
+    // FlexLayout arranges purely by childViews() order - reordering then
+    // relying on the automatic updateLayout() call (same as addChild()/
+    // removeChild()) should be enough to re-pack a and b's positions
+    // without an explicit updateLayout() call from the test.
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 100, 10));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+
+    auto* a = new newui::SubView();
+    a->setDesiredSize(newui::Size(20.0f, 10.0f));
+    a->setVisible(true);
+    auto* b = new newui::SubView();
+    b->setDesiredSize(newui::Size(30.0f, 10.0f));
+    b->setVisible(true);
+    container->addChild(a);
+    container->addChild(b);
+
+    ASSERT_FLOAT_EQ(a->bounds().left(), 0.0f);
+    ASSERT_FLOAT_EQ(b->bounds().left(), 20.0f);
+
+    container->reorderChild(b, 0);
+
+    EXPECT_FLOAT_EQ(b->bounds().left(), 0.0f);
+    EXPECT_FLOAT_EQ(a->bounds().left(), 30.0f);
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------------
+// setParent() - the real, safe, coordinated reparent (removeChild() from the old
+// parent + addChild() onto the new one) - see its own doc comment (view.h) for why
+// this is a separate method from addChild()/removeChild()'s own raw parent_
+// bookkeeping (internal_setParent(), also in view.h) rather than routed through it.
+// ---------------------------------------------------------------------------
+
+TEST(SetParent, MovesAnAlreadyAttachedChildToADifferentContainer) {
+    auto* containerA = new newui::SubView();
+    auto* containerB = new newui::SubView();
+    auto* child = new newui::SubView();
+    containerA->addChild(child);
+
+    EXPECT_TRUE(child->setParent(containerB));
+
+    EXPECT_EQ(child->parent(), containerB);
+    EXPECT_TRUE(containerA->childViews().empty());
+    ASSERT_EQ(containerB->childViews().size(), 1u);
+    EXPECT_EQ(containerB->childViews()[0], child);
+
+    delete containerA;
+    delete containerB;
+}
+
+TEST(SetParent, AttachesAFreshNeverAttachedChild) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    ASSERT_EQ(child->parent(), nullptr);
+
+    EXPECT_TRUE(child->setParent(container));
+
+    EXPECT_EQ(child->parent(), container);
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], child);
+
+    delete container;
+}
+
+TEST(SetParent, NullptrDetachesTheChildEntirely) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    container->addChild(child);
+
+    EXPECT_TRUE(child->setParent(nullptr));
+
+    EXPECT_EQ(child->parent(), nullptr);
+    EXPECT_TRUE(container->childViews().empty());
+
+    delete container;
+    delete child;
+}
+
+TEST(SetParent, IsANoOpWhenNewParentIsAlreadyTheCurrentParent) {
+    auto* container = new newui::SubView();
+    auto* child = new newui::SubView();
+    container->addChild(child);
+
+    EXPECT_TRUE(child->setParent(container));
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], child);
+
+    delete container;
+}
+
+TEST(SetParent, RefusesToCreateACycle) {
+    // containerB is already containerA's own child - moving containerA to become
+    // containerB's child (containerA->setParent(containerB)) would make containerA
+    // its own indirect descendant.
+    auto* containerA = new newui::SubView();
+    auto* containerB = new newui::SubView();
+    containerA->addChild(containerB);
+
+    EXPECT_FALSE(containerA->setParent(containerB));
+
+    EXPECT_EQ(containerA->parent(), nullptr);
+    ASSERT_EQ(containerA->childViews().size(), 1u);
+    EXPECT_EQ(containerA->childViews()[0], containerB);
+
+    delete containerA;
+}
+
+TEST(SetParent, RefusesOnARootView) {
+    newui::RootView root(nullptr, newui::Rect(0, 0, 100, 100), "root");
+    auto* container = new newui::SubView();
+
+    EXPECT_FALSE(root.setParent(container));
+
+    delete container;
+}
+
+// ---------------------------------------------------------------------------
 // destroy() - regression coverage for a real crash: View::destroy() used
 // to iterate childViews_ with a live range-based for loop while each
 // child->destroy() removed itself from that same vector
@@ -512,7 +766,7 @@ TEST(ViewDestroy, DestroysDirectRootViewChildrenWithoutCorruptingIteration) {
     // case, e.g. root.addChild(sidebar) in examples/layout1.cpp) never had
     // parent_ set at all, so SubView::destroy()'s self-removal
     // (parent_->removeChild(this)) silently never fired for it.
-    // RootView::addChild() now calls setParent() too - without that,
+    // RootView::addChild() now calls internal_setParent() too - without that,
     // View::destroy()'s front()-popping loop would never see childViews_
     // shrink and would re-process (and double-delete) the same already-
     // destroyed pointer.
@@ -636,4 +890,357 @@ TEST(SubViewRemoveChild, PropagatesNullToWholeDetachedSubtree) {
     delete child;
     root->destroy();
     delete root;
+}
+
+// Rect::snappedOutwardToPixels() - see its own comment (geometry.h) for
+// why View::paintChildren() needs this for every child's bounds before
+// translating/clipping by them: a themed child (ThemedViewStyle::paint(),
+// viewstyle.cpp) positioned at a generically-fractional coordinate (e.g.
+// a Slider's thumb) otherwise leaves ctx's clip with fractional edges,
+// which trips a real BL_ASSERT(is_rect_fill()) in Blend2D's
+// fetchpatternpart.cpp - a real, reproduced crash this fixes.
+
+TEST(RectSnappedOutwardToPixels, AlreadyWholePixelRectIsUnchanged) {
+    newui::Rect r(10.0f, 20.0f, 30.0f, 40.0f);
+    EXPECT_EQ(r.snappedOutwardToPixels(), r);
+}
+
+TEST(RectSnappedOutwardToPixels, FractionalEdgesFloorLeadingAndCeilTrailing) {
+    newui::Rect r(10.25f, 20.75f, 30.5f, 40.5f);  // right = 40.75, bottom = 61.25
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_FLOAT_EQ(snapped.left(), 10.0f);
+    EXPECT_FLOAT_EQ(snapped.top(), 20.0f);
+    EXPECT_FLOAT_EQ(snapped.right(), 41.0f);
+    EXPECT_FLOAT_EQ(snapped.bottom(), 62.0f);
+}
+
+TEST(RectSnappedOutwardToPixels, NegativeOriginStillFloorsTowardNegativeInfinity) {
+    newui::Rect r(-10.25f, -20.75f, 5.0f, 5.0f);
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_FLOAT_EQ(snapped.left(), -11.0f);
+    EXPECT_FLOAT_EQ(snapped.top(), -21.0f);
+}
+
+TEST(RectSnappedOutwardToPixels, ResultNeverShrinksTheOriginalRect) {
+    // "Outward" - every edge only ever moves away from the rect's own
+    // center, so nothing real gets clipped off by the snap itself.
+    newui::Rect r(10.1f, 20.9f, 30.3f, 40.7f);
+    newui::Rect snapped = r.snappedOutwardToPixels();
+
+    EXPECT_LE(snapped.left(), r.left());
+    EXPECT_LE(snapped.top(), r.top());
+    EXPECT_GE(snapped.right(), r.right());
+    EXPECT_GE(snapped.bottom(), r.bottom());
+}
+
+// ---- View coordinate mapping (localToRoot/rootToLocal/localToScreen/mapTo) ----
+// None of these tests has a live window, so localToScreen()/screenToLocal() degrade to root
+// space (see view.h) - what's checked here is the parent-chain/origin() math itself.
+
+TEST(ViewCoordinateMapping, NestedLocalToRootAccumulatesEveryAncestorOffset) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* outer = new newui::SubView();
+    outer->setBounds(newui::Rect(20, 30, 200, 200));
+    root->addChild(outer);
+    auto* inner = new newui::SubView();
+    inner->setBounds(newui::Rect(5, 7, 50, 50));
+    outer->addChild(inner);
+
+    newui::Point rootPt = inner->localToRoot(newui::Point(1, 2));
+    EXPECT_FLOAT_EQ(rootPt.x, 26.0f);
+    EXPECT_FLOAT_EQ(rootPt.y, 39.0f);
+
+    newui::Point back = inner->rootToLocal(rootPt);
+    EXPECT_FLOAT_EQ(back.x, 1.0f);
+    EXPECT_FLOAT_EQ(back.y, 2.0f);
+
+    // A RootView's local space *is* root space.
+    newui::Point rp = root->localToRoot(newui::Point(9, 8));
+    EXPECT_FLOAT_EQ(rp.x, 9.0f);
+    EXPECT_FLOAT_EQ(rp.y, 8.0f);
+
+    // accumulatedOffset() is now just localToRoot((0,0)).
+    newui::Point off = root->accumulatedOffset(inner);
+    EXPECT_FLOAT_EQ(off.x, 25.0f);
+    EXPECT_FLOAT_EQ(off.y, 37.0f);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, ParentOriginShiftIsUndoneAtThatLevel) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* scroller = new newui::SubView();
+    scroller->setBounds(newui::Rect(10, 10, 100, 100));
+    scroller->setOrigin(newui::Point(0, 40));  // scrolled down 40
+    root->addChild(scroller);
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 50, 20, 20));  // content-space y=50 -> visible at y=10
+    scroller->addChild(child);
+
+    newui::Point rootPt = child->localToRoot(newui::Point(0, 0));
+    EXPECT_FLOAT_EQ(rootPt.x, 10.0f);
+    EXPECT_FLOAT_EQ(rootPt.y, 20.0f);  // 10 + 50 - 40
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, DetachedSubtreeMapsRelativeToItsTopmostAncestor) {
+    auto* top = new newui::SubView();
+    top->setBounds(newui::Rect(100, 100, 50, 50));
+    auto* leaf = new newui::SubView();
+    leaf->setBounds(newui::Rect(3, 4, 10, 10));
+    top->addChild(leaf);
+
+    newui::Point pt = leaf->localToRoot(newui::Point(0, 0));
+    EXPECT_FLOAT_EQ(pt.x, 103.0f);
+    EXPECT_FLOAT_EQ(pt.y, 104.0f);
+
+    top->destroy();
+    delete top;
+}
+
+TEST(ViewCoordinateMapping, MapToConvertsBetweenSiblingsViaSharedRoot) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* a = new newui::SubView();
+    a->setBounds(newui::Rect(10, 10, 50, 50));
+    root->addChild(a);
+    auto* b = new newui::SubView();
+    b->setBounds(newui::Rect(100, 40, 50, 50));
+    root->addChild(b);
+
+    newui::Point inB = a->mapTo(*b, newui::Point(5, 5));
+    EXPECT_FLOAT_EQ(inB.x, -85.0f);
+    EXPECT_FLOAT_EQ(inB.y, -25.0f);
+
+    newui::Rect r = a->mapTo(*b, newui::Rect(0, 0, 20, 30));
+    EXPECT_FLOAT_EQ(r.left(), -90.0f);
+    EXPECT_FLOAT_EQ(r.top(), -30.0f);
+    EXPECT_FLOAT_EQ(r.size().width, 20.0f);
+    EXPECT_FLOAT_EQ(r.size().height, 30.0f);
+
+    root->destroy();
+    delete root;
+}
+
+TEST(ViewCoordinateMapping, ScreenBoundsAndRectOverloadsMatchPointMapping) {
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 300, 300), "root");
+    auto* v = new newui::SubView();
+    v->setBounds(newui::Rect(15, 25, 60, 40));
+    root->addChild(v);
+
+    newui::Rect sb = v->screenBounds();  // no window -> root space
+    EXPECT_FLOAT_EQ(sb.left(), 15.0f);
+    EXPECT_FLOAT_EQ(sb.top(), 25.0f);
+    EXPECT_FLOAT_EQ(sb.size().width, 60.0f);
+    EXPECT_FLOAT_EQ(sb.size().height, 40.0f);
+
+    newui::Rect local = v->screenToLocal(v->localToScreen(newui::Rect(2, 3, 4, 5)));
+    EXPECT_FLOAT_EQ(local.left(), 2.0f);
+    EXPECT_FLOAT_EQ(local.top(), 3.0f);
+
+    root->destroy();
+    delete root;
+}
+
+// Rect::united() - see its own comment (geometry.h). RootView::markDirty()'s
+// running dirtyRect_ union, previously hand-rolled inline there.
+
+TEST(RectUnited, OverlappingRectsGiveTheirBoundingBox) {
+    newui::Rect a(0.0f, 0.0f, 50.0f, 50.0f);
+    newui::Rect b(30.0f, 20.0f, 50.0f, 50.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 80.0f, 70.0f));
+}
+
+TEST(RectUnited, DisjointRectsSpanTheGapBetweenThem) {
+    // Rects that don't share a top-left corner - taking max of the *sizes*
+    // independently (the mistake geometry.h's own comment warns about) would
+    // give (0,0,10,10) here, which covers neither the second rect nor the gap.
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(a.united(b), newui::Rect(0.0f, 0.0f, 60.0f, 60.0f));
+}
+
+TEST(RectUnited, ContainedRectLeavesTheOuterOneUnchanged) {
+    newui::Rect outer(10.0f, 10.0f, 100.0f, 100.0f);
+    newui::Rect inner(20.0f, 30.0f, 5.0f, 5.0f);
+
+    EXPECT_EQ(outer.united(inner), outer);
+    EXPECT_EQ(inner.united(outer), outer);
+}
+
+TEST(RectUnited, IsCommutative) {
+    newui::Rect a(-20.0f, 5.0f, 30.0f, 10.0f);
+    newui::Rect b(40.0f, -15.0f, 5.0f, 60.0f);
+
+    EXPECT_EQ(a.united(b), b.united(a));
+}
+
+TEST(RectUnited, HandlesNegativeCoordinates) {
+    newui::Rect a(-30.0f, -40.0f, 10.0f, 10.0f);  // right = -20, bottom = -30
+    newui::Rect b(-5.0f, -5.0f, 10.0f, 10.0f);    // right = 5, bottom = 5
+
+    EXPECT_EQ(a.united(b), newui::Rect(-30.0f, -40.0f, 35.0f, 45.0f));
+}
+
+TEST(RectUnited, EmptyRectIsTheIdentityOnEitherSide) {
+    newui::Rect r(10.0f, 20.0f, 30.0f, 40.0f);
+    newui::Rect none;  // default: empty()
+
+    EXPECT_EQ(none.united(r), r);
+    EXPECT_EQ(r.united(none), r);
+}
+
+TEST(RectUnited, EmptyRectDoesNotDragTheResultOutToTheOrigin) {
+    // The old inline union in RootView::markDirty() always folded in the incoming
+    // rect's corner even when it was the cleared/default rect - which silently
+    // stretched the dirty region back out to (0,0).
+    newui::Rect r(100.0f, 100.0f, 10.0f, 10.0f);
+
+    EXPECT_EQ(r.united(newui::Rect()), r);
+}
+
+TEST(RectUnited, TwoEmptyRectsStayEmpty) {
+    EXPECT_TRUE(newui::Rect().united(newui::Rect()).empty());
+}
+
+TEST(RectUnited, DoesNotModifyEitherOperand) {
+    newui::Rect a(0.0f, 0.0f, 10.0f, 10.0f);
+    newui::Rect b(50.0f, 50.0f, 10.0f, 10.0f);
+
+    (void)a.united(b);
+
+    EXPECT_EQ(a, newui::Rect(0.0f, 0.0f, 10.0f, 10.0f));
+    EXPECT_EQ(b, newui::Rect(50.0f, 50.0f, 10.0f, 10.0f));
+}
+
+// Rect::intersects() / Rect::intersected() - see their comments (geometry.h).
+
+TEST(RectIntersects, OverlappingRectsIntersect) {
+    EXPECT_TRUE(newui::Rect(0, 0, 50, 50).intersects(newui::Rect(30, 30, 50, 50)));
+}
+
+TEST(RectIntersects, ContainedRectIntersects) {
+    EXPECT_TRUE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 5, 5)));
+    EXPECT_TRUE(newui::Rect(10, 10, 5, 5).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, DisjointRectsDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(50, 50, 10, 10)));
+}
+
+TEST(RectIntersects, RectsThatOnlyTouchAnEdgeDoNot) {
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(10, 0, 10, 10)));  // share the x=10 edge
+    EXPECT_FALSE(newui::Rect(0, 0, 10, 10).intersects(newui::Rect(0, 10, 10, 10)));  // share the y=10 edge
+}
+
+TEST(RectIntersects, ARectWithNoAreaOverlapsNothing) {
+    EXPECT_FALSE(newui::Rect(0, 0, 100, 100).intersects(newui::Rect(10, 10, 0, 20)));
+    EXPECT_FALSE(newui::Rect(10, 10, 20, 0).intersects(newui::Rect(0, 0, 100, 100)));
+}
+
+TEST(RectIntersects, IsSymmetric) {
+    newui::Rect a(-20, 5, 30, 10);
+    newui::Rect b(0, 8, 40, 60);
+    EXPECT_EQ(a.intersects(b), b.intersects(a));
+}
+
+TEST(RectIntersected, GivesTheSharedArea) {
+    EXPECT_EQ(newui::Rect(0, 0, 50, 50).intersected(newui::Rect(30, 20, 50, 50)), newui::Rect(30, 20, 20, 30));
+}
+
+TEST(RectIntersected, ContainedRectIsItsOwnIntersection) {
+    newui::Rect inner(10, 10, 5, 5);
+    EXPECT_EQ(newui::Rect(0, 0, 100, 100).intersected(inner), inner);
+    EXPECT_EQ(inner.intersected(newui::Rect(0, 0, 100, 100)), inner);
+}
+
+TEST(RectIntersected, DisjointRectsGiveAZeroSizedRect) {
+    newui::Rect none = newui::Rect(0, 0, 10, 10).intersected(newui::Rect(50, 50, 10, 10));
+    EXPECT_FLOAT_EQ(none.width(), 0.0f);
+    EXPECT_FLOAT_EQ(none.height(), 0.0f);
+}
+
+TEST(RectIntersected, HandlesNegativeCoordinates) {
+    EXPECT_EQ(newui::Rect(-30, -30, 40, 40).intersected(newui::Rect(-10, -10, 40, 40)), newui::Rect(-10, -10, 20, 20));
+}
+
+namespace
+{
+    class CountingLayout : public newui::Layout {
+    public:
+        explicit CountingLayout(int& count) : count_(count) {}
+        void arrange(newui::View& container) override {
+            ++count_;
+            for (newui::SubView* child : container.childViews()) {
+                child->setBounds(newui::Rect(0.0f, 0.0f, 10.0f + count_, 10.0f));   // a real resize each pass
+            }
+        }
+    private:
+        int& count_;
+    };
+}
+
+// destroy() marks the whole subtree Destroying before detaching anything, so the teardown's own
+// child removals never lay out or resize what is going away - listeners whose owners are already
+// gone (a designer's canvas-size hook, say) never run.
+TEST(ViewDestroying, DestroyingATreeSkipsLayoutAndResizeInsideIt)
+{
+    int parentArranges = 0;
+    int innerArranges = 0;
+    int sizeChanges = 0;
+    auto* parent = new newui::SubView();
+    parent->setBounds(newui::Rect(0, 0, 200, 200));
+    parent->setLayout(std::make_unique<CountingLayout>(parentArranges));
+    auto* inner = new newui::SubView();
+    inner->setLayout(std::make_unique<CountingLayout>(innerArranges));
+    parent->addChild(inner);
+    auto* leaf = new newui::SubView();
+    inner->addChild(leaf);
+    auto* sibling = new newui::SubView();
+    parent->addChild(sibling);
+    for (newui::SubView* view : { inner, leaf, sibling }) {
+        view->onSizeChanged.add([&sizeChanges](newui::View&, const newui::Size&) {
+            ++sizeChanges;
+            return newui::SyncReturn::Handled;
+        });
+    }
+    parentArranges = innerArranges = sizeChanges = 0;
+
+    parent->destroy();
+
+    EXPECT_TRUE(parent->isDestroying());
+    EXPECT_EQ(parentArranges, 0);
+    EXPECT_EQ(innerArranges, 0);
+    EXPECT_EQ(sizeChanges, 0);
+    delete parent;
+}
+
+TEST(ViewDestroying, DestroyingOneChildStillRelayoutsItsLiveParent)
+{
+    int parentArranges = 0;
+    auto* parent = new newui::SubView();
+    parent->setBounds(newui::Rect(0, 0, 200, 200));
+    parent->setLayout(std::make_unique<CountingLayout>(parentArranges));
+    auto* doomed = new newui::SubView();
+    parent->addChild(doomed);
+    auto* survivor = new newui::SubView();
+    parent->addChild(survivor);
+    parentArranges = 0;
+
+    doomed->destroy();
+    delete doomed;
+
+    EXPECT_FALSE(parent->isDestroying());
+    EXPECT_FALSE(survivor->isDestroying());
+    EXPECT_GT(parentArranges, 0) << "the parent re-arranges its remaining children";
+    ASSERT_EQ(parent->childViews().size(), 1u);
+
+    parent->destroy();
+    delete parent;
 }

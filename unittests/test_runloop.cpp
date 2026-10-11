@@ -1,5 +1,8 @@
+#include "newui/action.h"
 #include "newui/delegate.h"
+#include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
+#include "newui/utils.h"
 
 #include <gtest/gtest.h>
 
@@ -37,9 +40,9 @@ TEST(RunLoopPostCall, RunsOnLoopThreadAndCompletesAsyncReturn) {
     g_lastValue = 0;
     g_callbackThreadId = std::thread::id();
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     newui::Delegate<int> delegate;
@@ -61,9 +64,9 @@ TEST(RunLoopPostCall, RunsOnLoopThreadAndCompletesAsyncReturn) {
 TEST(RunLoopPostCall, StopsAtFirstError) {
     g_secondCallCount = 0;
 
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     newui::Delegate<int> delegate;
     delegate.add(&FailOnLoop);
@@ -81,9 +84,9 @@ TEST(RunLoopPostCall, StopsAtFirstError) {
 }
 
 TEST(RunLoopPostIdle, RunsQueuedIdleTaskOnLoopThread) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::atomic<bool> ran{false};
@@ -114,9 +117,9 @@ TEST(RunLoopPostIdle, RunsQueuedIdleTaskOnLoopThread) {
 }
 
 TEST(RunLoopPostIdle, RunsMultipleQueuedIdleTasksInOrder) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -146,9 +149,9 @@ TEST(RunLoopPostIdle, RunsMultipleQueuedIdleTasksInOrder) {
 }
 
 TEST(RunLoopPostIdle, TaskIsRequeuedUntilItReturnsTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -193,15 +196,18 @@ TEST(RunLoopPostIdle, TaskIsRequeuedUntilItReturnsTrue) {
 // started" guard, which is safely testable without either.
 
 TEST(RunLoopRunModal, ThrowsIfCalledBeforeRun) {
-    newui::RunLoop runLoop;
+    // current() on this (the test's own) thread, never run() here -
+    // matches the "before run()" scenario this test wants without
+    // needing a second thread.
+    newui::RunLoop& runLoop = newui::RunLoop::current();
 
     EXPECT_THROW(runLoop.runModal(nullptr, nullptr, [] { return true; }), std::runtime_error);
 }
 
 TEST(RunLoopRunModal, ThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     // Called from this test's own thread, not loopThread - runModal()
     // should refuse rather than silently pump some other thread's queue.
@@ -212,9 +218,9 @@ TEST(RunLoopRunModal, ThrowsIfCalledFromDifferentThreadThanRun) {
 }
 
 TEST(RunLoopRunModal, ReturnsTrueImmediatelyWhenIsDoneIsAlreadyTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::mutex doneMutex;
@@ -260,9 +266,9 @@ TEST(RunLoopRunModal, ReturnsTrueImmediatelyWhenIsDoneIsAlreadyTrue) {
 // real Win32 objects headlessly" precedent as TestableContextMenu in
 // test_menus.cpp.
 TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -341,15 +347,18 @@ TEST(RunLoopRunModal, EscapeOnFocusedChildWindowIsRecognizedAsModalHandles) {
 // tests cover runModal()'s guard, above.
 
 TEST(RunLoopPostDelayed, ThrowsIfCalledBeforeRun) {
-    newui::RunLoop runLoop;
+    // current() on this (the test's own) thread, never run() here -
+    // matches the "before run()" scenario this test wants without
+    // needing a second thread.
+    newui::RunLoop& runLoop = newui::RunLoop::current();
 
     EXPECT_THROW(runLoop.postDelayed(std::chrono::milliseconds(10), [] { return true; }), std::runtime_error);
 }
 
 TEST(RunLoopPostDelayed, ThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     // Called from this test's own thread, not loopThread - a Win32 timer
     // is thread-affine, so postDelayed() should refuse here the same way
@@ -362,9 +371,9 @@ TEST(RunLoopPostDelayed, ThrowsIfCalledFromDifferentThreadThanRun) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedThrowsIfCalledFromDifferentThreadThanRun) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     EXPECT_THROW(runLoop.cancelDelayed(1), std::runtime_error);
 
@@ -373,9 +382,9 @@ TEST(RunLoopPostDelayed, CancelDelayedThrowsIfCalledFromDifferentThreadThanRun) 
 }
 
 TEST(RunLoopPostDelayed, RunsOnLoopThreadAfterInterval) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
     std::thread::id loopThreadId = loopThread.get_id();
 
     std::mutex doneMutex;
@@ -411,9 +420,9 @@ TEST(RunLoopPostDelayed, RunsOnLoopThreadAfterInterval) {
 }
 
 TEST(RunLoopPostDelayed, TaskIsRescheduledUntilItReturnsTrue) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -454,9 +463,9 @@ TEST(RunLoopPostDelayed, TaskIsRescheduledUntilItReturnsTrue) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedStopsATimerBeforeItsFirstTick) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex mutex;
     int callCount = 0;
@@ -487,9 +496,9 @@ TEST(RunLoopPostDelayed, CancelDelayedStopsATimerBeforeItsFirstTick) {
 }
 
 TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex mutex;
     std::condition_variable cv;
@@ -534,10 +543,141 @@ TEST(RunLoopPostDelayed, CancelDelayedStopsAnAlreadyTickingTimer) {
     loopThread.join();
 }
 
+// RunLoop::current() - lets code reach "whichever RunLoop is actively
+// pumping this thread right now" without going through
+// Application::instance().runLoop(), so RootView/Caret/ScrollBar/Stepper/
+// ViewController auto-repeat and idle-task scheduling work identically
+// whether the running loop is Application's own owned instance or a
+// standalone one a caller constructs and runs itself (no Application/
+// Frame involved at all).
+
+TEST(RunLoopCurrent, NotRunningWhenNoLoopIsRunningOnThisThread) {
+    // current() is now always a valid reference (a thread-local singleton,
+    // auto-created on first access) rather than a nullable pointer - the
+    // meaningful check is whether it's actually running, via operator
+    // bool()/isRunning(), not identity against nullptr.
+    EXPECT_FALSE(newui::RunLoop::current());
+}
+
+TEST(RunLoopCurrent, ResolvesToTheInstanceActuallyRunningOnThatThread) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+    newui::RunLoop* seenFromLoopThread = nullptr;
+
+    runLoop.post([&]() {
+        seenFromLoopThread = &newui::RunLoop::current();
+        {
+            std::lock_guard<std::mutex> lock(doneMutex);
+            ran = true;
+        }
+        doneCv.notify_all();
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(seenFromLoopThread, &runLoop);
+    // This (the calling/test) thread's own current() is a distinct
+    // instance, never run() here, regardless of what's running on
+    // loopThread - thread-local, not process-global.
+    EXPECT_NE(&newui::RunLoop::current(), &runLoop);
+    EXPECT_FALSE(newui::RunLoop::current());
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopCurrent, NotRunningOnThisThreadAfterAnotherThreadsLoopReturns) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
+
+    runLoop.quit();
+    loopThread.join();
+
+    // current() is thread-local to loopThread, which has already exited -
+    // this checks the test thread's own instance never got started by a
+    // loop running on a different thread (same "thread-local, not
+    // process-global" property as above, from the other direction).
+    EXPECT_FALSE(newui::RunLoop::current());
+}
+
+// Regression coverage for the RunLoop::run() WM_KEYDOWN/WM_SYSKEYDOWN case
+// unconditionally dereferencing Application::instance().getFrame() (now
+// removed - that call was dead code, its result never actually used) -
+// this is what made hotkey matching, and therefore any standalone RunLoop
+// with no Application/Frame at all, crash on the very first keystroke.
+// No newui::Application/Frame is touched anywhere in this test.
+TEST(RunLoopRegisterAction, MatchesHotkeyOnRealKeydownWithNoApplicationOrFrame) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
+
+    newui::Action action("test action");
+    action.setHotkey(newui::vkF1);
+    runLoop.registerAction(&action);
+
+    std::atomic<int> performCount{0};
+    action.onActionPerformed.add([&](newui::Action&) {
+        ++performCount;
+        return newui::SyncReturn::Handled;
+        });
+
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    bool ran = false;
+
+    runLoop.post([&]() {
+        // Real, plain (non-newui) window - a synthetic WM_KEYDOWN has to
+        // target a window actually owned by loopThread, same reasoning as
+        // RunLoopRunModal's own window-creation tests above.
+        HINSTANCE moduleHandle = ::GetModuleHandleA(nullptr);
+        HWND hwnd = ::CreateWindowExA(0, "STATIC", "", WS_POPUP,
+            0, 0, 0, 0, nullptr, nullptr, moduleHandle, nullptr);
+
+        ::PostMessage(hwnd, WM_KEYDOWN, VK_F1, 0);
+
+        // A postIdle task only runs once run()'s own do-while loop has
+        // fully drained the message queue (see RunLoop::run()'s idle
+        // loop) - the queued WM_KEYDOWN above, posted first, is
+        // guaranteed to already have been retrieved and dispatched by
+        // then. Sleeping here instead would block this same loop thread
+        // from ever pumping GetMessage() to retrieve it in the first
+        // place - postIdle is the correct way to sequence after it.
+        runLoop.postIdle([&, hwnd]() {
+            ::DestroyWindow(hwnd);
+            {
+                std::lock_guard<std::mutex> lock(doneMutex);
+                ran = true;
+            }
+            doneCv.notify_all();
+            return true;  // one-shot
+            });
+        });
+
+    {
+        std::unique_lock<std::mutex> lock(doneMutex);
+        ASSERT_TRUE(doneCv.wait_for(lock, std::chrono::seconds(5), [&] { return ran; }));
+    }
+
+    EXPECT_EQ(performCount.load(), 1);
+
+    runLoop.unregisterAction(&action);
+    runLoop.quit();
+    loopThread.join();
+}
+
 TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
-    newui::RunLoop runLoop;
-    std::thread loopThread([&runLoop]() { runLoop.run(); });
-    runLoop.waitUntilStarted();
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
 
     std::mutex doneMutex;
     std::condition_variable doneCv;
@@ -571,4 +711,12 @@ TEST(RunLoopPostIdle, MultipleUnfinishedTasksInterleaveRoundRobin) {
 
     runLoop.quit();
     loopThread.join();
+}
+
+// Insert was declared (vkInsert) but never translated, so it never reached any key handler.
+TEST(TranslateVirtualKey, EditingKeysAreTranslated)
+{
+    EXPECT_EQ(newui::translateVirtualKey(VK_INSERT, 0), static_cast<std::uint32_t>(newui::vkInsert));
+    EXPECT_EQ(newui::translateVirtualKey(VK_DELETE, 0), static_cast<std::uint32_t>(newui::vkDelete));
+    EXPECT_EQ(newui::translateVirtualKey(VK_F2, 0), static_cast<std::uint32_t>(newui::vkF2));
 }

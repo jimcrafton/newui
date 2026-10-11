@@ -1,4 +1,8 @@
 #include "newui/reflection.h"
+#include "newui/utils.h"
+
+#include <algorithm>
+#include <set>
 
 namespace newui::reflection {
 
@@ -22,37 +26,56 @@ namespace newui::reflection {
         }
     }
 
+    // Walks parentClass() (most-derived first, i.e. starting at `this`) so a
+    // single-name lookup finds an inherited member too, not just one
+    // declared directly on this class - the same "most-derived-first"
+    // resolution allProperties()/allFields()/allDelegates() already do via
+    // their own merge, just without building a whole merged vector for a
+    // single lookup. TypedClass<T>::read() (below) now drives its per-
+    // object read loop from the source document's own keys and resolves
+    // each one through exactly this call - a Button node's "visible" key
+    // (a View property, never redeclared on Button) has to resolve here or
+    // reading anything but a class's own directly-declared properties would
+    // silently do nothing for every inherited one.
     const Property* Class::property(const std::string& propertyName) const {
-        for (const auto* p : properties_) {
-            if (p->name() == propertyName) {
-                return p;
+        for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+            for (const auto* p : c->properties_) {
+                if (p->name() == propertyName) {
+                    return p;
+                }
             }
         }
         return nullptr;
     }
 
     const Field* Class::field(const std::string& fieldName) const {
-        for (const auto* f : fields_) {
-            if (f->name() == fieldName) {
-                return f;
+        for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+            for (const auto* f : c->fields_) {
+                if (f->name() == fieldName) {
+                    return f;
+                }
             }
         }
         return nullptr;
     }
 
     const Method* Class::method(const std::string& methodName) const {
-        for (const auto* m : methods_) {
-            if (m->name() == methodName) {
-                return m;
+        for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+            for (const auto* m : c->methods_) {
+                if (m->name() == methodName) {
+                    return m;
+                }
             }
         }
         return nullptr;
     }
 
     const Delegate* Class::delegate(const std::string& delegateName) const {
-        for (const auto* d : delegates_) {
-            if (d->name() == delegateName) {
-                return d;
+        for (const Class* c = this; c != nullptr; c = c->parentClass()) {
+            for (const auto* d : c->delegates_) {
+                if (d->name() == delegateName) {
+                    return d;
+                }
             }
         }
         return nullptr;
@@ -172,6 +195,59 @@ namespace newui::reflection {
         return getClass(found->second);
     }
 
+    std::vector<const Class*> ReflectionRegistry::allClasses() {
+        auto& reg = instance();
+        std::vector<const Class*> result;
+        result.reserve(reg.classesByType_.size());
+        for (auto& [type, classPtr] : reg.classesByType_) {
+            result.push_back(classPtr);
+        }
+        return result;
+    }
+
+    std::vector<const Class*> ReflectionRegistry::classesWithTag(const std::string& tag) {
+        std::vector<const Class*> result;
+        for (const Class* clazz : allClasses()) {
+            const auto& tags = clazz->tags();
+            if (std::find(tags.begin(), tags.end(), tag) != tags.end()) {
+                result.push_back(clazz);
+            }
+        }
+        return result;
+    }
+
+    std::vector<const Class*> ReflectionRegistry::classesWithCategory(const std::string& category) {
+        std::vector<const Class*> result;
+        for (const Class* clazz : allClasses()) {
+            const auto& categories = clazz->categories();
+            if (std::find(categories.begin(), categories.end(), category) != categories.end()) {
+                result.push_back(clazz);
+            }
+        }
+        return result;
+    }
+
+    namespace {
+        std::vector<std::string> uniqueSorted(const std::vector<const Class*>& classes,
+                const std::vector<std::string>& (Class::*accessor)() const) {
+            std::set<std::string> unique;
+            for (const Class* clazz : classes) {
+                for (const std::string& value : (clazz->*accessor)()) {
+                    unique.insert(value);
+                }
+            }
+            return std::vector<std::string>(unique.begin(), unique.end());
+        }
+    }
+
+    std::vector<std::string> ReflectionRegistry::allTags() {
+        return uniqueSorted(allClasses(), &Class::tags);
+    }
+
+    std::vector<std::string> ReflectionRegistry::allCategories() {
+        return uniqueSorted(allClasses(), &Class::categories);
+    }
+
     const Enum* ReflectionRegistry::getEnum(std::type_index type) {
         auto& reg = instance();
         auto found = reg.enumsByType_.find(type);
@@ -201,21 +277,17 @@ namespace newui::reflection {
         }
     }
 
+    // Scalar/enum leaf values only - every real caller (TypedProperty::
+    // read()'s by-value fallback, TypedMemberField::read()'s fallback,
+    // TypedPropertyCollection::readFreshElement()'s scalar-container
+    // branch) already checks classinfo(valType) itself and only reaches
+    // this function when it's null, i.e. valType is never a registered
+    // Class here - that recursion goes through ClassReader::readInto()
+    // directly at each of those call sites instead (see their own
+    // comments), not through here.
     void Property::readValue(const std::string& valName, const std::type_index& valType, std::any& val, void* instancePtr, ClassReader* reader)
     {
-        const Class* valClazz = classinfo(valType);
-        if (nullptr != valClazz) {
-            // Was `std::any val;` here - shadowed the outer val parameter,
-            // so a nested read's result never actually reached the
-            // caller. Writes straight into the outer val now, same
-            // in/out contract TypedProperty::read()'s own nested-Class
-            // branches rely on (an already-populated val addresses
-            // existing storage to write into; an empty one signals "build
-            // a fresh heap instance").
-            bool onHeap = false;
-            valClazz->read(reader, valName, val, onHeap);
-        }
-        else if (const Enum* valEnum = ReflectionRegistry::getEnum(valType); valEnum != nullptr) {
+        if (const Enum* valEnum = ReflectionRegistry::getEnum(valType); valEnum != nullptr) {
             // Mirrors writeValue()'s own enum branch below - one string
             // (plain enum) or an array of them (flags enum, Enum::
             // isFlags()) - see EnumBuilder<T>::flags()'s own comment for
@@ -255,6 +327,16 @@ namespace newui::reflection {
                 std::string str;
                 reader->readString(valName, str);
                 val = str;
+            }
+            else if (valType == typeid(std::wstring)) {
+                // e.g. TextField::text() - the reader's own readString()/
+                // writeString() are UTF-8-only, so a wide-string property
+                // round-trips through newui::utf8ToWide()/wideToUtf8()
+                // (utils.h) at this one boundary rather than needing its
+                // own reader/writer primitives.
+                std::string str;
+                reader->readString(valName, str);
+                val = utf8ToWide(str);
             }
             else if (valType == typeid(bool)) {
                 bool b;
@@ -360,6 +442,9 @@ namespace newui::reflection {
         }
         if (valType == typeid(std::string)) {
             writer->writeString(valName, std::any_cast<std::string>(val));
+        }
+        else if (valType == typeid(std::wstring)) {
+            writer->writeString(valName, wideToUtf8(std::any_cast<std::wstring>(val)));
         }
         else if (valType == typeid(bool)) {
             writer->writeBool(valName, std::any_cast<bool>(val));

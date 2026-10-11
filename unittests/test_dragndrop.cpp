@@ -6,7 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
+#include <string>
+#include <vector>
 #include <memory>
 #include <shlobj.h>
 
@@ -654,4 +657,184 @@ TEST(COMDropTarget, DropAtDispatchesNothingWhenNothingInTheChainAccepts) {
     DWORD effect = DROPEFFECT_COPY;
     EXPECT_EQ(comDropTarget->dropAt(dataObject.Get(), newui::Point(50, 50), &effect), S_OK);
     EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+}
+
+// ---- Text drag hover feedback / positioned drops ----
+
+namespace {
+// child sits at (10,10) inside the 200x200 root, so a root-space (50,60) is child-local (40,50).
+struct HoverProbe {
+    int overCount = 0;
+    int leaveCount = 0;
+    std::wstring lastText;
+    newui::Point lastPoint;
+    newui::DropEffect answer = newui::DropEffect::Copy;  // what the handler sets
+    std::vector<std::string> order;                       // "over", "leave", "droppedAt", "dropped"
+
+    void attachTo(newui::View* view) {
+        auto dropTarget = std::make_unique<newui::DropTarget>();
+        dropTarget->onTextDropped.add([this](newui::DropTarget&, const std::wstring&) {
+            order.push_back("dropped");
+            return newui::SyncReturn::Handled;
+        });
+        dropTarget->onTextDroppedAt.add([this](newui::DropTarget&, const std::wstring& text, const newui::Point& pt) {
+            order.push_back("droppedAt");
+            lastText = text;
+            lastPoint = pt;
+            return newui::SyncReturn::Handled;
+        });
+        dropTarget->onTextDragOver.add([this](newui::DropTarget&, const std::wstring& text, const newui::Point& pt,
+                newui::DropEffect& effect) {
+            ++overCount;
+            order.push_back("over");
+            lastText = text;
+            lastPoint = pt;
+            effect = answer;
+            return newui::SyncReturn::Handled;
+        });
+        dropTarget->onDragLeave.add([this](newui::DropTarget&) {
+            ++leaveCount;
+            order.push_back("leave");
+            return newui::SyncReturn::Handled;
+        });
+        view->setDropTarget(std::move(dropTarget));
+    }
+};
+}
+
+TEST(COMDropTarget, DragEnterAndOverFireTextDragOverWithTheTextAndTheTargetLocalPoint) {
+    DropTargetFixture fixture;
+    HoverProbe probe;
+    probe.attachTo(fixture.child);
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    EXPECT_EQ(probe.overCount, 1);
+    EXPECT_EQ(probe.lastText, L"payload");
+    EXPECT_FLOAT_EQ(probe.lastPoint.x, 40.0f);
+    EXPECT_FLOAT_EQ(probe.lastPoint.y, 50.0f);
+
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragOverAt(newui::Point(70, 80), &effect);
+    EXPECT_EQ(probe.overCount, 2);
+    EXPECT_FLOAT_EQ(probe.lastPoint.x, 60.0f);
+    EXPECT_FLOAT_EQ(probe.lastPoint.y, 70.0f);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_COPY));
+}
+
+TEST(COMDropTarget, AHoverHandlerCanRefuseTheDropAtThatPoint) {
+    DropTargetFixture fixture;
+    HoverProbe probe;
+    probe.answer = newui::DropEffect::None;
+    probe.attachTo(fixture.child);
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+
+    // ...and the drop there is refused too, not just the cursor.
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dropAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+    EXPECT_EQ(std::count(probe.order.begin(), probe.order.end(), std::string("dropped")), 0);
+    EXPECT_EQ(std::count(probe.order.begin(), probe.order.end(), std::string("droppedAt")), 0);
+}
+
+TEST(COMDropTarget, DragLeaveFiresOnDragLeaveOnceAndOnlyWhenHovering) {
+    DropTargetFixture fixture;
+    HoverProbe probe;
+    probe.attachTo(fixture.child);
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    comDropTarget->DragLeave();  // never hovered anything
+    EXPECT_EQ(probe.leaveCount, 0);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    comDropTarget->DragLeave();
+    EXPECT_EQ(probe.leaveCount, 1);
+    comDropTarget->DragLeave();
+    EXPECT_EQ(probe.leaveCount, 1);
+}
+
+TEST(COMDropTarget, MovingOffTheTargetFiresOnDragLeave) {
+    DropTargetFixture fixture;
+    HoverProbe probe;
+    probe.attachTo(fixture.child);
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragOverAt(newui::Point(190, 190), &effect);  // outside child - nothing accepts
+    EXPECT_EQ(probe.leaveCount, 1);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+}
+
+TEST(COMDropTarget, DropEndsTheHoverThenDeliversPositionedAndPlainTextDrops) {
+    DropTargetFixture fixture;
+    HoverProbe probe;
+    probe.attachTo(fixture.child);
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    probe.order.clear();
+    probe.leaveCount = 0;
+
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dropAt(dataObject.Get(), newui::Point(50, 60), &effect);
+
+    // The final hover check at the drop point, the hover ending, then both drop flavors.
+    ASSERT_EQ(probe.order.size(), 4u);
+    EXPECT_EQ(probe.order[0], "over");
+    EXPECT_EQ(probe.order[1], "leave");
+    EXPECT_EQ(probe.order[2], "droppedAt");
+    EXPECT_EQ(probe.order[3], "dropped");
+    EXPECT_FLOAT_EQ(probe.lastPoint.x, 40.0f);
+    EXPECT_FLOAT_EQ(probe.lastPoint.y, 50.0f);
+}
+
+TEST(COMDropTarget, AViewWithOnlyHoverDelegatesDoesNotAccept) {
+    DropTargetFixture fixture;
+    auto dropTarget = std::make_unique<newui::DropTarget>();
+    dropTarget->onTextDragOver.add([](newui::DropTarget&, const std::wstring&, const newui::Point&, newui::DropEffect&) {
+        return newui::SyncReturn::Handled;
+    });
+    fixture.child->setDropTarget(std::move(dropTarget));
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+}
+
+TEST(COMDropTarget, AViewWithOnlyTextDroppedAtStillAccepts) {
+    DropTargetFixture fixture;
+    auto dropTarget = std::make_unique<newui::DropTarget>();
+    dropTarget->onTextDroppedAt.add([](newui::DropTarget&, const std::wstring&, const newui::Point&) {
+        return newui::SyncReturn::Handled;
+    });
+    fixture.child->setDropTarget(std::move(dropTarget));
+    auto dataObject = Microsoft::WRL::Make<MockDataObject>();
+    dataObject->setText(L"payload");
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_COPY));
 }

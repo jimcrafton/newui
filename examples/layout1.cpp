@@ -51,8 +51,8 @@ newui::SubView* MakePanel(const std::string& name, const std::string& background
     panel->setName(name);
     panel->setVisible(true);
     panel->style().setBackgroundColor( newui::Color::fromName(backgroundColorName) );
-    panel->style().borderFill = newui::Color::fromName(borderColorName).toBLRgba32();
-    panel->style().borderWidth = borderWidth;
+    panel->style().setBorderFill(newui::Color::fromName(borderColorName).toBLRgba32());
+    panel->style().setBorderWidth(borderWidth);
     return panel;
 }
 
@@ -168,10 +168,10 @@ int main() {
 
     auto* badge = MakePanel("badge", "white", "darkred", 2.0f);
     auto badgeParams = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Right | newui::Anchor::Top);
-    badgeParams->rightMargin = 8.0f;
-    badgeParams->topMargin = 8.0f;
-    badgeParams->width = 24.0f;
-    badgeParams->height = 24.0f;
+    badgeParams->setRightMargin(8.0f);
+    badgeParams->setTopMargin(8.0f);
+    badgeParams->setWidth(24.0f);
+    badgeParams->setHeight(24.0f);
     badge->setLayoutParams(std::move(badgeParams));
     content1->addChild(badge);
 
