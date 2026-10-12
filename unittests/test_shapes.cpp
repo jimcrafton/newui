@@ -246,3 +246,28 @@ TEST(ShapesReflection, ShapeLayerRoundTripsItsMixedShapeCollection) {
     EXPECT_FLOAT_EQ(freshRect->width(), 30.0f);
     EXPECT_FLOAT_EQ(freshRect->height(), 40.0f);
 }
+
+TEST(ShapesBlur, BoxBlur3SoftensTheEdgesOfABlockSymmetrically) {
+    const int w = 61, h = 61;
+    std::vector<std::uint8_t> pixels(std::size_t(w) * h * 4, 0);
+    for (int y = 25; y <= 35; ++y) {
+        for (int x = 25; x <= 35; ++x) {
+            for (int c = 0; c < 4; ++c) {
+                pixels[(std::size_t(y) * w + std::size_t(x)) * 4 + std::size_t(c)] = 255;
+            }
+        }
+    }
+    newui::shapes::boxBlur3(pixels.data(), w, h, w * 4, 3.0f);
+    auto alphaAt = [&](int x, int y) { return int(pixels[(std::size_t(y) * w + std::size_t(x)) * 4 + 3]); };
+    EXPECT_GE(alphaAt(30, 30), 150);                    // the middle stays mostly solid (the block is narrower than the blur reaches)
+    EXPECT_GT(alphaAt(23, 30), 0);                      // the edge bled outwards
+    EXPECT_LT(alphaAt(23, 30), alphaAt(30, 30));
+    EXPECT_GT(alphaAt(25, 30), alphaAt(22, 30));        // and falls off with distance
+    EXPECT_EQ(alphaAt(22, 30), alphaAt(38, 30));        // left and right agree
+    EXPECT_EQ(alphaAt(30, 22), alphaAt(30, 38));        // so do top and bottom
+    EXPECT_EQ(alphaAt(0, 0), 0);                        // far away nothing arrives
+
+    std::vector<std::uint8_t> untouched(16, 7);
+    newui::shapes::boxBlur3(untouched.data(), 2, 2, 8, 0.0f);  // radius 0 is a no-op
+    EXPECT_EQ(untouched[0], 7);
+}

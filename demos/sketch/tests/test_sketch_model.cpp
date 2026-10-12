@@ -922,6 +922,589 @@ TEST(SketchGradient, AlongStrokeFollowsThePathNotTheBox) {
     EXPECT_LT(px[88 * 100 + 10] & 0xFF, 60u);
 }
 
+// ---- Arrange / align / transform / lock / hide ---------------------------------------------------
+
+namespace {
+    // Three squares a, b, c (back to front) at x = 0, 100, 200.
+    struct Row {
+        SketchDocument doc;
+        std::size_t a = 0, b = 0, c = 0;
+        Row() {
+            a = doc.add(SketchObject::makeRect(0, 10, 40, 40)).id();
+            b = doc.add(SketchObject::makeRect(100, 20, 20, 20)).id();
+            c = doc.add(SketchObject::makeRect(200, 0, 60, 80)).id();
+        }
+        std::vector<std::size_t> order() const {
+            std::vector<std::size_t> ids;
+            for (std::size_t i = 0; i < doc.objectCount(); ++i) { ids.push_back(doc.object(i).id()); }
+            return ids;
+        }
+    };
+}
+
+TEST(SketchArrange, BringToFrontAndSendToBackUndo) {
+    Row row;
+    row.doc.setSelection({row.a});
+    EXPECT_TRUE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront));
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.b, row.c, row.a}));
+    row.doc.undoStack().undo();
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.a, row.b, row.c}));
+    row.doc.undoStack().redo();
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.b, row.c, row.a}));
+    row.doc.setSelection({row.c});
+    EXPECT_TRUE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::SendToBack));
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.c, row.b, row.a}));
+}
+
+TEST(SketchArrange, ForwardAndBackwardStepOneNeighborAndDoNothingAtTheEnds) {
+    Row row;
+    row.doc.setSelection({row.b});
+    EXPECT_TRUE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::BringForward));
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.a, row.c, row.b}));
+    EXPECT_FALSE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::BringForward));  // already in front
+    EXPECT_TRUE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::SendBackward));
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.a, row.b, row.c}));
+    // Two together keep their relative order and each steps past one unselected neighbor.
+    row.doc.setSelection({row.a, row.b});
+    EXPECT_TRUE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::BringForward));
+    EXPECT_EQ(row.order(), (std::vector<std::size_t>{row.c, row.a, row.b}));
+    EXPECT_FALSE(row.doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront));
+}
+
+TEST(SketchAlign, ObjectsLineUpOnTheirCombinedBoundsAndUndo) {
+    Row row;
+    row.doc.setSelection({row.a, row.b, row.c});
+    EXPECT_TRUE(row.doc.alignSelection(SketchDocument::AlignMode::Top));
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().y0, 0.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().y0, 0.0, 1e-9);
+    EXPECT_FALSE(row.doc.alignSelection(SketchDocument::AlignMode::Top));  // nothing left to move
+    EXPECT_TRUE(row.doc.alignSelection(SketchDocument::AlignMode::Right));
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().x1, 260.0, 1e-9);
+    row.doc.undoStack().undo();
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().x0, 0.0, 1e-9);
+    row.doc.setSelection({row.a, row.b, row.c});
+    EXPECT_TRUE(row.doc.alignSelection(SketchDocument::AlignMode::Middle));
+    EXPECT_NEAR((row.doc.findById(row.b)->geometryBounds().y0 + row.doc.findById(row.b)->geometryBounds().y1) * 0.5, 40.0, 1e-9);
+}
+
+TEST(SketchAlign, OneObjectAlignsToThePage) {
+    SketchDocument doc;
+    doc.setPageSize(300, 200);
+    std::size_t id = doc.add(SketchObject::makeRect(10, 10, 100, 50)).id();
+    doc.setSelection({id});
+    EXPECT_TRUE(doc.alignSelection(SketchDocument::AlignMode::Center));
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 100.0, 1e-9);
+    EXPECT_TRUE(doc.alignSelection(SketchDocument::AlignMode::Bottom));
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().y1, 200.0, 1e-9);
+}
+
+TEST(SketchTransform, Rotate90AndFlipTurnTheFrameToo) {
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makeRect(0, 0, 100, 20)).id();
+    doc.setSelection({id});
+    EXPECT_TRUE(doc.rotateSelection90(true));
+    BLBox box = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR(box.x1 - box.x0, 20.0, 1e-6);
+    EXPECT_NEAR(box.y1 - box.y0, 100.0, 1e-6);
+    EXPECT_NEAR((box.x0 + box.x1) * 0.5, 50.0, 1e-6);  // about its center
+    EXPECT_NEAR(doc.findById(id)->frameAngle(), 3.14159265358979323846 * 0.5, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1, 100.0, 1e-6);
+    EXPECT_NEAR(doc.findById(id)->frameAngle(), 0.0, 1e-12);
+
+    doc.add(SketchObject::makeRect(300, 0, 10, 10));
+    doc.setSelection({id, doc.object(1).id()});
+    EXPECT_TRUE(doc.flipSelection(true));  // mirrored about x = 155
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 210.0, 1e-6);
+    EXPECT_NEAR(doc.object(1).geometryBounds().x1, 10.0, 1e-6);
+    EXPECT_TRUE(doc.flipSelection(false));
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Flip Vertical");
+}
+
+TEST(SketchLockHide, HiddenAndLockedObjectsLeaveTheSelectionAndComeBack) {
+    Row row;
+    row.doc.setSelection({row.a, row.b});
+    EXPECT_TRUE(row.doc.hideSelection());
+    EXPECT_FALSE(row.doc.findById(row.a)->isVisible());
+    EXPECT_TRUE(row.doc.selection().empty());
+    EXPECT_EQ(row.doc.hitTest(BLPoint(20, 30), 1.0), nullptr);
+    row.doc.setSelection({row.c});
+    EXPECT_TRUE(row.doc.lockSelection());
+    EXPECT_TRUE(row.doc.findById(row.c)->isLocked());
+    EXPECT_TRUE(row.doc.selection().empty());
+    EXPECT_TRUE(row.doc.showAll());
+    EXPECT_TRUE(row.doc.findById(row.a)->isVisible());
+    EXPECT_FALSE(row.doc.showAll());  // nothing hidden any more
+    EXPECT_TRUE(row.doc.unlockAll());
+    EXPECT_FALSE(row.doc.findById(row.c)->isLocked());
+    row.doc.undoStack().undo();  // back to locked
+    EXPECT_TRUE(row.doc.findById(row.c)->isLocked());
+}
+
+TEST(SketchClipboard, CopySelectionAsSvgAndPasteIsOneUndoStep) {
+    SketchDocument doc;
+    EXPECT_TRUE(doc.selectionToSvg().empty());
+    std::size_t a = doc.add(SketchObject::makeRect(10, 10, 40, 30)).id();
+    std::size_t b = doc.add(SketchObject::makeEllipse(100, 100, 20, 20)).id();
+    doc.add(SketchObject::makeLine(0, 0, 5, 5));
+    doc.setSelection({a, b});
+    std::string svg = doc.selectionToSvg();
+    ASSERT_FALSE(svg.empty());
+
+    EXPECT_FALSE(doc.pasteSvg("not svg at all", 0, 0));
+    ASSERT_TRUE(doc.pasteSvg(svg, 12, 12));
+    ASSERT_EQ(doc.objectCount(), 5u);
+    EXPECT_EQ(doc.selection().size(), 2u);  // the pasted objects are selected
+    BLBox pasted = doc.object(3).bounds();
+    BLBox original = doc.object(0).bounds();
+    EXPECT_NEAR(pasted.x0 - original.x0, 12.0, 1e-6);
+    EXPECT_NEAR(pasted.y0 - original.y0, 12.0, 1e-6);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 3u);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.objectCount(), 5u);
+}
+
+TEST(SketchStrokeOptions, WidthProfileTapersRendersAndRoundTrips) {
+    std::unique_ptr<SketchObject> line(SketchObject::makeLine(0, 50, 100, 50));
+    line->setStrokeWidth(10.0);
+    line->setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    StrokeOptions taper;
+    taper.widths = {WidthPoint{0.0, 1.0, 1.0}, WidthPoint{1.0, 0.1, 0.1}};
+    line->setStrokeOptions(taper);
+    std::vector<std::uint32_t> px = render(*line, 100, 100);
+    EXPECT_GT(px[46 * 100 + 5] >> 24, 200u);   // wide near the start (half width ~4.5)
+    EXPECT_EQ(px[46 * 100 + 95] >> 24, 0u);    // thin near the end
+    EXPECT_GT(px[50 * 100 + 95] >> 24, 100u);  // still drawn on the centerline
+
+    BLPoint p, n;
+    ASSERT_TRUE(line->pathSample(0.25, p, n));
+    EXPECT_NEAR(p.x, 25.0, 1e-6);
+    EXPECT_NEAR(std::fabs(n.y), 1.0, 1e-6);
+    double t = 0.0, d = 0.0;
+    ASSERT_TRUE(line->nearestOnPath(BLPoint(60, 53), t, d));
+    EXPECT_NEAR(t, 0.6, 1e-6);
+    EXPECT_NEAR(d, 3.0, 1e-6);
+    EXPECT_NEAR(widthScaleAt(taper.widths, 0.5, true), 0.55, 1e-6);  // the middle of the ease
+
+    SketchDocument doc;
+    doc.add(line->clone());
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    ASSERT_EQ(copy.object(0).strokeOptions().widths.size(), 2u);
+    EXPECT_NEAR(copy.object(0).strokeOptions().widths[1].left, 0.1, 1e-9);
+}
+
+TEST(SketchBlend, ModesBlendWithWhatIsBelowUndoAndSave) {
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makeRect(10, 10, 50, 50)).id();
+    doc.findById(id)->setFill(SketchPaint::solid(SketchColor::fromHex("#ffffff")));
+    doc.findById(id)->setStroke(SketchPaint::none());
+    doc.setSelection({id});
+
+    auto pixelOverWhite = [&](const SketchObject& object) {
+        BLImage image(80, 80, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+        object.paint(ctx);
+        ctx.end();
+        BLImageData data;
+        image.get_data(&data);
+        return reinterpret_cast<const std::uint32_t*>(data.pixel_data)[30 * (data.stride / 4) + 30] & 0x00FFFFFFu;
+    };
+    EXPECT_EQ(pixelOverWhite(*doc.findById(id)), 0x00FFFFFFu);  // Normal: white over white
+
+    auto before = doc.snapshotStyle();
+    doc.setSelectionBlendMode(BlendMode::Difference);
+    EXPECT_TRUE(doc.commitStyle(before, "Blend Mode"));
+    EXPECT_EQ(pixelOverWhite(*doc.findById(id)), 0x00000000u);  // white difference white = black
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id)->blendMode(), BlendMode::Normal);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.findById(id)->blendMode(), BlendMode::Difference);
+    std::unique_ptr<SketchObject> copyOf(doc.findById(id)->clone());
+    EXPECT_EQ(copyOf->blendMode(), BlendMode::Difference);
+
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    EXPECT_EQ(loaded.object(0).blendMode(), BlendMode::Difference);
+    EXPECT_STREQ(blendModeName(BlendMode::ColorDodge), "Color Dodge");
+    EXPECT_EQ(blendModeFromCss("soft-light"), BlendMode::SoftLight);
+}
+
+TEST(SketchGroups, GroupSelectUngroupArrangeAlignDuplicateAndSave) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    std::size_t b = doc.add(SketchObject::makeRect(100, 0, 10, 10)).id();
+    std::size_t c = doc.add(SketchObject::makeRect(200, 0, 10, 10)).id();
+    doc.setSelection({a});
+    EXPECT_FALSE(doc.groupSelection());  // needs two objects
+    doc.setSelection({a, c});
+    EXPECT_FALSE(doc.canUngroup());
+    ASSERT_TRUE(doc.groupSelection());
+    // The members sit together where the topmost one was: b, a, c.
+    EXPECT_EQ(doc.object(0).id(), b);
+    EXPECT_EQ(doc.object(1).id(), a);
+    EXPECT_EQ(doc.object(2).id(), c);
+    ASSERT_EQ(doc.findById(a)->groups().size(), 1u);
+    EXPECT_EQ(doc.findById(a)->groups(), doc.findById(c)->groups());
+    EXPECT_EQ(doc.withGroupMembers({a}), (std::vector<std::size_t>{a, c}));
+    EXPECT_EQ(doc.withGroupMembers({b}), (std::vector<std::size_t>{b}));
+
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(a)->groups().empty());
+    EXPECT_EQ(doc.object(0).id(), a);
+    doc.undoStack().redo();
+    EXPECT_FALSE(doc.findById(c)->groups().empty());
+
+    // Sending the loose object forward steps past the whole group, not into it.
+    doc.setSelection({b});
+    ASSERT_TRUE(doc.arrangeSelection(SketchDocument::ArrangeOp::BringForward));
+    EXPECT_EQ(doc.object(0).id(), a);
+    EXPECT_EQ(doc.object(1).id(), c);
+    EXPECT_EQ(doc.object(2).id(), b);
+
+    // Aligning a group and an object treats the group as one piece.
+    doc.setSelection({a, c, b});
+    ASSERT_TRUE(doc.alignSelection(SketchDocument::AlignMode::Left));
+    EXPECT_NEAR(doc.findById(c)->geometryBounds().x0, 200.0, 1e-9);  // c stayed with a
+    EXPECT_NEAR(doc.findById(b)->geometryBounds().x0, 0.0, 1e-9);
+
+    // The file keeps the group as a <g>.
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 3u);
+    EXPECT_FALSE(loaded.object(0).groups().empty());
+    EXPECT_EQ(loaded.object(0).groups(), loaded.object(1).groups());
+    EXPECT_TRUE(loaded.object(2).groups().empty());
+
+    // A duplicate is a group of its own.
+    doc.setSelection({a, c});
+    doc.duplicateSelection(5, 5);
+    ASSERT_EQ(doc.objectCount(), 5u);
+    EXPECT_FALSE(doc.object(3).groups().empty());
+    EXPECT_NE(doc.object(3).groups(), doc.object(0).groups());
+    EXPECT_EQ(doc.object(3).groups(), doc.object(4).groups());
+
+    doc.setSelection({a, c});
+    ASSERT_TRUE(doc.ungroupSelection());
+    EXPECT_TRUE(doc.findById(a)->groups().empty());
+    EXPECT_FALSE(doc.canUngroup());
+    doc.undoStack().undo();
+    EXPECT_FALSE(doc.findById(a)->groups().empty());
+}
+
+TEST(SketchAppearance, StackPaintsInOrderHitTestsAndSaves) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(20, 20, 40, 40));
+    rect->setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect->setStroke(SketchPaint::none());
+    // A second fill on top (blue, half the rectangle's width would show nothing different - so use opacity): 50% blue.
+    std::vector<AppearanceItem> items = rect->appearance();
+    AppearanceItem blue = AppearanceItem::makeFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    blue.opacity = 0.5;
+    items.push_back(blue);
+    // And a thick stroke below everything: it only shows outside the fills.
+    AppearanceItem wide = AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::fromHex("#00ff00")), 20.0);
+    items.insert(items.begin(), wide);
+    rect->setAppearance(items);
+    ASSERT_EQ(rect->appearance().size(), 4u);  // wide stroke, red fill, no-paint stroke, blue fill
+
+    std::vector<std::uint32_t> px = render(*rect, 100, 100);
+    std::uint32_t center = px[40 * 100 + 40];
+    EXPECT_GT((center >> 16) & 0xFFu, 100u);   // red shows through half-transparent blue
+    EXPECT_GT(center & 0xFFu, 100u);           // and so does the blue
+    std::uint32_t outside = px[40 * 100 + 15]; // inside the stroke's reach, left of the rect
+    EXPECT_GT((outside >> 8) & 0xFFu, 200u);   // green
+    EXPECT_EQ(outside & 0xFFu, 0u);
+
+    // Hiding the item drops it from painting and the hit test; its bounds shrink too.
+    EXPECT_TRUE(rect->hitTest(BLPoint(15, 40), 0.5));  // on the wide stroke
+    items = rect->appearance();
+    items[0].visible = false;
+    rect->setAppearance(items);
+    EXPECT_FALSE(rect->hitTest(BLPoint(15, 40), 0.5));
+    EXPECT_LT(rect->bounds().x1 - rect->bounds().x0, 41.0);
+
+    // The primary accessors still mean the first fill / first stroke.
+    EXPECT_EQ(rect->fill().color().toHex(), "#ff0000");
+    EXPECT_EQ(rect->stroke().color().toHex(), "#00ff00");  // the first stroke is the wide one
+    EXPECT_DOUBLE_EQ(rect->strokeWidth(), 20.0);
+
+    // Undo goes through StyleState; the file keeps the whole stack.
+    SketchDocument doc;
+    std::size_t id = doc.add(rect->clone()).id();
+    doc.setSelection({id});
+    auto before = doc.snapshotStyle();
+    std::vector<AppearanceItem> edited = doc.findById(id)->appearance();
+    edited.pop_back();
+    doc.findById(id)->setAppearance(edited);
+    EXPECT_TRUE(doc.commitStyle(before, "Delete Item"));
+    EXPECT_EQ(doc.findById(id)->appearance().size(), 3u);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id)->appearance().size(), 4u);
+
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 1u);
+    const std::vector<AppearanceItem>& back = loaded.object(0).appearance();
+    ASSERT_EQ(back.size(), 4u);
+    EXPECT_EQ(back[0].kind, AppearanceKind::Stroke);
+    EXPECT_FALSE(back[0].visible);
+    EXPECT_DOUBLE_EQ(back[0].strokeWidth, 20.0);
+    EXPECT_EQ(back[3].kind, AppearanceKind::Fill);
+    EXPECT_DOUBLE_EQ(back[3].opacity, 0.5);
+}
+
+TEST(SketchAppearance, ActiveItemEditsAddDuplicateDeleteMoveAndClear) {
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makeRect(0, 0, 50, 50)).id();
+    doc.setSelection({id});
+    SketchObject* object = doc.findById(id);
+    ASSERT_EQ(object->appearance().size(), 2u);  // fill, stroke
+
+    ASSERT_TRUE(doc.addAppearanceItem(AppearanceKind::Stroke));
+    ASSERT_EQ(object->appearance().size(), 3u);
+    EXPECT_EQ(object->activeIndex(AppearanceKind::Stroke), 2u);
+    // The panels' accessors follow the active item: this edit lands on the new stroke, not the first.
+    object->setStrokeWidth(9.0);
+    EXPECT_DOUBLE_EQ(object->appearance()[2].strokeWidth, 9.0);
+    EXPECT_DOUBLE_EQ(object->appearance()[1].strokeWidth, 1.0);
+
+    doc.setActiveItem(AppearanceKind::Stroke, 1);  // choose the first stroke again - not an undo step
+    EXPECT_DOUBLE_EQ(object->strokeWidth(), 1.0);
+
+    doc.setActiveItem(AppearanceKind::Stroke, 2);
+    ASSERT_TRUE(doc.duplicateActiveItem(AppearanceKind::Stroke));
+    ASSERT_EQ(object->appearance().size(), 4u);
+    EXPECT_EQ(object->activeIndex(AppearanceKind::Stroke), 3u);
+    EXPECT_DOUBLE_EQ(object->appearance()[3].strokeWidth, 9.0);
+    object->setStrokeWidth(5.0);  // make the copy differ so moving it is visible
+
+    ASSERT_TRUE(doc.moveActiveItem(AppearanceKind::Stroke, -1));
+    EXPECT_EQ(object->activeIndex(AppearanceKind::Stroke), 2u);
+    EXPECT_FALSE(doc.moveActiveItem(AppearanceKind::Stroke, 1) && doc.moveActiveItem(AppearanceKind::Stroke, 1) && doc.moveActiveItem(AppearanceKind::Stroke, 1));  // runs off the top
+
+    // Live per-item opacity / blend / visibility, committed as one step.
+    auto before = doc.snapshotStyle();
+    doc.setSelectionItemOpacity(AppearanceKind::Stroke, 0.25);
+    doc.setSelectionItemBlendMode(AppearanceKind::Stroke, BlendMode::Multiply);
+    doc.setSelectionItemVisible(AppearanceKind::Stroke, false);
+    EXPECT_TRUE(doc.commitStyle(before, "Item"));
+    const AppearanceItem& edited = object->activeItem(AppearanceKind::Stroke);
+    EXPECT_DOUBLE_EQ(edited.opacity, 0.25);
+    EXPECT_EQ(edited.blendMode, BlendMode::Multiply);
+    EXPECT_FALSE(edited.visible);
+    doc.undoStack().undo();
+    EXPECT_TRUE(object->activeItem(AppearanceKind::Stroke).visible);
+
+    // Deleting walks back to a neighbour; the last item of a kind turns None instead of vanishing.
+    std::size_t before_count = object->appearance().size();
+    while (object->appearance().size() > 2) {
+        ASSERT_TRUE(doc.deleteActiveItem(AppearanceKind::Stroke));
+    }
+    EXPECT_EQ(object->appearance().size(), 2u);
+    EXPECT_GT(before_count, 2u);
+    ASSERT_TRUE(doc.deleteActiveItem(AppearanceKind::Stroke));  // the last stroke
+    EXPECT_EQ(object->appearance().size(), 2u);
+    EXPECT_TRUE(object->stroke().isNone());
+    doc.undoStack().undo();
+    EXPECT_FALSE(object->stroke().isNone());
+
+    object->setOpacity(0.5);
+    ASSERT_TRUE(doc.clearAppearance());
+    EXPECT_TRUE(object->fill().isNone());
+    EXPECT_TRUE(object->stroke().isNone());
+    EXPECT_DOUBLE_EQ(object->opacity(), 1.0);
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(object->opacity(), 0.5);
+    EXPECT_FALSE(object->fill().isNone());
+}
+
+TEST(SketchLayers, ObjectAndGroupOpacityBlendAsOnePiece) {
+    // A black fill with a black stroke overlapping it, at 50% object opacity: where they overlap the result is still
+    // 50% - not 75%, as it would be if each were drawn at 50% on its own.
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(20, 20, 40, 40));
+    rect->setFill(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    rect->setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    rect->setStrokeWidth(20.0);
+    rect->setOpacity(0.5);
+    std::vector<std::uint32_t> px = render(*rect, 100, 100);
+    std::uint32_t overlap = px[30 * 100 + 30] >> 24;   // inside the fill and within the stroke's inner half
+    std::uint32_t strokeOnly = px[15 * 100 + 40] >> 24;  // outside the rect, stroke only
+    EXPECT_NEAR(double(overlap), 128.0, 3.0);
+    EXPECT_NEAR(double(strokeOnly), 128.0, 3.0);
+
+    // Under a user transform with a fractional offset and a scale the layer still lines up with the direct drawing.
+    BLImage image(100, 100, BL_FORMAT_PRGB32);
+    BLContext ctx(image);
+    ctx.clear_all();
+    ctx.translate(3.25, 1.5);
+    ctx.scale(0.5);
+    SketchObject* half = rect->clone();
+    half->setOpacity(0.5);  // goes through a layer under a fractional, scaled transform
+    half->paint(ctx);
+    ctx.end();
+    delete half;
+
+    // A group with opacity: its members blend as one, undo restores it with the objects.
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(10, 10, 40, 40)).id();
+    std::size_t b = doc.add(SketchObject::makeRect(30, 30, 40, 40)).id();
+    for (std::size_t id : {a, b}) {
+        doc.findById(id)->setFill(SketchPaint::solid(SketchColor::fromHex("#000000")));
+        doc.findById(id)->setStroke(SketchPaint::none());
+    }
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    EXPECT_EQ(doc.selectedGroup(), doc.findById(a)->groups().front());
+    auto before = doc.snapshotStyle();
+    doc.setSelectionGroupOpacity(0.5);
+    EXPECT_TRUE(doc.commitStyle(before, "Group Opacity"));
+    BLImage canvas(100, 100, BL_FORMAT_PRGB32);
+    {
+        BLContext c2(canvas);
+        c2.clear_all();
+        doc.paint(c2);
+        c2.end();
+    }
+    BLImageData data;
+    canvas.get_data(&data);
+    const std::uint32_t* pixels = reinterpret_cast<const std::uint32_t*>(data.pixel_data);
+    std::size_t stride = std::size_t(data.stride) / 4;
+    EXPECT_NEAR(double(pixels[40 * stride + 40] >> 24), 128.0, 3.0);  // the squares overlap here - still 50%
+    EXPECT_NEAR(double(pixels[20 * stride + 20] >> 24), 128.0, 3.0);
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.groupProps(doc.findById(a)->groups().front()).opacity, 1.0);
+
+    // Saved and read back.
+    doc.undoStack().redo();
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    ASSERT_EQ(loaded.objectCount(), 2u);
+    EXPECT_DOUBLE_EQ(loaded.groupProps(loaded.object(0).groups().front()).opacity, 0.5);
+}
+
+TEST(SketchEffects, ShadowBlurRoundCornersAndSave) {
+    auto make = []() {
+        std::unique_ptr<SketchObject> rect(SketchObject::makeRect(20, 20, 40, 40));
+        rect->setFill(SketchPaint::solid(SketchColor::fromHex("#000000")));
+        rect->setStroke(SketchPaint::none());
+        return rect;
+    };
+    auto alphaAt = [](const std::vector<std::uint32_t>& px, int x, int y) { return px[std::size_t(y) * 100 + std::size_t(x)] >> 24; };
+
+    // Drop shadow: cast behind, offset down-right (4, 4), so it shows just outside the bottom-right corner only.
+    std::unique_ptr<SketchObject> shadowed = make();
+    std::vector<AppearanceItem> items = shadowed->appearance();
+    items.push_back(AppearanceItem::makeEffect(EffectKind::DropShadow));
+    shadowed->setAppearance(items);
+    EXPECT_GT(shadowed->effectPad(), 18.0);  // 3 x softness + offset
+    std::vector<std::uint32_t> px = render(*shadowed, 100, 100);
+    EXPECT_GT(alphaAt(px, 63, 63), 20u);
+    EXPECT_EQ(alphaAt(px, 6, 6), 0u);          // far up-left of the rect: no shadow there
+    EXPECT_GT(alphaAt(px, 40, 40), 200u);      // the rect itself is still on top
+    items[2].visible = false;
+    shadowed->setAppearance(items);
+    px = render(*shadowed, 100, 100);
+    EXPECT_EQ(alphaAt(px, 63, 63), 0u);
+
+    // Gaussian blur softens the edges of what is below it.
+    std::unique_ptr<SketchObject> blurred = make();
+    items = blurred->appearance();
+    items.push_back(AppearanceItem::makeEffect(EffectKind::GaussianBlur));
+    blurred->setAppearance(items);
+    px = render(*blurred, 100, 100);
+    EXPECT_GT(alphaAt(px, 62, 40), 0u);        // bled past the edge
+    EXPECT_LT(alphaAt(px, 58, 40), 255u);      // and thinned inside it
+    EXPECT_GT(alphaAt(px, 40, 40), 200u);
+
+    // Round corners cut the corner of a rectangle but not the middle of its sides.
+    std::unique_ptr<SketchObject> rounded = make();
+    items = rounded->appearance();
+    AppearanceItem round = AppearanceItem::makeEffect(EffectKind::RoundCorners);
+    round.radius = 12.0;
+    items.push_back(round);
+    rounded->setAppearance(items);
+    px = render(*rounded, 100, 100);
+    EXPECT_EQ(alphaAt(px, 21, 21), 0u);
+    EXPECT_GT(alphaAt(px, 40, 21), 200u);
+    EXPECT_GT(alphaAt(px, 40, 40), 200u);
+
+    // Effects survive undo snapshots and the file.
+    SketchDocument doc;
+    std::size_t id = doc.add(shadowed->clone()).id();
+    doc.setSelection({id});
+    ASSERT_TRUE(doc.addEffect(EffectKind::RoundCorners));
+    EXPECT_EQ(doc.findById(id)->appearance().size(), 4u);
+    ASSERT_TRUE(doc.changeActiveEffect([](AppearanceItem& e) { e.radius = 3.0; }, "Round Corners"));
+    SketchDocument loaded;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), loaded));
+    const std::vector<AppearanceItem>& back = loaded.object(0).appearance();
+    ASSERT_EQ(back.size(), 4u);
+    EXPECT_EQ(back[2].kind, AppearanceKind::Effect);
+    EXPECT_EQ(back[2].effect, EffectKind::DropShadow);
+    EXPECT_FALSE(back[2].visible);
+    EXPECT_DOUBLE_EQ(back[3].radius, 3.0);
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.findById(id)->appearance()[3].radius, 10.0);
+    ASSERT_TRUE(doc.deleteActiveItem(AppearanceKind::Effect));  // effects can all be removed
+    EXPECT_EQ(doc.findById(id)->appearance().size(), 3u);
+}
+
+TEST(SketchStrokeOptions, DashesRenderAndRoundTrip) {
+    std::unique_ptr<SketchObject> line(SketchObject::makeLine(0, 50, 100, 50));
+    line->setStrokeWidth(10.0);
+    line->setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    StrokeOptions dashed;
+    dashed.dashes = {20.0, 20.0};
+    line->setStrokeOptions(dashed);
+    std::vector<std::uint32_t> px = render(*line, 100, 100);
+    EXPECT_GT(px[50 * 100 + 10] >> 24, 200u);  // inside the first dash
+    EXPECT_EQ(px[50 * 100 + 30] >> 24, 0u);    // inside the first gap
+    EXPECT_GT(px[50 * 100 + 50] >> 24, 200u);  // second dash
+
+    SketchDocument doc;
+    doc.add(line->clone());
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_EQ(copy.object(0).strokeOptions().dashes, (std::vector<double>{20.0, 20.0}));
+}
+
+TEST(SketchStrokeOptions, CapsJoinsAndMiterRenderUndoAndSave) {
+    // A round cap reaches half a stroke width past the end of the line; a butt cap does not.
+    std::unique_ptr<SketchObject> line(SketchObject::makeLine(30, 50, 70, 50));
+    line->setStrokeWidth(20.0);
+    line->setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    std::vector<std::uint32_t> px = render(*line, 100, 100);
+    EXPECT_EQ(px[50 * 100 + 25] >> 24, 0u);  // butt: nothing left of x = 30
+    StrokeOptions round;
+    round.cap = StrokeCap::Round;
+    line->setStrokeOptions(round);
+    px = render(*line, 100, 100);
+    EXPECT_GT(px[50 * 100 + 25] >> 24, 200u);
+    EXPECT_EQ(px[50 * 100 + 15] >> 24, 0u);
+    EXPECT_TRUE(line->hitTest(BLPoint(22, 50), 0.5));  // hit testing sees the cap too
+    line->setStrokeOptions(StrokeOptions());
+    EXPECT_FALSE(line->hitTest(BLPoint(22, 50), 0.5));
+
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makePolyline({BLPoint(0, 0), BLPoint(50, 50), BLPoint(100, 0)})).id();
+    doc.setSelection({id});
+    auto before = doc.snapshotStyle();
+    doc.changeSelectionStrokeOptions([](StrokeOptions& o) { o.join = StrokeJoin::Round; o.miterLimit = 3.0; });
+    EXPECT_TRUE(doc.commitStyle(before, "Round Join"));
+    EXPECT_EQ(doc.findById(id)->strokeOptions().join, StrokeJoin::Round);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id)->strokeOptions().join, StrokeJoin::Miter);
+    doc.undoStack().redo();
+
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_EQ(copy.object(0).strokeOptions().join, StrokeJoin::Round);
+    EXPECT_DOUBLE_EQ(copy.object(0).strokeOptions().miterLimit, 3.0);
+    EXPECT_EQ(copy.object(0).strokeOptions().cap, StrokeCap::Butt);
+}
+
 // ---- SVG round trip -------------------------------------------------------------------------
 
 namespace {
@@ -1306,6 +1889,20 @@ TEST(NewDocumentModel, StartsAsLetterCmyk) {
     EXPECT_EQ(model.pixelWidth(), 2550);
     EXPECT_EQ(model.pixelHeight(), 3300);
     EXPECT_FALSE(model.isLandscape());
+}
+
+TEST(NewDocumentModel, LoadSetupShowsAnExistingPageInPoints) {
+    NewDocumentModel model;
+    model.loadSetup(595.0, 842.0, 150.0, ColorSpace::RGB, PageBackground::Transparent);
+    EXPECT_EQ(model.unit(), LengthUnit::Points);
+    EXPECT_DOUBLE_EQ(model.widthPoints(), 595.0);
+    EXPECT_DOUBLE_EQ(model.heightPoints(), 842.0);
+    EXPECT_DOUBLE_EQ(model.ppi(), 150.0);
+    EXPECT_EQ(model.colorMode(), ColorSpace::RGB);
+    EXPECT_EQ(model.background(), PageBackground::Transparent);
+    model.setUnit(LengthUnit::Inches);  // converting keeps the page the same physical size
+    EXPECT_NEAR(model.width(), 595.0 / 72.0, 1e-9);
+    EXPECT_NEAR(model.widthPoints(), 595.0, 1e-9);
 }
 
 TEST(NewDocumentModel, UnitChangeKeepsThePhysicalSize) {

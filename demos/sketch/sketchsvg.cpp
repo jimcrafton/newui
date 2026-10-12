@@ -744,8 +744,10 @@ namespace sketch {
             // Not inherited.
             style.props.erase("opacity");
             style.props.erase("display");
+            style.props.erase("mix-blend-mode");
             static const char* kKeys[] = {
                 "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
+                "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile",
                 "data-fill-color", "data-stroke-color",
             };
             for (const char* key : kKeys) {
@@ -775,6 +777,7 @@ namespace sketch {
             std::map<std::string, const XmlNode*> byId;
             SketchDocument* document = nullptr;
             float pageWidth = 612.0f, pageHeight = 792.0f;
+            std::vector<std::size_t> groupStack;  // the <g> elements being read (document group ids, outermost first)
         };
 
         void collectIds(const XmlNode& node, std::map<std::string, const XmlNode*>& out) {
@@ -1056,6 +1059,159 @@ namespace sketch {
             return SketchObject::make(type, path);
         }
 
+        // The stroke options (cap, join, miter limit, dashes, width profile) a style declares; lengths are multiplied by `scale`.
+        StrokeOptions readStrokeOptions(const Style& style, double scale) {
+        StrokeOptions strokeOptions;
+        if (const std::string* cap = style.get("stroke-linecap")) {
+            strokeOptions.cap = *cap == "round" ? StrokeCap::Round : (*cap == "square" ? StrokeCap::Square : StrokeCap::Butt);
+        }
+        if (const std::string* join = style.get("stroke-linejoin")) {
+            strokeOptions.join = *join == "round" ? StrokeJoin::Round : (*join == "bevel" ? StrokeJoin::Bevel : StrokeJoin::Miter);
+        }
+        strokeOptions.miterLimit = std::max(1.0, number(style.get("stroke-miterlimit"), 4.0));
+        if (const std::string* dashes = style.get("stroke-dasharray")) {
+            std::string text = *dashes;
+            for (char& ch : text) {
+                if (ch == ',') { ch = ' '; }
+            }
+            std::istringstream in(text);
+            std::vector<double> values;
+            double value = 0.0;
+            double total = 0.0;
+            while (in >> value) {
+                values.push_back(std::max(0.0, value * (scale > 1e-9 ? scale : 1.0)));
+                total += values.back();
+            }
+            if (total > 0.0) {
+                strokeOptions.dashes = values;
+            }
+        }
+        if (const std::string* profile = style.get("data-width-profile")) {
+            std::string text = *profile;
+            for (char& ch : text) {
+                if (ch == ';') { ch = '\n'; }
+            }
+            std::istringstream lines(text);
+            std::string row;
+            while (std::getline(lines, row)) {
+                std::istringstream in(row);
+                WidthPoint point;
+                if (in >> point.t >> point.left >> point.right) {
+                    strokeOptions.widths.push_back(point);
+                }
+            }
+            std::sort(strokeOptions.widths.begin(), strokeOptions.widths.end(),
+                [](const WidthPoint& a, const WidthPoint& b) { return a.t < b.t; });
+        }
+        return strokeOptions;
+        }
+
+        // A stroke's own opacity folded into a solid color's alpha.
+        SketchPaint foldStrokeOpacity(const SketchPaint& paint, const Style& style) {
+            const std::string* strokeOpacity = style.get("stroke-opacity");
+            if (strokeOpacity == nullptr || paint.kind() != SketchPaint::Kind::Solid) {
+                return paint;
+            }
+            SketchColor c = paint.color();
+            c.setAlpha(c.alpha() * float(number(strokeOpacity, 1.0)));
+            return SketchPaint::solid(c);
+        }
+
+        // <g data-sketch="appearance">: one object whose appearance is the stack of child paths (bottom to top).
+        void readAppearanceObject(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& matrix, const Style& style) {
+            const XmlNode* first = nullptr;
+            for (const auto& child : node.children) {
+                if (child->name == "path") {
+                    first = child.get();
+                    break;
+                }
+            }
+            if (first == nullptr) {
+                return;
+            }
+            SketchObjectType type = SketchObjectType::Path;
+            std::unique_ptr<SketchObject> object(makeShape(*first, type));
+            if (!object) {
+                return;
+            }
+            if (const std::string* dt = node.attr("data-type")) {
+                SketchObjectType stored;
+                if (parseObjectType(*dt, stored)) {
+                    object.reset(SketchObject::make(stored, object->geometry()));
+                }
+            }
+            BLPath path = object->geometry();
+            path.transform(matrix);
+            object->setGeometry(path);
+            BLBox box = object->geometryBounds();
+            double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
+            if (scale <= 1e-9) {
+                scale = 1.0;
+            }
+            std::vector<AppearanceItem> items;
+            for (const auto& child : node.children) {
+                const std::string* kind = child->attr("data-item");
+                if (child->name != "path" || kind == nullptr) {
+                    continue;
+                }
+                Style cs = styleFor(*child, style);
+                AppearanceItem item;
+                if (*kind == "effect") {
+                    const std::string* code = child->attr("data-effect");
+                    EffectKind effect = EffectKind::DropShadow;
+                    if (code != nullptr) {
+                        effect = *code == "outer-glow" ? EffectKind::OuterGlow : (*code == "gaussian-blur" ? EffectKind::GaussianBlur
+                            : (*code == "round-corners" ? EffectKind::RoundCorners : EffectKind::DropShadow));
+                    }
+                    item = AppearanceItem::makeEffect(effect);
+                    item.softness = number(child->attr("data-softness"), item.softness);
+                    item.offsetX = number(child->attr("data-dx"), item.offsetX);
+                    item.offsetY = number(child->attr("data-dy"), item.offsetY);
+                    item.radius = number(child->attr("data-radius"), item.radius);
+                    SketchPaint tint = readPaint(ctx, cs, "fill", box);
+                    if (tint.kind() == SketchPaint::Kind::Solid) {
+                        item.color = tint.color();
+                    }
+                    item.opacity = 1.0;
+                    item.blendMode = BlendMode::Normal;  // absent means Normal (makeEffect's default is the editing default)
+                } else if (*kind == "stroke") {
+                    item = AppearanceItem::makeStroke(foldStrokeOpacity(readPaint(ctx, cs, "stroke", box), cs),
+                        std::max(0.0, number(cs.get("stroke-width"), 1.0) * scale), readStrokeOptions(cs, scale));
+                } else {
+                    item = AppearanceItem::makeFill(readPaint(ctx, cs, "fill", box));
+                }
+                item.opacity = std::min(1.0, std::max(0.0, number(cs.get("opacity"), 1.0)));
+                if (const std::string* blend = cs.get("mix-blend-mode")) {
+                    item.blendMode = blendModeFromCss(*blend);
+                }
+                if (const std::string* display = cs.get("display")) {
+                    item.visible = *display != "none";
+                }
+                items.push_back(item);
+            }
+            object->setAppearance(items);
+            object->setOpacity(std::min(1.0, std::max(0.0, number(style.get("opacity"), 1.0))));
+            if (const std::string* blend = style.get("mix-blend-mode")) {
+                object->setBlendMode(blendModeFromCss(*blend));
+            }
+            if (const std::string* display = style.get("display")) {
+                object->setVisible(*display != "none");
+            }
+            if (const std::string* locked = node.attr("data-locked")) {
+                object->setLocked(*locked == "true");
+            }
+            if (const std::string* name = node.attr("data-name")) {
+                object->setName(*name);
+            } else if (const std::string* id = node.attr("id")) {
+                object->setName(*id);
+            }
+            if (const std::string* angle = node.attr("data-frame-angle")) {
+                object->setFrameAngle(number(angle, 0.0));
+            }
+            object->setGroups(ctx.groupStack);
+            ctx.document->add(object.release());
+        }
+
         void readNode(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& parentMatrix, const Style& inherited) {
             if (node.name == "defs" || node.name == "linearGradient" || node.name == "radialGradient" || node.name == "clipPath"
                 || node.name == "mask" || node.name == "pattern" || node.name == "symbol" || node.name == "style" || node.name == "metadata") {
@@ -1066,9 +1222,28 @@ namespace sketch {
                 matrix = concat(parentMatrix, parseTransform(*t));
             }
             Style style = styleFor(node, inherited);
+            if (node.name == "g" && node.attr("data-sketch") != nullptr && *node.attr("data-sketch") == "appearance") {
+                readAppearanceObject(ctx, node, matrix, style);
+                return;
+            }
             if (node.name == "g" || node.name == "svg" || node.name == "a" || node.name == "switch") {
+                bool group = node.name == "g" && ctx.document != nullptr;
+                if (group) {
+                    ctx.groupStack.push_back(ctx.document->newGroupId());
+                    GroupProps props;
+                    props.opacity = std::min(1.0, std::max(0.0, number(style.get("opacity"), 1.0)));
+                    if (const std::string* blend = style.get("mix-blend-mode")) {
+                        props.blendMode = blendModeFromCss(*blend);
+                    }
+                    if (!props.isDefault()) {
+                        ctx.document->setGroupProps(ctx.groupStack.back(), props);
+                    }
+                }
                 for (const auto& child : node.children) {
                     readNode(ctx, *child, matrix, style);
+                }
+                if (group) {
+                    ctx.groupStack.pop_back();
                 }
                 return;
             }
@@ -1098,25 +1273,12 @@ namespace sketch {
             // A scaling transform scales the stroke too.
             double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
             object->setStrokeWidth(std::max(0.0, strokeWidth * (scale > 1e-9 ? scale : 1.0)));
-            StrokeOptions strokeOptions;
-            if (const std::string* cap = style.get("stroke-linecap")) {
-                strokeOptions.cap = *cap == "round" ? StrokeCap::Round : (*cap == "square" ? StrokeCap::Square : StrokeCap::Butt);
-            }
-            if (const std::string* join = style.get("stroke-linejoin")) {
-                strokeOptions.join = *join == "round" ? StrokeJoin::Round : (*join == "bevel" ? StrokeJoin::Bevel : StrokeJoin::Miter);
-            }
-            strokeOptions.miterLimit = std::max(1.0, number(style.get("stroke-miterlimit"), 4.0));
-            object->setStrokeOptions(strokeOptions);
-            if (const std::string* strokeOpacity = style.get("stroke-opacity")) {
-                // Folded into the stroke's alpha when it is a solid color.
-                if (object->stroke().kind() == SketchPaint::Kind::Solid) {
-                    SketchColor c = object->stroke().color();
-                    SketchColor withAlpha = c;
-                    withAlpha.setAlpha(c.alpha() * float(number(strokeOpacity, 1.0)));
-                    object->setStroke(SketchPaint::solid(withAlpha));
-                }
-            }
+            object->setStrokeOptions(readStrokeOptions(style, scale));
+            object->setStroke(foldStrokeOpacity(object->stroke(), style));
             object->setOpacity(std::min(1.0, std::max(0.0, number(style.get("opacity"), 1.0))));
+            if (const std::string* blend = style.get("mix-blend-mode")) {
+                object->setBlendMode(blendModeFromCss(*blend));
+            }
             if (const std::string* display = style.get("display")) {
                 object->setVisible(*display != "none");
             }
@@ -1131,7 +1293,44 @@ namespace sketch {
             if (const std::string* angle = node.attr("data-frame-angle")) {
                 object->setFrameAngle(number(angle, 0.0));
             }
+            object->setGroups(ctx.groupStack);
             ctx.document->add(object.release());
+        }
+
+    }
+
+    namespace {
+        // stroke-width / cap / join / dashes / width profile / miter limit attributes of a stroke (nothing for a none paint).
+        std::string strokeAttrs(const SketchPaint& paint, double width, const StrokeOptions& options) {
+            std::ostringstream out;
+            if (paint.isNone()) {
+                return std::string();
+            }
+            out << " stroke-width=\"" << num(width) << "\"";
+                            if (options.cap != StrokeCap::Butt) {
+                out << " stroke-linecap=\"" << (options.cap == StrokeCap::Round ? "round" : "square") << "\"";
+            }
+            if (options.join != StrokeJoin::Miter) {
+                out << " stroke-linejoin=\"" << (options.join == StrokeJoin::Round ? "round" : "bevel") << "\"";
+            }
+            if (!options.dashes.empty()) {
+                out << " stroke-dasharray=\"";
+                for (size_t i = 0; i < options.dashes.size(); ++i) {
+                    out << (i > 0 ? " " : "") << num(options.dashes[i]);
+                }
+                out << "\"";
+            }
+            if (!options.widths.empty()) {  // other viewers ignore this and show the plain stroke
+                out << " data-width-profile=\"";
+                for (std::size_t i = 0; i < options.widths.size(); ++i) {
+                    out << (i > 0 ? ";" : "") << num(options.widths[i].t) << " " << num(options.widths[i].left) << " " << num(options.widths[i].right);
+                }
+                out << "\"";
+            }
+            if (options.miterLimit != 4.0) {  // 4 is SVG's default
+                out << " stroke-miterlimit=\"" << num(options.miterLimit) << "\"";
+            }
+            return out.str();
         }
 
     }
@@ -1142,9 +1341,104 @@ namespace sketch {
         std::ostringstream defs;
         std::ostringstream body;
         int gradientCount = 0;
+        std::vector<std::size_t> openGroups;  // <g> elements currently open (group ids)
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
             const SketchObject& object = document.object(i);
             BLBox box = object.geometryBounds();
+            {
+                const std::vector<std::size_t>& groups = object.groups();
+                std::size_t common = 0;
+                while (common < openGroups.size() && common < groups.size() && openGroups[common] == groups[common]) {
+                    ++common;
+                }
+                for (std::size_t k = openGroups.size(); k > common; --k) {
+                    body << "</g>\n";
+                }
+                openGroups.resize(common);
+                for (std::size_t k = common; k < groups.size(); ++k) {
+                    GroupProps props = document.groupProps(groups[k]);
+                    body << "<g";
+                    if (props.opacity < 1.0) {
+                        body << " opacity=\"" << num(props.opacity) << "\"";
+                    }
+                    if (props.blendMode != BlendMode::Normal) {
+                        body << " style=\"mix-blend-mode:" << blendModeCss(props.blendMode) << "\"";
+                    }
+                    body << ">\n";
+                    openGroups.push_back(groups[k]);
+                }
+            }
+            {
+                const std::vector<AppearanceItem>& items = object.appearance();
+                bool plain = items.size() == 2 && items[0].kind == AppearanceKind::Fill && items[1].kind == AppearanceKind::Stroke;
+                for (const AppearanceItem& item : items) {
+                    plain = plain && item.visible && item.opacity == 1.0 && item.blendMode == BlendMode::Normal;
+                }
+                if (!plain) {
+                    // Several fills/strokes (or per-item opacity/blend/visibility): the object is a <g> with one path per item.
+                    body << "<g data-sketch=\"appearance\" id=\"obj" << object.id() << "\" data-type=\"" << typeName(object.type()) << "\"";
+                    if (!object.name().empty()) {
+                        body << " data-name=\"" << escape(object.name()) << "\"";
+                    }
+                    if (object.frameAngle() != 0.0) {
+                        body << " data-frame-angle=\"" << num(object.frameAngle()) << "\"";
+                    }
+                    if (object.opacity() < 1.0) {
+                        body << " opacity=\"" << num(object.opacity()) << "\"";
+                    }
+                    if (object.blendMode() != BlendMode::Normal) {
+                        body << " style=\"mix-blend-mode:" << blendModeCss(object.blendMode()) << "\"";
+                    }
+                    if (!object.isVisible()) {
+                        body << " display=\"none\"";
+                    }
+                    if (object.isLocked()) {
+                        body << " data-locked=\"true\"";
+                    }
+                    body << ">\n";
+                    for (const AppearanceItem& item : items) {
+                        bool stroke = item.kind == AppearanceKind::Stroke;
+                        if (item.kind == AppearanceKind::Effect) {
+                            // Other viewers draw nothing for it; the reader restores it from these attributes.
+                            static const char* kCodes[] = {"drop-shadow", "outer-glow", "gaussian-blur", "round-corners"};
+                            body << "<path d=\"M0 0\" data-item=\"effect\" data-effect=\"" << kCodes[std::size_t(item.effect)] << "\" data-softness=\""
+                                 << num(item.softness) << "\" data-dx=\"" << num(item.offsetX) << "\" data-dy=\"" << num(item.offsetY)
+                                 << "\" data-radius=\"" << num(item.radius) << "\" stroke=\"none\""
+                                 << paintAttrs("fill", SketchPaint::solid(item.color), box, defs, gradientCount);
+                            if (item.opacity < 1.0) {
+                                body << " opacity=\"" << num(item.opacity) << "\"";
+                            }
+                            if (item.blendMode != BlendMode::Normal) {
+                                body << " style=\"mix-blend-mode:" << blendModeCss(item.blendMode) << "\"";
+                            }
+                            if (!item.visible) {
+                                body << " display=\"none\"";
+                            }
+                            body << "/>\n";
+                            continue;
+                        }
+                        body << "<path d=\"" << pathData(object.geometry()) << "\" data-item=\"" << (stroke ? "stroke" : "fill") << "\"";
+                        if (stroke) {
+                            body << " fill=\"none\"" << paintAttrs("stroke", item.paint, box, defs, gradientCount)
+                                 << strokeAttrs(item.paint, item.strokeWidth, item.strokeOptions);
+                        } else {
+                            body << paintAttrs("fill", object.isClosed() ? item.paint : SketchPaint::none(), box, defs, gradientCount) << " stroke=\"none\"";
+                        }
+                        if (item.opacity < 1.0) {
+                            body << " opacity=\"" << num(item.opacity) << "\"";
+                        }
+                        if (item.blendMode != BlendMode::Normal) {
+                            body << " style=\"mix-blend-mode:" << blendModeCss(item.blendMode) << "\"";
+                        }
+                        if (!item.visible) {
+                            body << " display=\"none\"";
+                        }
+                        body << "/>\n";
+                    }
+                    body << "</g>\n";
+                    continue;
+                }
+            }
             body << "<path id=\"obj" << object.id() << "\" d=\"" << pathData(object.geometry()) << "\" data-type=\"" << typeName(object.type()) << "\"";
             if (!object.name().empty()) {
                 body << " data-name=\"" << escape(object.name()) << "\"";
@@ -1155,21 +1449,12 @@ namespace sketch {
             SketchPaint fill = object.isClosed() ? object.fill() : SketchPaint::none();
             body << paintAttrs("fill", fill, box, defs, gradientCount);
             body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount);
-            if (!object.stroke().isNone()) {
-                body << " stroke-width=\"" << num(object.strokeWidth()) << "\"";
-                const StrokeOptions& options = object.strokeOptions();
-                if (options.cap != StrokeCap::Butt) {
-                    body << " stroke-linecap=\"" << (options.cap == StrokeCap::Round ? "round" : "square") << "\"";
-                }
-                if (options.join != StrokeJoin::Miter) {
-                    body << " stroke-linejoin=\"" << (options.join == StrokeJoin::Round ? "round" : "bevel") << "\"";
-                }
-                if (options.miterLimit != 4.0) {  // 4 is SVG's default
-                    body << " stroke-miterlimit=\"" << num(options.miterLimit) << "\"";
-                }
-            }
+            body << strokeAttrs(object.stroke(), object.strokeWidth(), object.strokeOptions());
             if (object.opacity() < 1.0) {
                 body << " opacity=\"" << num(object.opacity()) << "\"";
+            }
+            if (object.blendMode() != BlendMode::Normal) {
+                body << " style=\"mix-blend-mode:" << blendModeCss(object.blendMode()) << "\"";
             }
             if (!object.isVisible()) {
                 body << " display=\"none\"";
@@ -1178,6 +1463,9 @@ namespace sketch {
                 body << " data-locked=\"true\"";
             }
             body << "/>\n";
+        }
+        for (std::size_t k = openGroups.size(); k > 0; --k) {
+            body << "</g>\n";
         }
 
         std::ostringstream out;
@@ -1259,6 +1547,24 @@ namespace sketch {
         Style rootStyle = styleFor(*root, Style());
         for (const auto& child : root->children) {
             readNode(ctx, *child, base, rootStyle);
+        }
+        // A <g> holding a single object (or none that survived) is not worth a group.
+        std::map<std::size_t, std::size_t> members;
+        for (std::size_t i = 0; i < document.objectCount(); ++i) {
+            for (std::size_t g : document.object(i).groups()) {
+                ++members[g];
+            }
+        }
+        for (std::size_t i = 0; i < document.objectCount(); ++i) {
+            std::vector<std::size_t> kept;
+            for (std::size_t g : document.object(i).groups()) {
+                if (members[g] > 1) {
+                    kept.push_back(g);
+                }
+            }
+            if (kept.size() != document.object(i).groups().size()) {
+                document.object(i).setGroups(kept);
+            }
         }
         document.undoStack().clear();
         document.clearSelection();

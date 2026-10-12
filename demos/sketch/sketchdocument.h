@@ -7,6 +7,7 @@
 #include <newui/undostack.h>
 
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -33,15 +34,44 @@ namespace sketch {
         QuadFrame transformed(const BLMatrix2D& matrix) const;
     };
 
+    // Opacity and blend mode of a whole group, applied to its members drawn together.
+    // @reflect ignore=true
+    struct GroupProps {
+        double opacity = 1.0;
+        BlendMode blendMode = BlendMode::Normal;
+        bool isDefault() const { return opacity >= 1.0 && blendMode == BlendMode::Normal; }
+    };
+
     // An object's appearance at one moment - what undo of a style edit restores.
     // @reflect ignore=true
     struct StyleState {
         std::size_t id = 0;
-        SketchPaint fill;
-        SketchPaint stroke;
-        double strokeWidth = 1.0;
+        std::vector<AppearanceItem> items;
         double opacity = 1.0;
-        StrokeOptions strokeOptions;
+        BlendMode blendMode = BlendMode::Normal;
+        std::size_t activeFill = 0;    // the active items (not part of ==: choosing a row is not an edit)
+        std::size_t activeStroke = 1;
+        std::size_t activeEffect = 0;
+        // The object's outermost group (0 = none) and that group's props, so a group edit undoes with the objects.
+        std::size_t group = 0;
+        GroupProps groupProps;
+
+        static StyleState of(const SketchObject& object) {
+            return StyleState{object.id(), object.appearance(), object.opacity(), object.blendMode(), object.activeFillIndex(), object.activeStrokeIndex(), object.activeEffectIndex(), 0, GroupProps()};
+        }
+        void applyTo(SketchObject& object) const {
+            object.setAppearance(items);
+            object.setActiveIndices(activeFill, activeStroke, activeEffect);
+            object.setOpacity(opacity);
+            object.setBlendMode(blendMode);
+        }
+        // The active fill / stroke and its options (what the Color / Stroke panels edit).
+        const SketchPaint& fill() const { return activeItemOf(items, AppearanceKind::Fill, activeFill).paint; }
+        const SketchPaint& stroke() const { return activeItemOf(items, AppearanceKind::Stroke, activeStroke).paint; }
+        const StrokeOptions& strokeOptions() const { return activeItemOf(items, AppearanceKind::Stroke, activeStroke).strokeOptions; }
+        bool operator==(const StyleState& o) const { return id == o.id && items == o.items && opacity == o.opacity && blendMode == o.blendMode && group == o.group &&
+            groupProps.opacity == o.groupProps.opacity && groupProps.blendMode == o.groupProps.blendMode; }
+        bool operator!=(const StyleState& o) const { return !(*this == o); }
     };
 
     // The oriented box around the selection: `local` is measured in a frame turned by `angle`
@@ -104,6 +134,29 @@ namespace sketch {
         // Topmost visible, unlocked object under point (document units), or nullptr.
         SketchObject* hitTest(const BLPoint& point, double tolerance) const;
 
+        // ---- Groups ----
+        // A group is a set of objects sharing a group id in SketchObject::groups() (nested groups: several ids), kept
+        // adjacent in the stacking order. Selecting one member selects the whole outermost group (the canvas does it
+        // through withGroupMembers; Ctrl-click bypasses it to pick a single member).
+        std::size_t newGroupId() { return nextGroupId_++; }
+        // Group opacity / blend mode (default: opaque, normal). Setting is not an undo step by itself - the Appearance panel
+        // edits live and commits with commitStyle(), whose snapshots carry the group's props.
+        GroupProps groupProps(std::size_t groupId) const;
+        void setGroupProps(std::size_t groupId, const GroupProps& props);
+        // The outermost group the selection is exactly (all its members and nothing else), else 0.
+        std::size_t selectedGroup() const;
+        void setSelectionGroupOpacity(double opacity);
+        void setSelectionGroupBlendMode(BlendMode mode);
+        // `ids` plus every visible, unlocked object sharing an outermost group with one of them.
+        std::vector<std::size_t> withGroupMembers(const std::vector<std::size_t>& ids) const;
+        // Groups the selection (two or more objects) into a new outermost group, placed where its topmost member was;
+        // undoable. False when fewer than two objects are selected.
+        bool groupSelection();
+        // Dissolves the outermost group of each selected object (the objects stay selected); undoable. False when none is grouped.
+        bool ungroupSelection();
+        bool canGroup() const { return selection_.size() >= 2; }
+        bool canUngroup() const;
+
         // ---- Selection (ids, in selection order; a removed object drops out) ----
         const std::vector<std::size_t>& selection() const { return selection_; }
         bool isSelected(std::size_t id) const;
@@ -134,11 +187,17 @@ namespace sketch {
         // ---- Undoable edits (each pushes one step on undoStack()) ----
         newui::UndoStack& undoStack() { return undoStack_; }
         // Adds on top and selects it.
+        // Adds the objects (new ids) as one undo step and selects them; returns the ids.
+        std::vector<std::size_t> addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description);
         SketchObject& addUndoable(SketchObject* object, const std::string& description);
         // Deletes the selection.
         void deleteSelection();
         // Duplicates the selection, offset by (dx, dy); the copies become the selection.
         void duplicateSelection(double dx, double dy);
+        // Clipboard: the selection as SVG text (empty when nothing is selected), and the reverse - the objects in `svg`
+        // are added (moved by dx, dy) as one undo step and become the selection. Returns false when `svg` has no objects.
+        std::string selectionToSvg() const;
+        bool pasteSvg(const std::string& svg, double dx, double dy);
         // Records an edit that has already been applied live (a drag): `before` holds each edited
         // object's pre-edit outline, the objects' current outlines are the "after".
         void commitGeometry(const std::vector<GeometryState>& before, const std::string& description,
@@ -178,6 +237,32 @@ namespace sketch {
         void setSelectionStroke(const SketchPaint& paint);
         void setSelectionStrokeWidth(double width);
         void setSelectionOpacity(double opacity);
+        // Blend mode of the selection (live, like the other style setters; commitStyle records the step).
+        void setSelectionBlendMode(BlendMode mode);
+        // ---- Appearance stack of the selection (see AppearanceItem) ----
+        // "Active" = the fill / stroke row selected in the Appearance panel, on every selected object. Choosing the active
+        // item is view state (no undo step, does not mark the document modified).
+        void setActiveItem(AppearanceKind kind, std::size_t index);
+        // Live (no undo step; the panel commits with commitStyle) edits of the active item of the kind.
+        void setSelectionItemOpacity(AppearanceKind kind, double opacity);
+        void setSelectionItemBlendMode(AppearanceKind kind, BlendMode mode);
+        void setSelectionItemVisible(AppearanceKind kind, bool visible);
+        // Each of these is one undo step and returns false when nothing changed.
+        // A new fill / stroke on top of the stack (from the document's default paints), which becomes the active one.
+        bool addAppearanceItem(AppearanceKind kind);
+        // A new effect on top of the stack (with the defaults of its kind); it becomes the active effect.
+        bool addEffect(EffectKind kind);
+        // Edits the active effect of every selected object (one undo step).
+        bool changeActiveEffect(const std::function<void(AppearanceItem&)>& change, const std::string& description);
+        // A copy of the active item right above it. The copy becomes active.
+        bool duplicateActiveItem(AppearanceKind kind);
+        // Removes the active item; the last fill / stroke is set to a None paint instead, so there is always one of each.
+        bool deleteActiveItem(AppearanceKind kind);
+        // Moves the active item one place up (+1, painted later) or down (-1) the stack.
+        bool moveActiveItem(AppearanceKind kind, int delta);
+        // Leaves no fill and no stroke, full opacity, normal blend.
+        bool clearAppearance();
+
         // Cap / join / miter limit of the selection: `change` edits a copy of each object's options.
         void changeSelectionStrokeOptions(const std::function<void(StrokeOptions&)>& change);
         // Pushes one undo step taking the selection from `before` to its current style; false (and no step)
@@ -236,6 +321,16 @@ namespace sketch {
             bool visible = true;
             bool locked = false;
         };
+        // Group membership of some objects, for the undo steps of group/ungroup.
+        struct GroupState {
+            std::size_t id = 0;
+            std::vector<std::size_t> groups;
+        };
+        void applyGroups(const std::vector<GroupState>& states);
+        // `state` plus the group props of its object's outermost group.
+        StyleState withGroup(StyleState state) const;
+        // Paints objects_[begin, end), which all share the first `depth` groups; a group with opacity / blend goes through a layer.
+        void paintRange(BLContext& ctx, std::size_t begin, std::size_t end, std::size_t depth) const;
         bool applyFlags(const std::vector<FlagState>& before, const std::vector<FlagState>& after, const std::string& description);
         // Removes and returns the object (its index is stored in *index); null if not found.
         std::unique_ptr<SketchObject> detach(std::size_t id, std::size_t* index);
@@ -248,6 +343,8 @@ namespace sketch {
         std::optional<SketchColor> pageBackground_ = SketchColor::rgb(1.0f, 1.0f, 1.0f);
         std::vector<std::unique_ptr<SketchObject>> objects_;
         std::size_t nextId_ = 1;
+        std::size_t nextGroupId_ = 1;
+        std::map<std::size_t, GroupProps> groupProps_;
         SketchPaint defaultFill_ = SketchPaint::solid(SketchColor::fromHex("#d9e6ff"));
         SketchPaint defaultStroke_ = SketchPaint::solid(SketchColor::fromHex("#2f5fb3"));
         double defaultStrokeWidth_ = 1.5;

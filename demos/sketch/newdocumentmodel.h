@@ -42,6 +42,9 @@ namespace sketch {
         static const char* unitName(LengthUnit unit);  // "in", "px", ... for labels
         static double pointsPer(LengthUnit unit, double ppi);
 
+        // Starts from an existing document's page (Document Setup): shown in points, name and proportions untouched.
+        void loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background);
+
         // Takes all of a preset's settings (name resets to "Untitled-1", the link ratio is recaptured).
         void loadPreset(const DocumentPreset& preset);
 

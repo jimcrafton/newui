@@ -1,5 +1,7 @@
 #include "sketchobject.h"
 
+#include <newui/shapes.h>
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -248,6 +250,224 @@ namespace sketch {
             return result;
         }
 
+        // `path` cut into dashes (this Blend2D's stroker does not dash): the pattern is dash, gap, dash, gap...
+        // (an odd count repeats, as in SVG) and starts over on every subpath. Each dash is an open polyline, so
+        // stroking the result applies caps to every dash. A pattern with no length leaves the path whole.
+        BLPath dashedPath(const BLPath& path, const std::vector<double>& dashes) {
+            std::vector<double> pattern = dashes;
+            if (pattern.size() % 2 == 1) {
+                pattern.insert(pattern.end(), dashes.begin(), dashes.end());
+            }
+            double period = 0.0;
+            for (double d : pattern) { period += d; }
+            if (pattern.empty() || period < 1e-6) {
+                return path;
+            }
+            BLPath out;
+            for (Polyline& line : flattenPath(path)) {
+                if (line.closed) {
+                    line.points.push_back(line.points.front());
+                }
+                std::size_t index = 0;
+                double left = pattern[0];
+                bool on = true;
+                bool open = false;  // a dash is in progress
+                for (std::size_t i = 1; i < line.points.size(); ++i) {
+                    BLPoint a = line.points[i - 1], b = line.points[i];
+                    double length = std::hypot(b.x - a.x, b.y - a.y);
+                    double at = 0.0;
+                    if (on && !open && length > 0.0) {
+                        out.move_to(a);
+                        open = true;
+                    }
+                    while (length - at > left) {
+                        at += left;
+                        BLPoint cut(a.x + (b.x - a.x) * at / length, a.y + (b.y - a.y) * at / length);
+                        if (on) {
+                            out.line_to(cut);
+                            open = false;
+                        } else {
+                            out.move_to(cut);
+                            open = true;
+                        }
+                        on = !on;
+                        index = (index + 1) % pattern.size();
+                        left = pattern[index];
+                        if (left <= 0.0 && period < 1e-6) { break; }
+                    }
+                    left -= length - at;
+                    if (on && open) {
+                        out.line_to(b);
+                    }
+                }
+            }
+            return out;
+        }
+
+        // `path` with its corners rounded: each vertex where the outline turns by more than ~11 degrees gets a quadratic
+        // fillet of about `radius` (shortened to fit half of each neighbouring segment). Curves are flattened first, so
+        // their gentle bends are left alone and only real corners change.
+        BLPath roundedPath(const BLPath& path, double radius) {
+            BLPath out;
+            if (radius <= 0.0) {
+                return path;
+            }
+            for (Polyline& line : flattenPath(path)) {
+                std::vector<BLPoint> pts;
+                for (const BLPoint& p : line.points) {
+                    if (pts.empty() || std::hypot(p.x - pts.back().x, p.y - pts.back().y) > 1e-9) { pts.push_back(p); }
+                }
+                bool closed = line.closed && pts.size() > 2;
+                if (closed && std::hypot(pts.front().x - pts.back().x, pts.front().y - pts.back().y) <= 1e-9) { pts.pop_back(); }
+                std::size_t n = pts.size();
+                if (n < 2) { continue; }
+                struct Corner { BLPoint in, out, at; bool rounded = false; };
+                std::vector<Corner> corners(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    corners[i].at = corners[i].in = corners[i].out = pts[i];
+                    if (!closed && (i == 0 || i + 1 == n)) { continue; }
+                    const BLPoint& prev = pts[(i + n - 1) % n];
+                    const BLPoint& next = pts[(i + 1) % n];
+                    double l1 = std::hypot(pts[i].x - prev.x, pts[i].y - prev.y), l2 = std::hypot(next.x - pts[i].x, next.y - pts[i].y);
+                    BLPoint u1((pts[i].x - prev.x) / l1, (pts[i].y - prev.y) / l1), u2((next.x - pts[i].x) / l2, (next.y - pts[i].y) / l2);
+                    double cross = u1.x * u2.y - u1.y * u2.x, dot = u1.x * u2.x + u1.y * u2.y;
+                    double turn = std::atan2(std::fabs(cross), dot);  // 0 = straight on
+                    if (turn < 0.2) { continue; }
+                    double d = std::min(radius * std::tan(turn * 0.5), std::min(l1, l2) * 0.5);
+                    corners[i].in = BLPoint(pts[i].x - u1.x * d, pts[i].y - u1.y * d);
+                    corners[i].out = BLPoint(pts[i].x + u2.x * d, pts[i].y + u2.y * d);
+                    corners[i].rounded = true;
+                }
+                auto emitCorner = [&](const Corner& c) {
+                    out.line_to(c.in);
+                    if (c.rounded) { out.quad_to(c.at, c.out); }
+                };
+                out.move_to(corners[0].out);
+                for (std::size_t i = 1; i < n; ++i) { emitCorner(corners[i]); }
+                if (closed) {
+                    emitCorner(corners[0]);
+                    out.close();
+                }
+            }
+            return out;
+        }
+
+        // True when `point` lies in `path` stroked `width` wide with the options (width 0 never hits).
+        bool strokeHit(const BLPath& path, double width, const StrokeOptions& options, const BLPoint& point) {
+            if (width <= 0.0) {
+                return false;
+            }
+            BLStrokeOptions stroke;
+            stroke.width = width;
+            stroke.start_cap = stroke.end_cap = uint8_t(blCap(options.cap));
+            stroke.join = uint8_t(blJoin(options.join));
+            stroke.miter_limit = options.miterLimit;
+            BLPath outline;
+            if (outline.add_stroked_path(path, stroke, BLApproximationOptions()) != BL_SUCCESS) {
+                return false;
+            }
+            return outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
+        }
+
+        // The stroke of `path` as a filled outline whose half-width follows `points` (see WidthPoint). Each subpath gets
+        // two edges offset along the averaged vertex normals (mitered up to a limit); open ones are joined with the
+        // chosen cap, closed ones become a ring (two opposed loops, filled non-zero).
+        BLPath widthOutline(const BLPath& path, double baseHalf, const std::vector<WidthPoint>& points, StrokeCap cap) {
+            const double kPi = 3.14159265358979323846;
+            BLPath out;
+            for (Polyline& line : flattenPath(path)) {
+                std::vector<BLPoint> pts;
+                for (const BLPoint& p : line.points) {
+                    if (pts.empty() || std::hypot(p.x - pts.back().x, p.y - pts.back().y) > 1e-9) { pts.push_back(p); }
+                }
+                bool closed = line.closed && pts.size() > 2;
+                if (closed && std::hypot(pts.front().x - pts.back().x, pts.front().y - pts.back().y) <= 1e-9) { pts.pop_back(); }
+                std::size_t n = pts.size();
+                if (n < 2) { continue; }
+                std::vector<double> at(n, 0.0);
+                for (std::size_t i = 1; i < n; ++i) { at[i] = at[i - 1] + std::hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); }
+                double total = at[n - 1] + (closed ? std::hypot(pts[0].x - pts[n - 1].x, pts[0].y - pts[n - 1].y) : 0.0);
+                auto dirOf = [&](std::size_t a, std::size_t b) {
+                    double dx = pts[b].x - pts[a].x, dy = pts[b].y - pts[a].y, len = std::hypot(dx, dy);
+                    return BLPoint(dx / len, dy / len);
+                };
+                std::vector<BLPoint> left(n), right(n);
+                BLPoint startDir = dirOf(0, 1), endDir = dirOf(n - 2, n - 1);
+                for (std::size_t i = 0; i < n; ++i) {
+                    bool hasPrev = i > 0 || closed, hasNext = i + 1 < n || closed;
+                    BLPoint d0 = hasPrev ? dirOf(i > 0 ? i - 1 : n - 1, i) : dirOf(i, i + 1);
+                    BLPoint d1 = hasNext ? dirOf(i, i + 1 < n ? i + 1 : 0) : dirOf(i - 1, i);
+                    BLPoint normal(-(d0.y + d1.y), d0.x + d1.x);
+                    double len = std::hypot(normal.x, normal.y);
+                    BLPoint n1(-d1.y, d1.x);
+                    double miter = 1.0;
+                    if (len < 1e-9) {
+                        normal = n1;  // a 180 degree turn: just use the outgoing side
+                    } else {
+                        normal = BLPoint(normal.x / len, normal.y / len);
+                        miter = 1.0 / std::max(normal.x * n1.x + normal.y * n1.y, 0.25);
+                    }
+                    double t = total > 0.0 ? at[i] / total : 0.0;
+                    double wl = baseHalf * widthScaleAt(points, t, true) * miter, wr = baseHalf * widthScaleAt(points, t, false) * miter;
+                    left[i] = BLPoint(pts[i].x + normal.x * wl, pts[i].y + normal.y * wl);
+                    right[i] = BLPoint(pts[i].x - normal.x * wr, pts[i].y - normal.y * wr);
+                }
+                if (closed) {
+                    out.move_to(left[0]);
+                    for (std::size_t i = 1; i < n; ++i) { out.line_to(left[i]); }
+                    out.close();
+                    out.move_to(right[n - 1]);
+                    for (std::size_t i = n - 1; i > 0; --i) { out.line_to(right[i - 1]); }
+                    out.close();
+                    continue;
+                }
+                auto capPoints = [&](std::size_t i, const BLPoint& dir, bool atEnd) {
+                    // From the left edge round to the right at the end; from the right round to the left at the start.
+                    BLPoint c = pts[i];
+                    BLPoint nrm(-dir.y, dir.x);
+                    if (!atEnd) { nrm = BLPoint(-nrm.x, -nrm.y); }
+                    BLPoint a = atEnd ? left[i] : right[i], b = atEnd ? right[i] : left[i];
+                    double ra = std::hypot(a.x - c.x, a.y - c.y), rb = std::hypot(b.x - c.x, b.y - c.y);
+                    BLPoint outward = atEnd ? dir : BLPoint(-dir.x, -dir.y);
+                    double r = (ra + rb) * 0.5;
+                    if (cap == StrokeCap::Round) {
+                        const int steps = 12;
+                        for (int k = 1; k < steps; ++k) {
+                            double ang = kPi * k / steps, co = std::cos(ang), si = std::sin(ang);
+                            double rr = co > 0.0 ? ra : rb;
+                            out.line_to(c.x + nrm.x * co * rr + outward.x * si * r, c.y + nrm.y * co * rr + outward.y * si * r);
+                        }
+                    } else if (cap == StrokeCap::Square) {
+                        out.line_to(a.x + outward.x * ra, a.y + outward.y * ra);
+                        out.line_to(b.x + outward.x * rb, b.y + outward.y * rb);
+                    }
+                };
+                out.move_to(left[0]);
+                for (std::size_t i = 1; i < n; ++i) { out.line_to(left[i]); }
+                capPoints(n - 1, endDir, true);
+                for (std::size_t i = n; i > 0; --i) { out.line_to(right[i - 1]); }
+                capPoints(0, startDir, false);
+                out.close();
+            }
+            return out;
+        }
+
+        // The first subpath, flattened and measured: cumulative length at each vertex.
+        bool firstSubpath(const BLPath& path, std::vector<BLPoint>& pts, std::vector<double>& at) {
+            std::vector<Polyline> lines = flattenPath(path);
+            if (lines.empty()) { return false; }
+            Polyline& line = lines.front();
+            pts.clear();
+            for (const BLPoint& p : line.points) {
+                if (pts.empty() || std::hypot(p.x - pts.back().x, p.y - pts.back().y) > 1e-9) { pts.push_back(p); }
+            }
+            if (line.closed) { pts.push_back(pts.front()); }
+            if (pts.size() < 2) { return false; }
+            at.assign(pts.size(), 0.0);
+            for (std::size_t i = 1; i < pts.size(); ++i) { at[i] = at[i - 1] + std::hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); }
+            return at.back() > 0.0;
+        }
+
         // Strokes `path` with the gradient running along its length: the stroke is cut into short butt-ended
         // pieces, each a solid color picked from the gradient at its position. Pieces overlap their successor a
         // little so no seams show, and an opaque stroke gets a disc at every vertex so bends stay filled (which
@@ -380,11 +600,79 @@ namespace sketch {
         return new SketchObject(SketchObjectType::Path, path);
     }
 
+    std::size_t activeIndexOf(const std::vector<AppearanceItem>& items, AppearanceKind kind, std::size_t stored) {
+        if (stored < items.size() && items[stored].kind == kind) {
+            return stored;
+        }
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (items[i].kind == kind) {
+                return i;
+            }
+        }
+        return items.size();
+    }
+
+    const AppearanceItem& activeItemOf(const std::vector<AppearanceItem>& items, AppearanceKind kind, std::size_t stored) {
+        static const AppearanceItem kNoFill = [] { AppearanceItem item; item.kind = AppearanceKind::Fill; item.paint = SketchPaint::none(); return item; }();
+        static const AppearanceItem kNoStroke = [] { AppearanceItem item; item.kind = AppearanceKind::Stroke; item.paint = SketchPaint::none(); return item; }();
+        std::size_t index = activeIndexOf(items, kind, stored);
+        if (index < items.size()) {
+            return items[index];
+        }
+        static const AppearanceItem kNoEffect = [] { AppearanceItem item = AppearanceItem::makeEffect(EffectKind::RoundCorners); item.visible = false; return item; }();
+        return kind == AppearanceKind::Fill ? kNoFill : (kind == AppearanceKind::Stroke ? kNoStroke : kNoEffect);
+    }
+
+    std::size_t SketchObject::activeIndex(AppearanceKind kind) const {
+        return activeIndexOf(items_, kind, storedActive(kind));
+    }
+
+    AppearanceItem* SketchObject::activeItemPtr(AppearanceKind kind) {
+        if (kind != AppearanceKind::Effect) {
+            return &primary(kind);
+        }
+        std::size_t index = activeIndex(kind);
+        return index < items_.size() ? &items_[index] : nullptr;
+    }
+
+    void SketchObject::setActiveIndex(std::size_t index) {
+        if (index >= items_.size()) {
+            return;
+        }
+        AppearanceKind kind = items_[index].kind;
+        (kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_)) = index;
+    }
+
+    AppearanceItem& SketchObject::primary(AppearanceKind kind) {
+        std::size_t index = activeIndex(kind);
+        if (index < items_.size()) {
+            return items_[index];
+        }
+        AppearanceItem item;
+        item.kind = kind;
+        item.paint = SketchPaint::none();
+        if (kind == AppearanceKind::Fill) {
+            items_.insert(items_.begin(), item);
+            activeFill_ = 0;
+            ++activeStroke_;
+            return items_.front();
+        }
+        items_.push_back(item);
+        activeStroke_ = items_.size() - 1;
+        return items_.back();
+    }
+
+    void SketchObject::setAppearance(const std::vector<AppearanceItem>& items) {
+        items_ = items;
+        primary(AppearanceKind::Fill);
+        primary(AppearanceKind::Stroke);
+    }
+
     void SketchObject::setStrokeWidth(double width) {
         if (width < 0.0) {
             throw std::runtime_error("SketchObject::setStrokeWidth: width must not be negative");
         }
-        strokeWidth_ = width;
+        primary(AppearanceKind::Stroke).strokeWidth = width;
     }
 
     void SketchObject::setOpacity(double opacity) {
@@ -437,19 +725,103 @@ namespace sketch {
         copy->name_ = name_;
         copy->visible_ = visible_;
         copy->locked_ = locked_;
-        copy->fill_ = fill_;
-        copy->stroke_ = stroke_;
-        copy->strokeWidth_ = strokeWidth_;
-        copy->strokeOptions_ = strokeOptions_;
+        copy->items_ = items_;
+        copy->activeFill_ = activeFill_;
+        copy->activeStroke_ = activeStroke_;
+        copy->activeEffect_ = activeEffect_;
         copy->opacity_ = opacity_;
+        copy->blendMode_ = blendMode_;
+        copy->groups_ = groups_;
         copy->frameAngle_ = frameAngle_;
         return copy;
+    }
+
+    double widthScaleAt(const std::vector<WidthPoint>& points, double t, bool leftSide) {
+        if (points.empty()) { return 1.0; }
+        auto side = [leftSide](const WidthPoint& p) { return leftSide ? p.left : p.right; };
+        if (t <= points.front().t) { return side(points.front()); }
+        if (t >= points.back().t) { return side(points.back()); }
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            if (t <= points[i].t) {
+                double span = points[i].t - points[i - 1].t;
+                double u = span > 1e-12 ? (t - points[i - 1].t) / span : 1.0;
+                double ease = 0.5 - 0.5 * std::cos(3.14159265358979323846 * u);
+                return side(points[i - 1]) + (side(points[i]) - side(points[i - 1])) * ease;
+            }
+        }
+        return side(points.back());
+    }
+
+    bool SketchObject::pathSample(double t, BLPoint& point, BLPoint& normal) const {
+        std::vector<BLPoint> pts;
+        std::vector<double> at;
+        if (!firstSubpath(path_, pts, at)) { return false; }
+        double target = std::min(1.0, std::max(0.0, t)) * at.back();
+        std::size_t i = 1;
+        while (i + 1 < pts.size() && at[i] < target) { ++i; }
+        double span = at[i] - at[i - 1];
+        double u = span > 1e-12 ? (target - at[i - 1]) / span : 0.0;
+        point = BLPoint(pts[i - 1].x + (pts[i].x - pts[i - 1].x) * u, pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u);
+        double dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y, len = std::hypot(dx, dy);
+        normal = len > 0.0 ? BLPoint(-dy / len, dx / len) : BLPoint(0.0, 1.0);
+        return true;
+    }
+
+    bool SketchObject::nearestOnPath(const BLPoint& point, double& t, double& distance) const {
+        std::vector<BLPoint> pts;
+        std::vector<double> at;
+        if (!firstSubpath(path_, pts, at)) { return false; }
+        distance = 1e300;
+        for (std::size_t i = 1; i < pts.size(); ++i) {
+            double dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y, len2 = dx * dx + dy * dy;
+            double u = len2 > 0.0 ? ((point.x - pts[i - 1].x) * dx + (point.y - pts[i - 1].y) * dy) / len2 : 0.0;
+            u = std::min(1.0, std::max(0.0, u));
+            double d = std::hypot(point.x - (pts[i - 1].x + dx * u), point.y - (pts[i - 1].y + dy * u));
+            if (d < distance) {
+                distance = d;
+                t = (at[i - 1] + (at[i] - at[i - 1]) * u) / at.back();
+            }
+        }
+        return true;
+    }
+
+    namespace {
+        struct BlendInfo { const char* name; const char* css; BLCompOp op; };
+        const BlendInfo kBlends[] = {
+            {"Normal", "normal", BL_COMP_OP_SRC_OVER}, {"Multiply", "multiply", BL_COMP_OP_MULTIPLY},
+            {"Screen", "screen", BL_COMP_OP_SCREEN}, {"Overlay", "overlay", BL_COMP_OP_OVERLAY},
+            {"Darken", "darken", BL_COMP_OP_DARKEN}, {"Lighten", "lighten", BL_COMP_OP_LIGHTEN},
+            {"Color Dodge", "color-dodge", BL_COMP_OP_COLOR_DODGE}, {"Color Burn", "color-burn", BL_COMP_OP_COLOR_BURN},
+            {"Hard Light", "hard-light", BL_COMP_OP_HARD_LIGHT}, {"Soft Light", "soft-light", BL_COMP_OP_SOFT_LIGHT},
+            {"Difference", "difference", BL_COMP_OP_DIFFERENCE}, {"Exclusion", "exclusion", BL_COMP_OP_EXCLUSION},
+        };
+    }
+
+    const char* blendModeName(BlendMode mode) { return kBlends[std::size_t(mode)].name; }
+    const char* blendModeCss(BlendMode mode) { return kBlends[std::size_t(mode)].css; }
+    BlendMode blendModeFromCss(const std::string& value) {
+        for (std::size_t i = 0; i < sizeof(kBlends) / sizeof(kBlends[0]); ++i) {
+            if (value == kBlends[i].css) { return BlendMode(i); }
+        }
+        return BlendMode::Normal;
     }
 
     BLBox SketchObject::bounds() const {
         BLBox box(0, 0, 0, 0);
         path_.get_bounding_box(&box);
-        double half = stroke_.isNone() ? 0.0 : strokeWidth_ * 0.5;
+        double half = 0.0;
+        for (const AppearanceItem& item : items_) {
+            if (item.kind != AppearanceKind::Stroke || !item.visible || item.paint.isNone()) {
+                continue;
+            }
+            double h = item.strokeWidth * 0.5;
+            if (!item.strokeOptions.widths.empty()) {
+                double widest = 0.0;
+                for (const WidthPoint& p : item.strokeOptions.widths) { widest = std::max(widest, std::max(p.left, p.right)); }
+                h *= std::max(widest, 1.0);
+            }
+            half = std::max(half, h);
+        }
         return BLBox(box.x0 - half, box.y0 - half, box.x1 + half, box.y1 + half);
     }
 
@@ -459,51 +831,272 @@ namespace sketch {
             point.y < box.y0 - tolerance || point.y > box.y1 + tolerance) {
             return false;
         }
-        if (isClosed() && !fill_.isNone() && path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+        if (isClosed() && path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
+            for (const AppearanceItem& item : items_) {
+                if (item.kind == AppearanceKind::Fill && item.visible && !item.paint.isNone()) {
+                    return true;
+                }
+            }
+        }
+        // Stroke: stroke the outline at (width + tolerance) and test that area - for every visible stroke, or, when
+        // there is none, just the tolerance around the outline.
+        bool any = false;
+        for (const AppearanceItem& item : items_) {
+            if (item.kind == AppearanceKind::Stroke && item.visible && !item.paint.isNone() && item.strokeWidth > 0.0) {
+                any = true;
+                if (strokeHit(path_, item.strokeWidth + tolerance * 2.0, item.strokeOptions, point)) {
+                    return true;
+                }
+            }
+        }
+        return !any && tolerance > 0.0 && strokeHit(path_, tolerance * 2.0, StrokeOptions(), point);
+    }
+
+    namespace {
+        // One stroke item painted over the object's outline (box = the outline's bounds, for gradients).
+        void paintStrokeItem(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const BLBox& box) {
+            const SketchPaint& stroke = item.paint;
+            const StrokeOptions& options = item.strokeOptions;
+            double width = item.strokeWidth;
+            if (width <= 0.0) {
+                return;
+            }
+            if (!options.widths.empty() && setPaintStyle(ctx, stroke, box, false)) {
+                ctx.set_global_alpha(alpha);
+                ctx.fill_path(widthOutline(path, width * 0.5, options.widths, options.cap));
+            } else if (stroke.isGradient() && stroke.gradient().alongStroke && !stroke.gradient().stops.empty()) {
+                bool opaque = alpha >= 1.0;
+                for (const GradientStop& stop : stroke.gradient().stops) {
+                    opaque = opaque && stop.color.alpha() >= 1.0f;
+                }
+                ctx.set_global_alpha(alpha);
+                strokeAlongPath(ctx, path, width, stroke.gradient(), opaque);
+            } else if (setPaintStyle(ctx, stroke, box, true)) {
+                ctx.set_stroke_width(width);
+                ctx.set_stroke_caps(blCap(options.cap));
+                ctx.set_stroke_join(blJoin(options.join));
+                ctx.set_stroke_miter_limit(options.miterLimit);
+                ctx.set_global_alpha(alpha);
+                if (options.dashes.empty()) {
+                    ctx.stroke_path(path);
+                } else {
+                    ctx.stroke_path(dashedPath(path, options.dashes));
+                }
+            }
+        }
+    }
+
+    namespace {
+        // An offscreen layer at the context's device resolution: `toLayer` maps document space into its pixels.
+        struct DeviceLayer {
+            BLImage image;
+            int left = 0, top = 0;  // where the layer sits on the target (device pixels)
+            BLMatrix2D toLayer;
+            double scale = 1.0;     // layer pixels per document unit
+        };
+
+        bool makeLayer(BLContext& ctx, const BLBox& userBounds, DeviceLayer& layer) {
+            BLMatrix2D m = ctx.final_transform();
+            BLPoint corners[4] = {m.map_point(userBounds.x0, userBounds.y0), m.map_point(userBounds.x1, userBounds.y0),
+                m.map_point(userBounds.x1, userBounds.y1), m.map_point(userBounds.x0, userBounds.y1)};
+            double x0 = corners[0].x, x1 = corners[0].x, y0 = corners[0].y, y1 = corners[0].y;
+            for (const BLPoint& c : corners) {
+                x0 = std::min(x0, c.x); x1 = std::max(x1, c.x); y0 = std::min(y0, c.y); y1 = std::max(y1, c.y);
+            }
+            // Device pixels, a little generous for antialiasing, and never past what the target can show.
+            layer.left = std::max(0, int(std::floor(x0)) - 2);
+            layer.top = std::max(0, int(std::floor(y0)) - 2);
+            int right = std::min(int(ctx.target_width()), int(std::ceil(x1)) + 2), bottom = std::min(int(ctx.target_height()), int(std::ceil(y1)) + 2);
+            if (right <= layer.left || bottom <= layer.top) {
+                return false;
+            }
+            if (layer.image.create(right - layer.left, bottom - layer.top, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                return false;
+            }
+            layer.toLayer = m;
+            layer.toLayer.post_translate(-double(layer.left), -double(layer.top));
+            layer.scale = std::sqrt(std::fabs(m.m00 * m.m11 - m.m01 * m.m10));
             return true;
         }
-        // Stroke: stroke the outline at (half width + tolerance) and test that area.
-        BLStrokeOptions options;
-        options.width = (stroke_.isNone() ? 0.0 : strokeWidth_) + tolerance * 2.0;
-        options.start_cap = options.end_cap = uint8_t(blCap(strokeOptions_.cap));
-        options.join = uint8_t(blJoin(strokeOptions_.join));
-        options.miter_limit = strokeOptions_.miterLimit;
-        if (options.width <= 0.0) {
-            return false;
+
+        void compositeLayer(BLContext& ctx, const DeviceLayer& layer, double opacity, BlendMode mode) {
+            ctx.save();
+            BLMatrix2D toDevice = ctx.meta_transform();
+            toDevice.invert();
+            ctx.set_transform(toDevice);  // user space = device pixels, so the layer lands on whole pixels
+            ctx.set_comp_op(kBlends[std::size_t(mode)].op);
+            ctx.set_global_alpha(opacity);
+            ctx.blit_image(BLPointI(layer.left, layer.top), layer.image);
+            ctx.restore();
         }
-        BLPath outline;
-        if (outline.add_stroked_path(path_, options, BLApproximationOptions()) != BL_SUCCESS) {
-            return false;
+
+        // Applies a pixel effect to everything drawn into the layer so far.
+        void applyEffect(DeviceLayer& layer, const AppearanceItem& item) {
+            BLImageData data;
+            if (layer.image.get_data(&data) != BL_SUCCESS) {
+                return;
+            }
+            int w = data.size.w, h = data.size.h;
+            uint8_t* pixels = static_cast<uint8_t*>(data.pixel_data);
+            float blur = float(item.softness * layer.scale);
+            if (item.effect == EffectKind::GaussianBlur) {
+                newui::shapes::boxBlur3(pixels, w, h, data.stride, blur);
+                return;
+            }
+            // Drop shadow / outer glow: the silhouette of what is there, tinted, blurred, offset, and put behind it.
+            BLImage mask;
+            if (mask.create(w, h, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                return;
+            }
+            BLImageData md;
+            mask.get_data(&md);
+            BLRgba32 tint = item.color.toRgba32();
+            for (int y = 0; y < h; ++y) {
+                const uint32_t* from = reinterpret_cast<const uint32_t*>(pixels + std::ptrdiff_t(y) * data.stride);
+                uint32_t* to = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(md.pixel_data) + std::ptrdiff_t(y) * md.stride);
+                for (int x = 0; x < w; ++x) {
+                    uint32_t a = (from[x] >> 24) * tint.a() / 255u;
+                    to[x] = (a << 24) | ((tint.r() * a / 255u) << 16) | ((tint.g() * a / 255u) << 8) | (tint.b() * a / 255u);
+                }
+            }
+            newui::shapes::boxBlur3(static_cast<uint8_t*>(md.pixel_data), w, h, md.stride, blur);
+            BLPoint shift = item.effect == EffectKind::DropShadow ? layer.toLayer.map_vector(item.offsetX, item.offsetY) : BLPoint(0, 0);
+            BLImage out;
+            if (out.create(w, h, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                return;
+            }
+            {
+                BLContext oc(out);
+                oc.clear_all();
+                oc.set_comp_op(kBlends[std::size_t(item.blendMode)].op);
+                oc.set_global_alpha(item.opacity);
+                oc.blit_image(BLPointI(int(std::lround(shift.x)), int(std::lround(shift.y))), mask);
+                oc.set_comp_op(BL_COMP_OP_SRC_OVER);
+                oc.set_global_alpha(1.0);
+                oc.blit_image(BLPointI(0, 0), layer.image);
+                oc.end();
+            }
+            layer.image = out;
         }
-        return outline.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
+    }
+
+    void paintIsolated(BLContext& ctx, const BLBox& userBounds, double opacity, BlendMode mode, const std::function<void(BLContext&)>& content) {
+        DeviceLayer layer;
+        if (!makeLayer(ctx, userBounds, layer)) {
+            return;
+        }
+        {
+            BLContext lc(layer.image);
+            lc.clear_all();
+            lc.set_transform(layer.toLayer);
+            content(lc);
+            lc.end();
+        }
+        compositeLayer(ctx, layer, opacity, mode);
+    }
+
+    void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {
+        const AppearanceItem& item = items_[index];
+        // Round Corners effects above this item (later in the stack) reshape its outline.
+        BLPath shown = path_;
+        for (std::size_t j = index + 1; j < items_.size(); ++j) {
+            if (items_[j].kind == AppearanceKind::Effect && items_[j].effect == EffectKind::RoundCorners && items_[j].visible) {
+                shown = roundedPath(shown, items_[j].radius);
+            }
+        }
+        ctx.save();
+        ctx.set_comp_op(kBlends[std::size_t(item.blendMode)].op);
+        if (item.kind == AppearanceKind::Fill) {
+            if (isClosed() && setPaintStyle(ctx, item.paint, box, false)) {
+                ctx.set_global_alpha(item.opacity);
+                ctx.fill_path(shown);
+            }
+        } else {
+            paintStrokeItem(ctx, shown, item, item.opacity, box);
+        }
+        ctx.restore();
+    }
+
+    void SketchObject::paintItems(BLContext& ctx) const {
+        ctx.save();
+        BLBox box = geometryBounds();
+        for (std::size_t i = 0; i < items_.size(); ++i) {  // bottom to top
+            if (items_[i].visible && items_[i].kind != AppearanceKind::Effect) {
+                drawItem(ctx, i, box);
+            }
+        }
+        ctx.restore();
+    }
+
+    void SketchObject::paintWithEffects(BLContext& ctx) const {
+        DeviceLayer layer;
+        if (!makeLayer(ctx, paintBounds(), layer)) {
+            return;
+        }
+        BLBox box = geometryBounds();
+        BLContext lc(layer.image);
+        lc.clear_all();
+        lc.set_transform(layer.toLayer);
+        for (std::size_t i = 0; i < items_.size(); ++i) {
+            const AppearanceItem& item = items_[i];
+            if (!item.visible) {
+                continue;
+            }
+            if (item.kind != AppearanceKind::Effect) {
+                drawItem(lc, i, box);
+            } else if (item.effect != EffectKind::RoundCorners) {
+                lc.end();  // the effect works on the pixels drawn so far
+                applyEffect(layer, item);
+                lc.begin(layer.image);
+                lc.set_transform(layer.toLayer);
+            }
+        }
+        lc.end();
+        compositeLayer(ctx, layer, opacity_, blendMode_);
+    }
+
+    double SketchObject::effectPad() const {
+        double pad = 0.0;
+        for (const AppearanceItem& item : items_) {
+            if (item.kind != AppearanceKind::Effect || !item.visible) {
+                continue;
+            }
+            switch (item.effect) {
+                case EffectKind::DropShadow: pad += item.softness * newui::shapes::kBlurPadFactor + std::max(std::fabs(item.offsetX), std::fabs(item.offsetY)); break;
+                case EffectKind::OuterGlow:
+                case EffectKind::GaussianBlur: pad += item.softness * newui::shapes::kBlurPadFactor; break;
+                case EffectKind::RoundCorners: break;
+            }
+        }
+        return pad;
+    }
+
+    BLBox SketchObject::paintBounds() const {
+        BLBox box = bounds();
+        double pad = effectPad();
+        return BLBox(box.x0 - pad, box.y0 - pad, box.x1 + pad, box.y1 + pad);
+    }
+
+    const char* effectName(EffectKind kind) {
+        static const char* kNames[] = {"Drop Shadow", "Outer Glow", "Gaussian Blur", "Round Corners"};
+        return kNames[std::size_t(kind)];
     }
 
     void SketchObject::paint(BLContext& ctx) const {
         if (!visible_) {
             return;
         }
-        ctx.save();
-        BLBox box = geometryBounds();
-        if (isClosed() && setPaintStyle(ctx, fill_, box, false)) {
-            ctx.set_global_alpha(opacity_);
-            ctx.fill_path(path_);
+        bool pixelEffects = false;
+        for (const AppearanceItem& item : items_) {
+            pixelEffects = pixelEffects || (item.kind == AppearanceKind::Effect && item.visible && item.effect != EffectKind::RoundCorners);
         }
-        if (strokeWidth_ > 0.0 && stroke_.isGradient() && stroke_.gradient().alongStroke && !stroke_.gradient().stops.empty()) {
-            bool opaque = opacity_ >= 1.0;
-            for (const GradientStop& stop : stroke_.gradient().stops) {
-                opaque = opaque && stop.color.alpha() >= 1.0f;
-            }
-            ctx.set_global_alpha(opacity_);
-            strokeAlongPath(ctx, path_, strokeWidth_, stroke_.gradient(), opaque);
-        } else if (strokeWidth_ > 0.0 && setPaintStyle(ctx, stroke_, box, true)) {
-            ctx.set_stroke_width(strokeWidth_);
-            ctx.set_stroke_caps(blCap(strokeOptions_.cap));
-            ctx.set_stroke_join(blJoin(strokeOptions_.join));
-            ctx.set_stroke_miter_limit(strokeOptions_.miterLimit);
-            ctx.set_global_alpha(opacity_);
-            ctx.stroke_path(path_);
+        if (pixelEffects) {
+            paintWithEffects(ctx);
+        } else if (opacity_ >= 1.0 && blendMode_ == BlendMode::Normal) {
+            paintItems(ctx);
+        } else {
+            paintIsolated(ctx, bounds(), opacity_, blendMode_, [this](BLContext& layer) { paintItems(layer); });
         }
-        ctx.restore();
     }
 
 }

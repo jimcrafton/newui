@@ -22,6 +22,7 @@
 #include "newui/dialogs.h"
 #include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
+#include "newui/utils.h"
 #include "gradientbar.h"
 
 #include "newui/menus.h"
@@ -227,6 +228,10 @@ int main(int argc, char** argv) {
         onItem("Edit", "Undo", [undo](newui::MenuItem&) { undo(); });
         onItem("Edit", "Redo", [redo](newui::MenuItem&) { redo(); });
         onItem("Edit", "Delete", [del](newui::MenuItem&) { del(); });
+        onItem("Edit", "Cut", [canvas](newui::MenuItem&) { canvas->cutSelection(); });
+        onItem("Edit", "Copy", [canvas](newui::MenuItem&) { canvas->copySelection(); });
+        onItem("Edit", "Paste", [canvas](newui::MenuItem&) { canvas->paste(false); });
+        onItem("Edit", "Paste In Place", [canvas](newui::MenuItem&) { canvas->paste(true); });
         onItem("Edit", "Duplicate", [duplicate](newui::MenuItem&) { duplicate(); });
         // File menu: the SketchDocumentController does the work (prompts, pickers, errors); main only reflects
         // its events in the title bar, status bar and view.
@@ -266,6 +271,61 @@ int main(int argc, char** argv) {
         onItem("File", "Open...", [](newui::MenuItem&) { files.open(); });
         onItem("File", "Save", [](newui::MenuItem&) { files.save(); });
         onItem("File", "Save As...", [](newui::MenuItem&) { files.saveAs(); });
+        onItem("File", "Document Setup...", [](newui::MenuItem&) { files.documentSetup(); });
+        onItem("Help", "About sketch", [&frame](newui::MenuItem&) {
+            newui::Dialog::showMessageBox(frame.frameHandle(),
+                "sketch - a small vector editor built with newui.\n\nSVG files, RGB and CMYK documents, gradients, undo/redo.",
+                "About sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Information);
+        });
+        // File > Open Recent lists the newest files; the list changes whenever a file is opened or saved.
+        onItem("File", "Open Recent", [](newui::MenuItem&) {});
+        auto rebuildRecent = []() {
+            auto it = menuItems.find("File/Open Recent");
+            if (it == menuItems.end()) {
+                return;
+            }
+            newui::MenuItem* parent = it->second;
+            // The entry that was just clicked is still running when it asks for the rebuild, so the replaced items
+            // are parked and only deleted by the next rebuild.
+            static std::vector<std::unique_ptr<newui::MenuItem>> parked;
+            parked.clear();
+            while (!parent->children().empty()) {
+                newui::MenuItem* old = parent->children().back();
+                parent->removeChild(old);
+                parked.emplace_back(old);
+            }
+            const std::vector<std::string>& recent = files.recentFiles();
+            if (recent.empty()) {
+                newui::MenuItem* none = new newui::MenuItem("(No recent files)");
+                none->state().setEnabled(false);
+                parent->addChild(none);
+            }
+            for (std::size_t i = 0; i < recent.size(); ++i) {
+                newui::MenuItem* entry = new newui::MenuItem(std::to_string(i + 1) + "  " + recent[i]);
+                std::string path = recent[i];
+                entry->onClick += [path](newui::MenuItem&) {
+                    files.open(path);
+                    return newui::SyncReturn::Handled;
+                };
+                parent->addChild(entry);
+            }
+            if (!recent.empty()) {
+                newui::MenuItem* separator = new newui::MenuItem("");
+                separator->setSeparator(true);
+                parent->addChild(separator);
+                newui::MenuItem* clear = new newui::MenuItem("Clear Recent Files");
+                clear->onClick += [](newui::MenuItem&) {
+                    files.clearRecentFiles();
+                    return newui::SyncReturn::Handled;
+                };
+                parent->addChild(clear);
+            }
+        };
+        files.onRecentChanged += [rebuildRecent](sketch::SketchDocumentController&) {
+            rebuildRecent();
+            return newui::SyncReturn::Handled;
+        };
+        rebuildRecent();
         onItem("File", "Exit", [](newui::MenuItem&) {
             if (files.canClose()) {
                 newui::RunLoop::current().quit();
@@ -322,11 +382,15 @@ int main(int argc, char** argv) {
         onItem("Arrange", "Align Top", [doc](newui::MenuItem&) { doc->alignSelection(Align::Top); });
         onItem("Arrange", "Align Middle", [doc](newui::MenuItem&) { doc->alignSelection(Align::Middle); });
         onItem("Arrange", "Align Bottom", [doc](newui::MenuItem&) { doc->alignSelection(Align::Bottom); });
+        onButton("groupButton", [doc]() { doc->groupSelection(); });
+        onButton("ungroupButton", [doc]() { doc->ungroupSelection(); });
         onButton("bringToFrontButton", [doc]() { doc->arrangeSelection(Arrange::BringToFront); });
         onButton("sendToBackButton", [doc]() { doc->arrangeSelection(Arrange::SendToBack); });
         onButton("alignLeftButton", [doc]() { doc->alignSelection(Align::Left); });
         onButton("alignCenterButton", [doc]() { doc->alignSelection(Align::Center); });
         onButton("alignRightButton", [doc]() { doc->alignSelection(Align::Right); });
+        onItem("Object", "Group", [doc](newui::MenuItem&) { doc->groupSelection(); });
+        onItem("Object", "Ungroup", [doc](newui::MenuItem&) { doc->ungroupSelection(); });
         onItem("Object", "Lock", [doc](newui::MenuItem&) { doc->lockSelection(); });
         onItem("Object", "Unlock All", [doc](newui::MenuItem&) { doc->unlockAll(); });
         onItem("Object", "Hide", [doc](newui::MenuItem&) { doc->hideSelection(); });
@@ -398,6 +462,7 @@ int main(int argc, char** argv) {
                     "Line: drag to draw (Shift = 45 degrees)",
                     "Pen: not available yet", "Pencil: not available yet", "Text: not available yet",
                     "Gradient: drag across the object to set the gradient; drag its handles to edit; click the axis to add a stop",
+                    "Width: drag the path to add a width point, drag a handle to widen, drag the diamond to slide, Alt-click a point to delete",
                     "Hand: drag to pan", "Zoom: click to zoom in, Shift-click to zoom out"};
                 status->setPaneText(0, kHints[int(view.tool())]);
                 return newui::SyncReturn::Handled;
@@ -416,6 +481,7 @@ int main(int argc, char** argv) {
             {"pencilTool", sketch::SketchTool::Pencil},
             {"textTool", sketch::SketchTool::Text},
             {"gradientTool", sketch::SketchTool::Gradient},
+            {"widthTool", sketch::SketchTool::Width},
             {"handTool", sketch::SketchTool::Hand},
             {"zoomTool", sketch::SketchTool::Zoom},
         };
@@ -478,7 +544,7 @@ int main(int argc, char** argv) {
         // and leave exactly that one button checked.
         auto* canvas = dynamic_cast<sketch::CanvasView*>(frame.rootView().findView("canvas"));
         static const char* kNames[] = {"selectTool", "directSelectTool", "rectangleTool", "ellipseTool", "lineTool",
-            "penTool", "pencilTool", "textTool", "gradientTool", "handTool", "zoomTool"};
+            "penTool", "pencilTool", "textTool", "gradientTool", "widthTool", "handTool", "zoomTool"};
         int failures = 0;
         for (const char* name : kNames) {
             auto* button = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView(name));
@@ -715,6 +781,74 @@ int main(int argc, char** argv) {
             canvas->setTool(sketch::SketchTool::Select);
             expect(canvas->cursorKind() == newui::CursorKind::Arrow, "the select tool shows the arrow");
 
+            // Appearance panel: the stack lists the items, rows choose what the other controls edit, buttons edit the stack.
+            document.clearObjects();
+            document.add(sketch::SketchObject::makeRect(100, 100, 100, 60));
+            document.undoStack().clear();
+            document.setSelection({document.object(0).id()});
+            {
+                auto* stack = dynamic_cast<newui::ListView*>(frame.rootView().findView("appearanceStack"));
+                auto* opacitySlider = dynamic_cast<newui::Slider*>(frame.rootView().findView("opacitySlider"));
+                auto click = [&frame](const char* name) {
+                    if (auto* button = dynamic_cast<newui::Control*>(frame.rootView().findView(name))) {
+                        button->onClick(*button);
+                    }
+                };
+                auto rows = [stack]() { auto* m = stack != nullptr ? dynamic_cast<newui::StringListModel*>(stack->model()) : nullptr; return m != nullptr ? m->items().size() : std::size_t(0); };
+                expect(stack != nullptr && opacitySlider != nullptr, "appearance stack and opacity slider found");
+                if (stack != nullptr && opacitySlider != nullptr) {
+                    expect(rows() == 3, "the stack lists stroke, fill and the base opacity row");
+                    click("newStrokeButton");
+                    expect(document.object(0).appearance().size() == 3 && rows() == 4, "Add Stroke adds an item and a row");
+                    expect(stack->selectedIndex() == std::optional<std::size_t>(0), "the new stroke is the selected top row");
+                    stack->setSelectedIndex(2);  // the fill
+                    opacitySlider->setValue(50.0f);
+                    expect(std::fabs(document.object(0).appearance()[0].opacity - 0.5) < 0.01, "choosing the fill row points the opacity slider at the fill item");
+                    stack->setSelectedIndex(1);  // the first stroke
+                    expect(document.object(0).activeIndex(sketch::AppearanceKind::Stroke) == 1, "choosing a stroke row makes it the active stroke");
+                    opacitySlider->setValue(40.0f);
+                    expect(std::fabs(document.object(0).appearance()[1].opacity - 0.4) < 0.01 && document.object(0).opacity() == 1.0, "the opacity slider edits the selected item");
+                    stack->setSelectedIndex(3);  // the base row
+                    opacitySlider->setValue(60.0f);
+                    expect(std::fabs(document.object(0).opacity() - 0.6) < 0.01, "with the base row chosen the slider edits the object's opacity");
+                    stack->setSelectedIndex(0);
+                    click("deleteItemButton");
+                    expect(document.object(0).appearance().size() == 2 && rows() == 3, "Delete removes the selected item");
+                    click("clearAppearanceButton");
+                    expect(document.object(0).fill().isNone() && document.object(0).stroke().isNone(), "Clear Appearance leaves no fill or stroke");
+                }
+            }
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+
+            // Width tool: dragging the path adds a point and widens it, the handles and diamond edit it, Alt-click deletes.
+            document.clearObjects();
+            {
+                sketch::SketchObject& line = document.add(sketch::SketchObject::makeLine(100, 300, 400, 300));
+                line.setStroke(sketch::SketchPaint::solid(sketch::SketchColor::gray(0.0f)));
+                line.setStrokeWidth(10.0);
+            }
+            document.undoStack().clear();
+            document.setSelection({document.object(0).id()});
+            canvas->setTool(sketch::SketchTool::Width);
+            mouse(0, view(250, 300));
+            mouse(1, view(250, 290));
+            mouse(2, view(250, 290));
+            expect(document.object(0).strokeOptions().widths.size() == 3, "dragging the path with the width tool adds a point (and the two ends)");
+            expect(document.object(0).strokeOptions().widths.size() == 3 &&
+                std::fabs(document.object(0).strokeOptions().widths[1].left - 2.0) < 0.05, "the new point is twice the stroke weight wide");
+            expect(document.undoStack().canUndo(), "adding a width point is an undo step");
+            mouse(0, view(250, 300));
+            mouse(1, view(300, 300));
+            mouse(2, view(300, 300));
+            expect(document.object(0).strokeOptions().widths.size() == 3 &&
+                std::fabs(document.object(0).strokeOptions().widths[1].t - 0.5) > 0.1, "dragging the diamond slides the point along the path");
+            mouse(0, view(300, 300), newui::kmAlt);
+            mouse(2, view(300, 300), newui::kmAlt);
+            expect(document.object(0).strokeOptions().widths.size() == 2, "Alt-click on a point deletes it");
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+            expect(document.object(0).strokeOptions().widths.empty(), "undo puts the plain stroke back");
+            canvas->setTool(sketch::SketchTool::Select);
+
             // Select tool: the cursor over a handle follows the frame's turn.
             auto hover = [canvas](const newui::Point& p) { canvas->onMouseMove(*canvas, p, std::uint32_t(0), 0); return canvas->cursorKind(); };
             document.clearObjects();
@@ -735,6 +869,69 @@ int main(int argc, char** argv) {
             expect(hover(view(200 + 50 * std::sin(turn), 150 - 50 * std::cos(turn))) == newui::CursorKind::SizeNESW,
                 "a frame turned 45 degrees shows the arrow matching its turned handle");
             document.clearObjects();
+
+            // Drawing and moving snap to the grid when close to a line; Alt resizes from the center.
+            canvas->setZoom(1.0f);
+            canvas->setSnapToGrid(true);
+            canvas->setTool(sketch::SketchTool::Rectangle);
+            mouse(0, view(103, 98));
+            mouse(1, view(150, 150));
+            mouse(2, view(197, 203));
+            expect(document.objectCount() == 1, "a rectangle was drawn");
+            if (document.objectCount() == 1) {
+                BLBox drawn = document.object(0).geometryBounds();
+                expect(std::fabs(drawn.x0 - 100) < 1e-6 && std::fabs(drawn.y0 - 100) < 1e-6 &&
+                    std::fabs(drawn.x1 - 200) < 1e-6 && std::fabs(drawn.y1 - 200) < 1e-6, "drawing snaps both corners to the 20 pt grid");
+                canvas->setTool(sketch::SketchTool::Select);
+                document.setSelection({document.object(0).id()});
+                mouse(0, view(130, 130));  // (not the center: that is the transform origin) move by (11, 9): the middle (161, 159) is 1 pt off the 160 lines
+                mouse(1, view(141, 139));
+                mouse(2, view(141, 139));
+                BLBox moved = document.object(0).geometryBounds();
+                expect(std::fabs(moved.x0 - 110) < 1e-6 && std::fabs(moved.y0 - 110) < 1e-6, "moving snaps the box's middle to the grid");
+
+                document.clearObjects();
+                document.add(sketch::SketchObject::makeRect(100, 100, 200, 100));
+                document.setSelection({document.object(0).id()});
+                mouse(0, view(300, 150));  // the right-middle handle
+                mouse(1, view(330, 150), newui::kmAlt);
+                mouse(2, view(350, 150), newui::kmAlt);
+                BLBox grown = document.object(0).geometryBounds();
+                expect(std::fabs(grown.x0 - 50) < 1e-6 && std::fabs(grown.x1 - 350) < 1e-6, "Alt-dragging a handle resizes about the center");
+            }
+            document.clearObjects();
+            canvas->setTool(sketch::SketchTool::Select);
+        }
+
+        // Open Recent: the newest file is first, a re-opened one moves up, a missing one is dropped, and the list
+        // survives into a new controller (it is kept in a file).
+        {
+            std::string folder = newui::SpecialFolders::temp() + "/sketch_recent_check";
+            std::filesystem::create_directories(folder);
+            std::string listPath = folder + "/recent.txt";
+            std::filesystem::remove(listPath);
+            std::string a = folder + "/a.svg", b = folder + "/b.svg";
+            for (const std::string& path : {a, b}) {
+                document.clearObjects();
+                document.add(sketch::SketchObject::makeRect(0, 0, 10, 10));
+                document.save(path);
+            }
+            auto* controller = new sketch::SketchDocumentController(document, frame);  // lives to the end of the process
+            controller->setErrorReporter([](const std::string&) {});  // no message box for the missing file below
+            controller->setRecentFilesPath(listPath);
+            document.reset();
+            expect(controller->open(a) && controller->open(b), "two files open");
+            expect(controller->recentFiles().size() == 2 && controller->recentFiles()[0] == document.filePath(), "the newest file is first");
+            document.reset();
+            controller->open(a);
+            expect(controller->recentFiles().front().find("a.svg") != std::string::npos, "re-opening a file moves it to the top");
+            std::filesystem::remove(b);
+            document.reset();
+            controller->open(b);  // gone: reports an error (no dialog is shown for the missing file in this check) and is forgotten
+            expect(controller->recentFiles().size() == 1, "a file that no longer exists is dropped from the list");
+            auto* second = new sketch::SketchDocumentController(document, frame);
+            second->setRecentFilesPath(listPath);
+            expect(second->recentFiles() == controller->recentFiles(), "the list is read back from its file");
         }
         return failures;
     }

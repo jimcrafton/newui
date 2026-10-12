@@ -294,7 +294,8 @@ def tool_palette():
         tbtn("penTool", "tool-pen", toggle=True, s=32),
         tbtn("pencilTool", "tool-pencil", toggle=True, s=32),
         tbtn("textTool", "tool-text", toggle=True, s=32),
-        tbtn("gradientTool", "tool-gradient", toggle=True, s=32), tsep(False),
+        tbtn("gradientTool", "tool-gradient", toggle=True, s=32),
+        tbtn("widthTool", "tool-width", toggle=True, s=32), tsep(False),
         tbtn("handTool", "tool-hand", toggle=True, s=32),
         tbtn("zoomTool", "tool-zoom", toggle=True, s=32),
         spacer(1),
@@ -372,7 +373,7 @@ def stroke_panel():
                 tbtn("profileBulgeButton", "profile-bulge", toggle=True, s=26)], w=86, h=30),
         ], h=30),
         hbox("dashRow", [
-            toggle("dashedToggle", checked=True), label("Dashed", w=46),
+            toggle("dashedToggle"), label("Dashed", w=46),
             field("dashField", "12", w=36), field("gapField", "6", w=36),
             field("dash2Field", "", w=36), field("gap2Field", "", w=36)]),
         hbox("arrowRow", [
@@ -397,13 +398,14 @@ def appearance_panel():
     actions = toolbar("appearanceBar", "Horizontal", [
         tbtn("newStrokeButton", "new-stroke", s=26), tbtn("newFillButton", "new-fill", s=26),
         tbtn("newEffectButton", "fx", s=26), tsep(),
+        tbtn("itemVisibleButton", "eye", checked=True, s=26),
+        tbtn("moveItemUpButton", "item-up", s=26), tbtn("moveItemDownButton", "item-down", s=26), tsep(),
         tbtn("clearAppearanceButton", "clear-appearance", s=26),
         tbtn("duplicateItemButton", "duplicate-item", s=26), tbtn("deleteItemButton", "delete", s=26)], h=30)
     body = [
         stack, actions,
         slider_row("opacitySlider", "%", 75),
         hbox("blendRow", [label("Blend", w=44), dropdown("blendModeCombo", BLEND_MODES, weight=1, selected=1)]),
-        hbox("groupOpacityRow", [toggle("groupOpacityToggle"), label("Group opacity", w=100)], h=22),
     ]
     return panel("appearancePanel", "Appearance", body, header_right="Path: Rounded Rectangle")
 

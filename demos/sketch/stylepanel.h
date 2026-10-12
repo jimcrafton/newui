@@ -64,8 +64,17 @@ namespace sketch {
         void applyStrokeWeight();
         // Cap / join / miter: `change` edits the options of the selection (one undo step) or of the defaults.
         void applyStrokeOptions(const std::function<void(StrokeOptions&)>& change, const char* description);
+        void applyDashes();
         void applyMiterLimit();
         void applyOpacity();
+        void applyBlendMode(std::size_t index);
+
+        // ---- Appearance stack ----
+        // The list shows the first selected object's items top first, then the base "Opacity" row (object opacity and
+        // blend mode). Choosing an item row makes it that kind's active item, so every other control edits it.
+        void refreshAppearance(const SketchObject* first);
+        void stackRowChosen(std::size_t row);
+        AppearanceKind targetKind() const { return target_ == Target::Fill ? AppearanceKind::Fill : AppearanceKind::Stroke; }
 
         void beginDrag();
         void endDrag();
@@ -83,6 +92,7 @@ namespace sketch {
         SketchDocument& document_;
         Target target_ = Target::Fill;
         bool updating_ = false;
+        bool baseRowSelected_ = false;  // the stack's base "Opacity" row is the one being edited
         bool dragging_ = false;
         std::string dragDescription_;
         std::vector<StyleState> dragBefore_;

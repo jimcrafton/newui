@@ -15,7 +15,7 @@ namespace sketch {
     // What a left-button drag on the canvas does.
     // DirectSelect, Pen, Pencil and Text are palette entries whose behavior lands in later phases (S5): they
     // are selectable so the palette stays a radio group, but a drag with them does nothing yet.
-    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Line, Pen, Pencil, Text, Gradient, Hand, Zoom };
+    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Line, Pen, Pencil, Text, Gradient, Width, Hand, Zoom };
 
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
@@ -60,6 +60,14 @@ namespace sketch {
         // registers itself with the document (Model::addView) so edits repaint it.
         // @reflect ignore=true
         SketchDocument* document() const { return document_; }
+        // Clipboard (the selection travels as SVG text, so it also pastes into other editors). Paste lands 12 pt
+        // further down-right each time it is repeated; inPlace keeps the original position.
+        // @reflect ignore=true
+        bool copySelection();
+        // @reflect ignore=true
+        bool cutSelection();
+        // @reflect ignore=true
+        bool paste(bool inPlace);
         // @reflect ignore=true
         void setDocument(SketchDocument* document);
 
@@ -118,6 +126,7 @@ namespace sketch {
         void paint(BLContext& ctx) override;
 
     private:
+        int pasteCount_ = 0;
         static constexpr float kRulerThickness = 20.0f;
         static constexpr float kMinZoom = 0.05f;
         static constexpr float kMaxZoom = 64.0f;
@@ -153,7 +162,7 @@ namespace sketch {
         float panStartY_ = 0.0f;
 
         // ---- Tool interaction ----
-        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop };
+        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width };
         // Handles 0..7 clockwise from the top-left corner; 8 is the rotate knob above top-center.
         // 9 is the transform-origin marker.
         static constexpr int kRotateHandle = 8;
@@ -179,7 +188,7 @@ namespace sketch {
         // ---- Gradient tool ----
         // The tool edits the fill or the stroke paint of the selection.
         const SketchPaint& gradientPaint(const SketchObject& object) const { return gradientOnStroke_ ? object.stroke() : object.fill(); }
-        const SketchPaint& gradientPaint(const StyleState& state) const { return gradientOnStroke_ ? state.stroke : state.fill; }
+        const SketchPaint& gradientPaint(const StyleState& state) const { return gradientOnStroke_ ? state.stroke() : state.fill(); }
         void setGradientPaint(SketchObject& object, const SketchPaint& paint) const {
             if (gradientOnStroke_) { object.setStroke(paint); } else { object.setFill(paint); }
         }
@@ -207,6 +216,28 @@ namespace sketch {
         int gradientEnd_ = 0;                     // GradientEnd: 0 = start / center, 1 = end / radius point
         std::size_t gradientStop_ = 0;            // GradientStop: index of the stop being moved
         std::string gradientWhat_;                // undo step name
+
+        // ---- Width tool ----
+        // Edits the variable-width profile (StrokeOptions::widths) of the one selected object. Each width point shows
+        // as a diamond on the path with a square handle out on each side: dragging a handle widens both sides
+        // (Alt: that side only), dragging the diamond slides the point along the path (Alt-click deletes it), and
+        // dragging the path itself adds a point there.
+        enum class WidthMode { Slide, Both, Left, Right };
+        SketchObject* widthTarget() const;
+        // View-pixel positions of a width point's diamond and its two side handles.
+        bool widthHandles(const SketchObject& object, const WidthPoint& point, BLPoint& center, BLPoint& left, BLPoint& right) const;
+        void beginWidthDrag(const newui::Point& pt, std::uint32_t keys);
+        void updateWidthDrag(std::uint32_t keys);
+        void finishWidthDrag();
+        void cancelWidthDrag();
+        void paintWidthOverlay(BLContext& ctx) const;
+        void setWidths(const std::vector<WidthPoint>& widths);
+
+        std::vector<StyleState> widthBefore_;  // styles when a width drag began
+        WidthMode widthMode_ = WidthMode::Both;
+        std::size_t widthIndex_ = 0;           // the point being dragged
+        std::size_t widthObject_ = 0;          // its object's id
+        std::string widthWhat_;                // undo step name
 
         SketchTool tool_ = SketchTool::Select;
         Drag drag_ = Drag::None;

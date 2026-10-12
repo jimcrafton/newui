@@ -60,6 +60,7 @@ ICONS = {
     "tool-pen": '<path d="M12 2.5 17.5 10 14.8 15.5H9.2L6.5 10z" fill="%(i)s" stroke="none"/><path d="M12 9v6" stroke="#ffffff" stroke-width="1.4"/><circle cx="12" cy="8.2" r="1.3" fill="#ffffff" stroke="none"/><rect x="8" y="17.5" width="8" height="3.5" rx="1" fill="%(i)s" stroke="none"/>' % {"i": INK},
     "tool-pencil": '<path d="M4 20 5.2 15.2 16.6 3.8a1.8 1.8 0 0 1 2.6 0l1 1a1.8 1.8 0 0 1 0 2.6L8.8 18.8z" fill="%(i)s" stroke="none"/><path d="M14.5 6 18 9.5" stroke="#ffffff" stroke-width="1.3"/>' % {"i": INK},
     "tool-text": '<path d="M5 4h14v4.2h-1.8V6H13v12h2.6V20H8.4v-2H11V6H6.8v2.2H5z" fill="%(i)s" stroke="none"/>' % {"i": INK},
+    "tool-width": '<path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/><path d="M12 5v14" stroke-width="1.4"/>',
     "tool-hand": '<path d="M8 12.5V5.2a1.5 1.5 0 0 1 3 0V11m0-1V4.2a1.5 1.5 0 0 1 3 0V10m0-3.2a1.5 1.5 0 0 1 3 0V16a6.2 6.2 0 0 1-6.2 6.2h-.8a6 6 0 0 1-5-2.7l-3-4.8a1.5 1.5 0 0 1 2.5-1.6L8 15.3z" fill="%(i)s" stroke="none"/>' % {"i": INK},
     "tool-zoom": '<circle cx="10" cy="10" r="6.2" fill="none" stroke-width="2.2"/><path d="m15 15 6 6" stroke-width="3"/><path d="M10 7.2v5.6M7.2 10h5.6" stroke-width="1.6"/>',
     "tool-gradient": '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="%s"/></linearGradient></defs><rect x="3" y="7" width="18" height="10" fill="url(#g)"/><path d="M6 20h12M15 18l3 2-3 2"/>' % INK,
@@ -67,7 +68,9 @@ ICONS = {
     "stop-delete": '<path d="M6 12h12"/>',
     "gradient-reverse": '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
     # appearance panel
-    "fx": '<path d="M4 18 10 6M4 6l6 12"/><path d="M13 6h7M13 12h5M13 6v12"/>',
+    "item-up": '<path d="M6 15l6-6 6 6"/>',
+    "item-down": '<path d="M6 9l6 6 6-6"/>',
+    "fx": '<path d="M4 6h7M4 12h5M4 6v12"/><path d="M14 18l6-12M14 6l6 12"/>',
     "new-fill": '<rect x="4" y="4" width="16" height="16" fill="%s"/><path d="M12 8v8M8 12h8" stroke="#ffffff"/>' % INK,
     "new-stroke": '<rect x="4" y="4" width="16" height="16" stroke-width="3"/><path d="M12 9v6M9 12h6"/>',
     "clear-appearance": '<rect x="4" y="4" width="16" height="16"/><path d="M4 4 20 20"/>',

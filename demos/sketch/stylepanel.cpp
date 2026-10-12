@@ -1,6 +1,7 @@
 #include "stylepanel.h"
 
 #include <newui/color.h>
+#include <newui/models.h>
 #include <newui/mouse_constants.h>
 
 #include <algorithm>
@@ -15,6 +16,9 @@ namespace sketch {
     using namespace newui;
 
     namespace {
+        // Full weight at the start fading to a thin tip; and a lens: pointed ends swelling to the middle.
+        std::vector<WidthPoint> taperProfile() { return {WidthPoint{0.0, 1.0, 1.0}, WidthPoint{1.0, 0.1, 0.1}}; }
+        std::vector<WidthPoint> bulgeProfile() { return {WidthPoint{0.0, 0.05, 0.05}, WidthPoint{0.5, 1.5, 1.5}, WidthPoint{1.0, 0.05, 0.05}}; }
         std::string narrow(const std::wstring& text) {
             std::string result;
             for (wchar_t ch : text) {
@@ -244,6 +248,10 @@ namespace sketch {
         wireOption("joinMiterButton", [](StrokeOptions& o) { o.join = StrokeJoin::Miter; }, "Miter Join");
         wireOption("joinRoundButton", [](StrokeOptions& o) { o.join = StrokeJoin::Round; }, "Round Join");
         wireOption("joinBevelButton", [](StrokeOptions& o) { o.join = StrokeJoin::Bevel; }, "Bevel Join");
+        // Width profiles: presets for the variable-width stroke (the Width tool edits the points by hand).
+        wireOption("profileUniformButton", [](StrokeOptions& o) { o.widths.clear(); }, "Uniform Width");
+        wireOption("profileTaperButton", [](StrokeOptions& o) { o.widths = taperProfile(); }, "Taper Width");
+        wireOption("profileBulgeButton", [](StrokeOptions& o) { o.widths = bulgeProfile(); }, "Bulge Width");
         if (auto* miter = find<TextField>("miterLimitField")) {
             miter->onReturnPressed += [this](TextField&) {
                 applyMiterLimit();
@@ -251,6 +259,63 @@ namespace sketch {
             };
             miter->onLostFocus += [this](View&) {
                 applyMiterLimit();
+                return SyncReturn::Handled;
+            };
+        }
+
+        // Dashes: the toggle turns the pattern on (from the four fields, 12/6 when blank); editing a field re-applies it.
+        if (auto* toggle = find<Toggle>("dashedToggle")) {
+            toggle->onCheckedChanged += [this](Toggle&) {
+                applyDashes();
+                return SyncReturn::Handled;
+            };
+        }
+        for (const char* name : {"dashField", "gapField", "dash2Field", "gap2Field"}) {
+            if (auto* field = find<TextField>(name)) {
+                field->onReturnPressed += [this](TextField&) {
+                    applyDashes();
+                    return SyncReturn::Handled;
+                };
+                field->onLostFocus += [this](View&) {
+                    applyDashes();
+                    return SyncReturn::Handled;
+                };
+            }
+        }
+
+        // Appearance stack: choose a row, then add / duplicate / delete / reorder / hide / clear.
+        if (auto* stack = find<ListView>("appearanceStack")) {
+            stack->onSelectionChanged += [this](ListView& list) {
+                std::optional<std::size_t> row = list.selectedIndex();
+                if (!updating_ && row.has_value()) {
+                    stackRowChosen(*row);
+                }
+                return SyncReturn::Handled;
+            };
+        }
+        auto onTool = [this](const char* name, std::function<void()> action) {
+            if (auto* button = find<Control>(name)) {
+                button->onClick += [action](Control&) {
+                    action();
+                    return SyncReturn::Handled;
+                };
+            }
+        };
+        onTool("newStrokeButton", [this]() { baseRowSelected_ = false; target_ = Target::Stroke; document_.addAppearanceItem(AppearanceKind::Stroke); refresh(); onTargetChanged(*this); });
+        onTool("newFillButton", [this]() { baseRowSelected_ = false; target_ = Target::Fill; document_.addAppearanceItem(AppearanceKind::Fill); refresh(); onTargetChanged(*this); });
+        onTool("duplicateItemButton", [this]() { if (!baseRowSelected_) { document_.duplicateActiveItem(targetKind()); } });
+        onTool("deleteItemButton", [this]() { if (!baseRowSelected_) { document_.deleteActiveItem(targetKind()); } });
+        onTool("moveItemUpButton", [this]() { if (!baseRowSelected_) { document_.moveActiveItem(targetKind(), 1); } });
+        onTool("moveItemDownButton", [this]() { if (!baseRowSelected_) { document_.moveActiveItem(targetKind(), -1); } });
+        onTool("clearAppearanceButton", [this]() { baseRowSelected_ = false; document_.clearAppearance(); });
+        if (auto* eye = find<ToolbarButton>("itemVisibleButton")) {
+            eye->onCheckedChanged += [this](ToolbarButton& changed) {
+                if (updating_ || baseRowSelected_ || document_.selection().empty()) {
+                    return SyncReturn::Ignored;
+                }
+                bool visible = changed.isChecked();
+                AppearanceKind kind = targetKind();
+                edit(visible ? "Show Item" : "Hide Item", [this, kind, visible]() { document_.setSelectionItemVisible(kind, visible); }, []() {});
                 return SyncReturn::Handled;
             };
         }
@@ -416,6 +481,18 @@ namespace sketch {
             };
         }
 
+        // Blend mode of the selected objects (the Appearance panel's list; it follows the list's order).
+        if (auto* blend = find<DropDownList>("blendModeCombo")) {
+            blend->onSelectionChanged += [this](DropDownList& combo) {
+                std::optional<std::size_t> index = combo.selectedIndex();
+                if (updating_ || !index.has_value() || document_.selection().empty()) {
+                    return SyncReturn::Ignored;
+                }
+                applyBlendMode(*index);
+                return SyncReturn::Handled;
+            };
+        }
+
         // Apply: across the object (default) or, for a stroke, along its length.
         if (auto* apply = find<DropDownList>("gradientApplyCombo")) {
             apply->onSelectionChanged += [this](DropDownList& combo) {
@@ -466,8 +543,115 @@ namespace sketch {
         refresh();
     }
 
+    namespace {
+        // One row of the Appearance stack: "Stroke  4 pt  Solid #1b3a6b  50%  Multiply  (hidden)".
+        std::string appearanceRowText(const AppearanceItem& item) {
+            std::string text = item.kind == AppearanceKind::Fill ? "Fill   " : "Stroke   ";
+            if (item.kind == AppearanceKind::Stroke) {
+                char buffer[32];
+                std::snprintf(buffer, sizeof(buffer), "%g pt   ", item.strokeWidth);
+                text += buffer;
+            }
+            switch (item.paint.kind()) {
+                case SketchPaint::Kind::None: text += "None"; break;
+                case SketchPaint::Kind::Solid: text += "Solid " + item.paint.color().toHex(); break;
+                case SketchPaint::Kind::Linear: text += "Linear gradient"; break;
+                case SketchPaint::Kind::Radial: text += "Radial gradient"; break;
+            }
+            if (item.opacity < 1.0) {
+                text += "   " + std::to_string(int(item.opacity * 100.0 + 0.5)) + "%";
+            }
+            if (item.blendMode != BlendMode::Normal) {
+                text += std::string("   ") + blendModeName(item.blendMode);
+            }
+            if (!item.visible) {
+                text += "   (hidden)";
+            }
+            return text;
+        }
+    }
+
+    void StylePanel::refreshAppearance(const SketchObject* first) {
+        auto* list = find<ListView>("appearanceStack");
+        if (list == nullptr) {
+            return;
+        }
+        std::vector<std::string> rows;
+        if (first != nullptr) {
+            const std::vector<AppearanceItem>& items = first->appearance();
+            for (std::size_t i = items.size(); i-- > 0;) {  // the top of the stack first
+                rows.push_back(appearanceRowText(items[i]));
+            }
+            std::size_t group = document_.selectedGroup();
+            GroupProps props = document_.groupProps(group);
+            double opacity = group != 0 ? props.opacity : first->opacity();
+            BlendMode mode = group != 0 ? props.blendMode : first->blendMode();
+            std::string base = std::string(group != 0 ? "Group Opacity   " : "Opacity   ") + std::to_string(int(opacity * 100.0 + 0.5)) + "%";
+            if (mode != BlendMode::Normal) {
+                base += std::string("   ") + blendModeName(mode);
+            }
+            rows.push_back(base);
+        }
+        auto* model = dynamic_cast<StringListModel*>(list->model());
+        if (model == nullptr || model->items() != rows) {
+            auto fresh = std::make_unique<StringListModel>();
+            fresh->items() = rows;
+            list->setModel(std::move(fresh));
+        }
+        if (first == nullptr) {
+            list->clearSelection();
+        } else {
+            std::size_t itemCount = rows.size() - 1;
+            std::size_t row = baseRowSelected_ ? itemCount : itemCount - 1 - std::min(itemCount - 1, first->activeIndex(targetKind()));
+            if (list->selectedIndex() != std::optional<std::size_t>(row)) {
+                list->setSelectedIndex(row);
+            }
+        }
+        bool itemRow = first != nullptr && !baseRowSelected_;
+        if (auto* eye = find<ToolbarButton>("itemVisibleButton")) {
+            eye->setEnabled(itemRow);
+            bool visible = itemRow ? first->activeItem(targetKind()).visible : true;
+            if (eye->isChecked() != visible) {
+                eye->setChecked(visible);
+            }
+        }
+        for (const char* name : {"duplicateItemButton", "deleteItemButton", "moveItemUpButton", "moveItemDownButton"}) {
+            if (auto* button = find<Control>(name)) {
+                button->setEnabled(itemRow);
+            }
+        }
+        for (const char* name : {"newStrokeButton", "newFillButton", "clearAppearanceButton"}) {
+            if (auto* button = find<Control>(name)) {
+                button->setEnabled(first != nullptr);
+            }
+        }
+    }
+
+    void StylePanel::stackRowChosen(std::size_t row) {
+        const SketchObject* first = document_.selection().empty() ? nullptr : document_.findById(document_.selection().front());
+        if (first == nullptr) {
+            return;
+        }
+        std::size_t count = first->appearance().size();
+        if (row >= count) {  // the base "Opacity" row
+            baseRowSelected_ = true;
+            refresh();
+            return;
+        }
+        std::size_t index = count - 1 - row;
+        baseRowSelected_ = false;
+        Target before = target_;
+        target_ = first->appearance()[index].kind == AppearanceKind::Fill ? Target::Fill : Target::Stroke;
+        document_.setActiveItem(first->appearance()[index].kind, index);
+        refresh();
+        if (target_ != before) {
+            onTargetChanged(*this);
+        }
+    }
+
     void StylePanel::setTarget(Target target) {
         target_ = target;
+        baseRowSelected_ = false;
         refresh();
         onTargetChanged(*this);
     }
@@ -668,6 +852,37 @@ namespace sketch {
         }
     }
 
+    void StylePanel::applyDashes() {
+        if (updating_) {
+            return;
+        }
+        std::vector<double> dashes;
+        auto* toggle = find<Toggle>("dashedToggle");
+        if (toggle != nullptr && toggle->isChecked()) {
+            double values[4] = {12.0, 6.0, 0.0, 0.0};
+            bool given[4] = {false, false, false, false};
+            const char* names[4] = {"dashField", "gapField", "dash2Field", "gap2Field"};
+            for (int i = 0; i < 4; ++i) {
+                auto* field = find<TextField>(names[i]);
+                double value = 0.0;
+                if (field != nullptr && leadingNumber(field->text(), value) && value >= 0.0) {
+                    values[i] = value;
+                    given[i] = true;
+                }
+            }
+            // The second pair is optional; both halves are needed to use it.
+            size_t count = given[2] && given[3] ? 4 : 2;
+            if (values[0] + values[1] <= 0.0 || (count == 4 && values[0] + values[1] + values[2] + values[3] <= 0.0)) {
+                values[0] = 12.0;
+                values[1] = 6.0;
+                count = 2;
+            }
+            dashes.assign(values, values + count);
+        }
+        applyStrokeOptions([dashes](StrokeOptions& o) { o.dashes = dashes; }, dashes.empty() ? "Solid Stroke" : "Dashed Stroke");
+        refresh();
+    }
+
     void StylePanel::applyMiterLimit() {
         if (updating_) {
             return;
@@ -680,14 +895,32 @@ namespace sketch {
         refresh();
     }
 
+    void StylePanel::applyBlendMode(std::size_t index) {
+        std::vector<StyleState> before = document_.snapshotStyle();
+        if (baseRowSelected_ && document_.selectedGroup() != 0) {
+            document_.setSelectionGroupBlendMode(BlendMode(index));
+        } else if (baseRowSelected_) {
+            document_.setSelectionBlendMode(BlendMode(index));
+        } else {
+            document_.setSelectionItemBlendMode(targetKind(), BlendMode(index));
+        }
+        document_.commitStyle(before, "Blend Mode");
+    }
+
     void StylePanel::applyOpacity() {
         auto* slider = find<Slider>("opacitySlider");
         if (slider == nullptr) {
             return;
         }
         double opacity = std::min(1.0, std::max(0.0, double(slider->value()) / 100.0));
+        bool base = baseRowSelected_;
+        AppearanceKind kind = targetKind();
         edit("Opacity",
-            [this, opacity]() { document_.setSelectionOpacity(opacity); },
+            [this, opacity, base, kind]() {
+                if (base && document_.selectedGroup() != 0) { document_.setSelectionGroupOpacity(opacity); }
+                else if (base) { document_.setSelectionOpacity(opacity); }
+                else { document_.setSelectionItemOpacity(kind, opacity); }
+            },
             []() {});
     }
 
@@ -830,10 +1063,29 @@ namespace sketch {
         for (auto [name, on] : std::initializer_list<std::pair<const char*, bool>>{
                 {"capButtButton", options.cap == StrokeCap::Butt}, {"capRoundButton", options.cap == StrokeCap::Round},
                 {"capSquareButton", options.cap == StrokeCap::Square}, {"joinMiterButton", options.join == StrokeJoin::Miter},
-                {"joinRoundButton", options.join == StrokeJoin::Round}, {"joinBevelButton", options.join == StrokeJoin::Bevel}}) {
+                {"joinRoundButton", options.join == StrokeJoin::Round}, {"joinBevelButton", options.join == StrokeJoin::Bevel},
+                {"profileUniformButton", options.widths.empty()}, {"profileTaperButton", options.widths == taperProfile()},
+                {"profileBulgeButton", options.widths == bulgeProfile()}}) {
             if (auto* button = find<ToolbarButton>(name)) {
                 if (button->isChecked() != on) {
                     button->setChecked(on);
+                }
+            }
+        }
+        if (auto* toggle = find<Toggle>("dashedToggle")) {
+            if (toggle->isChecked() != !options.dashes.empty()) {
+                toggle->setChecked(!options.dashes.empty());
+            }
+        }
+        if (!options.dashes.empty()) {
+            const char* names[4] = {"dashField", "gapField", "dash2Field", "gap2Field"};
+            for (size_t i = 0; i < 4; ++i) {
+                if (auto* field = find<TextField>(names[i])) {
+                    char buffer[32] = "";
+                    if (i < options.dashes.size()) {
+                        std::snprintf(buffer, sizeof(buffer), "%g", options.dashes[i]);
+                    }
+                    field->setText(widen(buffer));
                 }
             }
         }
@@ -842,8 +1094,21 @@ namespace sketch {
             std::snprintf(buffer, sizeof(buffer), "%g", options.miterLimit);
             field->setText(widen(buffer));
         }
-        syncSlider("opacitySlider", float((first != nullptr ? first->opacity() : 1.0) * 100.0));
+        const AppearanceItem* shownItem = first != nullptr ? &first->activeItem(targetKind()) : nullptr;
+        bool showBase = first == nullptr || baseRowSelected_;
+        std::size_t group = document_.selectedGroup();
+        GroupProps groupProps = document_.groupProps(group);
+        double shownOpacity = first == nullptr ? 1.0 : (showBase ? (group != 0 ? groupProps.opacity : first->opacity()) : shownItem->opacity);
+        syncSlider("opacitySlider", float(shownOpacity * 100.0));
+        if (auto* blend = find<DropDownList>("blendModeCombo")) {
+            blend->setEnabled(first != nullptr);
+            std::size_t index = first == nullptr ? 0 : std::size_t(showBase ? (group != 0 ? groupProps.blendMode : first->blendMode()) : shownItem->blendMode);
+            if (blend->selectedIndex() != std::optional<std::size_t>(index)) {
+                blend->setSelectedIndex(index);
+            }
+        }
         syncWells();
+        refreshAppearance(first);
 
         updating_ = false;
     }

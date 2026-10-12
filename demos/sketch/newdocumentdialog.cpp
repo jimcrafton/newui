@@ -332,22 +332,45 @@ namespace sketch {
         };
     }
 
-    bool NewDocumentDialog::run(Frame& owner, NewDocumentModel& model) {
-        Dialog dialog;
-        dialog.setName("newdocument");
-        if (!Bundle::instance().loadDialog(dialog)) {
-            return false;
+    namespace {
+        bool showDialog(Frame& owner, NewDocumentModel& model, bool setup) {
+            Dialog dialog;
+            dialog.setName("newdocument");
+            if (!Bundle::instance().loadDialog(dialog)) {
+                return false;
+            }
+            NewDocumentModel working = model;
+            Session session(dialog.rootView(), working);
+            session.wire([&dialog](DialogResult result) { dialog.close(result); });
+            session.start();
+            if (setup) {
+                dialog.setTitle("Document Setup");
+                if (auto* ok = dynamic_cast<Button*>(dialog.rootView().findView("createButton"))) {
+                    ok->setText("OK");
+                }
+                for (const char* name : {"categoryControl", "presetList", "newDocumentName"}) {
+                    if (auto* control = dynamic_cast<Control*>(dialog.rootView().findView(name))) {
+                        control->setEnabled(false);
+                    }
+                }
+            }
+            if (dialog.showModal(&owner) != DialogResult::Ok) {
+                return false;
+            }
+            model = working;
+            return true;
         }
-        NewDocumentModel working = model;
-        Session session(dialog.rootView(), working);
-        session.wire([&dialog](DialogResult result) { dialog.close(result); });
-        session.start();
-        if (dialog.showModal(&owner) != DialogResult::Ok) {
-            return false;
-        }
-        model = working;
-        return true;
     }
+
+    bool NewDocumentDialog::runSetup(Frame& owner, NewDocumentModel& model) {
+        return showDialog(owner, model, true);
+    }
+
+    bool NewDocumentDialog::run(Frame& owner, NewDocumentModel& model) {
+        return showDialog(owner, model, false);
+    }
+
+
 
 }
 

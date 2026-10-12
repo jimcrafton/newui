@@ -100,6 +100,17 @@ namespace sketch {
         ratio_ = height_ > 0.0 ? width_ / height_ : 1.0;
     }
 
+    void NewDocumentModel::loadSetup(double widthPoints, double heightPoints, double ppi, ColorSpace colorMode, PageBackground background) {
+        unit_ = LengthUnit::Points;
+        width_ = widthPoints;
+        height_ = heightPoints;
+        ppi_ = ppi > 0.0 ? ppi : 72.0;
+        setColorMode(colorMode);
+        background_ = background;
+        linked_ = false;
+        captureRatio();
+    }
+
     void NewDocumentModel::loadPreset(const DocumentPreset& preset) {
         name_ = "Untitled-1";
         unit_ = preset.unit;

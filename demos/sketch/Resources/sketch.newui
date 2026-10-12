@@ -465,6 +465,15 @@
                 iconSize: 20
               },
               {
+                type: "ToolbarButton",
+                name: "widthTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-width.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
                 type: "ToolbarSeparator",
                 horizontal: false,
                 desiredSize: { type: "Size", width: 28, height: 9 },
@@ -529,7 +538,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1298 },
+            contentSize: { type: "Size", width: 268, height: 1270 },
             childViews: [
               {
                 type: "SubView",
@@ -543,9 +552,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1298 }
+                      size: { type: "Size", width: 268, height: 1270 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1298 },
+                    desiredSize: { type: "Size", width: 268, height: 1270 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -1387,8 +1396,7 @@
                                     type: "Toggle",
                                     name: "dashedToggle",
                                     desiredSize: { type: "Size", width: 20, height: 20 },
-                                    desiredSizeOverride: true,
-                                    checked: true
+                                    desiredSizeOverride: true
                                   },
                                   {
                                     type: "Label",
@@ -1509,7 +1517,7 @@
                         type: "SubView",
                         name: "appearancePanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 298 },
+                        desiredSize: { type: "Size", width: 268, height: 270 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -1569,7 +1577,7 @@
                             type: "SubView",
                             name: "appearancePanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 276 },
+                            desiredSize: { type: "Size", width: 0, height: 248 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -1616,6 +1624,38 @@
                                     desiredSize: { type: "Size", width: 26, height: 26 },
                                     desiredSizeOverride: true,
                                     icon: "icons/fx.svg",
+                                    iconSize: 16
+                                  },
+                                  {
+                                    type: "ToolbarSeparator",
+                                    horizontal: true,
+                                    desiredSize: { type: "Size", width: 9, height: 22 },
+                                    desiredSizeOverride: true
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "itemVisibleButton",
+                                    desiredSize: { type: "Size", width: 26, height: 26 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/eye.svg",
+                                    toggleButton: true,
+                                    checked: true,
+                                    iconSize: 16
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "moveItemUpButton",
+                                    desiredSize: { type: "Size", width: 26, height: 26 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/item-up.svg",
+                                    iconSize: 16
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "moveItemDownButton",
+                                    desiredSize: { type: "Size", width: 26, height: 26 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/item-down.svg",
                                     iconSize: 16
                                   },
                                   {
@@ -1713,30 +1753,6 @@
                                       items: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion"]
                                     },
                                     selectedIndex: 1
-                                  }
-                                ]
-                              },
-                              {
-                                type: "SubView",
-                                name: "groupOpacityRow",
-                                visible: true,
-                                desiredSize: { type: "Size", width: 0, height: 22 },
-                                desiredSizeOverride: true,
-                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
-                                childViews: [
-                                  {
-                                    type: "Toggle",
-                                    name: "groupOpacityToggle",
-                                    desiredSize: { type: "Size", width: 20, height: 20 },
-                                    desiredSizeOverride: true
-                                  },
-                                  {
-                                    type: "Label",
-                                    desiredSize: { type: "Size", width: 100, height: 20 },
-                                    desiredSizeOverride: true,
-                                    text: "Group opacity",
-                                    textAlignment: "Left",
-                                    style: { type: "LabelStyle", text: "Group opacity", textAlignment: "Left" }
                                   }
                                 ]
                               }

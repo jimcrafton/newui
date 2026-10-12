@@ -8,6 +8,7 @@
 
 #include <newui/keyboard_constants.h>
 #include <newui/rootview.h>
+#include <newui/clipboardmgr.h>
 
 #include <algorithm>
 #include <cmath>
@@ -88,6 +89,7 @@ namespace sketch {
             case SketchTool::Pen:
             case SketchTool::Pencil:
             case SketchTool::Gradient:
+            case SketchTool::Width:
             case SketchTool::Zoom:
                 cursor().setCursorKind(CursorKind::Cross);
                 break;
@@ -177,6 +179,10 @@ namespace sketch {
             beginGradientDrag(pt, keys);
             return SyncReturn::Handled;
         }
+        if (tool_ == SketchTool::Width) {
+            beginWidthDrag(pt, keys);
+            return SyncReturn::Handled;
+        }
         if (tool_ != SketchTool::Select) {
             return SyncReturn::Ignored;  // palette entries not implemented yet
         }
@@ -192,15 +198,20 @@ namespace sketch {
         if (hit != nullptr) {
             std::vector<std::size_t> selection = document_->selection();
             bool already = document_->isSelected(hit->id());
+            // Clicking a grouped object takes its whole group; Ctrl-click picks the one object.
+            bool single = (keys & kmCtrl) != 0;
+            std::vector<std::size_t> picked = single ? std::vector<std::size_t>{hit->id()} : document_->withGroupMembers({hit->id()});
             if (dragAdditive_) {
                 if (already) {
-                    selection.erase(std::remove(selection.begin(), selection.end(), hit->id()), selection.end());
+                    for (std::size_t id : picked) {
+                        selection.erase(std::remove(selection.begin(), selection.end(), id), selection.end());
+                    }
                 } else {
-                    selection.push_back(hit->id());
+                    selection.insert(selection.end(), picked.begin(), picked.end());
                 }
                 document_->setSelection(selection);
-            } else if (!already) {
-                document_->setSelection({hit->id()});
+            } else if (!already || (single && document_->selection().size() > 1)) {
+                document_->setSelection(picked);
             }
             if (document_->isSelected(hit->id())) {
                 drag_ = Drag::Move;
@@ -456,6 +467,9 @@ namespace sketch {
             case Drag::GradientStop:
                 updateGradientDrag(keys);
                 break;
+            case Drag::Width:
+                updateWidthDrag(keys);
+                break;
             case Drag::None:
                 break;
         }
@@ -505,7 +519,7 @@ namespace sketch {
                         selection.push_back(object.id());
                     }
                 }
-                document_->setSelection(selection);
+                document_->setSelection(document_->withGroupMembers(selection));
                 style().markDirty();
                 break;
             }
@@ -555,6 +569,9 @@ namespace sketch {
             case Drag::GradientEnd:
             case Drag::GradientStop:
                 finishGradientDrag();
+                break;
+            case Drag::Width:
+                finishWidthDrag();
                 break;
             case Drag::None:
                 break;
@@ -624,6 +641,53 @@ namespace sketch {
         return SyncReturn::Ignored;
     }
 
+    namespace {
+        std::wstring widenUtf8(const std::string& text) {
+            if (text.empty()) { return std::wstring(); }
+            int n = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0);
+            std::wstring out(std::size_t(n), L'\0');
+            ::MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), out.data(), n);
+            return out;
+        }
+
+        std::string narrowUtf8(const std::wstring& text) {
+            if (text.empty()) { return std::string(); }
+            int n = ::WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
+            std::string out(std::size_t(n), '\0');
+            ::WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), out.data(), n, nullptr, nullptr);
+            return out;
+        }
+    }
+
+    bool CanvasView::copySelection() {
+        if (document_ == nullptr) {
+            return false;
+        }
+        std::string svg = document_->selectionToSvg();
+        if (svg.empty() || !ClipboardManager::setText(widenUtf8(svg), this)) {
+            return false;
+        }
+        pasteCount_ = 0;
+        return true;
+    }
+
+    bool CanvasView::cutSelection() {
+        if (!copySelection()) {
+            return false;
+        }
+        document_->deleteSelection();
+        return true;
+    }
+
+    bool CanvasView::paste(bool inPlace) {
+        std::wstring text;
+        if (document_ == nullptr || !ClipboardManager::getText(text)) {
+            return false;
+        }
+        double offset = inPlace ? 0.0 : 12.0 * double(++pasteCount_);
+        return document_->pasteSvg(narrowUtf8(text), offset, offset);
+    }
+
     SyncReturn CanvasView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyChar*/, int /*repeatCount*/, std::uint32_t vkCode) {
         if (document_ == nullptr) {
             return SyncReturn::Ignored;
@@ -649,6 +713,22 @@ namespace sketch {
             document_->resetBoundingBox();
             return SyncReturn::Handled;
         }
+        if (ctrl && vkCode == vkLetterC) {
+            copySelection();
+            return SyncReturn::Handled;
+        }
+        if (ctrl && vkCode == vkLetterX) {
+            cutSelection();
+            return SyncReturn::Handled;
+        }
+        if (ctrl && vkCode == vkLetterV) {
+            paste(shift);
+            return SyncReturn::Handled;
+        }
+        if (ctrl && vkCode == vkLetterG) {
+            if (shift) { document_->ungroupSelection(); } else { document_->groupSelection(); }
+            return SyncReturn::Handled;
+        }
         if (ctrl && vkCode == vkLetterD) {
             document_->duplicateSelection(12.0, 12.0);
             return SyncReturn::Handled;
@@ -661,6 +741,8 @@ namespace sketch {
             if (drag_ != Drag::None) {  // cancel an in-progress drag, restoring the outlines
                 if (drag_ == Drag::GradientNew || drag_ == Drag::GradientEnd || drag_ == Drag::GradientStop) {
                     cancelGradientDrag();
+                } else if (drag_ == Drag::Width) {
+                    cancelWidthDrag();
                 } else if (!dragBefore_.empty()) {
                     applyToSelection(BLMatrix2D::make_identity());
                 }
@@ -726,7 +808,7 @@ namespace sketch {
         SelectionFrame frame;
         if (document_->selectionFrame(frame)) {
             ctx.stroke_path(frameOutline(frame));
-            if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient) {
+            if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width) {
                 BLPoint knob = handlePosition(kRotateHandle, frame);
                 BLPoint topCenter = handlePosition(1, frame);
                 BLPath stem;
@@ -753,7 +835,7 @@ namespace sketch {
 
         // The transform origin: a ringed dot (drag it to move the rotate/shear pivot).
         SelectionFrame originFrame;
-        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && document_->selectionFrame(originFrame)) {
+        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width && document_->selectionFrame(originFrame)) {
             BLPoint o = handlePosition(kOriginHandle, originFrame);
             BLPath ring;
             ring.add_circle(BLCircle(o.x, o.y, 4.5));
@@ -772,6 +854,9 @@ namespace sketch {
 
         if (tool_ == SketchTool::Gradient) {
             paintGradientOverlay(ctx);
+        }
+        if (tool_ == SketchTool::Width) {
+            paintWidthOverlay(ctx);
         }
 
         // Rubber band for marquee / shape being drawn.
@@ -799,6 +884,186 @@ namespace sketch {
             }
         }
         ctx.restore();
+    }
+
+    // ---- Width tool ----
+
+    SketchObject* CanvasView::widthTarget() const {
+        if (document_ == nullptr || document_->selection().size() != 1) {
+            return nullptr;
+        }
+        SketchObject* object = document_->findById(document_->selection().front());
+        return object != nullptr && !object->stroke().isNone() && object->strokeWidth() > 0.0 ? object : nullptr;
+    }
+
+    bool CanvasView::widthHandles(const SketchObject& object, const WidthPoint& point, BLPoint& center, BLPoint& left, BLPoint& right) const {
+        BLPoint p, n;
+        if (!object.pathSample(point.t, p, n)) {
+            return false;
+        }
+        double half = object.strokeWidth() * 0.5;
+        center = toView(p);
+        left = toView(BLPoint(p.x + n.x * half * point.left, p.y + n.y * half * point.left));
+        right = toView(BLPoint(p.x - n.x * half * point.right, p.y - n.y * half * point.right));
+        return true;
+    }
+
+    void CanvasView::setWidths(const std::vector<WidthPoint>& widths) {
+        document_->changeSelectionStrokeOptions([&widths](StrokeOptions& o) { o.widths = widths; });
+    }
+
+    void CanvasView::beginWidthDrag(const Point& pt, std::uint32_t keys) {
+        dragMoved_ = false;
+        drag_ = Drag::None;
+        SketchObject* target = widthTarget();
+        double px = double(pt.x), py = double(pt.y);
+        if (target != nullptr) {
+            widthBefore_ = document_->snapshotStyle();
+            widthObject_ = target->id();
+            std::vector<WidthPoint> widths = target->strokeOptions().widths;
+            auto closeTo = [&](const BLPoint& p) {
+                return std::fabs(px - p.x) <= kHandleHit + 2.0 && std::fabs(py - p.y) <= kHandleHit + 2.0;
+            };
+            bool alt = (keys & kmAlt) != 0;
+            for (std::size_t i = 0; i < widths.size(); ++i) {
+                BLPoint c, l, r;
+                if (!widthHandles(*target, widths[i], c, l, r)) {
+                    break;
+                }
+                if (closeTo(c)) {
+                    if (alt) {  // Alt-click deletes the point
+                        widths.erase(widths.begin() + std::ptrdiff_t(i));
+                        if (widths.size() < 2) { widths.clear(); }
+                        setWidths(widths);
+                        document_->commitStyle(widthBefore_, "Delete Width Point");
+                        widthBefore_.clear();
+                        return;
+                    }
+                    drag_ = Drag::Width;
+                    widthMode_ = WidthMode::Slide;
+                    widthIndex_ = i;
+                    widthWhat_ = "Move Width Point";
+                    return;
+                }
+                bool onLeft = closeTo(l), onRight = closeTo(r);
+                if (onLeft || onRight) {
+                    drag_ = Drag::Width;
+                    widthMode_ = !alt ? WidthMode::Both : (onLeft ? WidthMode::Left : WidthMode::Right);
+                    widthIndex_ = i;
+                    widthWhat_ = "Change Stroke Width";
+                    return;
+                }
+            }
+            // Dragging the path itself adds a point where it was grabbed (and the ends, so the rest stays as it was).
+            double t = 0.0, distance = 0.0;
+            if (target->nearestOnPath(dragStartDoc_, t, distance) && distance * double(zoom_) <= kHandleHit) {
+                if (widths.empty()) {
+                    widths.push_back({0.0, 1.0, 1.0});
+                    widths.push_back({1.0, 1.0, 1.0});
+                }
+                WidthPoint added{t, widthScaleAt(widths, t, true), widthScaleAt(widths, t, false)};
+                auto at = std::upper_bound(widths.begin(), widths.end(), added, [](const WidthPoint& a, const WidthPoint& b) { return a.t < b.t; });
+                widthIndex_ = std::size_t(at - widths.begin());
+                widths.insert(at, added);
+                setWidths(widths);
+                drag_ = Drag::Width;
+                widthMode_ = WidthMode::Both;
+                widthWhat_ = "Add Width Point";
+                return;
+            }
+            widthBefore_.clear();
+        }
+        // Anything else just selects the object under the pointer.
+        SketchObject* hit = document_->hitTest(dragStartDoc_, 4.0 / double(zoom_));
+        if (hit != nullptr && !document_->isSelected(hit->id())) {
+            document_->setSelection(document_->withGroupMembers({hit->id()}));
+        }
+    }
+
+    void CanvasView::updateWidthDrag(std::uint32_t keys) {
+        SketchObject* target = document_->findById(widthObject_);
+        if (target == nullptr || widthIndex_ >= target->strokeOptions().widths.size()) {
+            return;
+        }
+        std::vector<WidthPoint> widths = target->strokeOptions().widths;
+        WidthPoint& point = widths[widthIndex_];
+        if (widthMode_ == WidthMode::Slide) {
+            double t = 0.0, distance = 0.0;
+            if (!target->nearestOnPath(dragNowDoc_, t, distance)) {
+                return;
+            }
+            double lo = widthIndex_ > 0 ? widths[widthIndex_ - 1].t + 0.001 : 0.0;
+            double hi = widthIndex_ + 1 < widths.size() ? widths[widthIndex_ + 1].t - 0.001 : 1.0;
+            point.t = std::min(hi, std::max(lo, t));
+        } else {
+            BLPoint p, n;
+            if (!target->pathSample(point.t, p, n)) {
+                return;
+            }
+            // How far the pointer is out from the path along the normal, in units of half the stroke weight.
+            double half = std::max(target->strokeWidth() * 0.5, 1e-6);
+            double out = ((dragNowDoc_.x - p.x) * n.x + (dragNowDoc_.y - p.y) * n.y) / half;
+            if (widthMode_ == WidthMode::Both) {
+                point.left = point.right = std::fabs(out);
+            } else if (widthMode_ == WidthMode::Left) {
+                point.left = std::max(0.0, out);
+            } else {
+                point.right = std::max(0.0, -out);
+            }
+            (void)keys;
+        }
+        dragMoved_ = true;
+        setWidths(widths);
+    }
+
+    void CanvasView::finishWidthDrag() {
+        if (!widthBefore_.empty()) {
+            document_->commitStyle(widthBefore_, widthWhat_);
+        }
+        widthBefore_.clear();
+    }
+
+    void CanvasView::cancelWidthDrag() {
+        for (const StyleState& before : widthBefore_) {
+            if (SketchObject* object = document_->findById(before.id)) {
+                before.applyTo(*object);
+            }
+        }
+        widthBefore_.clear();
+        document_->touch();
+    }
+
+    void CanvasView::paintWidthOverlay(BLContext& ctx) const {
+        const SketchObject* target = widthTarget();
+        if (target == nullptr) {
+            return;
+        }
+        const BLRgba32 accent(0xFF1E6FE0u);
+        ctx.set_stroke_width(1.0);
+        ctx.set_stroke_style(accent);
+        for (const WidthPoint& point : target->strokeOptions().widths) {
+            BLPoint c, l, r;
+            if (!widthHandles(*target, point, c, l, r)) {
+                continue;
+            }
+            BLPath span;
+            span.move_to(l.x, l.y);
+            span.line_to(r.x, r.y);
+            ctx.stroke_path(span);
+            ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
+            for (const BLPoint& h : {l, r}) {
+                ctx.fill_rect(BLRect(h.x - 3.0, h.y - 3.0, 6.0, 6.0));
+                ctx.stroke_rect(BLRect(h.x - 3.0, h.y - 3.0, 6.0, 6.0));
+            }
+            BLPath diamond;
+            diamond.move_to(c.x, c.y - 5.0);
+            diamond.line_to(c.x + 5.0, c.y);
+            diamond.line_to(c.x, c.y + 5.0);
+            diamond.line_to(c.x - 5.0, c.y);
+            diamond.close();
+            ctx.fill_path(diamond);
+            ctx.stroke_path(diamond);
+        }
     }
 
     // ---- Gradient tool ----
@@ -946,7 +1211,7 @@ namespace sketch {
         // Otherwise a drag lays a new axis across the selection; clicking an unselected object selects it first.
         SketchObject* hit = document_->hitTest(dragStartDoc_, 4.0 / double(zoom_));
         if (hit != nullptr && !document_->isSelected(hit->id())) {
-            document_->setSelection({hit->id()});
+            document_->setSelection(document_->withGroupMembers({hit->id()}));
         }
         gradientBefore_ = document_->snapshotStyle();
         if (gradientBefore_.empty()) {
@@ -1065,8 +1330,7 @@ namespace sketch {
     void CanvasView::cancelGradientDrag() {
         for (const StyleState& before : gradientBefore_) {
             if (SketchObject* object = document_->findById(before.id)) {
-                object->setFill(before.fill);
-                object->setStroke(before.stroke);
+                before.applyTo(*object);
             }
         }
         gradientBefore_.clear();

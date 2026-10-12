@@ -6,7 +6,9 @@
 #include <newui/delegate.h>
 #include <newui/frame.h>
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace sketch {
 
@@ -29,12 +31,24 @@ namespace sketch {
         bool open(const std::string& path = std::string());
         bool save();
         bool saveAs();
+        // File > Document Setup: change the page size, resolution, color mode and background of this document
+        // (the color mode converts the artwork, as one undo step).
+        bool documentSetup();
         // True when it is fine to close the window / leave the app: nothing unsaved, or saved/discarded.
         bool canClose();
 
         // What an unsaved document is called ("Untitled-1" from the New Document dialog) - the title bar,
         // the "save changes?" question and Save As's suggested file name use it.
         const std::string& untitledName() const { return untitledName_; }
+
+        // The files opened or saved most recently, newest first (at most kMaxRecent), kept in a text file in the
+        // user's roaming data folder between runs. A file that cannot be opened is dropped from the list.
+        static constexpr std::size_t kMaxRecent = 8;
+        const std::vector<std::string>& recentFiles() const { return recent_; }
+        void clearRecentFiles();
+        // Where the list is kept (for tests); loads the list from there.
+        void setRecentFilesPath(const std::string& path);
+        newui::Delegate<SketchDocumentController> onRecentChanged;
 
         // The file name (or Untitled) with a * while modified - what the title bar shows after "sketch - ".
         std::string displayName() const;
@@ -48,6 +62,9 @@ namespace sketch {
         // After New or Open replaced the document's content (the view should refit, etc.).
         StateDelegate onDocumentReplaced;
 
+        // Replaces the error message box (for tests and headless runs); an empty function restores it.
+        void setErrorReporter(std::function<void(const std::string&)> reporter) { errorReporter_ = std::move(reporter); }
+
     protected:
         newui::UnsavedChangesChoice askUnsavedChanges(newui::Document& document) override;
         std::string chooseSavePath(newui::Document& document) override;
@@ -58,6 +75,13 @@ namespace sketch {
         SketchDocument& document_;
         newui::Frame& frame_;
         std::string untitledName_ = "Untitled";
+        std::function<void(const std::string&)> errorReporter_;
+        void remember(const std::string& path);
+        void forget(const std::string& path);
+        void loadRecent();
+        void saveRecent() const;
+        std::vector<std::string> recent_;
+        std::string recentPath_;
     };
 
 }
