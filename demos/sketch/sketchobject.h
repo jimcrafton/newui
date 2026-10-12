@@ -33,6 +33,37 @@ namespace sketch {
         double angleDegrees = 0.0;
         GradientSpread spread = GradientSpread::Pad;
 
+        // An explicit axis, set by the Gradient tool or read from a file: two points kept as fractions of the
+        // object's bounding box (0,0 = top-left, 1,1 = bottom-right, may lie outside), so it too follows its
+        // object. Linear: where the gradient starts (offset 0) and ends (offset 1). Radial: the center and a
+        // point on the outer circle. Without it the axis is derived from angleDegrees and the box (linear:
+        // edge to edge through the center; radial: centered, reaching the box's longer half-side).
+        bool hasAxis = false;
+        double axisX1 = 0.0, axisY1 = 0.5, axisX2 = 1.0, axisY2 = 0.5;
+        // Radial only: the radius across the axis as a multiple of the radius along it (1 = a circle). The
+        // ellipse is turned so its long/short sides line up with the axis direction.
+        double axisAspect = 1.0;
+        // How far the lines of equal color lean away from square to the axis, as the tangent of that lean (0 =
+        // square; a gradient under a skewing transform has it). Linear: the iso-color lines run along
+        // (skew * axis direction + across direction). Radial: the ellipse's across radius leans the same way.
+        double axisSkew = 0.0;
+        // Stroke paints only: the colors run along the stroke's path (by its length) instead of across the
+        // object's bounding box. The axis, angle and radial/linear kind then do not matter.
+        bool alongStroke = false;
+
+        // The matrix that turns the plain gradient (a circle of radius |end - start| around `start`, or the
+        // linear gradient from `start` to `end`) into the ellipse / leaning gradient described by aspect and
+        // skew; identity when there is neither.
+        BLMatrix2D axisMatrix(const BLPoint& start, const BLPoint& end, bool radial) const;
+
+        // The effective axis over `box`, in document units.
+        void axisPoints(const BLBox& box, bool radial, BLPoint& start, BLPoint& end) const;
+        // Fixes the axis to these document points (and, for a linear gradient, the angle to match).
+        void setAxis(const BLBox& box, const BLPoint& start, const BLPoint& end);
+        // Turns the gradient line to `degrees` about its midpoint, keeping its length (a no-op on the axis
+        // itself unless hasAxis); always updates angleDegrees.
+        void setAngle(const BLBox& box, double degrees);
+
         // `color` fading to white - a reasonable starting gradient when a solid fill is switched to one.
         static SketchGradient fromColor(const SketchColor& color);
 
@@ -44,7 +75,10 @@ namespace sketch {
         void reverse();
 
         bool operator==(const SketchGradient& other) const {
-            return angleDegrees == other.angleDegrees && spread == other.spread && stops == other.stops;
+            return angleDegrees == other.angleDegrees && spread == other.spread && stops == other.stops && hasAxis == other.hasAxis &&
+                alongStroke == other.alongStroke &&
+                (!hasAxis || (axisX1 == other.axisX1 && axisY1 == other.axisY1 && axisX2 == other.axisX2 && axisY2 == other.axisY2 &&
+                    axisAspect == other.axisAspect && axisSkew == other.axisSkew));
         }
         bool operator!=(const SketchGradient& other) const { return !(*this == other); }
     };
@@ -84,6 +118,20 @@ namespace sketch {
         SketchGradient gradient_;
     };
 
+    // How the ends and corners of a stroke look (the Stroke panel's Cap / Join / Miter).
+    enum class StrokeCap { Butt, Round, Square };
+    enum class StrokeJoin { Miter, Round, Bevel };
+    // @reflect ignore=true
+    struct StrokeOptions {
+        StrokeCap cap = StrokeCap::Butt;
+        StrokeJoin join = StrokeJoin::Miter;
+        // A miter longer than this many stroke widths is bevelled (Illustrator's default is 10).
+        double miterLimit = 10.0;
+
+        bool operator==(const StrokeOptions& other) const { return cap == other.cap && join == other.join && miterLimit == other.miterLimit; }
+        bool operator!=(const StrokeOptions& other) const { return !(*this == other); }
+    };
+
     enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path };
 
     // One drawable thing. Geometry is kept as a BLPath in document units (points, y down) so
@@ -121,6 +169,8 @@ namespace sketch {
         void setStroke(const SketchPaint& paint) { stroke_ = paint; }
         double strokeWidth() const { return strokeWidth_; }
         void setStrokeWidth(double width);
+        const StrokeOptions& strokeOptions() const { return strokeOptions_; }
+        void setStrokeOptions(const StrokeOptions& options) { strokeOptions_ = options; }
 
         // Whole-object opacity 0..1 (composited over fill+stroke together).
         double opacity() const { return opacity_; }
@@ -169,6 +219,7 @@ namespace sketch {
         SketchPaint fill_ = SketchPaint::solid(SketchColor::gray(1.0f));
         SketchPaint stroke_ = SketchPaint::solid(SketchColor::gray(0.0f));
         double strokeWidth_ = 1.0;
+        StrokeOptions strokeOptions_;
         double opacity_ = 1.0;
         double frameAngle_ = 0.0;
     };

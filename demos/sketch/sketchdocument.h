@@ -41,6 +41,7 @@ namespace sketch {
         SketchPaint stroke;
         double strokeWidth = 1.0;
         double opacity = 1.0;
+        StrokeOptions strokeOptions;
     };
 
     // The oriented box around the selection: `local` is measured in a frame turned by `angle`
@@ -85,6 +86,10 @@ namespace sketch {
         void setPageSize(float width, float height);
         float ppi() const { return ppi_; }
         void setPpi(float ppi);
+        // The page's fill: white by default; nullopt = transparent (shown as a checkerboard, written without a
+        // background rectangle). Not undoable.
+        const std::optional<SketchColor>& pageBackground() const { return pageBackground_; }
+        void setPageBackground(const std::optional<SketchColor>& color);
 
         std::size_t objectCount() const { return objects_.size(); }
         // Back-to-front: index 0 is painted first. Throws std::runtime_error when out of range.
@@ -145,6 +150,25 @@ namespace sketch {
         // Redraw after an edit made directly on an object (drag preview).
         void touch() { changed(); }
 
+        // ---- Arrange / align / transform / lock / hide: each is one undo step on the selection, and returns
+        // false (and records nothing) when it would change nothing ----
+        enum class ArrangeOp { BringToFront, BringForward, SendBackward, SendToBack };
+        // Moves the selected objects within the stacking order (index 0 is the back). Forward/Backward step past
+        // one unselected neighbor, as in Illustrator.
+        bool arrangeSelection(ArrangeOp op);
+        enum class AlignMode { Left, Center, Right, Top, Middle, Bottom };
+        // Aligns the selection's objects to the edge/center of their combined bounds - or, for one object, of the page.
+        bool alignSelection(AlignMode mode);
+        // Turns / mirrors the selection about the center of its bounds (the frame angles follow).
+        bool rotateSelection90(bool clockwise);
+        bool flipSelection(bool horizontal);
+        // Lock/Hide act on the selection (which is then cleared - a locked or hidden object cannot be selected);
+        // Unlock All / Show All act on the whole document.
+        bool lockSelection();
+        bool hideSelection();
+        bool unlockAll();
+        bool showAll();
+
         // ---- Style (fill / stroke / weight / opacity) ----
         // The setters below change the selected objects live, with no undo step - a slider drag calls them
         // many times; the caller then records one step with commitStyle(). With nothing selected the
@@ -154,6 +178,8 @@ namespace sketch {
         void setSelectionStroke(const SketchPaint& paint);
         void setSelectionStrokeWidth(double width);
         void setSelectionOpacity(double opacity);
+        // Cap / join / miter limit of the selection: `change` edits a copy of each object's options.
+        void changeSelectionStrokeOptions(const std::function<void(StrokeOptions&)>& change);
         // Pushes one undo step taking the selection from `before` to its current style; false (and no step)
         // when nothing differs.
         bool commitStyle(const std::vector<StyleState>& before, const std::string& description);
@@ -161,6 +187,8 @@ namespace sketch {
         const SketchPaint& defaultFill() const { return defaultFill_; }
         const SketchPaint& defaultStroke() const { return defaultStroke_; }
         double defaultStrokeWidth() const { return defaultStrokeWidth_; }
+        const StrokeOptions& defaultStrokeOptions() const { return defaultStrokeOptions_; }
+        void setDefaultStrokeOptions(const StrokeOptions& options);
         void setDefaultFill(const SketchPaint& paint);
         void setDefaultStroke(const SketchPaint& paint);
         void setDefaultStrokeWidth(double width);
@@ -200,6 +228,15 @@ namespace sketch {
 
     private:
         void changed();
+        // Puts the objects in the stacking order given by ids (all of them, back to front).
+        void reorder(const std::vector<std::size_t>& ids);
+        // Records a visible/locked change of some objects (already applied) as one undo step.
+        struct FlagState {
+            std::size_t id = 0;
+            bool visible = true;
+            bool locked = false;
+        };
+        bool applyFlags(const std::vector<FlagState>& before, const std::vector<FlagState>& after, const std::string& description);
         // Removes and returns the object (its index is stored in *index); null if not found.
         std::unique_ptr<SketchObject> detach(std::size_t id, std::size_t* index);
         void attach(std::unique_ptr<SketchObject> object, std::size_t index);
@@ -208,11 +245,13 @@ namespace sketch {
         float pageWidth_ = 612.0f;
         float pageHeight_ = 792.0f;
         float ppi_ = 72.0f;
+        std::optional<SketchColor> pageBackground_ = SketchColor::rgb(1.0f, 1.0f, 1.0f);
         std::vector<std::unique_ptr<SketchObject>> objects_;
         std::size_t nextId_ = 1;
         SketchPaint defaultFill_ = SketchPaint::solid(SketchColor::fromHex("#d9e6ff"));
         SketchPaint defaultStroke_ = SketchPaint::solid(SketchColor::fromHex("#2f5fb3"));
         double defaultStrokeWidth_ = 1.5;
+        StrokeOptions defaultStrokeOptions_;
         ColorSpace colorMode_ = ColorSpace::RGB;
         std::vector<std::size_t> selection_;
         std::optional<double> groupAngle_;

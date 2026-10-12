@@ -197,6 +197,8 @@
         <ellipse cx="560" cy="360" rx="70" ry="45" fill="url(#glow)"/>
         <!-- gradient axis handles for the selected gradient object -->
         <g stroke="#0078d4" stroke-width="1" stroke-dasharray="4 3" fill="#fff"><line x1="120" y1="110" x2="240" y2="230"/><circle cx="120" cy="110" r="2.5"/><rect x="237.5" y="227.5" width="5" height="5"/></g>
+        <!-- stop diamonds on the axis (interior stops, in their own color; the selected one has a heavy outline) -->
+        <g stroke="#0078d4" stroke-width="1"><path d="M180 164.5 L185.5 170 L180 175.5 L174.5 170 Z" fill="#e8452c" stroke="#000" stroke-width="2"/></g>
         <path d="M330 300 Q 410 120 510 250 T 680 220" fill="none" stroke="#2f7d4f" stroke-width="6" stroke-linecap="round"/>
         <polygon points="120,420 200,330 280,420" fill="#6a4fc7" fill-opacity=".85"/>
         <rect x="130" y="130" width="130" height="90" fill="#0078d4" opacity=".5"/>
@@ -241,7 +243,8 @@
             <button class="tb" title="Delete stop"><img src="../Resources/icons/stop-delete.svg" alt=""></button>
             <button class="tb" title="Reverse"><img src="../Resources/icons/gradient-reverse.svg" alt=""></button></div>
           <div class="row"><label style="min-width:34px">Type</label><span>Linear</span><label style="min-width:auto;margin-left:10px">Spread</label><select class="field"><option>Pad</option><option>Repeat</option><option>Reflect</option></select></div>
-          <div class="hint2">Drag the dashed handles on the canvas to move the gradient start/end</div>
+          <div class="row" title="Strokes only: run the colors along the stroke's length instead of across the object"><label style="min-width:34px">Apply</label><select class="field"><option>Across the object</option><option>Along the stroke</option></select></div>
+          <div class="hint2">Drag the dashed handles on the canvas to move the gradient start/end; the small diamond reshapes or tilts it</div>
         </div>
         <div class="modes" data-newui="SegmentedControl (color mode of the edited color; follows it, click converts it)"><button>Gray</button><button>RGB</button><button class="on">CMYK</button><button>HSB</button></div>
         <!-- Five rows: comp0..comp3 + alpha. RGB hides the 4th, Gray shows only K, HSB hides the 4th. Ranges: RGB 0-255, CMYK/Gray %, HSB 0-360/%/% -->

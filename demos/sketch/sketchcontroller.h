@@ -22,6 +22,8 @@ namespace sketch {
         SketchDocument& document() { return document_; }
 
         // Each returns false when cancelled or failed (the user has already been told about a failure).
+        // New: asks to save changes, then shows the New Document dialog and starts a document with the chosen
+        // page size, resolution, color mode and background.
         bool newDocument();
         // An empty path asks with the Open dialog.
         bool open(const std::string& path = std::string());
@@ -29,6 +31,10 @@ namespace sketch {
         bool saveAs();
         // True when it is fine to close the window / leave the app: nothing unsaved, or saved/discarded.
         bool canClose();
+
+        // What an unsaved document is called ("Untitled-1" from the New Document dialog) - the title bar,
+        // the "save changes?" question and Save As's suggested file name use it.
+        const std::string& untitledName() const { return untitledName_; }
 
         // The file name (or Untitled) with a * while modified - what the title bar shows after "sketch - ".
         std::string displayName() const;
@@ -51,6 +57,7 @@ namespace sketch {
     private:
         SketchDocument& document_;
         newui::Frame& frame_;
+        std::string untitledName_ = "Untitled";
     };
 
 }

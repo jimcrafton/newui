@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
@@ -118,20 +119,34 @@ namespace sketch {
             if (paint.isGradient() && !paint.gradient().stops.empty() && !degenerate) {
                 const SketchGradient& g = paint.gradient();
                 std::string id = "grad" + std::to_string(++gradientCount);
-                double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
                 const char* spread = g.spread == GradientSpread::Repeat ? "repeat" : (g.spread == GradientSpread::Reflect ? "reflect" : "pad");
-                if (paint.kind() == SketchPaint::Kind::Linear) {
-                    double angle = g.angleDegrees * kPi / 180.0;
-                    double dx = std::cos(angle), dy = std::sin(angle);
-                    double half = (std::fabs(w * dx) + std::fabs(h * dy)) * 0.5;
-                    defs << "<linearGradient id=\"" << id << "\" gradientUnits=\"userSpaceOnUse\" x1=\"" << num(cx - dx * half)
-                         << "\" y1=\"" << num(cy - dy * half) << "\" x2=\"" << num(cx + dx * half) << "\" y2=\"" << num(cy + dy * half)
-                         << "\" spreadMethod=\"" << spread << "\" data-angle=\"" << num(g.angleDegrees) << "\">\n";
+                bool linear = paint.kind() == SketchPaint::Kind::Linear;
+                BLPoint start, end;
+                g.axisPoints(box, !linear, start, end);
+                // data-axis: the explicit axis as box fractions, so reading it back keeps it tied to the object.
+                std::string axis;
+                if (g.hasAxis) {
+                    axis = " data-axis=\"" + num(g.axisX1) + " " + num(g.axisY1) + " " + num(g.axisX2) + " " + num(g.axisY2) + "\"";
+                }
+                // The squash (radial aspect) and lean (skew) go out as a standard gradientTransform so other viewers
+                // draw them too, plus our own numbers to read back exactly.
+                std::string shape;
+                if (g.hasAxis && (g.axisSkew != 0.0 || (!linear && g.axisAspect != 1.0))) {
+                    BLMatrix2D m = g.axisMatrix(start, end, !linear);
+                    shape = " gradientTransform=\"matrix(" + num(m.m00) + " " + num(m.m01) + " " + num(m.m10) + " " + num(m.m11) + " " +
+                        num(m.m20) + " " + num(m.m21) + ")\" data-aspect=\"" + num(g.axisAspect) + "\" data-skew=\"" + num(g.axisSkew) + "\"";
+                }
+                if (g.alongStroke) {
+                    shape += " data-along-stroke=\"1\"";
+                }
+                if (linear) {
+                    defs << "<linearGradient id=\"" << id << "\" gradientUnits=\"userSpaceOnUse\" x1=\"" << num(start.x)
+                         << "\" y1=\"" << num(start.y) << "\" x2=\"" << num(end.x) << "\" y2=\"" << num(end.y)
+                         << "\" spreadMethod=\"" << spread << "\" data-angle=\"" << num(g.angleDegrees) << "\"" << axis << shape << ">\n";
                 } else {
-                    double radius = std::max(w, h) * 0.5;
-                    defs << "<radialGradient id=\"" << id << "\" gradientUnits=\"userSpaceOnUse\" cx=\"" << num(cx) << "\" cy=\"" << num(cy)
-                         << "\" fx=\"" << num(cx) << "\" fy=\"" << num(cy) << "\" r=\"" << num(radius)
-                         << "\" spreadMethod=\"" << spread << "\">\n";
+                    defs << "<radialGradient id=\"" << id << "\" gradientUnits=\"userSpaceOnUse\" cx=\"" << num(start.x) << "\" cy=\"" << num(start.y)
+                         << "\" fx=\"" << num(start.x) << "\" fy=\"" << num(start.y) << "\" r=\"" << num(std::hypot(end.x - start.x, end.y - start.y))
+                         << "\" spreadMethod=\"" << spread << "\"" << axis << shape << ">\n";
                 }
                 for (const GradientStop& stop : g.stops) {
                     defs << "  ";
@@ -852,24 +867,86 @@ namespace sketch {
                                 gradient.spread = *spread == "repeat" ? GradientSpread::Repeat
                                     : (*spread == "reflect" ? GradientSpread::Reflect : GradientSpread::Pad);
                             }
-                            if (g.name == "radialGradient") {
-                                return SketchPaint::radial(gradient);
-                            }
-                            if (g.name == "linearGradient") {
+                            bool linear = g.name == "linearGradient";
+                            if (linear || g.name == "radialGradient") {
                                 if (const std::string* angle = g.attr("data-angle")) {
                                     gradient.angleDegrees = number(angle, 0.0);
-                                } else {
-                                    bool bbox = !(g.attr("gradientUnits") != nullptr && *g.attr("gradientUnits") == "userSpaceOnUse");
-                                    double x1 = number(g.attr("x1"), 0.0), y1 = number(g.attr("y1"), 0.0);
-                                    double x2 = number(g.attr("x2"), 1.0), y2 = number(g.attr("y2"), 0.0);
-                                    double dx = x2 - x1, dy = y2 - y1;
-                                    if (bbox) {
-                                        dx *= w;
-                                        dy *= h;
-                                    }
-                                    gradient.angleDegrees = std::atan2(dy, dx) * 180.0 / kPi;
                                 }
-                                return SketchPaint::linear(gradient);
+                                if (const std::string* along = g.attr("data-along-stroke")) {
+                                    gradient.alongStroke = *along == "1";
+                                }
+                                std::vector<double> axis;
+                                if (const std::string* own = g.attr("data-axis")) {
+                                    axis = numberList(*own);
+                                }
+                                if (axis.size() == 4) {  // our own file: the axis as box fractions
+                                    gradient.hasAxis = true;
+                                    gradient.axisX1 = axis[0];
+                                    gradient.axisY1 = axis[1];
+                                    gradient.axisX2 = axis[2];
+                                    gradient.axisY2 = axis[3];
+                                    if (const std::string* aspect = g.attr("data-aspect")) {
+                                        gradient.axisAspect = number(aspect, 1.0);
+                                    }
+                                    if (const std::string* skew = g.attr("data-skew")) {
+                                        gradient.axisSkew = number(skew, 0.0);
+                                    }
+                                    if (const std::string* along = g.attr("data-along-stroke")) {
+                                        gradient.alongStroke = *along == "1";
+                                    }
+                                } else if (g.attr("data-angle") == nullptr && w > 1e-9 && h > 1e-9) {
+                                    // A foreign gradient: keep its vector, as box fractions. Everything is taken to user space
+                                    // first (through gradientTransform, and the box for objectBoundingBox units).
+                                    bool bbox = !(g.attr("gradientUnits") != nullptr && *g.attr("gradientUnits") == "userSpaceOnUse");
+                                    BLMatrix2D t = identity();
+                                    if (const std::string* text = g.attr("gradientTransform")) {
+                                        t = parseTransform(*text);
+                                    }
+                                    auto user = [&](double x, double y) {
+                                        BLPoint p = t.map_point(x, y);
+                                        return bbox ? BLPoint(box.x0 + p.x * w, box.y0 + p.y * h) : p;
+                                    };
+                                    auto userVector = [&](double x, double y) {
+                                        BLPoint v = t.map_vector(x, y);
+                                        return bbox ? BLPoint(v.x * w, v.y * h) : v;
+                                    };
+                                    gradient.hasAxis = true;
+                                    BLPoint start, end, across;  // across: where the gradient's perpendicular goes in user space
+                                    if (linear) {
+                                        double x1 = number(g.attr("x1"), 0.0), y1 = number(g.attr("y1"), 0.0);
+                                        double x2 = number(g.attr("x2"), bbox ? 1.0 : box.x1), y2 = number(g.attr("y2"), 0.0);
+                                        start = user(x1, y1);
+                                        end = user(x2, y2);
+                                        across = userVector(-(y2 - y1), x2 - x1);
+                                        gradient.angleDegrees = std::atan2(end.y - start.y, end.x - start.x) * 180.0 / kPi;
+                                    } else {
+                                        double cx = number(g.attr("cx"), bbox ? 0.5 : box.x0 + w * 0.5);
+                                        double cy = number(g.attr("cy"), bbox ? 0.5 : box.y0 + h * 0.5);
+                                        double r = number(g.attr("r"), bbox ? 0.5 : std::max(w, h) * 0.5);
+                                        start = user(cx, cy);
+                                        BLPoint alongVector = userVector(r, 0.0);
+                                        across = userVector(0.0, r);
+                                        end = BLPoint(start.x + alongVector.x, start.y + alongVector.y);
+                                    }
+                                    // Split the perpendicular into a part along the axis (the lean) and a part square to it (the
+                                    // radial aspect): a skewing or non-uniform transform shows up as lean.
+                                    double axisLength = std::hypot(end.x - start.x, end.y - start.y);
+                                    if (axisLength > 1e-9) {
+                                        double ux = (end.x - start.x) / axisLength, uy = (end.y - start.y) / axisLength;
+                                        double wu = across.x * ux + across.y * uy, wv = -across.x * uy + across.y * ux;
+                                        if (std::fabs(wv) > 1e-9) {
+                                            gradient.axisSkew = wu / wv;
+                                            if (!linear) {
+                                                gradient.axisAspect = std::fabs(wv) / axisLength;
+                                            }
+                                        }
+                                    }
+                                    gradient.axisX1 = (start.x - box.x0) / w;
+                                    gradient.axisY1 = (start.y - box.y0) / h;
+                                    gradient.axisX2 = (end.x - box.x0) / w;
+                                    gradient.axisY2 = (end.y - box.y0) / h;
+                                }
+                                return linear ? SketchPaint::linear(gradient) : SketchPaint::radial(gradient);
                             }
                         }
                     }
@@ -995,6 +1072,9 @@ namespace sketch {
                 }
                 return;
             }
+            if (const std::string* id = node.attr("id"); id != nullptr && *id == "pageBackground") {
+                return;  // the page color is carried by data-page-background
+            }
             SketchObjectType type = SketchObjectType::Path;
             std::unique_ptr<SketchObject> object(makeShape(node, type));
             if (!object) {
@@ -1018,6 +1098,15 @@ namespace sketch {
             // A scaling transform scales the stroke too.
             double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
             object->setStrokeWidth(std::max(0.0, strokeWidth * (scale > 1e-9 ? scale : 1.0)));
+            StrokeOptions strokeOptions;
+            if (const std::string* cap = style.get("stroke-linecap")) {
+                strokeOptions.cap = *cap == "round" ? StrokeCap::Round : (*cap == "square" ? StrokeCap::Square : StrokeCap::Butt);
+            }
+            if (const std::string* join = style.get("stroke-linejoin")) {
+                strokeOptions.join = *join == "round" ? StrokeJoin::Round : (*join == "bevel" ? StrokeJoin::Bevel : StrokeJoin::Miter);
+            }
+            strokeOptions.miterLimit = std::max(1.0, number(style.get("stroke-miterlimit"), 4.0));
+            object->setStrokeOptions(strokeOptions);
             if (const std::string* strokeOpacity = style.get("stroke-opacity")) {
                 // Folded into the stroke's alpha when it is a solid color.
                 if (object->stroke().kind() == SketchPaint::Kind::Solid) {
@@ -1068,6 +1157,16 @@ namespace sketch {
             body << paintAttrs("stroke", object.stroke(), box, defs, gradientCount);
             if (!object.stroke().isNone()) {
                 body << " stroke-width=\"" << num(object.strokeWidth()) << "\"";
+                const StrokeOptions& options = object.strokeOptions();
+                if (options.cap != StrokeCap::Butt) {
+                    body << " stroke-linecap=\"" << (options.cap == StrokeCap::Round ? "round" : "square") << "\"";
+                }
+                if (options.join != StrokeJoin::Miter) {
+                    body << " stroke-linejoin=\"" << (options.join == StrokeJoin::Round ? "round" : "bevel") << "\"";
+                }
+                if (options.miterLimit != 4.0) {  // 4 is SVG's default
+                    body << " stroke-miterlimit=\"" << num(options.miterLimit) << "\"";
+                }
             }
             if (object.opacity() < 1.0) {
                 body << " opacity=\"" << num(object.opacity()) << "\"";
@@ -1085,10 +1184,18 @@ namespace sketch {
         out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
         out << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << num(document.pageWidth()) << "pt\" height=\"" << num(document.pageHeight())
             << "pt\" viewBox=\"0 0 " << num(document.pageWidth()) << " " << num(document.pageHeight()) << "\" data-ppi=\"" << num(document.ppi())
-            << "\" data-color-mode=\"" << (document.colorMode() == ColorSpace::CMYK ? "cmyk" : "rgb") << "\">\n";
+            << "\" data-color-mode=\"" << (document.colorMode() == ColorSpace::CMYK ? "cmyk" : "rgb")
+            << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\">\n";
         std::string defsText = defs.str();
         if (!defsText.empty()) {
             out << "<defs>\n" << defsText << "</defs>\n";
+        }
+        if (document.pageBackground()) {
+            // A real rectangle so other viewers show the page color; the reader recognizes it by its id and skips it.
+            std::ostringstream unused;
+            int none = 0;
+            out << "<rect id=\"pageBackground\" width=\"" << num(document.pageWidth()) << "\" height=\"" << num(document.pageHeight()) << "\""
+                << paintAttrs("fill", SketchPaint::solid(*document.pageBackground()), BLBox(0, 0, 0, 0), unused, none) << "/>\n";
         }
         out << body.str();
         out << "</svg>\n";
@@ -1132,6 +1239,16 @@ namespace sketch {
             if (value > 0.0) {
                 document.setPpi(float(value));
             }
+        }
+        if (const std::string* background = root->attr("data-page-background")) {
+            SketchColor color;
+            if (*background == "none") {
+                document.setPageBackground(std::nullopt);
+            } else if (parseNativeColor(background, 1.0f, color)) {
+                document.setPageBackground(color);
+            }
+        } else {
+            document.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
         }
         if (const std::string* mode = root->attr("data-color-mode")) {
             document.setColorMode(*mode == "cmyk" ? ColorSpace::CMYK : ColorSpace::RGB);

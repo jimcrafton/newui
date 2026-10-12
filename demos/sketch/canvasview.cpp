@@ -1,4 +1,4 @@
-#include "canvasview.h"
+﻿#include "canvasview.h"
 
 #include <newui/newui.h>
 #include <newui/color.h>
@@ -81,6 +81,26 @@ namespace sketch {
         }
         tool_ = tool;
         drag_ = Drag::None;
+        switch (tool) {  // the system cursor that best says what a drag will do
+            case SketchTool::Rectangle:
+            case SketchTool::Ellipse:
+            case SketchTool::Line:
+            case SketchTool::Pen:
+            case SketchTool::Pencil:
+            case SketchTool::Gradient:
+            case SketchTool::Zoom:
+                cursor().setCursorKind(CursorKind::Cross);
+                break;
+            case SketchTool::Text:
+                cursor().setCursorKind(CursorKind::IBeam);
+                break;
+            case SketchTool::Hand:
+                cursor().setCursorKind(CursorKind::Hand);
+                break;
+            default:
+                cursor().setCursorKind(CursorKind::Arrow);
+                break;
+        }
         style().markDirty();
         onToolChanged(*this);
     }
@@ -149,7 +169,12 @@ namespace sketch {
             return SyncReturn::Handled;
         }
         if (tool_ == SketchTool::Rectangle || tool_ == SketchTool::Ellipse || tool_ == SketchTool::Line) {
+            dragStartDoc_ = snapPoint(dragStartDoc_);
             drag_ = Drag::Draw;
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Gradient) {
+            beginGradientDrag(pt, keys);
             return SyncReturn::Handled;
         }
         if (tool_ != SketchTool::Select) {
@@ -179,6 +204,7 @@ namespace sketch {
             }
             if (document_->isSelected(hit->id())) {
                 drag_ = Drag::Move;
+                document_->selectionBounds(dragBounds_);
                 dragBefore_ = document_->snapshotSelection();
                 dragFrameBefore_ = document_->frameState();
                 document_->selectionFrame(dragFrame_);
@@ -266,6 +292,22 @@ namespace sketch {
                 if (shift) {  // constrain to the dominant axis
                     if (std::fabs(dx) > std::fabs(dy)) { dy = 0.0; } else { dx = 0.0; }
                 }
+                if (snapToGrid_) {  // an edge or the middle of the selection's box jumps onto a grid line
+                    auto pull = [this](double lo, double hi, double delta) {
+                        double best = delta, bestGap = 1e30;
+                        for (double edge : {lo, (lo + hi) * 0.5, hi}) {
+                            double snapped = snapValue(edge + delta);
+                            double gap = std::fabs(snapped - (edge + delta));
+                            if (gap > 0.0 && gap < bestGap) {
+                                bestGap = gap;
+                                best = snapped - edge;
+                            }
+                        }
+                        return best;
+                    };
+                    if (!shift || dx != 0.0) { dx = pull(dragBounds_.x0, dragBounds_.x1, dx); }
+                    if (!shift || dy != 0.0) { dy = pull(dragBounds_.y0, dragBounds_.y1, dy); }
+                }
                 applyToSelection(BLMatrix2D::make_translation(dx, dy));
                 break;
             }
@@ -281,6 +323,10 @@ namespace sketch {
                 bool movesBottom = (h == 4 || h == 5 || h == 6);
                 double ax = movesLeft ? box.x1 : box.x0;
                 double ay = movesTop ? box.y1 : box.y0;
+                if ((keys & kmAlt) != 0) {  // Alt: scale about the center instead of the opposite side
+                    ax = (box.x0 + box.x1) * 0.5;
+                    ay = (box.y0 + box.y1) * 0.5;
+                }
                 double grabX = movesLeft ? box.x0 : box.x1;
                 double grabY = movesTop ? box.y0 : box.y1;
                 double sx = 1.0, sy = 1.0;
@@ -393,10 +439,22 @@ namespace sketch {
             case Drag::Origin:
                 document_->setSelectionOrigin(dragFrame_, dragNowDoc_);
                 break;
-            case Drag::Marquee:
-            case Drag::Draw:
+            case Drag::Draw: {
+                dragNowDoc_ = snapPoint(dragNowDoc_);  // the rubber band shows the snapped corner too
+                BLPoint snapped = toView(dragNowDoc_);
+                dragNowView_ = Point(float(snapped.x), float(snapped.y));
                 dragMoved_ = true;
                 style().markDirty();
+                break;
+            }
+            case Drag::Marquee:
+                dragMoved_ = true;
+                style().markDirty();
+                break;
+            case Drag::GradientNew:
+            case Drag::GradientEnd:
+            case Drag::GradientStop:
+                updateGradientDrag(keys);
                 break;
             case Drag::None:
                 break;
@@ -469,6 +527,7 @@ namespace sketch {
                     line->setName("Line");
                     line->setStroke(document_->defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : document_->defaultStroke());
                     line->setStrokeWidth(document_->defaultStrokeWidth());
+                    line->setStrokeOptions(document_->defaultStrokeOptions());
                     document_->addUndoable(line, "Draw Line");
                     break;
                 }
@@ -488,9 +547,15 @@ namespace sketch {
                 shape->setFill(document_->defaultFill());
                 shape->setStroke(document_->defaultStroke());
                 shape->setStrokeWidth(document_->defaultStrokeWidth());
+                shape->setStrokeOptions(document_->defaultStrokeOptions());
                 document_->addUndoable(shape, tool_ == SketchTool::Ellipse ? "Draw Ellipse" : "Draw Rectangle");
                 break;
             }
+            case Drag::GradientNew:
+            case Drag::GradientEnd:
+            case Drag::GradientStop:
+                finishGradientDrag();
+                break;
             case Drag::None:
                 break;
         }
@@ -499,6 +564,8 @@ namespace sketch {
     }
 
     SyncReturn CanvasView::handleMouseMove(View& /*sender*/, const Point& pt, std::uint32_t /*buttons*/, std::uint32_t keys) {
+        pointerDoc_ = toDocument(pt);
+        onPointerMoved(*this);
         if (panning_) {
             setPan(panStartX_ + (pt.x - panAnchor_.x), panStartY_ + (pt.y - panAnchor_.y));
             return SyncReturn::Handled;
@@ -507,7 +574,42 @@ namespace sketch {
             updateDrag(pt, keys);
             return SyncReturn::Handled;
         }
+        updateHoverCursor(pt);
         return SyncReturn::Ignored;
+    }
+
+    namespace {
+        // The two-headed arrow along the direction (dx, dy), in 45 degree steps - so a handle of a turned frame
+        // shows the arrow that matches how it will actually stretch.
+        CursorKind resizeCursorFor(double dx, double dy) {
+            double steps = std::atan2(dy, dx) / (3.14159265358979323846 / 4.0);
+            int k = ((int(std::lround(steps)) % 4) + 4) % 4;  // 0 = horizontal, 1 = down-right, 2 = vertical, 3 = up-right
+            static const CursorKind kKinds[4] = {CursorKind::SizeWE, CursorKind::SizeNWSE, CursorKind::SizeNS, CursorKind::SizeNESW};
+            return kKinds[k];
+        }
+    }
+
+    // With the Select tool the pointer shows what the handle under it does; other tools keep their own cursor.
+    void CanvasView::updateHoverCursor(const Point& pt) {
+        if (tool_ != SketchTool::Select || document_ == nullptr) {
+            return;
+        }
+        CursorKind kind = CursorKind::Arrow;
+        SelectionFrame frame;
+        int handle = hitHandle(pt);
+        if (handle >= 0 && document_->selectionFrame(frame)) {
+            if (handle == kOriginHandle) {
+                kind = CursorKind::SizeAll;
+            } else if (handle == kRotateHandle) {
+                kind = CursorKind::Hand;
+            } else {
+                BLPoint center = toView(frame.pointAt(0.5, 0.5)), at = handlePosition(handle, frame);
+                kind = resizeCursorFor(at.x - center.x, at.y - center.y);
+            }
+        }
+        if (cursorKind() != kind) {
+            cursor().setCursorKind(kind);
+        }
     }
 
     SyncReturn CanvasView::handleMouseUp(View& /*sender*/, const Point& pt, std::uint32_t /*buttons*/, std::uint32_t keys) {
@@ -557,7 +659,9 @@ namespace sketch {
         }
         if (vkCode == vkEscape) {
             if (drag_ != Drag::None) {  // cancel an in-progress drag, restoring the outlines
-                if (!dragBefore_.empty()) {
+                if (drag_ == Drag::GradientNew || drag_ == Drag::GradientEnd || drag_ == Drag::GradientStop) {
+                    cancelGradientDrag();
+                } else if (!dragBefore_.empty()) {
                     applyToSelection(BLMatrix2D::make_identity());
                 }
                 drag_ = Drag::None;
@@ -622,7 +726,7 @@ namespace sketch {
         SelectionFrame frame;
         if (document_->selectionFrame(frame)) {
             ctx.stroke_path(frameOutline(frame));
-            if (drag_ != Drag::Marquee && drag_ != Drag::Draw) {
+            if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient) {
                 BLPoint knob = handlePosition(kRotateHandle, frame);
                 BLPoint topCenter = handlePosition(1, frame);
                 BLPath stem;
@@ -649,7 +753,7 @@ namespace sketch {
 
         // The transform origin: a ringed dot (drag it to move the rotate/shear pivot).
         SelectionFrame originFrame;
-        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && document_->selectionFrame(originFrame)) {
+        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && document_->selectionFrame(originFrame)) {
             BLPoint o = handlePosition(kOriginHandle, originFrame);
             BLPath ring;
             ring.add_circle(BLCircle(o.x, o.y, 4.5));
@@ -664,6 +768,10 @@ namespace sketch {
             ctx.stroke_path(cross);
             ctx.set_fill_style(accent);
             ctx.fill_circle(BLCircle(o.x, o.y, 1.6));
+        }
+
+        if (tool_ == SketchTool::Gradient) {
+            paintGradientOverlay(ctx);
         }
 
         // Rubber band for marquee / shape being drawn.
@@ -689,6 +797,392 @@ namespace sketch {
                     ctx.stroke_rect(band);
                 }
             }
+        }
+        ctx.restore();
+    }
+
+    // ---- Gradient tool ----
+
+    SketchObject* CanvasView::gradientTarget() const {
+        if (document_ == nullptr || document_->selection().size() != 1) {
+            return nullptr;
+        }
+        SketchObject* object = document_->findById(document_->selection().front());
+        return object != nullptr && gradientPaint(*object).isGradient() && !gradientPaint(*object).gradient().stops.empty() ? object : nullptr;
+    }
+
+    bool CanvasView::gradientAxisView(const SketchObject& object, BLPoint& start, BLPoint& end) const {
+        const SketchPaint& fill = gradientPaint(object);
+        if (!fill.isGradient()) {
+            return false;
+        }
+        BLPoint a, b;
+        fill.gradient().axisPoints(object.geometryBounds(), fill.kind() == SketchPaint::Kind::Radial, a, b);
+        start = toView(a);
+        end = toView(b);
+        return true;
+    }
+
+    BLPoint CanvasView::aspectHandle(const BLPoint& center, const BLPoint& end, double aspect, double skew) {
+        double dx = end.x - center.x, dy = end.y - center.y;
+        return BLPoint(center.x + (-dy + skew * dx) * aspect, center.y + (dx + skew * dy) * aspect);
+    }
+
+    BLPoint CanvasView::tiltHandle(const BLPoint& start, const BLPoint& end, double skew) {
+        double dx = end.x - start.x, dy = end.y - start.y, len = std::hypot(dx, dy);
+        if (len < 1e-9) {
+            return BLPoint((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+        }
+        double ux = dx / len, uy = dy / len;
+        double lx = skew * ux - uy, ly = skew * uy + ux;  // skew * along + across
+        double ll = std::hypot(lx, ly);
+        return BLPoint((start.x + end.x) * 0.5 + lx / ll * 28.0, (start.y + end.y) * 0.5 + ly / ll * 28.0);
+    }
+
+    void CanvasView::setGradientOnStroke(bool stroke) {
+        if (stroke != gradientOnStroke_) {
+            gradientOnStroke_ = stroke;
+            style().markDirty();
+        }
+    }
+
+    void CanvasView::setSelectedGradientStop(std::size_t index) {
+        gradientSelectedStop_ = index;
+        style().markDirty();
+    }
+
+    namespace {
+        // `p` moved onto the nearest 45 degree direction from `anchor`, keeping its distance.
+        BLPoint snapTo45(const BLPoint& anchor, const BLPoint& p) {
+            double step = 3.14159265358979323846 / 4.0;
+            double len = std::hypot(p.x - anchor.x, p.y - anchor.y);
+            double angle = std::round(std::atan2(p.y - anchor.y, p.x - anchor.x) / step) * step;
+            return BLPoint(anchor.x + len * std::cos(angle), anchor.y + len * std::sin(angle));
+        }
+    }
+
+    void CanvasView::beginGradientDrag(const Point& pt, std::uint32_t keys) {
+        dragMoved_ = false;
+        gradientBefore_ = document_->snapshotStyle();
+        if (SketchObject* target = gradientTarget()) {
+            BLPoint a, b;
+            gradientAxisView(*target, a, b);
+            SketchGradient gradient = gradientPaint(*target).gradient();
+            bool radial = gradientPaint(*target).kind() == SketchPaint::Kind::Radial;
+            double px = double(pt.x), py = double(pt.y);
+            auto closeTo = [&](const BLPoint& p) {
+                return std::fabs(px - p.x) <= kHandleHit + 2.0 && std::fabs(py - p.y) <= kHandleHit + 2.0;
+            };
+            auto at = [&](double t) { return BLPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t); };
+            // The ends of the axis are handles of their own; every stop strictly between them is draggable.
+            for (std::size_t i = 0; i < gradient.stops.size(); ++i) {
+                double t = gradient.stops[i].offset;
+                if (t <= 0.001 || t >= 0.999 || !closeTo(at(t))) {
+                    continue;
+                }
+                if ((keys & kmAlt) != 0) {
+                    if (gradient.stops.size() > 2) {
+                        gradient.stops.erase(gradient.stops.begin() + std::ptrdiff_t(i));
+                        setGradientPaint(*target, radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient));
+                        document_->touch();
+                        document_->commitStyle(gradientBefore_, "Delete Gradient Stop");
+                        setSelectedGradientStop(std::min(gradientSelectedStop_, gradient.stops.size() - 1));
+                        onGradientStopSelected(*this);
+                    }
+                    drag_ = Drag::None;
+                    return;
+                }
+                drag_ = Drag::GradientStop;
+                gradientStop_ = i;
+                gradientWhat_ = "Move Gradient Stop";
+                setSelectedGradientStop(i);
+                onGradientStopSelected(*this);
+                return;
+            }
+            if (radial && closeTo(aspectHandle(a, b, gradient.hasAxis ? gradient.axisAspect : 1.0, gradient.axisSkew))) {
+                drag_ = Drag::GradientEnd;
+                gradientEnd_ = 2;
+                gradientWhat_ = "Reshape Gradient";
+                return;
+            }
+            if (!radial && closeTo(tiltHandle(a, b, gradient.hasAxis ? gradient.axisSkew : 0.0))) {
+                drag_ = Drag::GradientEnd;
+                gradientEnd_ = 3;
+                gradientWhat_ = "Tilt Gradient";
+                return;
+            }
+            if (closeTo(a) || closeTo(b)) {
+                drag_ = Drag::GradientEnd;
+                gradientEnd_ = closeTo(a) ? 0 : 1;
+                gradientWhat_ = radial ? (gradientEnd_ == 0 ? "Move Gradient Center" : "Resize Gradient") : "Move Gradient Axis";
+                setSelectedGradientStop(gradientEnd_ == 0 ? 0 : gradient.stops.size() - 1);
+                onGradientStopSelected(*this);
+                return;
+            }
+            // A click on the axis adds a stop there (and lets it be dragged on).
+            double dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+            if (len2 > 1.0) {
+                double t = ((px - a.x) * dx + (py - a.y) * dy) / len2;
+                BLPoint on = at(t);
+                if (t > 0.0 && t < 1.0 && std::hypot(px - on.x, py - on.y) <= 4.0) {
+                    gradient.stops.push_back({t, gradient.colorAt(t)});
+                    gradient.sortStops();
+                    for (std::size_t i = 0; i < gradient.stops.size(); ++i) {
+                        if (gradient.stops[i].offset == t) {
+                            gradientStop_ = i;
+                        }
+                    }
+                    setGradientPaint(*target, radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient));
+                    document_->touch();
+                    drag_ = Drag::GradientStop;
+                    gradientWhat_ = "Add Gradient Stop";
+                    setSelectedGradientStop(gradientStop_);
+                    onGradientStopSelected(*this);
+                    return;
+                }
+            }
+        }
+
+        // Otherwise a drag lays a new axis across the selection; clicking an unselected object selects it first.
+        SketchObject* hit = document_->hitTest(dragStartDoc_, 4.0 / double(zoom_));
+        if (hit != nullptr && !document_->isSelected(hit->id())) {
+            document_->setSelection({hit->id()});
+        }
+        gradientBefore_ = document_->snapshotStyle();
+        if (gradientBefore_.empty()) {
+            drag_ = Drag::None;
+            return;
+        }
+        drag_ = Drag::GradientNew;
+        gradientWhat_ = "Gradient";
+    }
+
+    void CanvasView::updateGradientDrag(std::uint32_t keys) {
+        bool shift = (keys & kmShift) != 0;
+        if (gradientBefore_.empty()) {
+            return;
+        }
+        if (drag_ == Drag::GradientNew) {
+            BLPoint a = dragStartDoc_, b = dragNowDoc_;
+            if (!dragMoved_ && std::hypot(b.x - a.x, b.y - a.y) * double(zoom_) < 3.0) {
+                return;  // a click, not yet a drag
+            }
+            dragMoved_ = true;
+            if (shift) {
+                b = snapTo45(a, b);
+            }
+            for (const StyleState& before : gradientBefore_) {
+                SketchObject* object = document_->findById(before.id);
+                if (object == nullptr) {
+                    continue;
+                }
+                SketchGradient gradient;
+                bool radial = false;
+                if (gradientPaint(before).isGradient()) {
+                    gradient = gradientPaint(before).gradient();
+                    radial = gradientPaint(before).kind() == SketchPaint::Kind::Radial;
+                } else {
+                    const SketchPaint& fallback = (gradientOnStroke_ ? document_->defaultStroke() : document_->defaultFill());
+                    gradient = SketchGradient::fromColor(!gradientPaint(before).isNone() ? gradientPaint(before).color()
+                        : (fallback.isNone() ? SketchColor::gray(0.0f) : fallback.color()));
+                }
+                gradient.setAxis(object->geometryBounds(), a, b);
+                setGradientPaint(*object, radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient));
+            }
+            document_->touch();
+            return;
+        }
+
+        SketchObject* object = document_->findById(gradientBefore_.front().id);
+        if (object == nullptr || !gradientPaint(*object).isGradient()) {
+            return;
+        }
+        bool radial = gradientPaint(*object).kind() == SketchPaint::Kind::Radial;
+        SketchGradient gradient = gradientPaint(*object).gradient();
+        BLBox box = object->geometryBounds();
+        BLPoint start, end;
+        gradient.axisPoints(box, radial, start, end);
+        dragMoved_ = true;
+        if (drag_ == Drag::GradientEnd) {
+            BLPoint now = dragNowDoc_;
+            if (gradientEnd_ == 2 || gradientEnd_ == 3) {
+                // The reshaping handles. Work in the axis frame: u along the axis, v across it.
+                double length = std::hypot(end.x - start.x, end.y - start.y);
+                if (length > 1e-9) {
+                    if (!gradient.hasAxis) {
+                        gradient.setAxis(box, start, end);  // make the derived axis explicit before reshaping it
+                    }
+                    double ux = (end.x - start.x) / length, uy = (end.y - start.y) / length;
+                    // Radial: the pointer is the across radius' end, measured from the center; linear: from the middle.
+                    BLPoint origin = gradientEnd_ == 2 ? start : BLPoint((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+                    double qu = (now.x - origin.x) * ux + (now.y - origin.y) * uy;
+                    double qv = -(now.x - origin.x) * uy + (now.y - origin.y) * ux;
+                    if (shift) {
+                        gradient.axisSkew = 0.0;
+                        if (gradientEnd_ == 2) { gradient.axisAspect = 1.0; }
+                    } else if (std::fabs(qv) > 1e-6) {
+                        gradient.axisSkew = std::min(10.0, std::max(-10.0, qu / qv));
+                        if (gradientEnd_ == 2) {
+                            gradient.axisAspect = std::min(8.0, std::max(0.05, std::fabs(qv) / length));
+                        }
+                    }
+                }
+            } else if (gradientEnd_ == 0) {
+                if (radial) {  // the center carries the radius point along
+                    end = BLPoint(end.x + now.x - start.x, end.y + now.y - start.y);
+                    start = now;
+                } else {
+                    start = shift ? snapTo45(end, now) : now;
+                }
+            } else {
+                end = shift && !radial ? snapTo45(start, now) : now;
+            }
+            if (gradientEnd_ < 2) {
+                gradient.setAxis(box, start, end);
+            }
+        } else if (drag_ == Drag::GradientStop && gradientStop_ < gradient.stops.size()) {
+            double dx = end.x - start.x, dy = end.y - start.y, len2 = dx * dx + dy * dy;
+            if (len2 < 1e-9) {
+                return;
+            }
+            double t = ((dragNowDoc_.x - start.x) * dx + (dragNowDoc_.y - start.y) * dy) / len2;
+            // A stop cannot pass its neighbors (the list stays sorted while it moves).
+            double lo = gradientStop_ > 0 ? gradient.stops[gradientStop_ - 1].offset : 0.0;
+            double hi = gradientStop_ + 1 < gradient.stops.size() ? gradient.stops[gradientStop_ + 1].offset : 1.0;
+            gradient.stops[gradientStop_].offset = std::min(hi, std::max(lo, t));
+        }
+        setGradientPaint(*object, radial ? SketchPaint::radial(gradient) : SketchPaint::linear(gradient));
+        document_->touch();
+    }
+
+    void CanvasView::finishGradientDrag() {
+        if (!gradientBefore_.empty()) {
+            document_->commitStyle(gradientBefore_, gradientWhat_);
+        }
+        gradientBefore_.clear();
+    }
+
+    void CanvasView::cancelGradientDrag() {
+        for (const StyleState& before : gradientBefore_) {
+            if (SketchObject* object = document_->findById(before.id)) {
+                object->setFill(before.fill);
+                object->setStroke(before.stroke);
+            }
+        }
+        gradientBefore_.clear();
+        document_->touch();
+    }
+
+    // The target's axis with its stops: the axis end handles are a circle (start / center) and a square (end /
+    // radius point); interior stops are diamonds in their own color.
+    void CanvasView::paintGradientOverlay(BLContext& ctx) const {
+        SketchObject* target = gradientTarget();
+        BLPoint a, b;
+        if (target == nullptr || !gradientAxisView(*target, a, b)) {
+            return;
+        }
+        const SketchGradient& gradient = gradientPaint(*target).gradient();
+        bool radial = gradientPaint(*target).kind() == SketchPaint::Kind::Radial;
+        const BLRgba32 accent(0xFF1E6FE0u), white(0xFFFFFFFFu);
+        ctx.save();
+        if (radial) {
+            // The gradient's circle - an ellipse once it has an aspect, turned to follow the axis.
+            double radius = std::hypot(b.x - a.x, b.y - a.y);
+            BLPath ring;
+            ring.add_circle(BLCircle(a.x, a.y, radius));
+            ring.transform(gradient.axisMatrix(a, b, true));
+            ctx.set_stroke_width(1.0);
+            ctx.set_stroke_style(BLRgba32(0x801E6FE0u));
+            ctx.stroke_path(ring);
+        }
+        BLPath line;
+        line.move_to(a.x, a.y);
+        line.line_to(b.x, b.y);
+        ctx.set_stroke_width(3.0);
+        ctx.set_stroke_style(white);
+        ctx.stroke_path(line);
+        ctx.set_stroke_width(1.0);
+        ctx.set_stroke_style(accent);
+        ctx.stroke_path(line);
+
+        for (std::size_t index = 0; index < gradient.stops.size(); ++index) {
+            const GradientStop& stop = gradient.stops[index];
+            double t = stop.offset;
+            if (t <= 0.001 || t >= 0.999) {
+                continue;
+            }
+            bool selected = index == gradientSelectedStop_;
+            double x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+            BLPath diamond;
+            diamond.move_to(x, y - 5.5);
+            diamond.line_to(x + 5.5, y);
+            diamond.line_to(x, y + 5.5);
+            diamond.line_to(x - 5.5, y);
+            diamond.close();
+            ctx.set_fill_style(stop.color.toRgba32());
+            ctx.fill_path(diamond);
+            ctx.set_stroke_width(3.0);
+            ctx.set_stroke_style(white);
+            ctx.stroke_path(diamond);
+            ctx.set_stroke_width(selected ? 2.0 : 1.0);
+            ctx.set_stroke_style(selected ? BLRgba32(0xFF000000u) : accent);
+            ctx.stroke_path(diamond);
+        }
+        // The end handles show the color of the stop sitting on them.
+        auto endColor = [&](bool first) {
+            for (const GradientStop& stop : gradient.stops) {
+                if (first ? stop.offset <= 0.001 : stop.offset >= 0.999) {
+                    return stop.color.toRgba32();
+                }
+            }
+            return white;
+        };
+        BLPath circle;
+        circle.add_circle(BLCircle(a.x, a.y, 5.5));
+        ctx.set_fill_style(white);
+        ctx.fill_path(circle);
+        ctx.stroke_path(circle);
+        ctx.set_fill_style(endColor(true));
+        ctx.fill_circle(BLCircle(a.x, a.y, 3.0));
+        // A selected end stop is marked by a heavier outline on its handle.
+        if (!gradient.stops.empty() && gradientSelectedStop_ == 0) {
+            ctx.set_stroke_width(2.0);
+            ctx.set_stroke_style(BLRgba32(0xFF000000u));
+            ctx.stroke_path(circle);
+            ctx.set_stroke_width(1.0);
+            ctx.set_stroke_style(accent);
+        }
+        {   // the reshaping handle: radial = where the across radius ends, linear = a tilt for the equal-color lines
+            BLPoint k = radial ? aspectHandle(a, b, gradient.hasAxis ? gradient.axisAspect : 1.0, gradient.axisSkew)
+                               : tiltHandle(a, b, gradient.hasAxis ? gradient.axisSkew : 0.0);
+            if (!radial) {  // a thin line from the middle of the axis shows the direction the equal-color lines take
+                BLPath arm;
+                arm.move_to((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                arm.line_to(k.x, k.y);
+                ctx.set_stroke_width(1.0);
+                ctx.set_stroke_style(accent);
+                ctx.stroke_path(arm);
+            }
+            BLPath mark;
+            mark.move_to(k.x, k.y - 4.5);
+            mark.line_to(k.x + 4.5, k.y);
+            mark.line_to(k.x, k.y + 4.5);
+            mark.line_to(k.x - 4.5, k.y);
+            mark.close();
+            ctx.set_fill_style(white);
+            ctx.fill_path(mark);
+            ctx.stroke_path(mark);
+        }
+        BLRect square(std::floor(b.x) - 5.0, std::floor(b.y) - 5.0, 11.0, 11.0);
+        ctx.set_fill_style(white);
+        ctx.fill_rect(square);
+        ctx.stroke_rect(BLRect(square.x + 0.5, square.y + 0.5, square.w - 1.0, square.h - 1.0));
+        ctx.set_fill_style(endColor(false));
+        ctx.fill_rect(BLRect(square.x + 3.0, square.y + 3.0, square.w - 6.0, square.h - 6.0));
+        if (!gradient.stops.empty() && gradientSelectedStop_ == gradient.stops.size() - 1 && gradientSelectedStop_ != 0) {
+            ctx.set_stroke_width(2.0);
+            ctx.set_stroke_style(BLRgba32(0xFF000000u));
+            ctx.stroke_rect(BLRect(square.x + 0.5, square.y + 0.5, square.w - 1.0, square.h - 1.0));
         }
         ctx.restore();
     }
@@ -732,6 +1226,10 @@ namespace sketch {
     }
 
     void CanvasView::zoomToFit() {
+        if (document_ != nullptr) {  // the page may have been resized by New/Open since the last paint
+            pageWidth_ = document_->pageWidth();
+            pageHeight_ = document_->pageHeight();
+        }
         Rect client = getClientBounds();
         float availW = client.width() - rulerSize() - 40.0f;
         float availH = client.height() - rulerSize() - 40.0f;
@@ -743,6 +1241,19 @@ namespace sketch {
         float fit = fitW < fitH ? fitW : fitH;
         centered_ = true;
         setZoom(fit < kMinZoom ? kMinZoom : (fit > kMaxZoom ? kMaxZoom : fit));
+    }
+
+    void CanvasView::setSnapToGrid(bool value) {
+        snapToGrid_ = value;
+    }
+
+    double CanvasView::snapValue(double value) const {
+        if (!snapToGrid_ || gridSpacing_ <= 0.0f) {
+            return value;
+        }
+        double spacing = double(gridSpacing_);
+        double nearest = std::round(value / spacing) * spacing;
+        return std::fabs(nearest - value) * double(zoom_) <= 6.0 ? nearest : value;
     }
 
     void CanvasView::setShowGrid(bool value) {
@@ -769,6 +1280,10 @@ namespace sketch {
             return;
         }
 
+        if (document_ != nullptr) {
+            pageWidth_ = document_->pageWidth();
+            pageHeight_ = document_->pageHeight();
+        }
         float rulerSize = this->rulerSize();
 
         ctx.save();
@@ -795,8 +1310,24 @@ namespace sketch {
         double pageTop = client.top() + rulerSize + double(panY_);
         double pageW = double(pageWidth_) * double(zoom_);
         double pageH = double(pageHeight_) * double(zoom_);
-        ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
-        ctx.fill_rect(BLRect(pageLeft, pageTop, pageW, pageH));
+        if (document_ != nullptr && !document_->pageBackground()) {
+            // Transparent: a light checkerboard, clipped to the page.
+            ctx.save();
+            ctx.clip_to_rect(BLRect(pageLeft, pageTop, pageW, pageH));
+            ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
+            ctx.fill_rect(BLRect(pageLeft, pageTop, pageW, pageH));
+            ctx.set_fill_style(BLRgba32(0xFFD9D9D9u));
+            const double square = 10.0;
+            for (double y = 0.0, row = 0.0; y < pageH; y += square, row += 1.0) {
+                for (double x = (std::fmod(row, 2.0) == 0.0 ? 0.0 : square), col = 0.0; x < pageW; x += 2.0 * square, col += 1.0) {
+                    ctx.fill_rect(BLRect(pageLeft + x, pageTop + y, square, square));
+                }
+            }
+            ctx.restore();
+        } else {
+            ctx.set_fill_style(document_ != nullptr ? document_->pageBackground()->toRgba32() : BLRgba32(0xFFFFFFFFu));
+            ctx.fill_rect(BLRect(pageLeft, pageTop, pageW, pageH));
+        }
 
         if (showGrid_) {
             double step = double(gridSpacing_) * double(zoom_);

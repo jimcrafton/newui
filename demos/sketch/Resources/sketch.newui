@@ -111,7 +111,10 @@
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Align Left" },
               { type: "MenuItem", text: "Align Center" },
-              { type: "MenuItem", text: "Align Right" }
+              { type: "MenuItem", text: "Align Right" },
+              { type: "MenuItem", text: "Align Top" },
+              { type: "MenuItem", text: "Align Middle" },
+              { type: "MenuItem", text: "Align Bottom" }
             ]
           },
           {
@@ -526,7 +529,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1268 },
+            contentSize: { type: "Size", width: 268, height: 1298 },
             childViews: [
               {
                 type: "SubView",
@@ -540,9 +543,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1268 }
+                      size: { type: "Size", width: 268, height: 1298 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1268 },
+                    desiredSize: { type: "Size", width: 268, height: 1298 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -550,7 +553,7 @@
                         type: "SubView",
                         name: "colorPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 402 },
+                        desiredSize: { type: "Size", width: 268, height: 432 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -610,7 +613,7 @@
                             type: "SubView",
                             name: "colorPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 380 },
+                            desiredSize: { type: "Size", width: 0, height: 410 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -776,6 +779,36 @@
                                     model: {
                                       type: "StringListModel",
                                       items: ["Pad", "Repeat", "Reflect"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "gradientApplyRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Apply",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Apply", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "DropDownList",
+                                    name: "gradientApplyCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 24 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["Across the object", "Along the stroke"]
                                     },
                                     selectedIndex: 0
                                   }

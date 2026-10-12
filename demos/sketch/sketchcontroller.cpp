@@ -1,8 +1,11 @@
 #include "sketchcontroller.h"
 
+#include "newdocumentdialog.h"
+
 #include <newui/dialogs.h>
 
 #include <filesystem>
+#include <optional>
 
 namespace sketch {
 
@@ -15,10 +18,31 @@ namespace sketch {
     }
 
     bool SketchDocumentController::newDocument() {
-        if (!newInto(document_, [this]() { document_.clearObjects(); })) {
+        if (!confirmDiscardChanges(document_)) {
             return false;
         }
-        onStatus(*this, "New document");
+        NewDocumentModel settings;
+        if (!NewDocumentDialog::run(frame_, settings)) {
+            return false;
+        }
+        document_.clearObjects();
+        document_.setPageSize(float(settings.widthPoints()), float(settings.heightPoints()));
+        document_.setPpi(float(settings.ppi()));
+        document_.setColorMode(settings.colorMode());
+        switch (settings.background()) {
+            case PageBackground::Transparent:
+                document_.setPageBackground(std::nullopt);
+                break;
+            case PageBackground::CurrentFill:
+                document_.setPageBackground(document_.defaultFill().isNone() ? SketchColor::rgb(1.0f, 1.0f, 1.0f) : document_.defaultFill().color());
+                break;
+            default:
+                document_.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
+                break;
+        }
+        document_.reset();  // untitled and unmodified
+        untitledName_ = settings.name();
+        onStatus(*this, "New document " + untitledName_);
         onDocumentReplaced(*this);
         onStateChanged(*this);
         return true;
@@ -57,7 +81,7 @@ namespace sketch {
     }
 
     std::string SketchDocumentController::displayName() const {
-        std::string name = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).filename().string() : std::string("Untitled");
+        std::string name = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).filename().string() : untitledName_;
         return name + (document_.isModified() ? " *" : "");
     }
 
@@ -72,7 +96,7 @@ namespace sketch {
     }
 
     newui::UnsavedChangesChoice SketchDocumentController::askUnsavedChanges(newui::Document& document) {
-        std::string name = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : std::string("Untitled");
+        std::string name = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : untitledName_;
         newui::DialogResult answer = newui::Dialog::showMessageBox(frame_.frameHandle(), "Save changes to " + name + "?", "sketch",
             newui::MessageBoxButtons::YesNoCancel, newui::MessageBoxIcon::Question);
         return answer == newui::DialogResult::Yes ? newui::UnsavedChangesChoice::Save
@@ -83,9 +107,7 @@ namespace sketch {
     std::string SketchDocumentController::chooseSavePath(newui::Document& document) {
         newui::FileDialogOptions options = fileOptions();
         options.title = "Save As";
-        if (document.hasFilePath()) {
-            options.defaultFileName = std::filesystem::path(document.filePath()).filename().string();
-        }
+        options.defaultFileName = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : untitledName_ + ".svg";
         std::string path;
         newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
         return path;

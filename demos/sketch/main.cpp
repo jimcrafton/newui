@@ -15,6 +15,7 @@
 
 #include "canvasview.h"
 #include "sketchdocument.h"
+#include "newdocumentdialog.h"
 #include "sketchcontroller.h"
 #include "stylepanel.h"
 #include "newui/controllers.h"
@@ -62,6 +63,7 @@ int main(int argc, char** argv) {
 
     std::string startupPath;
     bool checkOnly = false;
+    bool checkNewDoc = false;
     bool checkTools = false;
     int checkDepth = 4;
     for (int i = 1; i < argc; ++i) {
@@ -70,6 +72,8 @@ int main(int argc, char** argv) {
             checkOnly = true;
         } else if (arg == "--check-tools") {
             checkTools = true;
+        } else if (arg == "--check-newdoc") {
+            checkNewDoc = true;
         } else if (arg.rfind("--depth=", 0) == 0) {
             checkDepth = std::stoi(arg.substr(8));
         } else if (startupPath.empty()) {
@@ -89,6 +93,10 @@ int main(int argc, char** argv) {
     if (!newui::Bundle::instance().loadFrame(frame)) {
         std::printf("sketch: could not load Resources/sketch.newui\n");
         return 1;
+    }
+
+    if (checkNewDoc) {
+        return sketch::NewDocumentDialog::check();
     }
 
     if (checkOnly) {
@@ -296,6 +304,106 @@ int main(int argc, char** argv) {
         onButton("redoButton", redo);
         onButton("deleteButton", del);
 
+        // File buttons on the toolbar are the menu's commands.
+        onButton("newButton", []() { files.newDocument(); });
+        onButton("openButton", []() { files.open(); });
+        onButton("saveButton", []() { files.save(); });
+
+        // Arrange / align / transform / lock / hide: one undo step each (SketchDocument does the work).
+        using Arrange = sketch::SketchDocument::ArrangeOp;
+        using Align = sketch::SketchDocument::AlignMode;
+        onItem("Arrange", "Bring to Front", [doc](newui::MenuItem&) { doc->arrangeSelection(Arrange::BringToFront); });
+        onItem("Arrange", "Bring Forward", [doc](newui::MenuItem&) { doc->arrangeSelection(Arrange::BringForward); });
+        onItem("Arrange", "Send Backward", [doc](newui::MenuItem&) { doc->arrangeSelection(Arrange::SendBackward); });
+        onItem("Arrange", "Send to Back", [doc](newui::MenuItem&) { doc->arrangeSelection(Arrange::SendToBack); });
+        onItem("Arrange", "Align Left", [doc](newui::MenuItem&) { doc->alignSelection(Align::Left); });
+        onItem("Arrange", "Align Center", [doc](newui::MenuItem&) { doc->alignSelection(Align::Center); });
+        onItem("Arrange", "Align Right", [doc](newui::MenuItem&) { doc->alignSelection(Align::Right); });
+        onItem("Arrange", "Align Top", [doc](newui::MenuItem&) { doc->alignSelection(Align::Top); });
+        onItem("Arrange", "Align Middle", [doc](newui::MenuItem&) { doc->alignSelection(Align::Middle); });
+        onItem("Arrange", "Align Bottom", [doc](newui::MenuItem&) { doc->alignSelection(Align::Bottom); });
+        onButton("bringToFrontButton", [doc]() { doc->arrangeSelection(Arrange::BringToFront); });
+        onButton("sendToBackButton", [doc]() { doc->arrangeSelection(Arrange::SendToBack); });
+        onButton("alignLeftButton", [doc]() { doc->alignSelection(Align::Left); });
+        onButton("alignCenterButton", [doc]() { doc->alignSelection(Align::Center); });
+        onButton("alignRightButton", [doc]() { doc->alignSelection(Align::Right); });
+        onItem("Object", "Lock", [doc](newui::MenuItem&) { doc->lockSelection(); });
+        onItem("Object", "Unlock All", [doc](newui::MenuItem&) { doc->unlockAll(); });
+        onItem("Object", "Hide", [doc](newui::MenuItem&) { doc->hideSelection(); });
+        onItem("Object", "Show All", [doc](newui::MenuItem&) { doc->showAll(); });
+        onItem("Object/Transform", "Rotate 90 CW", [doc](newui::MenuItem&) { doc->rotateSelection90(true); });
+        onItem("Object/Transform", "Rotate 90 CCW", [doc](newui::MenuItem&) { doc->rotateSelection90(false); });
+        onItem("Object/Transform", "Flip Horizontal", [doc](newui::MenuItem&) { doc->flipSelection(true); });
+        onItem("Object/Transform", "Flip Vertical", [doc](newui::MenuItem&) { doc->flipSelection(false); });
+
+        // Snap to Grid: the View menu item and the toolbar toggle are one setting.
+        auto* snapButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("snapToGridButton"));
+        auto setSnap = [canvas, snapButton](bool on) {
+            canvas->setSnapToGrid(on);
+            if (auto it = menuItems.find("View/Snap to Grid"); it != menuItems.end()) { it->second->setChecked(on); }
+            if (snapButton != nullptr && snapButton->isChecked() != on) { snapButton->setChecked(on); }
+        };
+        onItem("View", "Snap to Grid", [canvas, setSnap](newui::MenuItem&) { setSnap(!canvas->snapToGrid()); });
+        if (snapButton != nullptr) {
+            snapButton->onCheckedChanged += [canvas, setSnap](newui::ToolbarButton& changed) {
+                if (changed.isChecked() != canvas->snapToGrid()) { setSnap(changed.isChecked()); }
+                return newui::SyncReturn::Handled;
+            };
+        }
+        setSnap(canvas->snapToGrid());
+
+        // Edit > Undo / Redo (and the toolbar buttons) show whether there is anything to undo, and what.
+        auto syncUndo = [doc, &frame]() {
+            const bool canUndo = doc->undoStack().canUndo(), canRedo = doc->undoStack().canRedo();
+            if (auto it = menuItems.find("Edit/Undo"); it != menuItems.end()) {
+                it->second->setText(canUndo ? "Undo " + doc->undoStack().undoDescription() : "Undo");
+                it->second->state().setEnabled(canUndo);
+            }
+            if (auto it = menuItems.find("Edit/Redo"); it != menuItems.end()) {
+                it->second->setText(canRedo ? "Redo " + doc->undoStack().redoDescription() : "Redo");
+                it->second->state().setEnabled(canRedo);
+            }
+            if (auto* b = dynamic_cast<newui::Control*>(frame.rootView().findView("undoButton"))) { b->setEnabled(canUndo); }
+            if (auto* b = dynamic_cast<newui::Control*>(frame.rootView().findView("redoButton"))) { b->setEnabled(canRedo); }
+        };
+        doc->onChanged += [syncUndo](sketch::SketchDocument&) { syncUndo(); return newui::SyncReturn::Handled; };
+        doc->undoStack().onActionPushed += [syncUndo](newui::UndoStack&, const newui::UndoableAction&) { syncUndo(); return newui::SyncReturn::Handled; };
+        syncUndo();
+
+        // Status bar: pointer position (pane 1), size of the selection (pane 2) and a hint for the tool (pane 0).
+        if (status != nullptr && status->paneCount() >= 4) {
+            canvas->onPointerMoved += [status](sketch::CanvasView& view) {
+                char text[64];
+                std::snprintf(text, sizeof(text), "x %.1f  y %.1f pt", view.pointerPosition().x, view.pointerPosition().y);
+                status->setPaneText(1, text);
+                return newui::SyncReturn::Handled;
+            };
+            auto syncSize = [status, doc]() {
+                BLBox box;
+                char text[64] = "";
+                if (doc->selectionBounds(box)) {
+                    std::snprintf(text, sizeof(text), "W %.1f  H %.1f", box.x1 - box.x0, box.y1 - box.y0);
+                }
+                status->setPaneText(2, text);
+            };
+            doc->onChanged += [syncSize](sketch::SketchDocument&) { syncSize(); return newui::SyncReturn::Handled; };
+            doc->onSelectionChanged += [syncSize](sketch::SketchDocument&) { syncSize(); return newui::SyncReturn::Handled; };
+            syncSize();
+            canvas->onToolChanged += [status](sketch::CanvasView& view) {
+                static const char* kHints[] = {
+                    "Select: click, Shift-click or drag a box; drag to move; handles resize (Alt = from center) and rotate",
+                    "Direct Select: not available yet",
+                    "Rectangle: drag to draw (Shift = square)",
+                    "Ellipse: drag to draw (Shift = circle)",
+                    "Line: drag to draw (Shift = 45 degrees)",
+                    "Pen: not available yet", "Pencil: not available yet", "Text: not available yet",
+                    "Gradient: drag across the object to set the gradient; drag its handles to edit; click the axis to add a stop",
+                    "Hand: drag to pan", "Zoom: click to zoom in, Shift-click to zoom out"};
+                status->setPaneText(0, kHints[int(view.tool())]);
+                return newui::SyncReturn::Handled;
+            };
+        }
+
         // Tool palette: radio behavior over the toggle buttons; the canvas tool and the buttons follow each other.
         struct ToolButton { const char* name; sketch::SketchTool tool; };
         static const ToolButton kTools[] = {
@@ -338,6 +446,22 @@ int main(int argc, char** argv) {
 
         // Color / Stroke / opacity panels follow the selection and edit it (undoably).
         static sketch::StylePanel stylePanel(frame.rootView(), document);
+
+        // The Gradient tool edits what the Color panel targets (fill or stroke), and the stop selected on the
+        // canvas is the stop the panel edits - and the other way round.
+        canvas->setGradientOnStroke(stylePanel.target() == sketch::StylePanel::Target::Stroke);
+        stylePanel.onTargetChanged += [canvas](sketch::StylePanel& panel) {
+            canvas->setGradientOnStroke(panel.target() == sketch::StylePanel::Target::Stroke);
+            return newui::SyncReturn::Handled;
+        };
+        canvas->onGradientStopSelected += [](sketch::CanvasView& view) {
+            stylePanel.setSelectedStop(view.selectedGradientStop());
+            return newui::SyncReturn::Handled;
+        };
+        stylePanel.onStopSelected += [canvas](sketch::StylePanel& panel) {
+            canvas->setSelectedGradientStop(panel.selectedStop());
+            return newui::SyncReturn::Handled;
+        };
 
         // Status bar: first pane reports the selection count.
         document.onSelectionChanged += [status](sketch::SketchDocument& changed) {
@@ -479,15 +603,138 @@ int main(int argc, char** argv) {
                 document.undoStack().undo();
                 expect(document.object(0).fill().color().space() == sketch::ColorSpace::CMYK, "undo restores the CMYK color");
 
+                while (document.undoStack().canUndo()) { document.undoStack().undo(); }
                 document.object(0).setFill(sketch::SketchPaint::solid(sketch::SketchColor::rgb(0.2f, 0.4f, 0.6f)));
                 document.touch();
-                while (document.undoStack().canUndo()) { document.undoStack().undo(); }
                 expect(document.convertToColorMode(sketch::ColorSpace::CMYK) && document.colorMode() == sketch::ColorSpace::CMYK, "document converts to CMYK");
                 expect(document.object(0).fill().color().space() == sketch::ColorSpace::CMYK, "object colors follow the document mode");
                 document.undoStack().undo();
                 expect(document.colorMode() == sketch::ColorSpace::RGB && document.object(0).fill().color().space() == sketch::ColorSpace::RGB, "undo restores the RGB document");
             }
             (void)undoable;
+        }
+
+        // Gradient tool: dragging lays an axis, its ends and stops are draggable, the axis takes new stops.
+        if (canvas != nullptr) {
+            document.clearObjects();
+            document.add(sketch::SketchObject::makeRect(100, 100, 200, 100))
+                .setFill(sketch::SketchPaint::solid(sketch::SketchColor::rgb(0.9f, 0.3f, 0.2f)));
+            document.undoStack().clear();
+            document.setSelection({document.object(0).id()});
+            canvas->setTool(sketch::SketchTool::Gradient);
+            auto view = [canvas](double x, double y) {
+                BLPoint p = canvas->toView(BLPoint(x, y));
+                return newui::Point(float(p.x), float(p.y));
+            };
+            auto mouse = [canvas](int what, const newui::Point& p, std::uint32_t keys = 0) {
+                if (what == 0) { canvas->onMouseDown(*canvas, p, std::uint32_t(1), keys); }
+                else if (what == 1) { canvas->onMouseMove(*canvas, p, std::uint32_t(1), keys); }
+                else { canvas->onMouseUp(*canvas, p, std::uint32_t(1), keys); }
+            };
+            auto axis = [&document](BLPoint& start, BLPoint& end) {
+                const sketch::SketchObject& object = document.object(0);
+                object.fill().gradient().axisPoints(object.geometryBounds(), object.fill().kind() == sketch::SketchPaint::Kind::Radial, start, end);
+            };
+            BLPoint start, end;
+
+            mouse(0, view(120, 150));
+            mouse(1, view(200, 150));
+            mouse(2, view(280, 150));
+            expect(document.object(0).fill().kind() == sketch::SketchPaint::Kind::Linear, "dragging with the gradient tool makes a linear gradient");
+            axis(start, end);
+            expect(std::fabs(start.x - 120) < 0.01 && std::fabs(end.x - 280) < 0.01 && std::fabs(end.y - 150) < 0.01, "the drag sets the gradient axis");
+            expect(document.undoStack().canUndo(), "laying an axis is one undo step");
+
+            mouse(0, view(280, 150));  // the end handle
+            mouse(1, view(240, 170));
+            mouse(2, view(200, 150));
+            axis(start, end);
+            expect(std::fabs(end.x - 200) < 0.01 && std::fabs(start.x - 120) < 0.01, "dragging the end handle moves only the end");
+
+            mouse(0, view(160, 150));  // on the axis, between the ends: adds a stop
+            mouse(2, view(160, 150));
+            expect(document.object(0).fill().gradient().stops.size() == 3, "clicking the axis adds a stop");
+            mouse(0, view(160, 150));  // the new stop: drag it along the axis
+            mouse(1, view(180, 150));
+            mouse(2, view(180, 150));
+            expect(std::fabs(document.object(0).fill().gradient().stops[1].offset - 0.75) < 0.01, "dragging a stop moves its offset");
+            mouse(0, view(180, 150), newui::kmAlt);
+            mouse(2, view(180, 150), newui::kmAlt);
+            expect(document.object(0).fill().gradient().stops.size() == 2, "Alt-click removes a stop");
+
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+            expect(document.object(0).fill().kind() == sketch::SketchPaint::Kind::Solid, "undoing the gradient edits restores the solid fill");
+
+            // The tool and the Color panel share the selected stop.
+            mouse(0, view(120, 150));
+            mouse(1, view(280, 150));
+            mouse(2, view(280, 150));
+            mouse(0, view(200, 150));  // add a stop in the middle: it becomes the selected one
+            mouse(2, view(200, 150));
+            auto* offsetField = dynamic_cast<newui::TextField*>(frame.rootView().findView("stopOffsetField"));
+            expect(canvas->selectedGradientStop() == 1, "the new stop is the canvas's selected stop");
+            expect(offsetField != nullptr && std::string(offsetField->text().begin(), offsetField->text().end()).compare(0, 2, "50") == 0, "the Color panel shows the stop selected on the canvas");
+            auto* stopBar = dynamic_cast<sketch::GradientBar*>(frame.rootView().findView("gradientBar"));
+            if (stopBar != nullptr) {
+                stopBar->setSelectedStop(2);
+                stopBar->onStopSelected(*stopBar);
+                expect(canvas->selectedGradientStop() == 2, "selecting a stop in the panel selects it on the canvas");
+            }
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+
+            // With the stroke as the Color panel's target the tool edits the stroke (the fill is left alone).
+            auto* strokeTarget = dynamic_cast<newui::SubView*>(frame.rootView().findView("strokeWell"));
+            auto* fillTarget = dynamic_cast<newui::SubView*>(frame.rootView().findView("fillWell"));
+            if (strokeTarget != nullptr && fillTarget != nullptr) {
+                strokeTarget->onMouseDown(*strokeTarget, newui::Point(5, 5), std::uint32_t(1), 0);
+                expect(canvas->gradientOnStroke(), "the stroke well points the tool at the stroke");
+                mouse(0, view(120, 150));
+                mouse(1, view(280, 150));
+                mouse(2, view(280, 150));
+                expect(document.object(0).stroke().isGradient() && !document.object(0).fill().isGradient(), "the tool lays a gradient on the stroke only");
+
+                // A radial stroke gradient gets an aspect handle below its center.
+                auto* radialButton = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("fillRadialButton"));
+                if (radialButton != nullptr) {
+                    radialButton->setChecked(true);
+                    expect(document.object(0).stroke().kind() == sketch::SketchPaint::Kind::Radial, "the radial button makes the stroke radial");
+                    mouse(0, view(120, 310));  // the aspect handle: radius 160 straight down from the center
+                    mouse(1, view(120, 260));
+                    mouse(2, view(120, 230));
+                    expect(std::fabs(document.object(0).stroke().gradient().axisAspect - 0.5) < 0.01, "dragging the aspect handle squashes the radial gradient");
+                }
+                fillTarget->onMouseDown(*fillTarget, newui::Point(5, 5), std::uint32_t(1), 0);
+                expect(!canvas->gradientOnStroke(), "the fill well points the tool back at the fill");
+            }
+            while (document.undoStack().canUndo()) { document.undoStack().undo(); }
+
+            canvas->setTool(sketch::SketchTool::Hand);
+            expect(canvas->cursorKind() == newui::CursorKind::Hand, "the hand tool shows the hand cursor");
+            canvas->setTool(sketch::SketchTool::Gradient);
+            expect(canvas->cursorKind() == newui::CursorKind::Cross, "the gradient tool shows the crosshair");
+            canvas->setTool(sketch::SketchTool::Select);
+            expect(canvas->cursorKind() == newui::CursorKind::Arrow, "the select tool shows the arrow");
+
+            // Select tool: the cursor over a handle follows the frame's turn.
+            auto hover = [canvas](const newui::Point& p) { canvas->onMouseMove(*canvas, p, std::uint32_t(0), 0); return canvas->cursorKind(); };
+            document.clearObjects();
+            document.add(sketch::SketchObject::makeRect(100, 100, 200, 100));
+            document.setSelection({document.object(0).id()});
+            expect(hover(view(100, 100)) == newui::CursorKind::SizeNWSE, "an upright frame's top-left handle shows the NW-SE arrow");
+            expect(hover(view(200, 100)) == newui::CursorKind::SizeNS, "its top-middle handle shows the vertical arrow");
+            expect(hover(view(300, 150)) == newui::CursorKind::SizeWE, "its right-middle handle shows the horizontal arrow");
+            expect(hover(view(200, 250)) == newui::CursorKind::Arrow, "away from the handles the arrow returns");
+            double turn = 3.14159265358979323846 / 4.0;  // turn the object 45 degrees about its center
+            BLMatrix2D rotation = BLMatrix2D::make_translation(-200, -150);
+            rotation.post_rotate(turn);
+            rotation.post_translate(200, 150);
+            document.object(0).transform(rotation);
+            document.object(0).setFrameAngle(turn);
+            document.touch();
+            // The top-middle handle is now up and to the right of the center: the NE-SW arrow.
+            expect(hover(view(200 + 50 * std::sin(turn), 150 - 50 * std::cos(turn))) == newui::CursorKind::SizeNESW,
+                "a frame turned 45 degrees shows the arrow matching its turned handle");
+            document.clearObjects();
         }
         return failures;
     }

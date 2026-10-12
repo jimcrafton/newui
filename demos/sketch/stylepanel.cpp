@@ -223,6 +223,38 @@ namespace sketch {
             };
         }
 
+        // Cap and join are radio groups of toggle buttons: checking one applies it, unchecking the active one snaps back.
+        auto wireOption = [this](const char* name, std::function<void(StrokeOptions&)> set, const char* what) {
+            if (auto* button = find<ToolbarButton>(name)) {
+                button->onCheckedChanged += [this, set, what](ToolbarButton& changed) {
+                    if (updating_) {
+                        return SyncReturn::Ignored;
+                    }
+                    if (changed.isChecked()) {
+                        applyStrokeOptions(set, what);
+                    }
+                    refresh();
+                    return SyncReturn::Handled;
+                };
+            }
+        };
+        wireOption("capButtButton", [](StrokeOptions& o) { o.cap = StrokeCap::Butt; }, "Butt Cap");
+        wireOption("capRoundButton", [](StrokeOptions& o) { o.cap = StrokeCap::Round; }, "Round Cap");
+        wireOption("capSquareButton", [](StrokeOptions& o) { o.cap = StrokeCap::Square; }, "Square Cap");
+        wireOption("joinMiterButton", [](StrokeOptions& o) { o.join = StrokeJoin::Miter; }, "Miter Join");
+        wireOption("joinRoundButton", [](StrokeOptions& o) { o.join = StrokeJoin::Round; }, "Round Join");
+        wireOption("joinBevelButton", [](StrokeOptions& o) { o.join = StrokeJoin::Bevel; }, "Bevel Join");
+        if (auto* miter = find<TextField>("miterLimitField")) {
+            miter->onReturnPressed += [this](TextField&) {
+                applyMiterLimit();
+                return SyncReturn::Handled;
+            };
+            miter->onLostFocus += [this](View&) {
+                applyMiterLimit();
+                return SyncReturn::Handled;
+            };
+        }
+
         if (auto* swatches = find<SwatchGrid>("swatchGrid")) {
             swatches->onSwatchPicked += [this](SwatchGrid& grid) {
                 std::size_t index = grid.selectedIndex();
@@ -282,6 +314,7 @@ namespace sketch {
             bar->onStopSelected += [this](GradientBar& changed) {
                 selectedStop_ = changed.selectedStop();
                 refresh();
+                onStopSelected(*this);
                 return SyncReturn::Handled;
             };
             bar->onStopsEdited += [this](GradientBar& changed) {
@@ -341,6 +374,7 @@ namespace sketch {
             }
             applyGradient(gradient, paint.kind(), "Add Gradient Stop");
             refresh();
+            onStopSelected(*this);
         });
         wireButton("deleteStopButton", [this]() {
             SketchPaint paint = targetPaint();
@@ -353,6 +387,7 @@ namespace sketch {
             selectedStop_ = std::min(index, gradient.stops.size() - 1);
             applyGradient(gradient, paint.kind(), "Delete Gradient Stop");
             refresh();
+            onStopSelected(*this);
         });
         wireButton("reverseGradientButton", [this]() {
             SketchPaint paint = targetPaint();
@@ -376,6 +411,23 @@ namespace sketch {
                 gradient.spread = *index == 1 ? GradientSpread::Repeat : (*index == 2 ? GradientSpread::Reflect : GradientSpread::Pad);
                 if (gradient != paint.gradient()) {
                     applyGradient(gradient, paint.kind(), "Gradient Spread");
+                }
+                return SyncReturn::Handled;
+            };
+        }
+
+        // Apply: across the object (default) or, for a stroke, along its length.
+        if (auto* apply = find<DropDownList>("gradientApplyCombo")) {
+            apply->onSelectionChanged += [this](DropDownList& combo) {
+                SketchPaint paint = targetPaint();
+                std::optional<std::size_t> index = combo.selectedIndex();
+                if (updating_ || !paint.isGradient() || !index.has_value()) {
+                    return SyncReturn::Ignored;
+                }
+                SketchGradient gradient = paint.gradient();
+                gradient.alongStroke = *index == 1 && target_ == Target::Stroke;
+                if (gradient != paint.gradient()) {
+                    applyGradient(gradient, paint.kind(), "Gradient Along Stroke");
                 }
                 return SyncReturn::Handled;
             };
@@ -416,6 +468,12 @@ namespace sketch {
 
     void StylePanel::setTarget(Target target) {
         target_ = target;
+        refresh();
+        onTargetChanged(*this);
+    }
+
+    void StylePanel::setSelectedStop(std::size_t index) {
+        selectedStop_ = index;
         refresh();
     }
 
@@ -540,7 +598,15 @@ namespace sketch {
             }
             if (auto* field = find<TextField>("gradientAngleField")) {
                 if (leadingNumber(field->text(), number)) {
-                    gradient.angleDegrees = number;
+                    // One object: turn its explicit axis about its midpoint; several (different boxes): back to
+                    // the angle-derived axis.
+                    if (gradient.hasAxis && document_.selection().size() == 1) {
+                        const SketchObject* object = document_.findById(document_.selection().front());
+                        gradient.setAngle(object != nullptr ? object->geometryBounds() : BLBox(0, 0, 1, 1), number);
+                    } else {
+                        gradient.hasAxis = false;
+                        gradient.angleDegrees = number;
+                    }
                 }
             }
             if (gradient != paint.gradient()) {
@@ -586,6 +652,30 @@ namespace sketch {
             edit("Stroke Weight",
                 [this, width]() { document_.setSelectionStrokeWidth(width); },
                 [this, width]() { document_.setDefaultStrokeWidth(width); });
+        }
+        refresh();
+    }
+
+    void StylePanel::applyStrokeOptions(const std::function<void(StrokeOptions&)>& change, const char* description) {
+        if (!document_.selection().empty()) {
+            std::vector<StyleState> before = document_.snapshotStyle();
+            document_.changeSelectionStrokeOptions(change);
+            document_.commitStyle(before, description);
+        } else {
+            StrokeOptions options = document_.defaultStrokeOptions();
+            change(options);
+            document_.setDefaultStrokeOptions(options);
+        }
+    }
+
+    void StylePanel::applyMiterLimit() {
+        if (updating_) {
+            return;
+        }
+        double limit = 0.0;
+        auto* field = find<TextField>("miterLimitField");
+        if (field != nullptr && leadingNumber(field->text(), limit) && limit >= 1.0) {
+            applyStrokeOptions([limit](StrokeOptions& o) { o.miterLimit = limit; }, "Miter Limit");
         }
         refresh();
     }
@@ -701,6 +791,15 @@ namespace sketch {
             }
         }
 
+        if (auto* apply = find<DropDownList>("gradientApplyCombo")) {
+            // Only a stroke can run its colors along its length.
+            apply->setEnabled(paint.isGradient() && target_ == Target::Stroke);
+            std::size_t index = paint.isGradient() && paint.gradient().alongStroke && target_ == Target::Stroke ? 1 : 0;
+            if (apply->selectedIndex() != std::optional<std::size_t>(index)) {
+                apply->setSelectedIndex(index);
+            }
+        }
+
         auto setChecked = [this](const char* name, bool checked) {
             if (auto* button = find<ToolbarButton>(name)) {
                 if (button->isChecked() != checked) {
@@ -725,6 +824,22 @@ namespace sketch {
         if (auto* field = find<TextField>("strokeWeightField")) {
             char buffer[32];
             std::snprintf(buffer, sizeof(buffer), "%g pt", weight);
+            field->setText(widen(buffer));
+        }
+        const StrokeOptions& options = first != nullptr ? first->strokeOptions() : document_.defaultStrokeOptions();
+        for (auto [name, on] : std::initializer_list<std::pair<const char*, bool>>{
+                {"capButtButton", options.cap == StrokeCap::Butt}, {"capRoundButton", options.cap == StrokeCap::Round},
+                {"capSquareButton", options.cap == StrokeCap::Square}, {"joinMiterButton", options.join == StrokeJoin::Miter},
+                {"joinRoundButton", options.join == StrokeJoin::Round}, {"joinBevelButton", options.join == StrokeJoin::Bevel}}) {
+            if (auto* button = find<ToolbarButton>(name)) {
+                if (button->isChecked() != on) {
+                    button->setChecked(on);
+                }
+            }
+        }
+        if (auto* field = find<TextField>("miterLimitField")) {
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "%g", options.miterLimit);
             field->setText(widen(buffer));
         }
         syncSlider("opacitySlider", float((first != nullptr ? first->opacity() : 1.0) * 100.0));

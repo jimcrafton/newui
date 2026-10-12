@@ -27,6 +27,11 @@ namespace sketch {
         changed();
     }
 
+    void SketchDocument::setPageBackground(const std::optional<SketchColor>& color) {
+        pageBackground_ = color;
+        changed();
+    }
+
     SketchObject& SketchDocument::object(std::size_t index) const {
         if (index >= objects_.size()) {
             throw std::runtime_error("SketchDocument::object: index out of range");
@@ -505,6 +510,244 @@ namespace sketch {
         }
     }
 
+    // ---- Arrange / align / transform / lock / hide ----
+
+    void SketchDocument::reorder(const std::vector<std::size_t>& ids) {
+        std::vector<std::unique_ptr<SketchObject>> sorted;
+        for (std::size_t id : ids) {
+            for (std::unique_ptr<SketchObject>& object : objects_) {
+                if (object != nullptr && object->id() == id) {
+                    sorted.push_back(std::move(object));
+                    break;
+                }
+            }
+        }
+        // Anything the list did not name (cannot happen for our own orders) keeps its place at the front.
+        std::vector<std::unique_ptr<SketchObject>> rest;
+        for (std::unique_ptr<SketchObject>& object : objects_) {
+            if (object != nullptr) {
+                rest.push_back(std::move(object));
+            }
+        }
+        objects_ = std::move(rest);
+        for (std::unique_ptr<SketchObject>& object : sorted) {
+            objects_.push_back(std::move(object));
+        }
+        changed();
+    }
+
+    bool SketchDocument::arrangeSelection(ArrangeOp op) {
+        if (selection_.empty()) {
+            return false;
+        }
+        std::vector<std::size_t> before;
+        std::vector<bool> chosen;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            before.push_back(object->id());
+            chosen.push_back(isSelected(object->id()));
+        }
+        std::vector<std::size_t> after = before;
+        std::vector<bool> flags = chosen;
+        std::size_t n = after.size();
+        switch (op) {
+            case ArrangeOp::BringToFront:
+            case ArrangeOp::SendToBack: {
+                std::vector<std::size_t> picked, others;
+                for (std::size_t i = 0; i < n; ++i) {
+                    (flags[i] ? picked : others).push_back(after[i]);
+                }
+                after = op == ArrangeOp::BringToFront ? others : picked;
+                after.insert(after.end(), op == ArrangeOp::BringToFront ? picked.begin() : others.begin(),
+                    op == ArrangeOp::BringToFront ? picked.end() : others.end());
+                break;
+            }
+            case ArrangeOp::BringForward:
+                for (std::size_t i = n; i-- > 1;) {  // pairs (i-1, i), from the top down
+                    if (flags[i - 1] && !flags[i]) {
+                        std::swap(after[i - 1], after[i]);
+                        std::swap(flags[i - 1], flags[i]);
+                    }
+                }
+                break;
+            case ArrangeOp::SendBackward:
+                for (std::size_t i = 1; i < n; ++i) {
+                    if (flags[i] && !flags[i - 1]) {
+                        std::swap(after[i - 1], after[i]);
+                        std::swap(flags[i - 1], flags[i]);
+                    }
+                }
+                break;
+        }
+        if (after == before) {
+            return false;
+        }
+        const char* what = op == ArrangeOp::BringToFront ? "Bring to Front" : (op == ArrangeOp::BringForward ? "Bring Forward"
+            : (op == ArrangeOp::SendBackward ? "Send Backward" : "Send to Back"));
+        reorder(after);
+        undoStack_.push({what, [this, after]() { reorder(after); }, [this, before]() { reorder(before); }});
+        return true;
+    }
+
+    bool SketchDocument::alignSelection(AlignMode mode) {
+        std::vector<GeometryState> before = snapshotSelection();
+        if (before.empty()) {
+            return false;
+        }
+        FrameState frameBefore = frameState();
+        BLBox target(0, 0, pageWidth_, pageHeight_);  // one object lines up with the page
+        if (before.size() > 1) {
+            selectionBounds(target);
+        }
+        bool moved = false;
+        for (const GeometryState& entry : before) {
+            SketchObject* object = findById(entry.id);
+            if (object == nullptr) {
+                continue;
+            }
+            BLBox b = object->geometryBounds();
+            double dx = 0.0, dy = 0.0;
+            switch (mode) {
+                case AlignMode::Left: dx = target.x0 - b.x0; break;
+                case AlignMode::Center: dx = (target.x0 + target.x1) * 0.5 - (b.x0 + b.x1) * 0.5; break;
+                case AlignMode::Right: dx = target.x1 - b.x1; break;
+                case AlignMode::Top: dy = target.y0 - b.y0; break;
+                case AlignMode::Middle: dy = (target.y0 + target.y1) * 0.5 - (b.y0 + b.y1) * 0.5; break;
+                case AlignMode::Bottom: dy = target.y1 - b.y1; break;
+            }
+            if (std::fabs(dx) > 1e-9 || std::fabs(dy) > 1e-9) {
+                object->transform(BLMatrix2D::make_translation(dx, dy));
+                moved = true;
+            }
+        }
+        if (!moved) {
+            return false;
+        }
+        quadFrame_.reset();
+        static const char* kNames[] = {"Align Left", "Align Center", "Align Right", "Align Top", "Align Middle", "Align Bottom"};
+        commitGeometry(before, kNames[int(mode)], frameBefore);
+        return true;
+    }
+
+    bool SketchDocument::rotateSelection90(bool clockwise) {
+        BLBox box;
+        std::vector<GeometryState> before = snapshotSelection();
+        if (before.empty() || !selectionBounds(box)) {
+            return false;
+        }
+        FrameState frameBefore = frameState();
+        double angle = clockwise ? 3.14159265358979323846 * 0.5 : -3.14159265358979323846 * 0.5;
+        double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
+        BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
+        m.post_rotate(angle);
+        m.post_translate(cx, cy);
+        for (const GeometryState& entry : before) {
+            if (SketchObject* object = findById(entry.id)) {
+                object->transform(m);
+                object->setFrameAngle(entry.angle + angle);
+            }
+        }
+        quadFrame_.reset();
+        groupAngle_.reset();
+        commitGeometry(before, clockwise ? "Rotate 90 CW" : "Rotate 90 CCW", frameBefore);
+        return true;
+    }
+
+    bool SketchDocument::flipSelection(bool horizontal) {
+        BLBox box;
+        std::vector<GeometryState> before = snapshotSelection();
+        if (before.empty() || !selectionBounds(box)) {
+            return false;
+        }
+        FrameState frameBefore = frameState();
+        double cx = (box.x0 + box.x1) * 0.5, cy = (box.y0 + box.y1) * 0.5;
+        BLMatrix2D m = BLMatrix2D::make_translation(-cx, -cy);
+        m.post_scale(horizontal ? -1.0 : 1.0, horizontal ? 1.0 : -1.0);
+        m.post_translate(cx, cy);
+        for (const GeometryState& entry : before) {
+            if (SketchObject* object = findById(entry.id)) {
+                object->transform(m);
+                object->setFrameAngle(-entry.angle);  // a mirrored turned box is the box turned the other way
+            }
+        }
+        quadFrame_.reset();
+        groupAngle_.reset();
+        commitGeometry(before, horizontal ? "Flip Horizontal" : "Flip Vertical", frameBefore);
+        return true;
+    }
+
+    bool SketchDocument::applyFlags(const std::vector<FlagState>& before, const std::vector<FlagState>& after, const std::string& description) {
+        if (before.empty()) {
+            return false;
+        }
+        auto apply = [this](const std::vector<FlagState>& states) {
+            for (const FlagState& state : states) {
+                if (SketchObject* object = findById(state.id)) {
+                    object->setVisible(state.visible);
+                    object->setLocked(state.locked);
+                }
+            }
+            // A hidden or locked object cannot stay selected.
+            std::vector<std::size_t> keep;
+            for (std::size_t id : selection_) {
+                const SketchObject* object = findById(id);
+                if (object != nullptr && object->isVisible() && !object->isLocked()) {
+                    keep.push_back(id);
+                }
+            }
+            if (keep.size() != selection_.size()) {
+                setSelection(keep);
+            }
+            changed();
+        };
+        apply(after);
+        undoStack_.push({description, [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
+        return true;
+    }
+
+    bool SketchDocument::lockSelection() {
+        std::vector<FlagState> before, after;
+        for (std::size_t id : selection_) {
+            if (const SketchObject* object = findById(id)) {
+                before.push_back({id, object->isVisible(), object->isLocked()});
+                after.push_back({id, object->isVisible(), true});
+            }
+        }
+        return applyFlags(before, after, "Lock");
+    }
+
+    bool SketchDocument::hideSelection() {
+        std::vector<FlagState> before, after;
+        for (std::size_t id : selection_) {
+            if (const SketchObject* object = findById(id)) {
+                before.push_back({id, object->isVisible(), object->isLocked()});
+                after.push_back({id, false, object->isLocked()});
+            }
+        }
+        return applyFlags(before, after, "Hide");
+    }
+
+    bool SketchDocument::unlockAll() {
+        std::vector<FlagState> before, after;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            if (object->isLocked()) {
+                before.push_back({object->id(), object->isVisible(), true});
+                after.push_back({object->id(), object->isVisible(), false});
+            }
+        }
+        return applyFlags(before, after, "Unlock All");
+    }
+
+    bool SketchDocument::showAll() {
+        std::vector<FlagState> before, after;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            if (!object->isVisible()) {
+                before.push_back({object->id(), false, object->isLocked()});
+                after.push_back({object->id(), true, object->isLocked()});
+            }
+        }
+        return applyFlags(before, after, "Show All");
+    }
+
     bool SketchDocument::readFromFile(const std::string& path) {
         std::ifstream in(path, std::ios::binary);
         if (!in) {
@@ -536,7 +779,7 @@ namespace sketch {
         std::vector<StyleState> result;
         for (std::size_t id : selection_) {
             if (const SketchObject* object = findById(id)) {
-                result.push_back({id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity()});
+                result.push_back({id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity(), object->strokeOptions()});
             }
         }
         return result;
@@ -578,6 +821,22 @@ namespace sketch {
         changed();
     }
 
+    void SketchDocument::changeSelectionStrokeOptions(const std::function<void(StrokeOptions&)>& change) {
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                StrokeOptions options = object->strokeOptions();
+                change(options);
+                object->setStrokeOptions(options);
+            }
+        }
+        changed();
+    }
+
+    void SketchDocument::setDefaultStrokeOptions(const StrokeOptions& options) {
+        defaultStrokeOptions_ = options;
+        onChanged(*this);
+    }
+
     bool SketchDocument::commitStyle(const std::vector<StyleState>& before, const std::string& description) {
         std::vector<StyleState> after;
         bool differs = false;
@@ -586,9 +845,9 @@ namespace sketch {
             if (object == nullptr) {
                 continue;
             }
-            StyleState now{old.id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity()};
+            StyleState now{old.id, object->fill(), object->stroke(), object->strokeWidth(), object->opacity(), object->strokeOptions()};
             differs = differs || now.fill != old.fill || now.stroke != old.stroke ||
-                now.strokeWidth != old.strokeWidth || now.opacity != old.opacity;
+                now.strokeWidth != old.strokeWidth || now.opacity != old.opacity || now.strokeOptions != old.strokeOptions;
             after.push_back(now);
         }
         if (!differs) {
@@ -601,6 +860,7 @@ namespace sketch {
                     object->setStroke(state.stroke);
                     object->setStrokeWidth(state.strokeWidth);
                     object->setOpacity(state.opacity);
+                    object->setStrokeOptions(state.strokeOptions);
                 }
             }
             changed();
@@ -653,7 +913,7 @@ namespace sketch {
         auto capture = [this]() {
             State state{colorMode_, defaultFill_, defaultStroke_, {}};
             for (const std::unique_ptr<SketchObject>& object : objects_) {
-                state.styles.push_back({object->id(), object->fill(), object->stroke(), object->strokeWidth(), object->opacity()});
+                state.styles.push_back({object->id(), object->fill(), object->stroke(), object->strokeWidth(), object->opacity(), object->strokeOptions()});
             }
             return state;
         };

@@ -1,6 +1,8 @@
 #include "newui/dialogs.h"
 
 #include "newui/application.h"
+#include "newui/rootview.h"
+#include "newui/subview.h"
 #include "newui/runloop.h"
 #include "newui/utils.h"
 
@@ -10,6 +12,75 @@
 namespace newui {
 
 namespace {
+
+    // The screen rectangle a dialog centers on: the owner window, the focused view inside it, or the
+    // mouse cursor. With no owner (or a bogus one) the active window, then the primary monitor.
+    RECT anchorRect(HWND owner, DialogPosition position) {
+        if (position == DialogPosition::CenterOnMouse) {
+            POINT cursor = {0, 0};
+            ::GetCursorPos(&cursor);
+            return RECT{cursor.x, cursor.y, cursor.x, cursor.y};
+        }
+        if (owner == nullptr || !::IsWindow(owner)) {
+            owner = ::GetActiveWindow();
+        }
+        RECT window = {0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN)};
+        if (owner != nullptr && ::IsWindow(owner)) {
+            ::GetWindowRect(owner, &window);
+        }
+        if (position == DialogPosition::CenterOnFocus) {
+            Frame* frame = Application::instance().getFrame();
+            if (frame != nullptr && frame->frameHandle() == owner) {
+                if (SubView* focused = frame->rootView().focusedSubView()) {
+                    Rect bounds = focused->screenBounds();
+                    if (bounds.width() > 0.0f && bounds.height() > 0.0f) {
+                        return RECT{LONG(bounds.left()), LONG(bounds.top()), LONG(bounds.left() + bounds.width()), LONG(bounds.top() + bounds.height())};
+                    }
+                }
+            }
+        }
+        return window;
+    }
+
+    // Top-left of a width x height window centered on `anchor`, kept inside the work area of the monitor it is on.
+    POINT centeredOn(const RECT& anchor, int width, int height) {
+        POINT result;
+        result.x = anchor.left + ((anchor.right - anchor.left) - width) / 2;
+        result.y = anchor.top + ((anchor.bottom - anchor.top) - height) / 2;
+        POINT center = {(anchor.left + anchor.right) / 2, (anchor.top + anchor.bottom) / 2};
+        MONITORINFO monitor = {};
+        monitor.cbSize = sizeof(monitor);
+        if (::GetMonitorInfo(::MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const RECT& area = monitor.rcWork;
+            if (result.x + width > area.right) { result.x = area.right - width; }
+            if (result.y + height > area.bottom) { result.y = area.bottom - height; }
+            if (result.x < area.left) { result.x = area.left; }
+            if (result.y < area.top) { result.y = area.top; }
+        }
+        return result;
+    }
+
+    // MessageBox() cannot be positioned directly; a thread-local CBT hook moves the box as it activates.
+    struct MessageBoxPlacement {
+        RECT anchor = {};
+        HHOOK hook = nullptr;
+    };
+    thread_local MessageBoxPlacement g_messageBoxPlacement;
+
+    LRESULT CALLBACK messageBoxHook(int code, WPARAM wParam, LPARAM lParam) {
+        HHOOK hook = g_messageBoxPlacement.hook;
+        if (code == HCBT_ACTIVATE) {
+            HWND box = reinterpret_cast<HWND>(wParam);
+            RECT rect;
+            if (::GetWindowRect(box, &rect)) {
+                POINT at = centeredOn(g_messageBoxPlacement.anchor, int(rect.right - rect.left), int(rect.bottom - rect.top));
+                ::SetWindowPos(box, nullptr, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            ::UnhookWindowsHookEx(hook);  // placed once; later activations are the user's business
+            g_messageBoxPlacement.hook = nullptr;
+        }
+        return ::CallNextHookEx(hook, code, wParam, lParam);
+    }
 
     // Initializes COM (STA) for the current thread if it isn't already,
     // and releases it again on destruction - only if this instance is the
@@ -123,7 +194,7 @@ namespace {
 }  // namespace
 
 DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const std::string& title,
-                                     MessageBoxButtons buttons, MessageBoxIcon icon) {
+                                     MessageBoxButtons buttons, MessageBoxIcon icon, DialogPosition position) {
     UINT flags = 0;
     switch (buttons) {
         case MessageBoxButtons::Ok:              flags |= MB_OK; break;
@@ -142,7 +213,13 @@ DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const s
         case MessageBoxIcon::Question:    flags |= MB_ICONQUESTION; break;
     }
 
+    g_messageBoxPlacement.anchor = anchorRect(owner, position);
+    g_messageBoxPlacement.hook = ::SetWindowsHookExA(WH_CBT, messageBoxHook, nullptr, ::GetCurrentThreadId());
     int id = ::MessageBoxA(owner, text.c_str(), title.c_str(), flags);
+    if (g_messageBoxPlacement.hook != nullptr) {  // the box never activated
+        ::UnhookWindowsHookEx(g_messageBoxPlacement.hook);
+        g_messageBoxPlacement.hook = nullptr;
+    }
     switch (id) {
         case IDOK:     return DialogResult::Ok;
         case IDCANCEL: return DialogResult::Cancel;
@@ -319,33 +396,16 @@ bool Dialog::initialize()
     DWORD dialogStyle = WS_POPUPWINDOW | WS_CAPTION | WS_CLIPSIBLINGS | DS_MODALFRAME;
     DWORD dwExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CONTROLPARENT;
 
-    // Modal over an owner: centered on it (kept on its monitor), not wherever the layout file put it.
+    // Modal over an owner: placed by position() (centered on the owner by default, kept on its monitor),
+    // not wherever the layout file put it.
     int x = static_cast<int>(bounds_.left());
     int y = static_cast<int>(bounds_.top());
     const int width = static_cast<int>(bounds_.size().width);
     const int height = static_cast<int>(bounds_.size().height);
-    RECT ownerRect;
-    if (modalOwner_ != nullptr && ::GetWindowRect(modalOwner_, &ownerRect)) {
-        x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
-        y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
-
-        MONITORINFO monitor = {};
-        monitor.cbSize = sizeof(monitor);
-        if (::GetMonitorInfo(::MonitorFromWindow(modalOwner_, MONITOR_DEFAULTTONEAREST), &monitor)) {
-            const RECT& area = monitor.rcWork;
-            if (x + width > area.right) {
-                x = area.right - width;
-            }
-            if (y + height > area.bottom) {
-                y = area.bottom - height;
-            }
-            if (x < area.left) {
-                x = area.left;
-            }
-            if (y < area.top) {
-                y = area.top;
-            }
-        }
+    if (modalOwner_ != nullptr) {
+        POINT at = centeredOn(anchorRect(modalOwner_, position_), width, height);
+        x = at.x;
+        y = at.y;
     }
 
     auto hwnd = ::CreateWindowExA(

@@ -46,7 +46,8 @@ Plan: [PLAN.md](PLAN.md). Two demos on newui: **sketch** (vector editor, first) 
 - `StylePanel` (`stylepanel.h/.cpp`, created in `main.cpp`): the fill/stroke wells in the tool palette choose the target (thicker border = active; header shows "Fill/Stroke" dot); R/G/B/A sliders (+ value boxes), hex field, swatch grid (`SwatchGrid::onSwatchPicked`), fill none/solid buttons, stroke weight field, opacity slider all edit the selection, or the document defaults (`defaultFill/Stroke/StrokeWidth`, used by the draw tools) when nothing is selected.
 - Slider drags are live (`setSelectionFill/...`, no undo) and become ONE undo step on mouse-up (`commitStyle`); typed values commit immediately. The panel refreshes from `SketchDocument::onChanged` / `onSelectionChanged` (multi-selection shows the first object).
 - Gradients (S3b-lite): `SketchPaint` kinds None/Solid/Linear/Radial with `SketchGradient` (stops, angle, spread), defined relative to the object's bounding box so they follow moves/resizes/rotations (a warp does not distort them); rendered in `SketchObject::paint` via Blend2D gradients, for fills and strokes. `GradientBar` is interactive (click marker = select, drag = move, click bar = add stop; fires `onStopsEdited`/`onStopSelected`). `StylePanel`: linear/radial buttons convert between kinds, sliders/hex/swatches edit the selected stop, Stop %, Angle, Spread, add/delete/reverse stop all wired; every edit is a normal undo step (a bar drag is one). Rendering is unit-tested by rasterizing into a `BLImage`.
-- Not done: the on-canvas gradient tool (the gradientTool palette button does nothing), radial center/radius handles, gradient strokes along the stroke direction.
+- **Gradient tool (G palette button; builds, 92 model tests + `--check-tools` drag checks pass; NOT yet tried by hand):** `SketchGradient` gained an optional explicit axis (`hasAxis`, `axisX1..axisY2` = two points as fractions of the object's bbox; `axisPoints/setAxis/setAngle`). Linear: start/end; radial: center + a point on the circle. Without it the axis is derived from `angleDegrees` as before. Paint, SVG writer and the canvas all go through `axisPoints`. Canvas (`CanvasView::beginGradientDrag` etc.): drag across the selection (or a clicked object) lays an axis (a solid fill becomes linear; an existing gradient keeps its kind/stops; Shift = 45 deg), one undo step; with a single gradient-filled object selected the tool shows the axis (circle = start/center, square = end/radius point, diamonds = interior stops) - drag the ends or stops, click the axis to add a stop, Alt-click a stop to delete (min 2 stops). Panel Angle field turns an explicit axis about its midpoint (several objects selected: drops the axis). SVG: `data-axis` (box fractions) next to the userSpaceOnUse x1/y1/x2/y2 or cx/cy/r; foreign gradient vectors (bbox or user-space units) are now kept as an axis instead of just an angle. Gaps closed afterwards: (1) the tool edits the **stroke** when the Color panel's target is Stroke (`CanvasView::setGradientOnStroke`, wired from `StylePanel::onTargetChanged`); (2) the selected stop is shared both ways (`CanvasView::onGradientStopSelected/setSelectedGradientStop` <-> `StylePanel::onStopSelected/setSelectedStop`; the selected stop gets a heavy outline); (3) **elliptical radial gradients**: `SketchGradient::axisAspect` (cross radius / along radius, drawn via `ellipseMatrix` as a gradient transform), a diamond aspect handle across the axis on the canvas (Shift on it resets to a circle), written as `gradientTransform` + `data-aspect`; (4) `gradientTransform` is read for foreign gradients (any matrix: center/axis points are mapped, radial aspect = cross/along lengths, shear ignored); (5) per-tool cursors (crosshair for draw/gradient/pen/pencil/zoom, I-beam for text, hand for hand) - there is no magnifier cursor, and Select shows no resize cursors on its handles (the frame can be rotated); (6) the mockup shows a stop diamond.
+- Not done: gradient strokes that follow the stroke direction (a stroke gradient is a plain bbox gradient like Illustrator's default), shear in foreign gradient transforms.
 - Not done in S3: Gray/CMYK/HSB modes (the mockup has only 4 slider rows - add a 5th, in the mockup first), gradients (the linear/radial buttons snap back), cap/join/dash/arrows, appearance stack + blend modes, graphic styles, layers, group/z-order.
 - `--check-tools` also drives the panel headlessly (select, slider, hex, undo).
 
@@ -79,8 +80,34 @@ Needs `tools/reflectgen/.venv` (created; gitignored). Resources are copied next 
 - 8 SVG tests in `sketch_tests` (72 total). Closing the window with the X prompts too: `Frame::onClosing(Frame&, bool& canClose)` (new, in frame.h/frame.cpp) vetoes WM_CLOSE; the File commands live in newui's `DocumentController` (saveDocument/saveDocumentAs/openInto/newInto + virtual UI hooks askUnsavedChanges/chooseSavePath/chooseOpenPath/reportError, unit-tested); sketch's `SketchDocumentController` (sketchcontroller.h/.cpp) overrides the hooks (SVG filters, owner window) and fires onStatus/onStateChanged/onDocumentReplaced. Gaps: File > New keeps the page size
   (no New Document dialog logic yet); Open Recent, Export, Document Setup still inert.
 
+## Color modes (done; not seen on screen yet)
+- `SketchColor::convertedTo(space)` / `toRgb` (naive CMYK, luminance gray, standard HSB). Document mode: `SketchDocument::colorMode()` (RGB|CMYK only),
+  `setColorMode` (loading/new doc: sets the mode + converts the defaults, not undoable), `convertToColorMode` (View > Color Mode: converts every
+  object/gradient stop/default, one undo step). SVG carries `data-color-mode` on the root.
+- Color panel: four component sliders `comp0..comp3Slider` + `alphaSlider`; captions/ranges/row visibility follow the edited color's own space
+  (RGB 0-255 R/G/B; CMYK 0-100 C/M/Y/K; Gray = K ink coverage 0-100; HSB 0-360/100/100). The Gray/RGB/CMYK/HSB buttons convert the edited color
+  (undoable); edits stay in the color's space; hex converts back into it; swatches apply in the document mode.
+- Status bar: the pane before the zoom pane shows "RGB doc"/"CMYK doc"; View > Color Mode checks follow `colorMode()` (also after undo/open).
+- Found + fixed in newui: `SegmentedControl` segments never loaded from `.newui` (plain vector property is skipped by the reader) - now a collection
+  (`addSegment/removeSegment`); the generator emits `segments` before `selectedIndex`. The New Document dialog's segmented controls benefit too.
+- Unverified visually: hiding `comp3SliderRow` (RGB/HSB/Gray) should collapse the row - check the panel does not leave a gap or mis-scroll.
+- Not done: Gray/HSB are not document modes (only per-color), no ICC, New Document dialog does not set the mode yet (needs its own logic).
+- `--check-tools` now creates its own objects (the demo scene is gone).
+
+- newui `DialogPosition` (CenterOnRootView default / CenterOnFocus / CenterOnMouse): `Dialog::showMessageBox(..., position)` (CBT hook moves the native box) and `Dialog::setPosition()` / `"position"` in a dialog's `.newui` (Dialog is now `@reflect`ed; `Bundle::loadDialog` reads it as a Dialog). Native file pickers ignore it. The New Document dialog should be a `Dialog` loaded with `loadDialog` when its logic is built.
+
+## New Document dialog (done; not seen on screen yet)
+- `newdocumentmodel.h/.cpp`: pure logic (presets, unit conversion keeping physical size, px follows ppi, orientation, keep proportions, summary text), unit-tested.
+  `PRESETS` in gen_newui.py and `kPresets` in newdocumentmodel.cpp must stay in step.
+- `newdocumentdialog.h/.cpp`: loads Resources/newdocument.newui into a `newui::Dialog` (position CenterOnRootView from the file), mirrors the model into the controls;
+  `NewDocumentDialog::run()` is modal, `check()` is the headless self-test (`sketch.exe --check-newdoc`, 22 checks). Text boxes commit on Enter / focus loss / Create (no live update while typing).
+- File > New / Ctrl+N: `SketchDocumentController::newDocument()` asks to save, shows the dialog, then clears and applies page size, ppi, color mode (`setColorMode`) and background;
+  the name (Untitled-1) shows in the title / save prompt / Save As suggestion until the first save.
+- `SketchDocument::pageBackground()` (white default, nullopt = transparent -> checkerboard on the canvas); SVG: `data-page-background` + a `<rect id="pageBackground">` the reader skips.
+  The canvas now follows the document's page size (it only read it at attach time before - Open of a different-size file used to keep the old page).
+- Not done: no Document Setup dialog (change size later), no remembering the last-used settings, no live preview while typing.
+
 ## Next
-1. Try opening SVGs exported from Inkscape/browsers and note what is skipped.
-2. Gradient tool on canvas (drag start/end, radial center/radius), Gray/CMYK/HSB color modes (mockup needs a 5th slider row first).
-3. New Document dialog logic; S5 pen/text; S6 export/PDF; S7 clipboard/snapping.
-4. manyrows M0-M6 after sketch.
+1. Try File > New (choose categories, units, orientation, link, color mode, transparent background), Create, then Save/Open.
+2. S5 pen/text; S6 export/PDF (CMYK operators); S7 clipboard/snapping; Document Setup.
+3. manyrows M0-M6 after sketch.

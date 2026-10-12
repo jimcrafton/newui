@@ -3,6 +3,7 @@
 #include "sketchdocument.h"
 
 #include <newui/controls.h>
+#include <newui/delegate.h>
 #include <newui/rootview.h>
 #include <newui/segmentedcontrol.h>
 
@@ -37,6 +38,14 @@ namespace sketch {
         // Re-reads the selection (or defaults) into every control.
         void refresh();
 
+        // The gradient stop the panel edits (index into the target gradient's stops). Setting it does not
+        // fire onStopSelected - that is for changes the user makes in the panel.
+        std::size_t selectedStop() const { return selectedStop_; }
+        void setSelectedStop(std::size_t index);
+        newui::Delegate<StylePanel> onStopSelected;
+        // Fired when the fill/stroke target changes.
+        newui::Delegate<StylePanel> onTargetChanged;
+
     private:
         SketchPaint targetPaint() const;
         // Applies `paint` to the target of the selection (or the defaults) and records an undo step unless a
@@ -53,6 +62,9 @@ namespace sketch {
         void applySlidersAsColor();
         void applyHex();
         void applyStrokeWeight();
+        // Cap / join / miter: `change` edits the options of the selection (one undo step) or of the defaults.
+        void applyStrokeOptions(const std::function<void(StrokeOptions&)>& change, const char* description);
+        void applyMiterLimit();
         void applyOpacity();
 
         void beginDrag();

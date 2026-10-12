@@ -4,6 +4,7 @@
   type: "Frame",
   title: "New Document",
   name: "newdocument",
+  position: "CenterOnRootView",
   bounds: {
     type: "Rect",
     pos: { type: "Point", x: 120, y: 120 },
@@ -31,7 +32,7 @@
             type: "SubView",
             name: "presetColumn",
             visible: true,
-            desiredSize: { type: "Size", width: 270, height: 78 },
+            desiredSize: { type: "Size", width: 270, height: 84 },
             desiredSizeOverride: true,
             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 8 },
             childViews: [
@@ -59,11 +60,11 @@
               {
                 type: "Label",
                 name: "presetNote",
-                desiredSize: { type: "Size", width: 0, height: 34 },
+                desiredSize: { type: "Size", width: 0, height: 40 },
                 desiredSizeOverride: true,
                 text: "Pick a starting shape, then adjust anything on the right.",
                 textAlignment: "Left",
-                style: { type: "LabelStyle", text: "Pick a starting shape, then adjust anything on the right.", textAlignment: "Left" }
+                style: { type: "LabelStyle", text: "Pick a starting shape, then adjust anything on the right.", textAlignment: "Left", wordWrap: true }
               }
             ]
           },

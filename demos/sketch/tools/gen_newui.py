@@ -253,7 +253,7 @@ MENUS = [
     mi("Arrange", children=[
         mi("Bring to Front", "Ctrl+Shift+]"), mi("Bring Forward", "Ctrl+]"),
         mi("Send Backward", "Ctrl+["), mi("Send to Back", "Ctrl+Shift+["), SEP,
-        mi("Align Left"), mi("Align Center"), mi("Align Right")]),
+        mi("Align Left"), mi("Align Center"), mi("Align Right"), mi("Align Top"), mi("Align Middle"), mi("Align Bottom")]),
     mi("View", children=[
         mi("Zoom In", "Ctrl++"), mi("Zoom Out", "Ctrl+-"), mi("Fit Page", "Ctrl+0"), mi("Actual Size", "Ctrl+1"), SEP,
         mi("Show Grid", "Ctrl+'", checked=True), mi("Snap to Grid", "Ctrl+Shift+'", checked=True),
@@ -328,8 +328,11 @@ def color_panel():
         label("Type", w=32), label("Linear", w=50, name="gradientTypeLabel"),
         label("Spread", w=44), dropdown("spreadCombo", ["Pad", "Repeat", "Reflect"], weight=1),
     ])
+    apply_row = hbox("gradientApplyRow", [
+        label("Apply", w=44), dropdown("gradientApplyCombo", ["Across the object", "Along the stroke"], weight=1),
+    ])
     body = [
-        fill_types, gradient_bar, stop_row, type_row,
+        fill_types, gradient_bar, stop_row, type_row, apply_row,
         segmented("colorModeControl", ["Gray", "RGB", "CMYK", "HSB"], selected=1),
         # Four component rows (the program sets captions/ranges/visibility per color mode) plus alpha.
         slider_row("comp0Slider", "R", 232), slider_row("comp1Slider", "G", 69),
@@ -522,10 +525,12 @@ def new_document_document():
     first = PRESETS[0]
     print_items = [preset_row(p) for p in PRESETS if p[0] == "Print"]
 
+    note = label("Pick a starting shape, then adjust anything on the right.", h=40, name="presetNote")
+    note["style"]["wordWrap"] = True  # 270 px is too narrow for one line
     left = vbox("presetColumn", [
         segmented("categoryControl", ["Print", "Web", "Mobile", "Art"], selected=0, h=28),
         listview("presetList", print_items, h=0, row=36, weight=1, selected=0),
-        label("Pick a starting shape, then adjust anything on the right.", h=34, name="presetNote"),
+        note,
     ], spacing=8, w=270)
     # presetList takes the leftover height; the column itself stretches (weight on its own row below).
 
@@ -562,7 +567,7 @@ def new_document_document():
                 bounds=rect(0, 0, DIALOG_W, DIALOG_H), childViews=[content, footer])
     return {
         "meta": {"author": "", "date": "2026-10-11", "copyright": "", "version": "0.1.0.0"},
-        "type": "Frame", "title": "New Document", "name": "newdocument",
+        "type": "Frame", "title": "New Document", "name": "newdocument", "position": "CenterOnRootView",
         "bounds": rect(120, 120, DIALOG_W, DIALOG_H),
         "rootView": root,
     }

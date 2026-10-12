@@ -814,6 +814,114 @@ TEST(SketchGradient, GradientEditsUndoLikeAnyStyle) {
     EXPECT_FALSE(doc.findById(a)->fill().isGradient());
 }
 
+TEST(SketchGradient, ExplicitAxisIsKeptRelativeToTheBox) {
+    SketchGradient gradient = redToBlue();
+    BLBox box(10, 20, 110, 70);  // 100 x 50
+    BLPoint start, end;
+    gradient.axisPoints(box, false, start, end);  // derived: edge to edge through the center
+    EXPECT_NEAR(start.x, 10.0, 1e-9);
+    EXPECT_NEAR(end.x, 110.0, 1e-9);
+    EXPECT_NEAR(start.y, 45.0, 1e-9);
+
+    gradient.setAxis(box, BLPoint(30, 30), BLPoint(60, 70));
+    EXPECT_TRUE(gradient.hasAxis);
+    EXPECT_NEAR(gradient.angleDegrees, std::atan2(40.0, 30.0) * 180.0 / 3.14159265358979323846, 1e-9);
+    // The same fractions over a moved and doubled box.
+    gradient.axisPoints(BLBox(0, 0, 200, 100), false, start, end);
+    EXPECT_NEAR(start.x, 40.0, 1e-9);
+    EXPECT_NEAR(start.y, 20.0, 1e-9);
+    EXPECT_NEAR(end.x, 100.0, 1e-9);
+    EXPECT_NEAR(end.y, 100.0, 1e-9);
+
+    // Turning the angle of an explicit axis keeps its midpoint and length.
+    gradient.axisPoints(box, false, start, end);
+    double length = std::hypot(end.x - start.x, end.y - start.y);
+    gradient.setAngle(box, 0.0);
+    BLPoint s2, e2;
+    gradient.axisPoints(box, false, s2, e2);
+    EXPECT_NEAR(s2.y, e2.y, 1e-9);
+    EXPECT_NEAR(e2.x - s2.x, length, 1e-9);
+    EXPECT_NEAR((s2.x + e2.x) * 0.5, (start.x + end.x) * 0.5, 1e-9);
+}
+
+TEST(SketchGradient, AxisChangesTheRenderedGradient) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 40));
+    rect->setStroke(SketchPaint::none());
+    SketchGradient gradient = redToBlue();
+    gradient.setAxis(rect->geometryBounds(), BLPoint(60, 20), BLPoint(100, 20));  // red until x = 60, then fades to blue
+    rect->setFill(SketchPaint::linear(gradient));
+    std::vector<std::uint32_t> px = render(*rect, 100, 40);
+    EXPECT_GT((px[20 * 100 + 30] >> 16) & 0xFF, 240u);  // padded red before the start
+    EXPECT_LT(px[20 * 100 + 30] & 0xFF, 15u);
+    EXPECT_GT(px[20 * 100 + 97] & 0xFF, 200u);
+}
+
+TEST(SketchGradient, RadialAxisSetsCenterAndRadius) {
+    SketchGradient gradient = redToBlue();
+    BLBox box(0, 0, 100, 100);
+    gradient.setAxis(box, BLPoint(25, 25), BLPoint(25, 75));
+    BLPoint center, edge;
+    gradient.axisPoints(box, true, center, edge);
+    EXPECT_NEAR(center.x, 25.0, 1e-9);
+    EXPECT_NEAR(std::hypot(edge.x - center.x, edge.y - center.y), 50.0, 1e-9);
+}
+
+TEST(SketchGradient, AspectSquashesARadialGradientIntoAnEllipse) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 100));
+    rect->setStroke(SketchPaint::none());
+    SketchGradient gradient = redToBlue();
+    // Center in the middle, radius 40 along x, half of that across (y).
+    gradient.setAxis(rect->geometryBounds(), BLPoint(50, 50), BLPoint(90, 50));
+    gradient.axisAspect = 0.5;
+    rect->setFill(SketchPaint::radial(gradient));
+    std::vector<std::uint32_t> px = render(*rect, 100, 100);
+    // 10 px out along x (a quarter of the way) is mostly red; 25 px out along y is past the 20 px ellipse
+    // edge, so fully blue - a circle of radius 40 would still be purple there.
+    EXPECT_GT((px[50 * 100 + 60] >> 16) & 0xFF, px[50 * 100 + 60] & 0xFF);
+    EXPECT_GT(px[75 * 100 + 50] & 0xFF, 240u);
+    EXPECT_LT((px[75 * 100 + 50] >> 16) & 0xFF, 20u);
+
+    BLMatrix2D m = gradient.axisMatrix(BLPoint(50, 50), BLPoint(90, 50), true);
+    BLPoint p = m.map_point(90, 50);
+    EXPECT_NEAR(p.x, 90.0, 1e-9);
+    BLPoint q = m.map_point(50, 90);
+    EXPECT_NEAR(q.y, 70.0, 1e-9);
+}
+
+TEST(SketchGradient, SkewLeansTheLinesOfEqualColor) {
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(0, 0, 100, 100));
+    rect->setStroke(SketchPaint::none());
+    SketchGradient gradient = redToBlue();
+    gradient.setAxis(rect->geometryBounds(), BLPoint(0, 50), BLPoint(100, 50));
+    gradient.axisSkew = 1.0;  // t = (x - (y - 50)) / 100
+    rect->setFill(SketchPaint::linear(gradient));
+    std::vector<std::uint32_t> px = render(*rect, 100, 100);
+    EXPECT_GT((px[95 * 100 + 50] >> 16) & 0xFF, 200u);  // lower middle: t = 0.05, red
+    EXPECT_GT(px[5 * 100 + 50] & 0xFF, 200u);            // upper middle: t = 0.95, blue
+}
+
+TEST(SketchGradient, AlongStrokeFollowsThePathNotTheBox) {
+    std::vector<BLPoint> corner = {BLPoint(10, 10), BLPoint(10, 90), BLPoint(90, 90)};
+    std::unique_ptr<SketchObject> line(SketchObject::makePolyline(corner));
+    line->setFill(SketchPaint::none());
+    line->setStrokeWidth(10.0);
+    SketchGradient gradient = redToBlue();
+    gradient.alongStroke = true;
+    line->setStroke(SketchPaint::linear(gradient));
+    std::vector<std::uint32_t> px = render(*line, 100, 100);
+    std::uint32_t start = px[15 * 100 + 10], bend = px[88 * 100 + 10], end = px[90 * 100 + 88];
+    EXPECT_GT((start >> 16) & 0xFF, 200u);   // the first end is red
+    EXPECT_GT(end & 0xFF, 200u);              // the last end is blue
+    // Halfway along the path (at the bend) both colors are present; a box gradient would still be pure red here.
+    EXPECT_GT(bend & 0xFF, 80u);
+    EXPECT_GT((bend >> 16) & 0xFF, 80u);
+    // The same stroke with the plain box gradient is red along the whole left leg (a left-to-right gradient).
+    gradient.alongStroke = false;
+    line->setStroke(SketchPaint::linear(gradient));
+    px = render(*line, 100, 100);
+    EXPECT_LT(px[88 * 100 + 10] & 0xFF, 60u);
+}
+
 // ---- SVG round trip -------------------------------------------------------------------------
 
 namespace {
@@ -897,6 +1005,135 @@ TEST(SketchSvg, GradientsRoundTrip) {
     EXPECT_EQ(fill.gradient().stops[1].color.space(), ColorSpace::CMYK);
     EXPECT_NEAR(fill.gradient().stops[2].color.alpha(), 0.5f, 0.01f);
     EXPECT_EQ(copy.object(0).stroke().kind(), SketchPaint::Kind::Radial);
+}
+
+TEST(SketchSvg, GradientAxisRoundTripsAndFollowsTheObject) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(10, 10, 100, 50));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    g.setAxis(o.geometryBounds(), BLPoint(30, 20), BLPoint(90, 50));
+    o.setFill(SketchPaint::linear(g));
+    SketchObject& c = doc.add(SketchObject::makeEllipse(200, 100, 40, 40));
+    SketchGradient r = SketchGradient::fromColor(SketchColor::fromHex("#00ff00"));
+    r.setAxis(c.geometryBounds(), BLPoint(190, 90), BLPoint(190, 130));
+    c.setFill(SketchPaint::radial(r));
+
+    SketchDocument copy = roundTrip(doc);
+    ASSERT_EQ(copy.objectCount(), 2u);
+    for (std::size_t i = 0; i < 2; ++i) {
+        const SketchObject& was = doc.object(i);
+        const SketchObject& now = copy.object(i);
+        bool radial = i == 1;
+        EXPECT_EQ(now.fill().kind(), was.fill().kind());
+        ASSERT_TRUE(now.fill().gradient().hasAxis);
+        BLPoint s0, e0, s1, e1;
+        was.fill().gradient().axisPoints(was.geometryBounds(), radial, s0, e0);
+        now.fill().gradient().axisPoints(now.geometryBounds(), radial, s1, e1);
+        EXPECT_NEAR(s0.x, s1.x, 1e-3);
+        EXPECT_NEAR(s0.y, s1.y, 1e-3);
+        EXPECT_NEAR(e0.x, e1.x, 1e-3);
+        EXPECT_NEAR(e0.y, e1.y, 1e-3);
+    }
+    // The axis is relative to the box, so moving the object moves it along.
+    copy.object(0).transform(BLMatrix2D::make_translation(50, 0));
+    BLPoint moved, ignored;
+    copy.object(0).fill().gradient().axisPoints(copy.object(0).geometryBounds(), false, moved, ignored);
+    EXPECT_NEAR(moved.x, 80.0, 1e-3);
+}
+
+TEST(SketchSvg, ForeignGradientVectorsAreKept) {
+    const char* svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>"
+        "<defs><linearGradient id='a' gradientUnits='userSpaceOnUse' x1='20' y1='10' x2='60' y2='10'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient>"
+        "<radialGradient id='b' cx='0.25' cy='0.5' r='0.25'><stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></radialGradient></defs>"
+        "<rect x='10' y='0' width='100' height='20' fill='url(#a)'/>"
+        "<rect x='0' y='0' width='40' height='40' fill='url(#b)'/></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    BLPoint start, end;
+    doc.object(0).fill().gradient().axisPoints(doc.object(0).geometryBounds(), false, start, end);
+    EXPECT_NEAR(start.x, 20.0, 1e-6);
+    EXPECT_NEAR(end.x, 60.0, 1e-6);
+    EXPECT_NEAR(start.y, 10.0, 1e-6);
+    doc.object(1).fill().gradient().axisPoints(doc.object(1).geometryBounds(), true, start, end);
+    EXPECT_NEAR(start.x, 10.0, 1e-6);   // 0.25 of 40
+    EXPECT_NEAR(start.y, 20.0, 1e-6);
+    EXPECT_NEAR(end.x - start.x, 10.0, 1e-6);  // r = 0.25 of 40
+}
+
+TEST(SketchSvg, EllipticalRadialAspectRoundTrips) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    g.setAxis(o.geometryBounds(), BLPoint(50, 50), BLPoint(80, 80));
+    g.axisAspect = 0.4;
+    o.setFill(SketchPaint::radial(g));
+    std::string svg = svgFromDocument(doc);
+    EXPECT_NE(svg.find("gradientTransform"), std::string::npos);  // other viewers see the ellipse too
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svg, copy));
+    EXPECT_NEAR(copy.object(0).fill().gradient().axisAspect, 0.4, 1e-4);
+}
+
+TEST(SketchSvg, ForeignGradientTransformBecomesAxisAndAspect) {
+    const char* svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>"
+        "<defs><radialGradient id='b' gradientUnits='userSpaceOnUse' cx='50' cy='50' r='20' gradientTransform='translate(0 0) rotate(0 50 50) scale(1 1)'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></radialGradient>"
+        "<linearGradient id='a' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='10' y2='0' gradientTransform='translate(20 30) scale(2)'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient>"
+        "<radialGradient id='c' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='translate(50 50) scale(3 1.5)'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></radialGradient></defs>"
+        "<rect width='100' height='100' fill='url(#b)'/><rect width='100' height='100' fill='url(#a)'/><rect width='100' height='100' fill='url(#c)'/></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 3u);
+    BLPoint start, end;
+    doc.object(1).fill().gradient().axisPoints(doc.object(1).geometryBounds(), false, start, end);
+    EXPECT_NEAR(start.x, 20.0, 1e-6);
+    EXPECT_NEAR(start.y, 30.0, 1e-6);
+    EXPECT_NEAR(end.x, 40.0, 1e-6);  // 10 * 2 + 20
+    doc.object(2).fill().gradient().axisPoints(doc.object(2).geometryBounds(), true, start, end);
+    EXPECT_NEAR(start.x, 50.0, 1e-6);
+    EXPECT_NEAR(end.x - start.x, 30.0, 1e-6);  // r = 10 scaled 3x along x
+    EXPECT_NEAR(doc.object(2).fill().gradient().axisAspect, 0.5, 1e-6);  // 1.5 / 3
+}
+
+TEST(SketchSvg, SkewAndAlongStrokeRoundTrip) {
+    SketchDocument doc;
+    SketchObject& o = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    g.setAxis(o.geometryBounds(), BLPoint(0, 50), BLPoint(100, 50));
+    g.axisSkew = 0.75;
+    o.setFill(SketchPaint::linear(g));
+    SketchGradient along = SketchGradient::fromColor(SketchColor::fromHex("#00ff00"));
+    along.alongStroke = true;
+    o.setStroke(SketchPaint::linear(along));
+    std::string svg = svgFromDocument(doc);
+    EXPECT_NE(svg.find("gradientTransform"), std::string::npos);
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svg, copy));
+    EXPECT_NEAR(copy.object(0).fill().gradient().axisSkew, 0.75, 1e-4);
+    EXPECT_TRUE(copy.object(0).stroke().gradient().alongStroke);
+    EXPECT_FALSE(copy.object(0).fill().gradient().alongStroke);
+}
+
+TEST(SketchSvg, ForeignSkewIsKept) {
+    const char* svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>"
+        "<defs><linearGradient id='a' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='100' y2='0' gradientTransform='skewX(45)'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient>"
+        "<radialGradient id='b' gradientUnits='userSpaceOnUse' cx='50' cy='50' r='20' gradientTransform='rotate(0 50 50) translate(50 50) skewX(30) translate(-50 -50)'>"
+        "<stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></radialGradient></defs>"
+        "<rect width='100' height='100' fill='url(#a)'/><rect width='100' height='100' fill='url(#b)'/></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_NEAR(doc.object(0).fill().gradient().axisSkew, 1.0, 1e-6);
+    EXPECT_NEAR(doc.object(1).fill().gradient().axisSkew, std::tan(30.0 * 3.14159265358979323846 / 180.0), 1e-6);
+    EXPECT_NEAR(doc.object(1).fill().gradient().axisAspect, 1.0, 1e-6);
 }
 
 TEST(SketchSvg, RotatedObjectsKeepTheirFrameAngle) {
@@ -1054,4 +1291,118 @@ TEST(SketchSvg, ColorModeRoundTrips) {
     // A file without the attribute is an RGB document, even when loaded over a CMYK one.
     ASSERT_TRUE(documentFromSvg("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>", copy));
     EXPECT_EQ(copy.colorMode(), ColorSpace::RGB);
+}
+
+// ---- New Document model --------------------------------------------------------------------------
+
+#include "newdocumentmodel.h"
+
+TEST(NewDocumentModel, StartsAsLetterCmyk) {
+    NewDocumentModel model;
+    EXPECT_EQ(model.name(), "Untitled-1");
+    EXPECT_NEAR(model.widthPoints(), 612.0, 1e-6);
+    EXPECT_NEAR(model.heightPoints(), 792.0, 1e-6);
+    EXPECT_EQ(model.colorMode(), ColorSpace::CMYK);
+    EXPECT_EQ(model.pixelWidth(), 2550);
+    EXPECT_EQ(model.pixelHeight(), 3300);
+    EXPECT_FALSE(model.isLandscape());
+}
+
+TEST(NewDocumentModel, UnitChangeKeepsThePhysicalSize) {
+    NewDocumentModel model;
+    model.setUnit(LengthUnit::Millimeters);
+    EXPECT_NEAR(model.width(), 215.9, 0.01);
+    EXPECT_NEAR(model.height(), 279.4, 0.01);
+    EXPECT_NEAR(model.widthPoints(), 612.0, 1e-6);
+    model.setUnit(LengthUnit::Pixels);  // 300 ppi
+    EXPECT_NEAR(model.width(), 2550.0, 1e-6);
+    EXPECT_NEAR(model.widthPoints(), 612.0, 1e-6);
+}
+
+TEST(NewDocumentModel, PixelUnitsFollowThePpi) {
+    NewDocumentModel model;
+    model.loadPreset(NewDocumentModel::presets()[10]);  // Full HD, px @ 72
+    EXPECT_NEAR(model.widthPoints(), 1920.0, 1e-6);
+    model.setPpi(144.0);  // same pixel count, half the physical size
+    EXPECT_NEAR(model.widthPoints(), 960.0, 1e-6);
+    EXPECT_EQ(model.pixelWidth(), 1920);
+    model.setPpi(-5.0);  // ignored
+    EXPECT_NEAR(model.ppi(), 144.0, 1e-9);
+}
+
+TEST(NewDocumentModel, OrientationSwapsOnlyWhenNeeded) {
+    NewDocumentModel model;  // 8.5 x 11 portrait
+    model.setLandscape(false);
+    EXPECT_NEAR(model.width(), 8.5, 1e-9);
+    model.setLandscape(true);
+    EXPECT_NEAR(model.width(), 11.0, 1e-9);
+    EXPECT_NEAR(model.height(), 8.5, 1e-9);
+    EXPECT_TRUE(model.isLandscape());
+    model.setLandscape(true);
+    EXPECT_NEAR(model.width(), 11.0, 1e-9);
+}
+
+TEST(NewDocumentModel, KeepProportionsScalesTheOtherSide) {
+    NewDocumentModel model;
+    model.loadPreset(NewDocumentModel::presets()[19]);  // App icon would be square; use A4 instead
+    model.loadPreset(NewDocumentModel::presets()[4]);   // A4 210 x 297 mm
+    model.setKeepProportions(true);
+    model.setWidth(105.0);
+    EXPECT_NEAR(model.height(), 148.5, 0.01);
+    model.setHeight(594.0);
+    EXPECT_NEAR(model.width(), 420.0, 0.01);
+    model.setKeepProportions(false);
+    model.setWidth(100.0);
+    EXPECT_NEAR(model.height(), 594.0, 1e-9);
+    model.setWidth(0.0);  // ignored
+    EXPECT_NEAR(model.width(), 100.0, 1e-9);
+}
+
+TEST(NewDocumentModel, PresetsAndCategories) {
+    std::vector<std::string> categories = NewDocumentModel::categories();
+    ASSERT_EQ(categories.size(), 4u);
+    EXPECT_EQ(categories[0], "Print");
+    EXPECT_EQ(categories[3], "Art");
+    EXPECT_EQ(NewDocumentModel::presetsIn("Print").size(), 10u);
+    EXPECT_EQ(NewDocumentModel::presetsIn("Web").size(), 6u);
+    EXPECT_EQ(NewDocumentModel::rowText(NewDocumentModel::presets()[0]), "Letter   8.5 x 11 in   CMYK, 300 ppi");
+}
+
+TEST(NewDocumentModel, SummaryAndLabels) {
+    NewDocumentModel model;
+    EXPECT_EQ(model.widthLabel(), "8.5 in");
+    EXPECT_EQ(model.heightLabel(), "11 in");
+    EXPECT_EQ(model.summary(), "612 x 792 pt  =  8.5 x 11 in  =  215.9 x 279.4 mm\n2550 x 3300 px at 300 ppi  -  CMYK  -  Portrait");
+}
+
+TEST(NewDocumentModel, OnlyRgbAndCmykColorModes) {
+    NewDocumentModel model;
+    model.setColorMode(ColorSpace::HSB);
+    EXPECT_EQ(model.colorMode(), ColorSpace::RGB);
+    model.setColorMode(ColorSpace::CMYK);
+    EXPECT_EQ(model.colorMode(), ColorSpace::CMYK);
+}
+
+TEST(SketchSvg, PageBackgroundRoundTrips) {
+    SketchDocument doc;
+    EXPECT_TRUE(doc.pageBackground().has_value());  // white by default
+    doc.add(SketchObject::makeRect(0, 0, 5, 5));
+    std::string svg = svgFromDocument(doc);
+    EXPECT_NE(svg.find("id=\"pageBackground\""), std::string::npos);  // a real rect for other viewers
+
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svg, copy));
+    EXPECT_EQ(copy.objectCount(), 1u);  // the background rect is not an object
+    ASSERT_TRUE(copy.pageBackground().has_value());
+    EXPECT_EQ(copy.pageBackground()->toHex(), "#ffffff");
+
+    doc.setPageBackground(SketchColor::cmyk(0.1f, 0.0f, 0.0f, 0.0f));
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_EQ(copy.pageBackground()->space(), ColorSpace::CMYK);
+
+    doc.setPageBackground(std::nullopt);
+    std::string transparent = svgFromDocument(doc);
+    EXPECT_EQ(transparent.find("id=\"pageBackground\""), std::string::npos);
+    ASSERT_TRUE(documentFromSvg(transparent, copy));
+    EXPECT_FALSE(copy.pageBackground().has_value());
 }

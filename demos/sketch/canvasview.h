@@ -6,13 +6,14 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace sketch {
 
     // What a left-button drag on the canvas does.
-    // DirectSelect..Gradient are palette entries whose behavior lands in later phases (S3/S5): they
+    // DirectSelect, Pen, Pencil and Text are palette entries whose behavior lands in later phases (S5): they
     // are selectable so the palette stays a radio group, but a drag with them does nothing yet.
     enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Line, Pen, Pencil, Text, Gradient, Hand, Zoom };
 
@@ -50,6 +51,11 @@ namespace sketch {
         float gridSpacing() const { return gridSpacing_; }
         void setGridSpacing(float spacing);
 
+        // Draw and move drags jump to the grid when within a few pixels of a grid line (like Illustrator's
+        // snap-to-point; the grid need not be visible).
+        bool snapToGrid() const { return snapToGrid_; }
+        void setSnapToGrid(bool value);
+
         // The document painted on the page; null paints an empty page. Not owned. The view
         // registers itself with the document (Model::addView) so edits repaint it.
         // @reflect ignore=true
@@ -78,11 +84,27 @@ namespace sketch {
 
         // The active tool. Select: click/shift-click/marquee, drag to move, handles to resize/rotate.
         // Rectangle/Ellipse/Line: drag out a shape (Shift = square/circle/45 degrees). Hand: drag pans.
+        // Gradient: drag across the selected object(s) to lay a gradient axis (a solid fill becomes a linear
+        // gradient; Shift = 45 degrees); drag the axis ends and stops of a selected gradient; click the axis to
+        // add a stop, Alt-click a stop to remove it.
         // @reflect ignore=true
         SketchTool tool() const { return tool_; }
         // @reflect ignore=true
         void setTool(SketchTool tool);
         newui::Delegate<CanvasView> onToolChanged;
+
+        // The pointer over the page, in document units (status bar coordinates); fired on every move.
+        BLPoint pointerPosition() const { return pointerDoc_; }
+        newui::Delegate<CanvasView> onPointerMoved;
+
+        // Which paint the Gradient tool edits: the fill (default) or the stroke - follows the Color panel's target.
+        bool gradientOnStroke() const { return gradientOnStroke_; }
+        void setGradientOnStroke(bool stroke);
+        // The gradient stop the tool has selected (highlighted on the axis; the Color panel edits the same one).
+        // Setting it from outside does not fire onGradientStopSelected.
+        std::size_t selectedGradientStop() const { return gradientSelectedStop_; }
+        void setSelectedGradientStop(std::size_t index);
+        newui::Delegate<CanvasView> onGradientStopSelected;
 
         // Fired whenever zoom() changes (wheel, setZoom, zoomToFit) - the zoom combo and status
         // bar follow it.
@@ -115,6 +137,12 @@ namespace sketch {
         float gridSpacing_ = 20.0f;
         bool showGrid_ = true;
         bool showRulers_ = true;
+        bool snapToGrid_ = true;
+        BLPoint pointerDoc_;
+        BLBox dragBounds_;  // the selection's bounds when a move began
+        // `value` moved onto the nearest grid line when it is within snapThreshold px of one.
+        double snapValue(double value) const;
+        BLPoint snapPoint(const BLPoint& point) const { return BLPoint(snapValue(point.x), snapValue(point.y)); }
         bool centered_ = true;  // cleared by the first manual pan/zoom
         float panX_ = 20.0f;
         float panY_ = 20.0f;
@@ -125,7 +153,7 @@ namespace sketch {
         float panStartY_ = 0.0f;
 
         // ---- Tool interaction ----
-        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw };
+        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop };
         // Handles 0..7 clockwise from the top-left corner; 8 is the rotate knob above top-center.
         // 9 is the transform-origin marker.
         static constexpr int kRotateHandle = 8;
@@ -145,6 +173,40 @@ namespace sketch {
         void applyToSelection(const BLMatrix2D& matrix, double angleDelta = 0.0);
         void applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const QuadFrame& newQuad);
         void paintOverlay(BLContext& ctx) const;
+        // Select tool: the cursor over a handle (resize arrows that follow the frame's turn, rotate, pivot).
+        void updateHoverCursor(const newui::Point& pt);
+
+        // ---- Gradient tool ----
+        // The tool edits the fill or the stroke paint of the selection.
+        const SketchPaint& gradientPaint(const SketchObject& object) const { return gradientOnStroke_ ? object.stroke() : object.fill(); }
+        const SketchPaint& gradientPaint(const StyleState& state) const { return gradientOnStroke_ ? state.stroke : state.fill; }
+        void setGradientPaint(SketchObject& object, const SketchPaint& paint) const {
+            if (gradientOnStroke_) { object.setStroke(paint); } else { object.setFill(paint); }
+        }
+        // The handle that reshapes a radial gradient (view pixels): where its across radius ends - out from the
+        // center, across the axis, leaning by `skew`. Dragging it sets the aspect and the lean together.
+        static BLPoint aspectHandle(const BLPoint& center, const BLPoint& end, double aspect, double skew);
+        // The handle that tilts a linear gradient's lines of equal color: a fixed distance from the middle of the
+        // axis along the direction those lines run.
+        static BLPoint tiltHandle(const BLPoint& start, const BLPoint& end, double skew);
+        // The one selected object whose fill is a gradient (the tool's handles belong to it), or null.
+        SketchObject* gradientTarget() const;
+        // The target's gradient axis in view pixels (linear: start..end; radial: center..a point on the circle).
+        bool gradientAxisView(const SketchObject& object, BLPoint& start, BLPoint& end) const;
+        // Mouse-down with the gradient tool: grabs an axis end or stop of the target, adds a stop on its axis,
+        // or starts dragging out a new axis on the (selected / clicked) objects.
+        void beginGradientDrag(const newui::Point& pt, std::uint32_t keys);
+        void updateGradientDrag(std::uint32_t keys);
+        void finishGradientDrag();
+        void cancelGradientDrag();
+        void paintGradientOverlay(BLContext& ctx) const;
+
+        bool gradientOnStroke_ = false;
+        std::size_t gradientSelectedStop_ = 0;
+        std::vector<StyleState> gradientBefore_;  // fills when a gradient drag began
+        int gradientEnd_ = 0;                     // GradientEnd: 0 = start / center, 1 = end / radius point
+        std::size_t gradientStop_ = 0;            // GradientStop: index of the stop being moved
+        std::string gradientWhat_;                // undo step name
 
         SketchTool tool_ = SketchTool::Select;
         Drag drag_ = Drag::None;
