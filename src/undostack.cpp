@@ -9,6 +9,7 @@ namespace newui {
         redoStack_.clear();
         undoStack_.push_back(std::move(action));
         onActionPushed(*this, undoStack_.back());
+        onActionApplied(*this, undoStack_.back());
     }
 
     void UndoStack::undo() {
@@ -21,6 +22,7 @@ namespace newui {
             action.undoIt();
         }
         redoStack_.push_back(std::move(action));
+        onActionApplied(*this, redoStack_.back());
     }
 
     void UndoStack::redo() {
@@ -33,6 +35,7 @@ namespace newui {
             action.doIt();
         }
         undoStack_.push_back(std::move(action));
+        onActionApplied(*this, undoStack_.back());
     }
 
     void UndoStack::clear() {
