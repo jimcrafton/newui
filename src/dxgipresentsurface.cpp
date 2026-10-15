@@ -70,6 +70,25 @@ namespace newui {
 
 	DxgiPresentSurface::~DxgiPresentSurface() = default;
 
+	void DxgiPresentSurface::setGpuDeviceHook(GpuDeviceHook hook) {
+		gpuDeviceHook_ = std::move(hook);
+		if (gpuDeviceHook_ && gpu_) {
+			try {
+				gpuDeviceHook_(gpu_->device.Get(), gpu_->context.Get(), UINT(image_.size().w), UINT(image_.size().h));
+			}
+			catch (...) {
+			}
+		}
+	}
+
+	void DxgiPresentSurface::setGpuCompositeHook(GpuCompositeHook hook) {
+		gpuCompositeHook_ = std::move(hook);
+	}
+
+	void DxgiPresentSurface::setGpuResizeHook(GpuResizeHook hook) {
+		gpuResizeHook_ = std::move(hook);
+	}
+
 	PresentBackend DxgiPresentSurface::backend() const {
 		return gdi_ ? PresentBackend::Gdi : PresentBackend::Dxgi;
 	}
@@ -91,6 +110,15 @@ namespace newui {
 	}
 
 	void DxgiPresentSurface::releaseGpu() {
+		if (gpu_ && gpuDeviceHook_) {
+			// Tell the hook's owner the device is going while it's still alive, so it can release its own
+			// resources against it - a null device is the "gone" signal.
+			try {
+				gpuDeviceHook_(nullptr, nullptr, 0, 0);
+			}
+			catch (...) {
+			}
+		}
 		if (gpu_) {
 			// Direct3D 11 defers destroying objects, and only one flip-model swap chain can be associated with an
 			// HWND at a time, so merely dropping our references isn't enough before a new swap chain is created
@@ -138,6 +166,16 @@ namespace newui {
 		}
 		else {
 			ensureGpu();
+		}
+
+		// Only while a device is actually in place: not under GDI, and not when ensureGpu() had no window
+		// yet (the device hook delivers the size once there is one).
+		if (gpu_ && gpuResizeHook_) {
+			try {
+				gpuResizeHook_(UINT(width), UINT(height));
+			}
+			catch (...) {
+			}
 		}
 
 		return gdi_ ? gdi_->isValid() : true;
@@ -210,6 +248,13 @@ namespace newui {
 		gpu->hwnd = window();
 		gpu_ = std::move(gpu);
 		needsFullUpload_ = true;
+		if (gpuDeviceHook_) {
+			try {
+				gpuDeviceHook_(gpu_->device.Get(), gpu_->context.Get(), width, height);
+			}
+			catch (...) {
+			}
+		}
 		return true;
 	}
 
@@ -308,6 +353,24 @@ namespace newui {
 			// partial-present frames (full-frame presents were fine) - not narrowed down to which rect - so
 			// only the *upload* is partial. It's a DWM composition hint, not needed for correctness.
 			gpu_->context->CopyResource(backBuffer.Get(), gpu_->texture.Get());
+
+			if (gpuCompositeHook_) {
+				// GetBuffer(0) can hand back a different buffer between presents on a flip-model chain, so the
+				// RTV is built and dropped within this call, never cached. A creation failure just presents
+				// Blend2D's content without the hook's draw this frame. The result is deliberately kept out of
+				// hr, which below still means only "did GetBuffer()/Present1() succeed".
+				ComPtr<ID3D11RenderTargetView> rtv;
+				if (SUCCEEDED(gpu_->device->CreateRenderTargetView(backBuffer.Get(), nullptr, &rtv))) {
+					try {
+						gpuCompositeHook_(gpu_->context.Get(), rtv.Get());
+					}
+					catch (...) {
+					}
+					// Presenting a back buffer that's still bound as a render target is a DXGI validation
+					// warning, and easy for a hook body to forget - so unbind it here, always.
+					gpu_->context->OMSetRenderTargets(0, nullptr, nullptr);
+				}
+			}
 
 			DXGI_PRESENT_PARAMETERS params = {};
 			hr = gpu_->swapChain->Present1(0, 0, &params);

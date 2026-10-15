@@ -250,6 +250,30 @@ namespace newui {
 		return surface_->backend();
 	}
 
+	bool RootView::setGpuDeviceHook(GpuDeviceHook hook) {
+		auto* dxgi = dynamic_cast<DxgiPresentSurface*>(surface_.get());
+		if (dxgi != nullptr) {
+			dxgi->setGpuDeviceHook(std::move(hook));
+		}
+		return dxgi != nullptr;
+	}
+
+	bool RootView::setGpuCompositeHook(GpuCompositeHook hook) {
+		auto* dxgi = dynamic_cast<DxgiPresentSurface*>(surface_.get());
+		if (dxgi != nullptr) {
+			dxgi->setGpuCompositeHook(std::move(hook));
+		}
+		return dxgi != nullptr;
+	}
+
+	bool RootView::setGpuResizeHook(GpuResizeHook hook) {
+		auto* dxgi = dynamic_cast<DxgiPresentSurface*>(surface_.get());
+		if (dxgi != nullptr) {
+			dxgi->setGpuResizeHook(std::move(hook));
+		}
+		return dxgi != nullptr;
+	}
+
 	void RootView::setPresentBackend(PresentBackend backend) {
 		surface_ = createPresentSurface(backend);
 		surface_->setWindow(viewHwnd_);
