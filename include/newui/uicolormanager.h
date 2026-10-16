@@ -88,6 +88,9 @@ namespace newui {
         // color. Any thread; the same timing as setDarkModeOverride().
         static void setColorOverride(UIColorRole role, std::optional<Color> color);
 
+        // The color the host gave `role` with setColorOverride(), if it did.
+        static std::optional<Color> colorOverride(UIColorRole role);
+
         // HighlightBackground/HighlightText follow the user's actual
         // Windows accent color (DwmGetColorizationColor(), a real,
         // documented Win32 API - no WinRT needed) rather than a fixed

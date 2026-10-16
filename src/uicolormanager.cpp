@@ -187,6 +187,15 @@ namespace newui {
 			: 0ull);
 	}
 
+	std::optional<Color> UIColorManager::colorOverride(UIColorRole role) {
+		const std::size_t index = static_cast<std::size_t>(role);
+		const std::uint64_t forced = index < kRoleCount ? g_colorOverride[index].load() : 0;
+		if (forced == 0) {
+			return std::nullopt;
+		}
+		return Color(static_cast<std::uint32_t>(forced & 0xFFFFFFu), false);
+	}
+
 	void UIColorManager::setDarkModeOverride(std::optional<bool> dark) {
 		g_darkModeOverride.store(dark.has_value() ? (*dark ? 1 : 0) : -1);
 		// What loads its palette from the mode (Themes/dark.theme or light.theme) follows at once.
