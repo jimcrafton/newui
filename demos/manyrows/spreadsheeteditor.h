@@ -38,6 +38,28 @@ namespace manyrows {
         // is larger than kMaxRangeCells (nothing happens) or when every cell is already blank.
         bool clearRange(const newui::CellRange& range);
 
+        // What paste() did.
+        // @reflect ignore=true
+        struct PasteOutcome {
+            std::string error;            // non-empty: nothing was pasted (the message is for the status bar)
+            std::size_t changed = 0;      // cells whose text actually changed
+            bool clipped = false;         // part of the clipboard fell past the last row / column and was dropped
+            newui::CellRange block;       // the cells the paste covered (valid when error is empty)
+        };
+
+        // Pastes rows of cell text (TableClipText::parse) with its top-left cell at the top-left of `target`,
+        // as ONE undo step ("Paste B2:D5"). Exception, as in Excel: ONE clipboard cell pasted over a larger
+        // selection fills that whole selection. Anything past the table's last row or column is dropped
+        // (`clipped`). With `typed` (the generated table) every cell is validated first and one bad cell
+        // refuses the whole paste. More than kMaxRangeCells cells is refused.
+        PasteOutcome paste(const newui::CellRange& target, const std::vector<std::vector<std::string>>& cells, bool typed);
+
+        // Ctrl+D / Ctrl+R. The top row (left column) of the selection is copied over the rest; a selection of
+        // one row (column) copies from the row above (column to the left) instead. One undo step ("Fill down
+        // A2:A9"). Returns false when nothing changed or the block exceeds kMaxRangeCells.
+        bool fillDown(const newui::CellRange& range);
+        bool fillRight(const newui::CellRange& range);
+
         bool canUndo() const { return stack_.canUndo(); }
         bool canRedo() const { return stack_.canRedo(); }
         const std::string& undoDescription() const { return stack_.undoDescription(); }
@@ -63,6 +85,10 @@ namespace manyrows {
 
     private:
         void push(std::string description, std::vector<CellEdit> edits);
+        // A CellEdit setting (row, column) to `text`, or nothing when the cell already shows it.
+        void addEdit(std::vector<CellEdit>& edits, std::size_t row, std::size_t column, const std::string& text) const;
+        static std::string rangeName(const newui::CellRange& range);
+        bool fill(const newui::CellRange& range, bool down);
         void replay(bool undoing);
 
         ManyRowsModel* model_;
