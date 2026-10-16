@@ -1,0 +1,85 @@
+// manyrows_lite - the whole window: a table and a status bar.
+{
+  meta: { author: "", date: "2026-10-15", copyright: "", version: "0.1.0.0" },
+  type: "Frame",
+  title: "manyrows lite - 1,000,000 rows",
+  name: "manyrows_lite",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 80, y: 80 },
+    size: { type: "Size", width: 1100, height: 700 }
+  },
+  rootView: {
+    type: "RootView",
+    name: "rootview",
+    visible: true,
+    layout: { type: "FlexLayout", orientation: "Vertical" },
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 1100, height: 700 }
+    },
+    childViews: [
+      {
+        type: "ScrollView",
+        name: "tableScroll",
+        layoutParams: { type: "FlexLayoutParams", weight: 1 },
+        childViews: [
+          {
+            type: "SubView",
+            name: "tableViewport",
+            visible: true,
+            childViews: [
+              {
+                type: "TimedTableView",
+                name: "table",
+                rowHeight: 22
+              }
+            ]
+          }
+        ]
+      },
+      {
+        type: "StatusBar",
+        name: "statusBar",
+        desiredSize: { type: "Size", width: 0, height: 22 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "StatusPane",
+            text: "Ready",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 190, height: 0 },
+            desiredSizeOverride: true,
+            text: "paint - ms",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 170, height: 0 },
+            desiredSizeOverride: true,
+            text: "rows -",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 190, height: 0 },
+            desiredSizeOverride: true,
+            text: "no selection",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 150, height: 0 },
+            desiredSizeOverride: true,
+            text: "1,000,000 rows",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      }
+    ]
+  }
+}
