@@ -32,7 +32,7 @@
 //   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
 //   {"cmd":"describe","name":"v"}                -> type, properties:{name:value,..} (every reflected property with a plain value)
 //   {"cmd":"get","name":"v","property":"text"}  -> value (one reflected property)
-//   {"cmd":"tree","name":"tree","limit":50}      -> count (visible rows), rows:[{"depth":n,"text":".."}] (a TreeView)
+//   {"cmd":"tree","name":"tree","limit":50}      -> count (visible rows), rows:[{depth,text,expanded,hasChildren,x,y,w,h}] (a TreeView)
 //   {"cmd":"segment","name":"modes","index":1}   -> count, selected, label, x/y/w/h of that segment (a SegmentedControl)
 //   {"cmd":"screenshot","name":"root","path":"C:\\x.bmp"}  -> {"ok":true,"path":".."}  (name = a RootView)
 //   {"cmd":"idle"}                                -> replies once the loop has nothing pending
@@ -344,7 +344,12 @@ std::string treeReply(const Request& request) {
                 text = *shown;
             }
         }
-        rows += (rows.empty() ? "" : ",") + std::string("{\"depth\":") + std::to_string(path.size()) + ",\"text\":" + quote(text) + "}";
+        Rect rowBox = tree->localToScreen(Rect(0, controller.itemOffset(i), tree->screenBounds().width(), controller.itemHeight(i)));
+        rows += (rows.empty() ? "" : ",") + std::string("{\"depth\":") + std::to_string(path.size()) + ",\"text\":" + quote(text) +
+            ",\"expanded\":" + (controller.isExpanded(path) ? "true" : "false") +
+            ",\"hasChildren\":" + (model != nullptr && model->hasChildren(path) ? "true" : "false") +
+            ",\"x\":" + number(rowBox.left()) + ",\"y\":" + number(rowBox.top()) +
+            ",\"w\":" + number(rowBox.width()) + ",\"h\":" + number(rowBox.height()) + "}";
     }
     return reply(request, true, "\"count\":" + std::to_string(count) + ",\"rows\":[" + rows + "]");
 }

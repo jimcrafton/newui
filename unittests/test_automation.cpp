@@ -157,6 +157,8 @@ TEST_F(AutomationFixture, TreeListsTheVisibleRowsWithTheirText) {
     EXPECT_TRUE(contains(answer, "\"count\":2")) << answer;
     EXPECT_TRUE(contains(answer, "\"text\":\"alpha\"")) << answer;
     EXPECT_TRUE(contains(answer, "\"text\":\"beta\"")) << answer;
+    EXPECT_TRUE(contains(answer, "\"hasChildren\":false")) << answer;
+    EXPECT_TRUE(contains(answer, "\"h\":")) << answer;
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"tree\",\"name\":\"autoEditor\"}"), "is not a TreeView"));
 }
 

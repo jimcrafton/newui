@@ -97,7 +97,7 @@ request's `"id"` (a number) is echoed back when given. A failure is
 | `{"cmd":"scrollInfo","name":"explorerScroll"}` | For a `ScrollView`: per bar (prefix `v` or `h`) `Value`, `Min`, `Max`, `Page`, `Visible`, and the thumb's screen rect `x`, `y`, `w`, `h` (e.g. `vValue`, `vx`). Lets a test aim a scrollbar drag and check the position |
 | `{"cmd":"describe","name":"filterInput"}` | `type` and `properties`: every reflected property of the view that has a plain value (bool, number, string), by name. Works for any control newui reflects, with no per-control code |
 | `{"cmd":"get","name":"filterInput","property":"text"}` | `value` of one reflected property |
-| `{"cmd":"tree","name":"explorerTree","limit":50}` | For a `TreeView`: `count` (visible rows) and `rows`, the first `limit` (default 50) as `{"depth":n,"text":"..."}`; the text is the model's `value()` for the row's path when it is a string, else empty |
+| `{"cmd":"tree","name":"explorerTree","limit":50}` | For a `TreeView`: `count` (visible rows) and `rows`, the first `limit` (default 50) as `{"depth":n,"text":"...","expanded":b,"hasChildren":b,"x":..,"y":..,"w":..,"h":..}` (the row's screen rect; the text is the model's `value()` for the row's path when it is a string, else empty) |
 | `{"cmd":"segment","name":"explorerModes","index":1}` | For a `SegmentedControl`: `count`, `selected` (index), and that segment's `label` and screen rect `x`, `y`, `w`, `h` |
 | `{"cmd":"findView","name":"filterEdit"}` | `x`, `y`, `w`, `h` (screen pixels of the view's whole bounds, ready for `SendInput`), `visible` |
 | `{"cmd":"focused"}` | `name`, `type` of the focused view (the foreground window wins; empty if none) |
