@@ -1,9 +1,12 @@
 #include "sketchobject.h"
 
+#include "textoutline.h"
+
 #include <newui/shapes.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 
 namespace sketch {
@@ -352,6 +355,143 @@ namespace sketch {
             return out;
         }
 
+        // A repeatable pseudo-random number in [-1, 1) from a seed and two indices (splitmix64 mixing) - the same inputs always give the
+        // same number, which is what keeps a roughened outline still while it is moved or repainted.
+        double noise(std::uint64_t seed, std::uint64_t a, std::uint64_t b) {
+            std::uint64_t z = seed * 0x9E3779B97F4A7C15ull + a * 0xBF58476D1CE4E5B9ull + b * 0x94D049BB133111EBull;
+            z ^= z >> 30;
+            z *= 0xBF58476D1CE4E5B9ull;
+            z ^= z >> 27;
+            z *= 0x94D049BB133111EBull;
+            z ^= z >> 31;
+            return double(z >> 11) / double(1ull << 52) - 1.0;
+        }
+
+        // The corners of a flattened outline without repeated points; a closed outline loses its repeated first point too.
+        std::vector<BLPoint> cleanPoints(const Polyline& line, bool& closed) {
+            std::vector<BLPoint> pts;
+            for (const BLPoint& p : line.points) {
+                if (pts.empty() || std::hypot(p.x - pts.back().x, p.y - pts.back().y) > 1e-9) { pts.push_back(p); }
+            }
+            closed = line.closed && pts.size() > 2;
+            if (closed && std::hypot(pts.front().x - pts.back().x, pts.front().y - pts.back().y) <= 1e-9) { pts.pop_back(); }
+            return pts;
+        }
+
+        // Roughen: every outline is cut into pieces about `detail` long and each point (the old corners too) is moved by up to `size`
+        // in x and y. Curves come out as polylines - the wobble hides it.
+        BLPath roughenPath(const BLPath& path, double size, double detail, double seed) {
+            if (size <= 0.0) {
+                return path;
+            }
+            detail = std::max(0.5, detail);
+            const std::uint64_t s = std::uint64_t(std::llround(seed));
+            BLPath out;
+            std::uint64_t lineIndex = 0;
+            for (Polyline& line : flattenPath(path)) {
+                bool closed = false;
+                std::vector<BLPoint> pts = cleanPoints(line, closed);
+                std::size_t n = pts.size();
+                if (n < 2) { continue; }
+                std::vector<BLPoint> dense;
+                std::size_t segments = closed ? n : n - 1;
+                for (std::size_t i = 0; i < segments; ++i) {
+                    const BLPoint& a = pts[i];
+                    const BLPoint& b = pts[(i + 1) % n];
+                    int pieces = int(std::min(2000.0, std::max(1.0, std::ceil(std::hypot(b.x - a.x, b.y - a.y) / detail))));
+                    for (int k = 0; k < pieces; ++k) {
+                        double t = double(k) / pieces;
+                        dense.push_back(BLPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+                    }
+                }
+                if (!closed) { dense.push_back(pts.back()); }
+                for (std::size_t j = 0; j < dense.size(); ++j) {
+                    dense[j].x += noise(s, lineIndex, 2 * j) * size;
+                    dense[j].y += noise(s, lineIndex, 2 * j + 1) * size;
+                }
+                out.move_to(dense[0]);
+                for (std::size_t j = 1; j < dense.size(); ++j) { out.line_to(dense[j]); }
+                if (closed) { out.close(); }
+                ++lineIndex;
+            }
+            return out;
+        }
+
+        // Offset Path: every closed outline moves `distance` toward its outside (away from the fill; negative = inward) - each corner
+        // slides along its mitre, bevelled where the mitre would run past 4 x distance. Open paths become a rounded outline `distance`
+        // either side. Curves are flattened first. A very concave shape offset a long way can overlap itself (no clean-up of that).
+        BLPath offsetPath(const BLPath& path, double distance) {
+            if (distance == 0.0) {
+                return path;
+            }
+            std::vector<Polyline> lines = flattenPath(path);
+            // Which side of its edges the fill is on follows from the biggest outline (the outer one; holes run the other way).
+            double bestArea = 0.0;
+            for (Polyline& line : lines) {
+                bool closed = false;
+                std::vector<BLPoint> pts = cleanPoints(line, closed);
+                if (!closed) { continue; }
+                double area = 0.0;
+                for (std::size_t i = 0; i < pts.size(); ++i) {
+                    const BLPoint& a = pts[i];
+                    const BLPoint& b = pts[(i + 1) % pts.size()];
+                    area += a.x * b.y - b.x * a.y;
+                }
+                if (std::fabs(area) > std::fabs(bestArea)) { bestArea = area; }
+            }
+            const double side = bestArea >= 0.0 ? 1.0 : -1.0;
+            BLPath out;
+            for (Polyline& line : lines) {
+                bool closed = false;
+                std::vector<BLPoint> pts = cleanPoints(line, closed);
+                std::size_t n = pts.size();
+                if (n < 2) { continue; }
+                if (!closed) {
+                    BLPath open;
+                    open.move_to(pts[0]);
+                    for (std::size_t i = 1; i < n; ++i) { open.line_to(pts[i]); }
+                    BLStrokeOptions stroke;
+                    stroke.width = 2.0 * std::fabs(distance);
+                    stroke.start_cap = stroke.end_cap = BL_STROKE_CAP_ROUND;
+                    stroke.join = BL_STROKE_JOIN_ROUND;
+                    BLPath outline;
+                    if (outline.add_stroked_path(open, stroke, BLApproximationOptions()) == BL_SUCCESS) { out.add_path(outline); }
+                    continue;
+                }
+                auto normalOf = [&](std::size_t from, std::size_t to) {
+                    double dx = pts[to].x - pts[from].x, dy = pts[to].y - pts[from].y, len = std::hypot(dx, dy);
+                    return BLPoint(side * dy / len, -side * dx / len);
+                };
+                std::vector<BLPoint> moved;
+                for (std::size_t i = 0; i < n; ++i) {
+                    BLPoint n1 = normalOf((i + n - 1) % n, i), n2 = normalOf(i, (i + 1) % n);
+                    double dot = n1.x * n2.x + n1.y * n2.y;
+                    double stretch = 2.0 / (1.0 + dot);   // (mitre length / distance) squared
+                    if (1.0 + dot < 1e-6 || stretch > 16.0) {
+                        moved.push_back(BLPoint(pts[i].x + n1.x * distance, pts[i].y + n1.y * distance));
+                        moved.push_back(BLPoint(pts[i].x + n2.x * distance, pts[i].y + n2.y * distance));
+                    } else {
+                        double k = distance / (1.0 + dot);
+                        moved.push_back(BLPoint(pts[i].x + (n1.x + n2.x) * k, pts[i].y + (n1.y + n2.y) * k));
+                    }
+                }
+                out.move_to(moved[0]);
+                for (std::size_t i = 1; i < moved.size(); ++i) { out.line_to(moved[i]); }
+                out.close();
+            }
+            return out;
+        }
+
+        // `path` after the geometry effect `item` (Round Corners, Offset Path or Roughen).
+        BLPath applyGeometryEffect(const BLPath& path, const AppearanceItem& item) {
+            switch (item.effect) {
+                case EffectKind::RoundCorners: return roundedPath(path, item.radius);
+                case EffectKind::OffsetPath: return offsetPath(path, item.radius);
+                case EffectKind::Roughen: return roughenPath(path, item.radius, item.offsetX, item.offsetY);
+                default: return path;
+            }
+        }
+
         // True when `point` lies in `path` stroked `width` wide with the options (width 0 never hits).
         bool strokeHit(const BLPath& path, double width, const StrokeOptions& options, const BLPoint& point) {
             if (width <= 0.0) {
@@ -600,6 +740,48 @@ namespace sketch {
         return new SketchObject(SketchObjectType::Path, path);
     }
 
+    SketchObject* SketchObject::makeText(const std::string& text, const std::string& fontName, double fontSize, const BLPoint& origin) {
+        SketchObject* object = new SketchObject(SketchObjectType::Text, BLPath());
+        object->setTextState(text, fontName, fontSize, BLMatrix2D::make_translation(origin.x, origin.y));
+        object->setStroke(SketchPaint::none());   // text is a filled shape; a stroke can be added in the Appearance panel
+        return object;
+    }
+
+    void SketchObject::rebuildText() {
+        BLPath outline = textOutline(text_, fontName_, fontSize_);
+        outline.transform(textMatrix_);
+        path_ = outline;
+    }
+
+    void SketchObject::setText(const std::string& text) {
+        text_ = text;
+        rebuildText();
+    }
+
+    void SketchObject::setFontName(const std::string& fontName) {
+        fontName_ = fontName;
+        rebuildText();
+    }
+
+    void SketchObject::setFontSize(double size) {
+        if (size <= 0.0) {
+            throw std::runtime_error("SketchObject::setFontSize: size must be positive");
+        }
+        fontSize_ = size;
+        rebuildText();
+    }
+
+    void SketchObject::setTextState(const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix) {
+        if (fontSize <= 0.0) {
+            throw std::runtime_error("SketchObject::setTextState: size must be positive");
+        }
+        text_ = text;
+        fontName_ = fontName;
+        fontSize_ = fontSize;
+        textMatrix_ = matrix;
+        rebuildText();
+    }
+
     std::size_t activeIndexOf(const std::vector<AppearanceItem>& items, AppearanceKind kind, std::size_t stored) {
         if (stored < items.size() && items[stored].kind == kind) {
             return stored;
@@ -688,6 +870,9 @@ namespace sketch {
 
     void SketchObject::transform(const BLMatrix2D& matrix) {
         path_.transform(matrix);
+        if (type_ == SketchObjectType::Text) {
+            textMatrix_.post_transform(matrix);   // later edits of the words land where the object now is
+        }
     }
 
     BLBox SketchObject::geometryBounds() const {
@@ -733,6 +918,28 @@ namespace sketch {
         copy->blendMode_ = blendMode_;
         copy->groups_ = groups_;
         copy->frameAngle_ = frameAngle_;
+        copy->text_ = text_;
+        copy->fontName_ = fontName_;
+        copy->fontSize_ = fontSize_;
+        copy->textMatrix_ = textMatrix_;
+        return copy;
+    }
+
+    SketchObject* SketchObject::cloneWithGeometry(SketchObjectType type, const BLPath& path) const {
+        if (type == SketchObjectType::Text) {
+            throw std::runtime_error("SketchObject::cloneWithGeometry: a Text object cannot be given a new outline");
+        }
+        SketchObject* copy = new SketchObject(type, path);
+        copy->name_ = name_;
+        copy->visible_ = visible_;
+        copy->locked_ = locked_;
+        copy->items_ = items_;
+        copy->activeFill_ = activeFill_;
+        copy->activeStroke_ = activeStroke_;
+        copy->activeEffect_ = activeEffect_;
+        copy->opacity_ = opacity_;
+        copy->blendMode_ = blendMode_;
+        copy->groups_ = groups_;
         return copy;
     }
 
@@ -943,6 +1150,47 @@ namespace sketch {
                 newui::shapes::boxBlur3(pixels, w, h, data.stride, blur);
                 return;
             }
+            if (item.effect == EffectKind::InnerShadow) {
+                // The opposite of a silhouette: everything the shape does NOT cover, tinted and blurred (so its edge bleeds inward),
+                // moved by the offset, and kept only where the shape is - laid on top with the effect's blend mode and amount.
+                BLImage inverse, shade;
+                if (inverse.create(w, h, BL_FORMAT_PRGB32) != BL_SUCCESS || shade.create(w, h, BL_FORMAT_PRGB32) != BL_SUCCESS) {
+                    return;
+                }
+                BLImageData id, sd;
+                inverse.get_data(&id);
+                shade.get_data(&sd);
+                BLRgba32 color = item.color.toRgba32();
+                for (int y = 0; y < h; ++y) {
+                    const uint32_t* from = reinterpret_cast<const uint32_t*>(pixels + std::ptrdiff_t(y) * data.stride);
+                    uint32_t* to = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(id.pixel_data) + std::ptrdiff_t(y) * id.stride);
+                    for (int x = 0; x < w; ++x) {
+                        uint32_t a = (255u - (from[x] >> 24)) * color.a() / 255u;
+                        to[x] = (a << 24) | ((color.r() * a / 255u) << 16) | ((color.g() * a / 255u) << 8) | (color.b() * a / 255u);
+                    }
+                }
+                newui::shapes::boxBlur3(static_cast<uint8_t*>(id.pixel_data), w, h, id.stride, blur);
+                BLPoint move = layer.toLayer.map_vector(item.offsetX, item.offsetY);
+                int dx = int(std::lround(move.x)), dy = int(std::lround(move.y));
+                for (int y = 0; y < h; ++y) {
+                    const uint32_t* cover = reinterpret_cast<const uint32_t*>(pixels + std::ptrdiff_t(y) * data.stride);
+                    int sy = std::min(h - 1, std::max(0, y - dy));
+                    const uint32_t* row = reinterpret_cast<const uint32_t*>(static_cast<uint8_t*>(id.pixel_data) + std::ptrdiff_t(sy) * id.stride);
+                    uint32_t* to = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(sd.pixel_data) + std::ptrdiff_t(y) * sd.stride);
+                    for (int x = 0; x < w; ++x) {
+                        uint32_t c = row[std::min(w - 1, std::max(0, x - dx))];
+                        uint32_t k = cover[x] >> 24;   // how much of the shape is here
+                        to[x] = ((((c >> 24) & 255u) * k / 255u) << 24) | ((((c >> 16) & 255u) * k / 255u) << 16) |
+                            ((((c >> 8) & 255u) * k / 255u) << 8) | ((c & 255u) * k / 255u);
+                    }
+                }
+                BLContext oc(layer.image);
+                oc.set_comp_op(kBlends[std::size_t(item.blendMode)].op);
+                oc.set_global_alpha(item.opacity);
+                oc.blit_image(BLPointI(0, 0), shade);
+                oc.end();
+                return;
+            }
             // Drop shadow / outer glow: the silhouette of what is there, tinted, blurred, offset, and put behind it.
             BLImage mask;
             if (mask.create(w, h, BL_FORMAT_PRGB32) != BL_SUCCESS) {
@@ -997,11 +1245,11 @@ namespace sketch {
 
     void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {
         const AppearanceItem& item = items_[index];
-        // Round Corners effects above this item (later in the stack) reshape its outline.
+        // Geometry effects above this item (later in the stack) reshape its outline, in stack order.
         BLPath shown = path_;
         for (std::size_t j = index + 1; j < items_.size(); ++j) {
-            if (items_[j].kind == AppearanceKind::Effect && items_[j].effect == EffectKind::RoundCorners && items_[j].visible) {
-                shown = roundedPath(shown, items_[j].radius);
+            if (items_[j].kind == AppearanceKind::Effect && isGeometryEffect(items_[j].effect) && items_[j].visible) {
+                shown = applyGeometryEffect(shown, items_[j]);
             }
         }
         ctx.save();
@@ -1044,7 +1292,7 @@ namespace sketch {
             }
             if (item.kind != AppearanceKind::Effect) {
                 drawItem(lc, i, box);
-            } else if (item.effect != EffectKind::RoundCorners) {
+            } else if (!isGeometryEffect(item.effect)) {
                 lc.end();  // the effect works on the pixels drawn so far
                 applyEffect(layer, item);
                 lc.begin(layer.image);
@@ -1065,7 +1313,10 @@ namespace sketch {
                 case EffectKind::DropShadow: pad += item.softness * newui::shapes::kBlurPadFactor + std::max(std::fabs(item.offsetX), std::fabs(item.offsetY)); break;
                 case EffectKind::OuterGlow:
                 case EffectKind::GaussianBlur: pad += item.softness * newui::shapes::kBlurPadFactor; break;
+                case EffectKind::InnerShadow:   // cast inside the shape: no reach
                 case EffectKind::RoundCorners: break;
+                case EffectKind::OffsetPath: pad += 4.0 * std::max(0.0, item.radius); break;   // a mitre reaches up to 4 x the distance
+                case EffectKind::Roughen: pad += item.radius; break;
             }
         }
         return pad;
@@ -1078,7 +1329,7 @@ namespace sketch {
     }
 
     const char* effectName(EffectKind kind) {
-        static const char* kNames[] = {"Drop Shadow", "Outer Glow", "Gaussian Blur", "Round Corners"};
+        static const char* kNames[] = {"Drop Shadow", "Outer Glow", "Gaussian Blur", "Round Corners", "Inner Shadow", "Offset Path", "Roughen"};
         return kNames[std::size_t(kind)];
     }
 
@@ -1088,14 +1339,14 @@ namespace sketch {
         }
         bool pixelEffects = false;
         for (const AppearanceItem& item : items_) {
-            pixelEffects = pixelEffects || (item.kind == AppearanceKind::Effect && item.visible && item.effect != EffectKind::RoundCorners);
+            pixelEffects = pixelEffects || (item.kind == AppearanceKind::Effect && item.visible && !isGeometryEffect(item.effect));
         }
         if (pixelEffects) {
             paintWithEffects(ctx);
         } else if (opacity_ >= 1.0 && blendMode_ == BlendMode::Normal) {
             paintItems(ctx);
         } else {
-            paintIsolated(ctx, bounds(), opacity_, blendMode_, [this](BLContext& layer) { paintItems(layer); });
+            paintIsolated(ctx, paintBounds(), opacity_, blendMode_, [this](BLContext& layer) { paintItems(layer); });
         }
     }
 

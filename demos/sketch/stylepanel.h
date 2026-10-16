@@ -11,6 +11,7 @@
 #include "swatchgrid.h"
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,10 @@ namespace sketch {
 
         // Re-reads the selection (or defaults) into every control.
         void refresh();
+
+        // Adds an effect on top of the selection's stack and chooses its row - what a pick in the fx popup does
+        // (the popup itself blocks in a native menu loop, so the checks and any other UI call this directly).
+        void addEffect(EffectKind kind);
 
         // The gradient stop the panel edits (index into the target gradient's stops). Setting it does not
         // fire onStopSelected - that is for changes the user makes in the panel.
@@ -74,7 +79,33 @@ namespace sketch {
         // blend mode). Choosing an item row makes it that kind's active item, so every other control edits it.
         void refreshAppearance(const SketchObject* first);
         void stackRowChosen(std::size_t row);
-        AppearanceKind targetKind() const { return target_ == Target::Fill ? AppearanceKind::Fill : AppearanceKind::Stroke; }
+        // The kind the opacity slider, blend list, eye, duplicate / delete / move act on: the chosen effect row, else
+        // the fill / stroke target. (The Color and Stroke panels keep editing target_ while an effect row is chosen.)
+        AppearanceKind targetKind() const {
+            return effectRowSelected_ ? AppearanceKind::Effect : (target_ == Target::Fill ? AppearanceKind::Fill : AppearanceKind::Stroke);
+        }
+
+        // ---- Effects ----
+        // The fx button: a popup of the four effects at the cursor; the chosen one goes through addEffect().
+        void showEffectMenu();
+        // The options row under the blend list: shown only while an effect row is chosen, with the fields that effect has.
+        void refreshEffectOptions(const SketchObject* first);
+        // Reads one field of the options row and edits the chosen effect with it (one undo step).
+        enum class EffectField { X, Y, Size, Color };
+        void applyEffectField(EffectField field);
+        // Shrinks the Appearance panel by `hidden` pixels (the rows the options row leaves out) - the panel, its body, the
+        // sidebar's content and the sidebar's scrollable height are all fixed sizes in sketch.newui, so they are moved
+        // together. 0 restores the full height. The first call remembers the layout's heights as the full ones.
+        void fitAppearancePanel(float hidden);
+        // Moves a sidebar section by `shrink` pixels (negative grows it): the panel, its body and - when `child` names one - the
+        // child whose own fixed height changes, then the sidebar's content and scrollable height. Sections are tracked by
+        // panel name so several can be adjusted independently.
+        void fitSection(const char* panel, const char* body, float shrink, const char* child = nullptr);
+
+        // ---- Graphic Styles ----
+        // Redraws the style tiles (each style painted on a small shape) and sizes the grid to its rows.
+        void refreshGraphicStyles();
+        void styleTilePicked();
 
         void beginDrag();
         void endDrag();
@@ -93,6 +124,17 @@ namespace sketch {
         Target target_ = Target::Fill;
         bool updating_ = false;
         bool baseRowSelected_ = false;  // the stack's base "Opacity" row is the one being edited
+        // The layout's own heights of every section fitSection() has moved, and how far each is moved now.
+        struct Section {
+            float panelHeight = 0.0f;
+            float bodyHeight = 0.0f;
+            float childHeight = 0.0f;
+            float shrink = 0.0f;
+        };
+        std::map<std::string, Section> sections_;
+        float sidebarContentHeight_ = 0.0f;
+        std::size_t styleTiles_ = static_cast<std::size_t>(-1);   // how many style tiles the grid was last sized for
+        bool effectRowSelected_ = false;  // an effect row is the one being edited (never together with baseRowSelected_)
         bool dragging_ = false;
         std::string dragDescription_;
         std::vector<StyleState> dragBefore_;

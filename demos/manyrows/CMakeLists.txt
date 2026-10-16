@@ -46,7 +46,7 @@ add_library(manyrows_files STATIC
     manyrowsdocument.h manyrowsdocument.cpp
     manyrowscontroller.h manyrowscontroller.cpp
 )
-target_link_libraries(manyrows_files PUBLIC manyrows_core zlib_inflate)
+target_link_libraries(manyrows_files PUBLIC manyrows_core zlib_static)
 
 # The full app. Resources/ (manyrows.newui) is copied next to manyrows.exe, where Bundle looks for it.
 add_executable(manyrows
@@ -71,6 +71,7 @@ add_executable(manyrows_tests
     tests/test_spreadsheet_editor.cpp
     tests/test_clipboard_fill.cpp
     tests/test_sort_filter.cpp
+    tests/test_spreadsheet_controller.cpp
     tests/test_csv_format.cpp
     tests/test_xls_format.cpp
     tests/test_xlsx_format.cpp

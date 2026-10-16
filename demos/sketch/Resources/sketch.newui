@@ -97,6 +97,16 @@
                   { type: "MenuItem", text: "Outline Stroke" }
                 ]
               },
+              {
+                type: "MenuItem",
+                text: "Pathfinder",
+                children: [
+                  { type: "MenuItem", text: "Unite" },
+                  { type: "MenuItem", text: "Minus Front" },
+                  { type: "MenuItem", text: "Intersect" },
+                  { type: "MenuItem", text: "Exclude" }
+                ]
+              },
               { type: "MenuItem", text: "Expand Appearance" }
             ]
           },
@@ -421,6 +431,51 @@
               },
               {
                 type: "ToolbarButton",
+                name: "circleTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-circle.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "roundRectTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-roundrect.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "polygonTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-polygon.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "starTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-star.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "arcTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-arc.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
                 name: "lineTool",
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
@@ -470,6 +525,39 @@
                 desiredSize: { type: "Size", width: 32, height: 32 },
                 desiredSizeOverride: true,
                 icon: "icons/tool-width.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarSeparator",
+                horizontal: false,
+                desiredSize: { type: "Size", width: 28, height: 9 },
+                desiredSizeOverride: true
+              },
+              {
+                type: "ToolbarButton",
+                name: "scissorsTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-scissors.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "knifeTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-knife.svg",
+                toggleButton: true,
+                iconSize: 20
+              },
+              {
+                type: "ToolbarButton",
+                name: "eraserTool",
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                desiredSizeOverride: true,
+                icon: "icons/tool-eraser.svg",
                 toggleButton: true,
                 iconSize: 20
               },
@@ -538,7 +626,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1270 },
+            contentSize: { type: "Size", width: 268, height: 1330 },
             childViews: [
               {
                 type: "SubView",
@@ -552,9 +640,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1270 }
+                      size: { type: "Size", width: 268, height: 1330 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1270 },
+                    desiredSize: { type: "Size", width: 268, height: 1330 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -1517,7 +1605,7 @@
                         type: "SubView",
                         name: "appearancePanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 270 },
+                        desiredSize: { type: "Size", width: 268, height: 330 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -1554,11 +1642,11 @@
                               {
                                 type: "Label",
                                 name: "appearancePanelHeaderInfo",
-                                desiredSize: { type: "Size", width: 157, height: 22 },
+                                desiredSize: { type: "Size", width: 118, height: 22 },
                                 desiredSizeOverride: true,
-                                text: "Path: Rounded Rectangle",
+                                text: "Rounded Rectangle",
                                 textAlignment: "Right",
-                                style: { type: "LabelStyle", text: "Path: Rounded Rectangle", textAlignment: "Right" }
+                                style: { type: "LabelStyle", text: "Rounded Rectangle", textAlignment: "Right" }
                               },
                               {
                                 type: "SubView",
@@ -1577,7 +1665,7 @@
                             type: "SubView",
                             name: "appearancePanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 248 },
+                            desiredSize: { type: "Size", width: 0, height: 308 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -1755,6 +1843,101 @@
                                     selectedIndex: 1
                                   }
                                 ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "effectRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "effectXLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "X",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "X", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "effectXField",
+                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSizeOverride: true,
+                                    text: "4"
+                                  },
+                                  {
+                                    type: "Label",
+                                    name: "effectYLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Y",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Y", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "effectYField",
+                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSizeOverride: true,
+                                    text: "4"
+                                  },
+                                  {
+                                    type: "Label",
+                                    name: "effectSizeLabel",
+                                    desiredSize: { type: "Size", width: 34, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Blur",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Blur", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "effectSizeField",
+                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSizeOverride: true,
+                                    text: "6"
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "effectColorRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Color",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Color", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "SubView",
+                                    name: "effectColorWell",
+                                    visible: true,
+                                    desiredSize: { type: "Size", width: 22, height: 14 },
+                                    desiredSizeOverride: true,
+                                    style: {
+                                      type: "ViewStyle",
+                                      borderWidth: 1,
+                                      backgroundFill: { type: "Fill", kind: "Color", color: "#000000" }
+                                    }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "effectColorField",
+                                    desiredSize: { type: "Size", width: 84, height: 24 },
+                                    desiredSizeOverride: true,
+                                    text: "#000000"
+                                  }
+                                ]
                               }
                             ]
                           }
@@ -1870,7 +2053,6 @@
                                 desiredSizeOverride: true,
                                 columns: 6,
                                 gap: 5,
-                                selectedIndex: 1,
                                 swatches: ["#ffffff", "#e8452c", "#0078d4", "#00aeef", "#c0392b", "#6a4fc7"]
                               }
                             ]

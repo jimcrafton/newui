@@ -80,6 +80,8 @@ namespace manyrows {
         // ---- sort and filter (a view over the rows: nothing moves, nothing is undone) ----
         // Sorts by the active cell's column. Alt+Up / Alt+Down.
         void sortActiveColumn(bool ascending);
+        // Sorts by any column. Clicking a column header does this in a cycle (see handleHeaderClick()).
+        void sortColumn(std::size_t column, bool ascending);
         void clearSort();
         // Shows only the rows whose cell in the active cell's column equals the active cell (a blank cell: the
         // blank rows). Repeating it on another column narrows further; on the same column replaces; on the very
@@ -144,6 +146,7 @@ namespace manyrows {
         void selectBlock(const newui::CellRange& block);
         newui::SyncReturn handleKey(std::uint32_t keyMask, std::uint32_t vkey);
         newui::SyncReturn handleSelectionChanged();
+        newui::SyncReturn handleHeaderClick(std::size_t column, std::uint32_t keyMask);
         newui::SyncReturn handlePainted();
 
         TimedTableView& table_;

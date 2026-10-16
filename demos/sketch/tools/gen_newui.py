@@ -249,6 +249,7 @@ MENUS = [
         mi("Lock", "Ctrl+2"), mi("Unlock All"), mi("Hide", "Ctrl+3"), mi("Show All"), SEP,
         mi("Transform", children=[mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
         mi("Path", children=[mi("Join"), mi("Reverse Direction"), mi("Simplify"), mi("Outline Stroke")]),
+        mi("Pathfinder", children=[mi("Unite"), mi("Minus Front"), mi("Intersect"), mi("Exclude")]),
         mi("Expand Appearance")]),
     mi("Arrange", children=[
         mi("Bring to Front", "Ctrl+Shift+]"), mi("Bring Forward", "Ctrl+]"),
@@ -290,12 +291,20 @@ def tool_palette():
         tbtn("directSelectTool", "tool-direct-select", toggle=True, s=32), tsep(False),
         tbtn("rectangleTool", "tool-rectangle", toggle=True, s=32),
         tbtn("ellipseTool", "tool-ellipse", toggle=True, s=32),
+        tbtn("circleTool", "tool-circle", toggle=True, s=32),
+        tbtn("roundRectTool", "tool-roundrect", toggle=True, s=32),
+        tbtn("polygonTool", "tool-polygon", toggle=True, s=32),
+        tbtn("starTool", "tool-star", toggle=True, s=32),
+        tbtn("arcTool", "tool-arc", toggle=True, s=32),
         tbtn("lineTool", "tool-line", toggle=True, s=32),
         tbtn("penTool", "tool-pen", toggle=True, s=32),
         tbtn("pencilTool", "tool-pencil", toggle=True, s=32),
         tbtn("textTool", "tool-text", toggle=True, s=32),
         tbtn("gradientTool", "tool-gradient", toggle=True, s=32),
         tbtn("widthTool", "tool-width", toggle=True, s=32), tsep(False),
+        tbtn("scissorsTool", "tool-scissors", toggle=True, s=32),
+        tbtn("knifeTool", "tool-knife", toggle=True, s=32),
+        tbtn("eraserTool", "tool-eraser", toggle=True, s=32), tsep(False),
         tbtn("handTool", "tool-hand", toggle=True, s=32),
         tbtn("zoomTool", "tool-zoom", toggle=True, s=32),
         spacer(1),
@@ -406,8 +415,17 @@ def appearance_panel():
         stack, actions,
         slider_row("opacitySlider", "%", 75),
         hbox("blendRow", [label("Blend", w=44), dropdown("blendModeCombo", BLEND_MODES, weight=1, selected=1)]),
+        # Options of the chosen EFFECT row; StylePanel shows these only while one is chosen, and relabels / hides
+        # fields per effect (Round Corners: Radius only; Gaussian Blur: Blur only; Outer Glow: Blur + Color).
+        hbox("effectRow", [
+            label("X", w=14, name="effectXLabel"), field("effectXField", "4", w=44),
+            label("Y", w=14, name="effectYLabel"), field("effectYField", "4", w=44),
+            label("Blur", w=34, name="effectSizeLabel"), field("effectSizeField", "6", w=44)]),
+        hbox("effectColorRow", [
+            label("Color", w=44), color_well("effectColorWell", "#000000", w=22, h=14),
+            field("effectColorField", "#000000", w=84)]),
     ]
-    return panel("appearancePanel", "Appearance", body, header_right="Path: Rounded Rectangle")
+    return panel("appearancePanel", "Appearance", body, header_right="Rounded Rectangle")
 
 
 def styles_panel():
@@ -415,7 +433,8 @@ def styles_panel():
         hbox("graphicStyleActions", [
             tbtn("newGraphicStyleButton", "graphic-style-new", s=24),
             tbtn("deleteGraphicStyleButton", "delete", s=24)], h=26),
-        node("SwatchGrid", "graphicStyleGrid", h=40, columns=6, gap=5, selectedIndex=1,
+        # The tiles are painted by StylePanel (one per style of the document); the grid grows by rows as styles are added.
+        node("SwatchGrid", "graphicStyleGrid", h=40, columns=6, gap=5,
              swatches=["#ffffff", "#e8452c", "#0078d4", "#00aeef", "#c0392b", "#6a4fc7"]),
     ]
     return panel("stylesPanel", "Graphic Styles", body)

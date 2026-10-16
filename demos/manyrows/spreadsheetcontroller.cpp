@@ -32,6 +32,9 @@ namespace manyrows {
 
         table_.onKeyDown += [this](newui::View&, std::uint32_t keyMask, int, int, std::uint32_t vkey) { return handleKey(keyMask, vkey); };
         table_.onSelectionChanged += [this](newui::TableView&) { return handleSelectionChanged(); };
+        table_.onColumnHeaderClicked += [this](newui::TableView&, std::size_t column, std::uint32_t keyMask) {
+            return handleHeaderClick(column, keyMask);
+        };
         table_.onPainted += [this](TimedTableView&) { return handlePainted(); };
         // Programmatic edits (undo, paste...) change the active cell's text without moving the selection.
         model_.onChanged += [this](newui::Model&) {
@@ -268,12 +271,33 @@ namespace manyrows {
             say("Click a cell in the column to sort by");
             return;
         }
+        sortColumn(table_.activeColumn(), ascending);
+    }
+
+    // A plain click on a column header (it also selects the column) cycles that column through ascending,
+    // descending and unsorted; Shift / Ctrl / Alt clicks only select, as before.
+    newui::SyncReturn SpreadsheetController::handleHeaderClick(std::size_t column, std::uint32_t keyMask) {
+        if ((keyMask & (newui::kmShift | newui::kmCtrl | newui::kmAlt)) != 0) {
+            return newui::SyncReturn::Ignored;
+        }
+        const std::optional<ManyRowsModel::SortKey>& key = model_.sortKey();
+        if (!key.has_value() || key->column != column) {
+            sortColumn(column, true);
+        } else if (key->ascending) {
+            sortColumn(column, false);
+        } else {
+            clearSort();
+        }
+        return newui::SyncReturn::Handled;
+    }
+
+    void SpreadsheetController::sortColumn(std::size_t column, bool ascending) {
         if (refused()) {
             return;
         }
         table_.cancelEdit();
         auto start = std::chrono::steady_clock::now();
-        model_.sortBy(table_.activeColumn(), ascending);
+        model_.sortBy(column, ascending);
         char took[32];
         std::snprintf(took, sizeof(took), "%.2f", secondsSince(start));
         say(viewSummary() + " - " + withCommas(model_.sourceRowCount()) + " rows in " + took + " s");

@@ -1,7 +1,10 @@
 #include "sketchdocument.h"
+#include "gzip.h"
+#include "sketchbin.h"
 #include "sketchsvg.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -10,6 +13,22 @@
 #include <utility>
 
 namespace sketch {
+
+    namespace {
+        // True when `path` ends with `extension` (a dot and letters), ignoring case.
+        bool hasExtension(const std::string& path, const std::string& extension) {
+            if (path.size() < extension.size()) {
+                return false;
+            }
+            for (std::size_t i = 0; i < extension.size(); ++i) {
+                char c = path[path.size() - extension.size() + i];
+                if (std::tolower(static_cast<unsigned char>(c)) != extension[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
 
     void SketchDocument::setPageSize(float width, float height) {
         if (width <= 0.0f || height <= 0.0f) {
@@ -590,7 +609,7 @@ namespace sketch {
         std::vector<GeometryState> result;
         for (std::size_t id : selection_) {
             if (const SketchObject* object = findById(id)) {
-                result.push_back({id, object->geometry(), object->frameAngle()});
+                result.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix()});
             }
         }
         return result;
@@ -602,13 +621,14 @@ namespace sketch {
         std::vector<GeometryState> after;
         for (const GeometryState& entry : before) {
             if (const SketchObject* object = findById(entry.id)) {
-                after.push_back({entry.id, object->geometry(), object->frameAngle()});
+                after.push_back({entry.id, object->geometry(), object->frameAngle(), object->textMatrix()});
             }
         }
         auto apply = [this](const std::vector<GeometryState>& state, const FrameState& frame) {
             for (const GeometryState& entry : state) {
                 if (SketchObject* object = findById(entry.id)) {
                     object->setGeometry(entry.path);
+                    object->setTextMatrix(entry.textMatrix);
                     object->setFrameAngle(entry.angle);
                 }
             }
@@ -626,7 +646,7 @@ namespace sketch {
         FrameState frameBefore = frameState();
         for (std::size_t id : ids) {
             if (SketchObject* object = findById(id)) {
-                before.push_back({id, object->geometry(), object->frameAngle()});
+                before.push_back({id, object->geometry(), object->frameAngle(), object->textMatrix()});
                 object->transform(matrix);
             }
         }
@@ -1021,7 +1041,18 @@ namespace sketch {
         }
         std::ostringstream buffer;
         buffer << in.rdbuf();
-        return documentFromSvg(buffer.str(), *this);
+        std::string text = buffer.str();
+        if (isBinaryDocument(text)) {   // .skb: told by its first bytes, not its name
+            return documentFromBinary(text, *this);
+        }
+        if (isGzip(text)) {   // .svgz: told by its first bytes, not its name
+            std::string inflated;
+            if (!gzipDecompress(text, inflated)) {
+                return false;
+            }
+            return documentFromSvg(inflated, *this);
+        }
+        return documentFromSvg(text, *this);
     }
 
     bool SketchDocument::writeToFile(const std::string& path) {
@@ -1029,7 +1060,11 @@ namespace sketch {
         if (!out) {
             return false;
         }
-        out << svgFromDocument(*this);
+        std::string text = hasExtension(path, ".skb") ? binaryFromDocument(*this) : svgFromDocument(*this);
+        if (hasExtension(path, ".svgz")) {
+            text = gzipCompress(text);
+        }
+        out << text;
         return static_cast<bool>(out);
     }
 
@@ -1162,6 +1197,102 @@ namespace sketch {
         }
         changed();
         return commitStyle(before, kind == AppearanceKind::Stroke ? "Add Stroke" : "Add Fill");
+    }
+
+    std::vector<GraphicStyle> defaultGraphicStyles() {
+        auto style = [](const char* name, std::vector<AppearanceItem> items, double opacity = 1.0) {
+            GraphicStyle s;
+            s.name = name;
+            s.items = std::move(items);
+            s.opacity = opacity;
+            return s;
+        };
+        auto solid = [](const char* hex) { return SketchPaint::solid(SketchColor::fromHex(hex)); };
+        auto gradient = [](const char* from, const char* to, double angle) {
+            SketchGradient g;
+            g.stops = {GradientStop{0.0, SketchColor::fromHex(from)}, GradientStop{1.0, SketchColor::fromHex(to)}};
+            g.angleDegrees = angle;
+            return g;
+        };
+        std::vector<GraphicStyle> styles;
+        styles.push_back(style("Default", {AppearanceItem::makeFill(solid("#ffffff")), AppearanceItem::makeStroke(solid("#000000"), 1.0)}));
+        AppearanceItem shadow = AppearanceItem::makeEffect(EffectKind::DropShadow);
+        styles.push_back(style("Sunset + shadow", {AppearanceItem::makeFill(SketchPaint::linear(gradient("#f2b824", "#e8452c", 45.0))),
+            AppearanceItem::makeStroke(SketchPaint::none(), 1.0), shadow}));
+        styles.push_back(style("Blue card", {AppearanceItem::makeFill(solid("#0078d4")), AppearanceItem::makeStroke(solid("#1b3a6b"), 3.0)}));
+        SketchGradient glowFill = gradient("#ffffff", "#00aeef", 0.0);
+        styles.push_back(style("Glow", {AppearanceItem::makeFill(SketchPaint::radial(glowFill)), AppearanceItem::makeStroke(SketchPaint::none(), 1.0),
+            AppearanceItem::makeEffect(EffectKind::OuterGlow)}));
+        StrokeOptions dashed;
+        dashed.dashes = {8.0, 4.0};
+        styles.push_back(style("Dashed red", {AppearanceItem::makeFill(solid("#ffffff")), AppearanceItem::makeStroke(solid("#c0392b"), 3.0, dashed)}));
+        styles.push_back(style("Ghost", {AppearanceItem::makeFill(solid("#6a4fc7")), AppearanceItem::makeStroke(SketchPaint::none(), 1.0)}, 0.55));
+        return styles;
+    }
+
+    bool SketchDocument::addGraphicStyleFromSelection() {
+        const SketchObject* source = selection_.empty() ? nullptr : findById(selection_.front());
+        if (source == nullptr) {
+            return false;
+        }
+        std::vector<GraphicStyle> before = graphicStyles_;
+        GraphicStyle style;
+        style.items = source->appearance();
+        style.opacity = source->opacity();
+        style.blendMode = source->blendMode();
+        for (std::size_t number = before.size() + 1;; ++number) {
+            style.name = "Style " + std::to_string(number);
+            bool taken = false;
+            for (const GraphicStyle& existing : before) {
+                taken = taken || existing.name == style.name;
+            }
+            if (!taken) {
+                break;
+            }
+        }
+        std::vector<GraphicStyle> after = before;
+        after.push_back(style);
+        graphicStyles_ = after;
+        changed();
+        undoStack_.push({"New Graphic Style", [this, after]() { graphicStyles_ = after; changed(); }, [this, before]() { graphicStyles_ = before; changed(); }});
+        return true;
+    }
+
+    bool SketchDocument::deleteGraphicStyle(std::size_t index) {
+        if (index >= graphicStyles_.size()) {
+            return false;
+        }
+        std::vector<GraphicStyle> before = graphicStyles_;
+        std::vector<GraphicStyle> after = before;
+        after.erase(after.begin() + std::ptrdiff_t(index));
+        graphicStyles_ = after;
+        changed();
+        undoStack_.push({"Delete Graphic Style", [this, after]() { graphicStyles_ = after; changed(); }, [this, before]() { graphicStyles_ = before; changed(); }});
+        return true;
+    }
+
+    bool SketchDocument::applyGraphicStyle(std::size_t index) {
+        std::vector<StyleState> before = snapshotStyle();
+        if (before.empty() || index >= graphicStyles_.size()) {
+            return false;
+        }
+        const GraphicStyle& style = graphicStyles_[index];
+        for (std::size_t id : selection_) {
+            if (SketchObject* object = findById(id)) {
+                object->setAppearance(style.items);
+                // The active rows are the top-most fill and stroke (what the panels then edit).
+                std::size_t fill = 0, stroke = 0, effect = 0;
+                const std::vector<AppearanceItem>& items = object->appearance();
+                for (std::size_t i = 0; i < items.size(); ++i) {
+                    (items[i].kind == AppearanceKind::Fill ? fill : (items[i].kind == AppearanceKind::Stroke ? stroke : effect)) = i;
+                }
+                object->setActiveIndices(fill, stroke, effect);
+                object->setOpacity(style.opacity);
+                object->setBlendMode(style.blendMode);
+            }
+        }
+        changed();
+        return commitStyle(before, "Apply " + style.name);
     }
 
     bool SketchDocument::addEffect(EffectKind kind) {
@@ -1368,6 +1499,11 @@ namespace sketch {
         colorMode_ = mode;
         defaultFill_ = paintInSpace(defaultFill_, mode);
         defaultStroke_ = paintInSpace(defaultStroke_, mode);
+        for (GraphicStyle& style : graphicStyles_) {
+            for (AppearanceItem& item : style.items) {
+                item.paint = paintInSpace(item.paint, mode);
+            }
+        }
         changed();
     }
 
@@ -1383,9 +1519,10 @@ namespace sketch {
             ColorSpace mode;
             SketchPaint defaultFill, defaultStroke;
             std::vector<StyleState> styles;
+            std::vector<GraphicStyle> graphicStyles;
         };
         auto capture = [this]() {
-            State state{colorMode_, defaultFill_, defaultStroke_, {}};
+            State state{colorMode_, defaultFill_, defaultStroke_, {}, graphicStyles_};
             for (const std::unique_ptr<SketchObject>& object : objects_) {
                 state.styles.push_back(StyleState::of(*object));
             }
@@ -1395,6 +1532,11 @@ namespace sketch {
         colorMode_ = mode;
         defaultFill_ = paintInSpace(defaultFill_, mode);
         defaultStroke_ = paintInSpace(defaultStroke_, mode);
+        for (GraphicStyle& style : graphicStyles_) {
+            for (AppearanceItem& item : style.items) {
+                item.paint = paintInSpace(item.paint, mode);
+            }
+        }
         for (const std::unique_ptr<SketchObject>& object : objects_) {
             std::vector<AppearanceItem> items = object->appearance();
             for (AppearanceItem& item : items) {
@@ -1407,6 +1549,7 @@ namespace sketch {
             colorMode_ = state.mode;
             defaultFill_ = state.defaultFill;
             defaultStroke_ = state.defaultStroke;
+            graphicStyles_ = state.graphicStyles;
             for (const StyleState& style : state.styles) {
                 if (SketchObject* object = findById(style.id)) {
                     style.applyTo(*object);

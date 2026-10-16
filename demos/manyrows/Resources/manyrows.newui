@@ -82,6 +82,15 @@
               { type: "MenuItem", text: "Filter by Selected Value", shortcutText: "Ctrl+Shift+F" },
               { type: "MenuItem", text: "Clear Filters" }
             ]
+          },
+          {
+            type: "MenuItem",
+            text: "Help",
+            children: [
+              { type: "MenuItem", text: "Keyboard Shortcuts" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "About manyrows" }
+            ]
           }
         ]
       },

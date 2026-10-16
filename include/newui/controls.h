@@ -2788,6 +2788,12 @@ namespace newui {
         // Fired whenever the active cell or the selected range actually changes.
         SelectionChangedDelegate onSelectionChanged;
 
+        typedef Delegate<TableView, std::size_t, std::uint32_t> ColumnHeaderClickedDelegate;
+        // Fired after a click on a column header has selected that column, with the column's index and the
+        // keyboard modifiers (KeyboardMasks: kmShift, kmCtrl, kmAlt) held at the click. A resize drag on a header
+        // edge is not a click. An application can sort by the column, for instance - selection has already moved.
+        ColumnHeaderClickedDelegate onColumnHeaderClicked;
+
         typedef Delegate<TableView, std::size_t> ColumnResizedDelegate;
         // Fired after a header drag changed a column's width, with that column's index.
         ColumnResizedDelegate onColumnResized;

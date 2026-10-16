@@ -121,3 +121,68 @@ TEST(RenderSvgFile, LeavesAreasOutsideTheDocumentTransparentNotGarbage) {
 
     ::DeleteFileA(path.c_str());
 }
+
+TEST(RenderSvgFile, ADocumentWithAnExplicitSizeScalesToTheRequestedSize) {
+    // width / height attributes next to a viewBox (what most drawing programs write) must not stop the drawing scaling to
+    // the canvas: rendered at 16 x 16 the right half of this 32 x 32 document is the right half of the image, not cropped away.
+    const std::string path = "svgimage_test_declaredsize.svg";
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\">"
+                "<rect x=\"16\" width=\"16\" height=\"32\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(newui::renderSvgFile(path, 16, 16, image));
+    BLImageData data;
+    image.get_data(&data);
+    const auto pixelAt = [&](int x, int y) {
+        const auto* row = static_cast<const uint8_t*>(data.pixel_data) + size_t(y) * data.stride;
+        return reinterpret_cast<const uint32_t*>(row)[x];
+    };
+    EXPECT_EQ(pixelAt(12, 8), 0xFFFF0000u);   // the right half is red...
+    EXPECT_EQ(pixelAt(15, 15), 0xFFFF0000u);
+    EXPECT_EQ(pixelAt(2, 8), 0x00000000u);    // ...and the left half is empty
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(RenderSvgFile, ADocumentWithOnlyAnExplicitSizeAlsoScales) {
+    // No viewBox at all: the declared 20 x 10 is the document's own coordinate space, and it still fills a 40 x 20 canvas.
+    const std::string path = "svgimage_test_sizeonly.svg";
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\">"
+                "<rect width=\"20\" height=\"10\" fill=\"#ff0000\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(newui::renderSvgFile(path, 40, 20, image));
+    BLImageData data;
+    image.get_data(&data);
+    const auto pixelAt = [&](int x, int y) {
+        const auto* row = static_cast<const uint8_t*>(data.pixel_data) + size_t(y) * data.stride;
+        return reinterpret_cast<const uint32_t*>(row)[x];
+    };
+    EXPECT_EQ(pixelAt(1, 1), 0xFFFF0000u);
+    EXPECT_EQ(pixelAt(38, 18), 0xFFFF0000u);   // the far corner: scaled, not left at 20 x 10
+
+    ::DeleteFileA(path.c_str());
+}
+
+TEST(RenderSvgFile, StrokeWidthAttributesAreNotMistakenForTheDocumentSize) {
+    const std::string path = "svgimage_test_strokewidth.svg";
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\" stroke-width=\"4\" fill=\"#ff0000\">"
+                "<rect width=\"10\" height=\"10\"/></svg>";
+    }
+
+    BLImage image;
+    ASSERT_TRUE(newui::renderSvgFile(path, 20, 20, image));
+    BLImageData data;
+    image.get_data(&data);
+    EXPECT_EQ(static_cast<const uint32_t*>(data.pixel_data)[0], 0xFFFF0000u);   // still renders; nothing was stripped by mistake
+
+    ::DeleteFileA(path.c_str());
+}

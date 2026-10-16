@@ -18,8 +18,8 @@ namespace sketch {
     // The reader understands sketch's own output exactly and, for files from elsewhere, the common subset:
     // path (all commands, arcs included), rect, circle, ellipse, line, polyline, polygon, <g>, transform,
     // fill/stroke/opacity as attributes or style="", named/#rgb/#rrggbb/rgb() colors, and gradients
-    // (objectBoundingBox or userSpaceOnUse, href'd stops). Text, images, clipping, filters and CSS
-    // stylesheets are skipped.
+    // (objectBoundingBox or userSpaceOnUse, href'd stops). Text objects are read back from their own
+    // data-text attributes (other <text> elements, images, clipping, filters and CSS stylesheets are skipped).
     std::string svgFromDocument(const SketchDocument& document);
 
     // Replaces the document's contents with the SVG in `text` (page size, ppi and objects; undo history and

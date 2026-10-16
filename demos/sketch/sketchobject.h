@@ -167,11 +167,19 @@ namespace sketch {
     // stroke - the "primary" ones, which fill()/stroke()/strokeWidth()/strokeOptions() read and the old setters write;
     // either may be a paint of None.
     enum class AppearanceKind { Fill, Stroke, Effect };
-    // Live effects, in the order of the Add Effect menu. An effect acts on everything below it in the stack: a drop
-    // shadow / outer glow is cast behind that composite, Gaussian Blur blurs it, Round Corners rounds the outline of the
-    // fills and strokes below it.
-    enum class EffectKind { DropShadow, OuterGlow, GaussianBlur, RoundCorners };
+    // Live effects, in the order of the Add Effect menu (new kinds are only ever added at the end: the numbers are in files). An
+    // effect acts on everything below it in the stack: a drop shadow / outer glow is cast behind that composite, Gaussian Blur blurs
+    // it, Inner Shadow is cast inside its silhouette, Round Corners / Offset Path / Roughen reshape the outline of the fills and
+    // strokes below them.
+    //   Offset Path: `radius` is how far the outline moves (negative = inward).
+    //   Roughen: `radius` is the size of the wobble, `offsetX` the detail (the length of the pieces the outline is cut into) and
+    //   `offsetY` the seed - the same seed always roughens the same way, so the shape does not shimmer when it moves.
+    enum class EffectKind { DropShadow, OuterGlow, GaussianBlur, RoundCorners, InnerShadow, OffsetPath, Roughen };
     const char* effectName(EffectKind kind);
+    // True for the effects that reshape the outline (the rest work on pixels).
+    inline bool isGeometryEffect(EffectKind kind) { return kind == EffectKind::RoundCorners || kind == EffectKind::OffsetPath || kind == EffectKind::Roughen; }
+    // True for the effects that cast a tinted shadow or glow (they have a color, and a blend mode / amount of their own).
+    inline bool isTintedEffect(EffectKind kind) { return kind == EffectKind::DropShadow || kind == EffectKind::OuterGlow || kind == EffectKind::InnerShadow; }
     // @reflect ignore=true
     struct AppearanceItem {
         AppearanceKind kind = AppearanceKind::Fill;
@@ -216,6 +224,9 @@ namespace sketch {
                 case EffectKind::OuterGlow: item.opacity = 0.75; item.color = SketchColor::fromHex("#ffe066"); item.softness = 8.0; break;
                 case EffectKind::GaussianBlur: item.softness = 4.0; break;
                 case EffectKind::RoundCorners: break;
+                case EffectKind::InnerShadow: item.opacity = 0.75; item.blendMode = BlendMode::Multiply; item.softness = 5.0; item.offsetX = 3.0; item.offsetY = 3.0; break;
+                case EffectKind::OffsetPath: item.radius = 6.0; break;
+                case EffectKind::Roughen: item.radius = 2.0; item.offsetX = 8.0; item.offsetY = 1.0; break;
             }
             return item;
         }
@@ -236,7 +247,7 @@ namespace sketch {
     // piece (overlapping fills and strokes do not double up). Used for objects and groups with opacity < 1 or a blend mode.
     void paintIsolated(BLContext& ctx, const BLBox& userBounds, double opacity, BlendMode mode, const std::function<void(BLContext&)>& content);
 
-    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path };
+    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text };
 
     // One drawable thing. Geometry is kept as a BLPath in document units (points, y down) so
     // rendering, bounds and hit-testing all share it; the typed factories build that path.
@@ -251,6 +262,10 @@ namespace sketch {
         static SketchObject* makePolygon(const std::vector<BLPoint>& points);
         static SketchObject* makePolyline(const std::vector<BLPoint>& points);
         static SketchObject* makePath(const BLPath& path);
+        // A Text object: the glyph outlines of `text` with the first baseline starting at `origin`. Its outline is rebuilt by
+        // setText() / setFontSize() / setFontName(); moving, resizing and rotating the object are remembered (textMatrix()) so
+        // editing the words later keeps the object where it was put.
+        static SketchObject* makeText(const std::string& text, const std::string& fontName, double fontSize, const BLPoint& origin);
         // An object of the given type around an existing outline (what the SVG reader uses).
         static SketchObject* make(SketchObjectType type, const BLPath& path);
 
@@ -306,6 +321,21 @@ namespace sketch {
         BlendMode blendMode() const { return blendMode_; }
         void setBlendMode(BlendMode mode) { blendMode_ = mode; }
 
+        // Text objects only (type() == SketchObjectType::Text). The words ('\n' separates lines), the font name ("" = the default
+        // font) and size, and the matrix that places the un-transformed outline (baseline at the origin) in the document.
+        bool isText() const { return type_ == SketchObjectType::Text; }
+        const std::string& text() const { return text_; }
+        const std::string& fontName() const { return fontName_; }
+        double fontSize() const { return fontSize_; }
+        const BLMatrix2D& textMatrix() const { return textMatrix_; }
+        // Puts the placement back (undo of a move / resize restores the outline and, through this, where edits of the words land).
+        void setTextMatrix(const BLMatrix2D& matrix) { textMatrix_ = matrix; }
+        // Each of these rebuilds the outline from the text state; setTextState also replaces the placement matrix.
+        void setText(const std::string& text);
+        void setFontName(const std::string& fontName);
+        void setFontSize(double size);
+        void setTextState(const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix);
+
         const BLPath& geometry() const { return path_; }
         // Replaces the outline (undo restores the pre-edit one through this).
         void setGeometry(const BLPath& path) { path_ = path; }
@@ -326,6 +356,10 @@ namespace sketch {
         BLBox geometryBounds() const;
         // A copy with id 0 (the document assigns one on add) and the same appearance.
         SketchObject* clone() const;
+        // A new object of `type` around `path` (id 0) that wears this object's look: appearance, name, opacity, blend mode, visibility,
+        // lock and groups. What the cutting tools and the Pathfinder commands make their pieces with. The frame angle starts at 0
+        // (the outline is new); use a type other than Text, which keeps its words and placement.
+        SketchObject* cloneWithGeometry(SketchObjectType type, const BLPath& path) const;
         // Closed shapes (everything except Line/Polyline) take a fill; open ones ignore it.
         bool isClosed() const;
 
@@ -352,6 +386,8 @@ namespace sketch {
         // Everything through an offscreen layer so the pixel effects can act on what is below them.
         void paintWithEffects(BLContext& ctx) const;
         void drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const;
+        // Text objects: path_ = the outlines of text_ placed by textMatrix_.
+        void rebuildText();
         std::size_t storedActive(AppearanceKind kind) const { return kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_); }
         // The active item of the kind (the first one, added when missing: fills at the bottom, strokes on top).
         AppearanceItem& primary(AppearanceKind kind);
@@ -371,6 +407,10 @@ namespace sketch {
         std::size_t activeStroke_ = 1;
         std::size_t activeEffect_ = 0;
         double frameAngle_ = 0.0;
+        std::string text_;
+        std::string fontName_;
+        double fontSize_ = 24.0;
+        BLMatrix2D textMatrix_ = BLMatrix2D::make_identity();
     };
 
 }

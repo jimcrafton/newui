@@ -50,8 +50,9 @@ add_subdirectory(3rdparty/blend2d)
 # zlib - Dependency
 # =================
 # Vendored under 3rdparty/ as a permanent part of the project (madler/zlib
-# v1.3.1, zlib license, C) - inflate only. Used by the manyrows demo to read
-# .xlsx (ZIP) files; linked by that target alone, not by the newui library.
+# v1.3.1, zlib license, C) - inflate and deflate. Used by the manyrows demo to read
+# .xlsx (ZIP) files and by the sketch demo for .svgz (gzip) files; linked by those
+# targets alone, not by the newui library.
 add_subdirectory(3rdparty/zlib)
 
 # WIL - Dependency

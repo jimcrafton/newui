@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pathops.h"
 #include "sketchobject.h"
 
 #include <newui/delegate.h>
@@ -20,6 +21,7 @@ namespace sketch {
         std::size_t id = 0;
         BLPath path;
         double angle = 0.0;
+        BLMatrix2D textMatrix = BLMatrix2D::make_identity();   // a Text object's placement (see SketchObject::textMatrix)
     };
 
     // Four world-space corners (TL, TR, BR, BL) of a possibly distorted frame, with the projective map
@@ -41,6 +43,20 @@ namespace sketch {
         BlendMode blendMode = BlendMode::Normal;
         bool isDefault() const { return opacity >= 1.0 && blendMode == BlendMode::Normal; }
     };
+
+    // A named appearance the user saved: the whole stack (fills, strokes, effects) plus the object's opacity and blend
+    // mode. Applying one replaces those on every selected object. Gradients are stored relative to the object they paint,
+    // so a style looks the same on a shape of any size.
+    // @reflect ignore=true
+    struct GraphicStyle {
+        std::string name;
+        std::vector<AppearanceItem> items;
+        double opacity = 1.0;
+        BlendMode blendMode = BlendMode::Normal;
+        bool operator==(const GraphicStyle& o) const { return name == o.name && items == o.items && opacity == o.opacity && blendMode == o.blendMode; }
+    };
+    // The styles a new document starts with.
+    std::vector<GraphicStyle> defaultGraphicStyles();
 
     // An object's appearance at one moment - what undo of a style edit restores.
     // @reflect ignore=true
@@ -109,6 +125,17 @@ namespace sketch {
     class SketchDocument : public newui::Document {
     public:
         SketchDocument() = default;
+
+        // ---- Graphic Styles (saved with the document, see sketchsvg.cpp) ----
+        const std::vector<GraphicStyle>& graphicStyles() const { return graphicStyles_; }
+        // Replaces the whole list with no undo step (a load, New). Does not mark the document modified.
+        void setGraphicStyles(std::vector<GraphicStyle> styles) { graphicStyles_ = std::move(styles); onChanged(*this); }
+        // Each of these is one undo step and returns false when nothing happened.
+        // Saves the first selected object's appearance as a new style ("Style 1", "Style 2"...), at the end of the list.
+        bool addGraphicStyleFromSelection();
+        bool deleteGraphicStyle(std::size_t index);
+        // Replaces the appearance, opacity and blend mode of every selected object with the style's.
+        bool applyGraphicStyle(std::size_t index);
 
         // Page size in points (1/72 in), and the pixel density used when exporting/previewing.
         float pageWidth() const { return pageWidth_; }
@@ -221,6 +248,33 @@ namespace sketch {
         // Turns / mirrors the selection about the center of its bounds (the frame angles follow).
         bool rotateSelection90(bool clockwise);
         bool flipSelection(bool horizontal);
+
+        // ---- Cutting and combining (documentcutting.cpp). Each is one undo step; the pieces wear the look of what they came from
+        // and take its place in the stacking order; the new objects become the selection. ----
+
+        // Objects swapped for others: `remove` are taken out and `add` put in where they were (at the lowest removed position, or at
+        // the highest when `atTop`; at the top of the stack when nothing is removed).
+        struct Replacement {
+            std::vector<std::size_t> remove;
+            std::vector<std::unique_ptr<SketchObject>> add;
+            bool atTop = false;
+        };
+        // Applies every replacement as ONE undo step called `description`; returns the ids of all the objects added.
+        std::vector<std::size_t> replaceUndoable(std::vector<Replacement> replacements, const std::string& description);
+        // Pathfinder on the selected objects (two or more, by their outlines): Unite, Intersect, Exclude, or Subtract (the lowest
+        // object minus every one above it). The result is one path with the look of the top object (of the lowest for Subtract); curves
+        // become fine straight pieces. False, and nothing changes, when fewer than two are selected or the result would be empty.
+        bool combineSelection(BoolOp op);
+        // The Knife: the line `cut` (document units) divides the filled shapes it crosses into pieces, along the line carried straight on
+        // past its two ends. When some of the shapes it crosses are selected only those are cut, otherwise all of them. False when
+        // nothing was cut.
+        bool knifeCut(const std::vector<BLPoint>& cut);
+        // The Eraser: removes what a pen `width` wide dragged along `stroke` touches - parts of filled shapes, parts of lines. When some of
+        // what it touches is selected only that is erased, otherwise everything it touches. False when it touched nothing.
+        bool erase(const std::vector<BLPoint>& stroke, double width);
+        // The Scissors: cuts the path nearest to `at` (within `tolerance`) at that point, keeping its curves. A closed path opens; an
+        // open one divides in two. False when no path is close enough (or the point is at the end of an open path).
+        bool scissorsCut(const BLPoint& at, double tolerance);
         // Lock/Hide act on the selection (which is then cleared - a locked or hidden object cannot be selected);
         // Unlock All / Show All act on the whole document.
         bool lockSelection();
@@ -345,6 +399,7 @@ namespace sketch {
         std::size_t nextId_ = 1;
         std::size_t nextGroupId_ = 1;
         std::map<std::size_t, GroupProps> groupProps_;
+        std::vector<GraphicStyle> graphicStyles_ = defaultGraphicStyles();
         SketchPaint defaultFill_ = SketchPaint::solid(SketchColor::fromHex("#d9e6ff"));
         SketchPaint defaultStroke_ = SketchPaint::solid(SketchColor::fromHex("#2f5fb3"));
         double defaultStrokeWidth_ = 1.5;

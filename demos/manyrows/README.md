@@ -10,7 +10,7 @@ See [../PLAN.md](../PLAN.md) for the design and phases and [../HANDOFF.md](../HA
 | `manyrows_lite.exe` | A bare `TimedTableView` over 1,000,000 generated rows and a status bar. No menus, no files. | How little it takes to put a virtualized table on screen. |
 | `manyrows.exe [file]` | The full app: menus, formula bar, File New / Open / Save / Save As (CSV, TSV, XLS, XLSX), async load and save with progress, sheet picker. | A document-based app on `DocumentController`. |
 
-Both sort and filter as a view over the rows (nothing moves; a million rows sort in ~0.3 s in Release): Alt+Up / Alt+Down sort by the active cell's column, Ctrl+Shift+F filters to its value (repeat on other columns to narrow, again to switch off), Alt+Backspace resets; the full app has these in its Data menu, plus Data > Filter... (Ctrl+L), a strip for building a filter rule by rule (column, operator, value; rules are ANDed).
+Both sort and filter as a view over the rows (nothing moves; a million rows sort in ~0.3 s in Release): clicking a column header sorts by it (ascending, descending, unsorted; Shift/Ctrl-click only selects), Alt+Up / Alt+Down sort by the active cell's column, Ctrl+Shift+F filters to its value (repeat on other columns to narrow, again to switch off), Alt+Backspace resets; the full app has these in its Data menu, plus Data > Filter... (Ctrl+L), a strip for building a filter rule by rule (column, operator, value; rules are ANDed).
 
 Both edit cells in place, with undo / redo, cut / copy / paste (tab-separated text, so it moves to and from
 Excel), fill down / right and Delete, all from the keyboard (F2 or typing to edit; Ctrl+Z / Y / X / C / V / D / R).
@@ -64,9 +64,8 @@ mentions a cell, so the lite app is the first one plus a status bar.
 
 ## Tests
 
-`tests/` builds `manyrows_tests.exe` (111 tests, headless): model, editor (edit, clear, paste, fill, saved state),
-sort / filter, clipboard text, CSV / XLS / XLSX readers, document, loader (including the sheet picker) and saver. The controllers
-and the windows need a real view tree and are checked by launching the apps. `XlsxFormatPerf` times any file named
+`tests/` builds `manyrows_tests.exe` (128 tests, headless): model, editor (edit, clear, paste, fill, saved state),
+sort / filter, clipboard text, CSV / XLS / XLSX readers, document, loader (including the sheet picker) and saver. SpreadsheetController is tested on a real TimedTableView with no window (keys, header clicks, sort, filter, Go to, formula bar, edit guard, document replaced). ManyRowsWindow, FilterStrip and the toolbar need a laid-out frame and are checked by launching the apps. Clipboard commands are not tested through the controller (they would overwrite the system clipboard); the editor tests cover paste and fill. `XlsxFormatPerf` times any file named
 in the `MANYROWS_PERF_XLSX` environment variable (skipped otherwise).
 
 ## Status

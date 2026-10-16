@@ -47,6 +47,7 @@ namespace manyrows {
     private:
         void bindTitle();
         void bindFileMenu();
+        void bindHelpMenu();
         void bindProgressStrip();
         void bindSheetPicker();
         void showProgress();

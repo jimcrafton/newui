@@ -201,7 +201,8 @@ namespace sketch {
     namespace {
     newui::FileDialogOptions fileOptions() {
         newui::FileDialogOptions options;
-        options.filters.push_back({"SVG Files", "*.svg"});
+        options.filters.push_back({"SVG Files", "*.svg;*.svgz"});
+        options.filters.push_back({"Sketch Binary Files", "*.skb"});
         options.filters.push_back({"All Files", "*.*"});
         options.defaultExtension = "svg";
         return options;

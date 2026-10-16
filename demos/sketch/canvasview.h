@@ -1,10 +1,14 @@
 #pragma once
 
+#include "cursorset.h"
+#include "shapetools.h"
 #include "sketchdocument.h"
 
 #include <newui/subview.h>
 
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -12,10 +16,8 @@
 
 namespace sketch {
 
-    // What a left-button drag on the canvas does.
-    // DirectSelect, Pen, Pencil and Text are palette entries whose behavior lands in later phases (S5): they
-    // are selectable so the palette stays a radio group, but a drag with them does nothing yet.
-    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Line, Pen, Pencil, Text, Gradient, Width, Hand, Zoom };
+    // What a left-button drag on the canvas does. The order matches the status bar hints in main.cpp.
+    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Text, Gradient, Width, Scissors, Knife, Eraser, Hand, Zoom };
 
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
@@ -101,6 +103,24 @@ namespace sketch {
         void setTool(SketchTool tool);
         newui::Delegate<CanvasView> onToolChanged;
 
+        // Rounded Rectangle / Polygon / Star settings, changed with the Up / Down arrows while dragging one out.
+        double cornerRadius() const { return cornerRadius_; }
+        void setCornerRadius(double radius);
+        int polygonSides() const { return polygonSides_; }
+        void setPolygonSides(int sides);
+        int starPointCount() const { return starPoints_; }
+        void setStarPoints(int points);
+        double arcSweep() const { return arcSweep_; }
+        void setArcSweep(double radians);
+        // The Eraser's pen width in document units (the Up / Down arrows change it by 2 while that tool is chosen).
+        double eraserSize() const { return eraserSize_; }
+        void setEraserSize(double size);
+
+        // The cursor shown over the canvas, by the name of its image in Resources/cursors ("pen", "resize-nwse", "hand-grab"...;
+        // the hotspots are in cursors.json). It follows the tool, what is under the pointer and what a drag is doing.
+        // @reflect ignore=true
+        const std::string& cursorName() const { return cursorName_; }
+
         // The pointer over the page, in document units (status bar coordinates); fired on every move.
         BLPoint pointerPosition() const { return pointerDoc_; }
         newui::Delegate<CanvasView> onPointerMoved;
@@ -123,11 +143,26 @@ namespace sketch {
         // @reflect ignore=true
         std::function<bool(std::uint32_t vkCode, bool shift)> onControlKey;
 
+        // The Text tool (texttool.cpp): a click starts text there - or edits the text object clicked - and typing fills it in
+        // on the canvas; Enter starts a new line, the arrows / Home / End / Backspace / Delete edit, Ctrl+Up / Ctrl+Down change the
+        // size, Esc (or a click elsewhere, or another tool) finishes it as one undo step. Text left empty is not kept.
+        // @reflect ignore=true
+        bool textEditing() const { return textEditing_; }
+        // @reflect ignore=true
+        const std::string& editedText() const { return textBuffer_; }
+        // The size (points) new text gets, and the size of the text being edited.
+        double textSize() const { return textSize_; }
+        void setTextSize(double size);
+        // Finishes editing text now (nothing happens when none is being edited).
+        void commitText();
+
         void paint(BLContext& ctx) override;
 
     private:
         int pasteCount_ = 0;
         static constexpr float kRulerThickness = 20.0f;
+        // Cursor images are shown at this fraction of the size cursors.json describes (32 px drawn, 19 px shown). The environment variable SKETCH_CURSOR_SCALE (for example 0.6) overrides it, to try sizes without rebuilding.
+        static constexpr double kCursorScale = 0.585;
         static constexpr float kMinZoom = 0.05f;
         static constexpr float kMaxZoom = 64.0f;
 
@@ -138,6 +173,8 @@ namespace sketch {
         newui::SyncReturn handleMouseMove(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseUp(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleKeyDown(newui::View& sender, std::uint32_t keyMask, int keyChar, int repeatCount, std::uint32_t vkCode);
+        newui::SyncReturn handleKeyPress(newui::View& sender, std::uint32_t keyMask, int keyChar, int repeatCount, std::uint32_t vkCode);
+        newui::SyncReturn handleMouseDblClick(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
         newui::SyncReturn handleMouseWheel(newui::View& sender, const newui::Point& pt, float delta);
 
         float pageWidth_ = 612.0f;
@@ -162,7 +199,7 @@ namespace sketch {
         float panStartY_ = 0.0f;
 
         // ---- Tool interaction ----
-        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width };
+        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width, Pencil, PenHandle, DirectEdit, LiveShape, Knife, Erase };
         // Handles 0..7 clockwise from the top-left corner; 8 is the rotate knob above top-center.
         // 9 is the transform-origin marker.
         static constexpr int kRotateHandle = 8;
@@ -182,8 +219,132 @@ namespace sketch {
         void applyToSelection(const BLMatrix2D& matrix, double angleDelta = 0.0);
         void applyMapToSelection(const std::function<BLPoint(const BLPoint&)>& map, const QuadFrame& newQuad);
         void paintOverlay(BLContext& ctx) const;
-        // Select tool: the cursor over a handle (resize arrows that follow the frame's turn, rotate, pivot).
-        void updateHoverCursor(const newui::Point& pt);
+        // Chooses the cursor from the tool, an active pan / drag, or (Select tool) the handle under the pointer - resize arrows
+        // that follow the frame's turn, the rotate knob, the pivot - and shows it. Cheap: nothing happens unless the name changes.
+        void refreshCursor(const newui::Point& pt, std::uint32_t keys);
+        void setCanvasCursor(const std::string& name);
+        static const char* toolCursorName(SketchTool tool);
+
+        std::string cursorName_;
+        std::map<std::string, CursorHotspot> cursorHotspots_;
+        bool cursorHotspotsLoaded_ = false;
+        newui::Point lastPointer_;
+
+        // ---- Shape, pencil and pen tools (canvastools.cpp) ----
+        bool isShapeTool() const {
+            return tool_ == SketchTool::RoundRect || tool_ == SketchTool::Polygon || tool_ == SketchTool::Star || tool_ == SketchTool::Circle || tool_ == SketchTool::Arc;
+        }
+        // The outline a drag from dragStartDoc_ to `to` makes (document units); `valid` is false while it is too small.
+        BLPath shapeOutline(const BLPoint& to, bool shift, bool& valid) const;
+        void finishShapeDraw(bool shift);
+        void paintShapePreview(BLContext& ctx) const;
+        // Up / Down while dragging: more / fewer sides, points or a bigger / smaller corner radius. True when it applied.
+        bool adjustShapeParameter(int direction);
+        // Adds a drawn object with the document's default fill and stroke as one undo step; it becomes the selection.
+        void addDrawn(SketchObject* object, const char* name, const char* undoName, bool filled = true);
+        void pencilMove(const BLPoint& point);
+        void finishPencil();
+        void paintPencilPreview(BLContext& ctx) const;
+        bool penBegin(const newui::Point& pt, std::uint32_t keys);
+        void penDrag(const BLPoint& pointerDoc, bool alt);
+        void finishPen(bool close);
+        void cancelPen();
+        void penUndoLast();
+        void paintPenOverlay(BLContext& ctx) const;
+
+        // ---- Text tool (texttool.cpp) ----
+        struct TextSnapshot {
+            std::string text;
+            std::string font;
+            double size = 24.0;
+            BLMatrix2D matrix = BLMatrix2D::make_identity();
+        };
+        void beginText(const newui::Point& pt);
+        SketchObject* textObjectAt(const BLPoint& doc) const;
+        SketchObject* textObject() const;           // the object being edited (the draft while it is new)
+        std::size_t textIndexAt(const BLPoint& doc) const;
+        void refreshText();
+        void textInsert(const std::string& utf8);
+        bool textKeyDown(std::uint32_t keyMask, std::uint32_t vkCode);
+        void paintTextEditor(BLContext& ctx) const;
+        bool textEditing_ = false;
+        std::size_t textId_ = 0;                    // the document object being edited; 0 while the text is new
+        std::unique_ptr<SketchObject> textDraft_;   // new text, added to the document when finished
+        TextSnapshot textBefore_;                   // an existing object as it was when editing began (for undo)
+        std::string textBuffer_;                    // UTF-8
+        std::size_t textCaret_ = 0;                 // byte index into textBuffer_
+        double textSize_ = 24.0;
+        unsigned long textHighSurrogate_ = 0;
+
+        // ---- Scissors, Knife and Eraser (cuttools.cpp) ----
+        // The canvas only collects the pointer's path (cutPoints_) and shows it; SketchDocument::scissorsCut / knifeCut / erase do the cutting.
+        void cutMove(const BLPoint& point);
+        void finishKnife();
+        void finishErase();
+        void paintCutOverlay(BLContext& ctx) const;
+        std::vector<BLPoint> cutPoints_;   // the Knife's or Eraser's path so far, in document units
+        double eraserSize_ = 14.0;
+
+        // ---- Direct Select (canvastools.cpp) ----
+        // Shows the anchors of the selected objects; a click picks an anchor, a drag moves it (or a handle of the picked
+        // anchor); Alt-dragging a corner anchor pulls curve handles out of it; Delete removes the picked anchor.
+        struct DirectRef {
+            std::size_t object = 0;   // the object's id
+            std::size_t sub = 0;      // which outline of it
+            std::size_t anchor = 0;
+            int part = 0;             // 0 the anchor, 1 its in-handle, 2 its out-handle, 3 pulling both handles out
+            bool valid = false;
+        };
+        bool directHit(const newui::Point& pt, DirectRef& out) const;
+        void directMouseDown(const newui::Point& pt, std::uint32_t keys);
+        void directDrag(const BLPoint& pointerDoc, bool alt);
+        void finishDirectDrag();
+        bool deleteDirectAnchor();
+        void paintDirectOverlay(BLContext& ctx) const;
+        DirectRef directSelected_;           // the picked anchor
+        DirectRef directDragRef_;            // what the drag in progress moves
+        std::vector<SubPath> directPaths_;   // the outlines being edited (the object's geometry is rebuilt from them)
+        PenAnchor directOriginal_;           // the anchor as it was when the drag began
+
+        // ---- Live shape handles (canvastools.cpp) ----
+        // A single selected star, polygon, rounded rectangle or arc shows extra handles (see mockup/live-shapes.html): the
+        // number of points / sides, the star inner radius, the corner radius, the two ends of an arc. The shape is recognised
+        // from its outline each time (shapetools.h), so nothing extra is stored and it also works for files and shapes made
+        // before - a shape that was squashed or edited into something irregular simply has none.
+        enum class LiveKind { None, RoundRect, Polygon, Star, Arc };
+        struct LiveShape {
+            LiveKind kind = LiveKind::None;
+            std::size_t object = 0;
+            RegularShape regular;   // polygon, star
+            RoundRectShape rect;    // rounded rectangle
+            ArcShape arc;           // arc
+        };
+        enum LiveHandle { kLiveNone = 0, kLivePoints = 1, kLiveInner = 2, kLiveRadius = 3, kLiveArcStart = 4, kLiveArcEnd = 5 };
+        bool liveShape(LiveShape& out) const;
+        // Where a handle sits, in view pixels.
+        BLPoint liveHandlePoint(const LiveShape& shape, int handle) const;
+        int liveHandleAt(const newui::Point& pt, const LiveShape& shape) const;
+        // The cursor that shows which way the handle is dragged: the points handle tracks sideways motion (a left-right arrow); the
+        // inner-radius and corner handles track the line they slide along (an arrow along it); an arc end tracks motion around
+        // the center (an arrow along the tangent). All follow the shape turn.
+        const char* liveHandleCursor(const LiveShape& shape, int handle) const;
+        void beginLiveDrag(int handle, const LiveShape& shape, const newui::Point& pt);
+        void updateLiveDrag(const BLPoint& pointerDoc, const newui::Point& pointerView);
+        void finishLiveDrag();
+        void paintLiveOverlay(BLContext& ctx) const;
+        LiveShape liveStart_;               // the shape when the drag began
+        int liveHandle_ = kLiveNone;
+        float liveStartX_ = 0.0f;           // the pointer x (view pixels) when a points drag began
+        std::string liveWhat_;              // undo step name
+        std::string liveLabel_;             // the value shown next to the handle while dragging
+
+        double arcSweep_ = 1.5707963267948966;   // the sweep a new arc gets (a quarter turn); Up / Down change it while dragging
+        double cornerRadius_ = 12.0;
+        int polygonSides_ = 5;
+        int starPoints_ = 5;
+        bool dragShift_ = false;               // Shift was down at the last drag update (the preview follows it)
+        std::vector<BLPoint> pencilPoints_;    // the freehand points so far
+        std::vector<PenAnchor> penAnchors_;    // the pen path being built (empty when none)
 
         // ---- Gradient tool ----
         // The tool edits the fill or the stroke paint of the selection.

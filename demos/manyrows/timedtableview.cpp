@@ -1,5 +1,7 @@
 #include "timedtableview.h"
 
+#include "cellitem.h"
+
 #include <newui/keyboard_constants.h>
 #include <newui/rootview.h>
 #include <newui/text.h>
@@ -69,7 +71,9 @@ namespace manyrows {
 
     void TimedTableView::paint(BLContext& ctx) {
         auto start = std::chrono::steady_clock::now();
+        CellItem::beginPass(model());   // font and colors resolved once for all the cells below
         TableView::paint(ctx);
+        CellItem::endPass();
         std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
 
         lastPaintMs_ = elapsed.count();

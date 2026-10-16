@@ -35,6 +35,7 @@ namespace sketch {
                     case '<': out += "&lt;"; break;
                     case '>': out += "&gt;"; break;
                     case '"': out += "&quot;"; break;
+                    case '\n': out += "&#10;"; break;   // a line break inside an attribute (the words of a text object)
                     default: out += c; break;
                 }
             }
@@ -175,6 +176,7 @@ namespace sketch {
                 case SketchObjectType::Ellipse: return "Ellipse";
                 case SketchObjectType::Polygon: return "Polygon";
                 case SketchObjectType::Polyline: return "Polyline";
+                case SketchObjectType::Text: return "Text";
                 default: return "Path";
             }
         }
@@ -973,11 +975,54 @@ namespace sketch {
             return SketchPaint::solid(color);
         }
 
+        // Text objects: the words, font, size and placement matrix their outline was made from (other viewers just see the
+        // outline path). Empty for every other kind of object.
+        std::string textAttrs(const SketchObject& object) {
+            if (!object.isText()) {
+                return std::string();
+            }
+            const BLMatrix2D& m = object.textMatrix();
+            std::ostringstream out;
+            out << " data-text=\"" << escape(object.text()) << "\" data-font-name=\"" << escape(object.fontName()) << "\" data-font-size=\""
+                << num(object.fontSize()) << "\" data-text-matrix=\"" << num(m.m00) << " " << num(m.m01) << " " << num(m.m10) << " "
+                << num(m.m11) << " " << num(m.m20) << " " << num(m.m21) << "\"";
+            return out.str();
+        }
+
+        // The reverse: a Text object keeps its words and font when the attributes are there (the file's own `matrix` is folded into
+        // the placement); without them the outline is all there is, so it becomes a plain path.
+        SketchObject* restoreText(const XmlNode& node, SketchObject* object, const BLMatrix2D& matrix) {
+            if (object->type() != SketchObjectType::Text) {
+                return object;
+            }
+            const std::string* words = node.attr("data-text");
+            const std::string* size = node.attr("data-font-size");
+            if (words == nullptr || size == nullptr) {
+                SketchObject* plain = SketchObject::make(SketchObjectType::Path, object->geometry());
+                delete object;
+                return plain;
+            }
+            BLMatrix2D placed = BLMatrix2D::make_identity();
+            if (const std::string* stored = node.attr("data-text-matrix")) {
+                double v[6] = {1, 0, 0, 1, 0, 0};
+                std::istringstream in(*stored);
+                for (double& value : v) {
+                    in >> value;
+                }
+                placed = BLMatrix2D(v[0], v[1], v[2], v[3], v[4], v[5]);
+            }
+            placed.post_transform(matrix);   // the file's own transform applies after the stored placement
+            const std::string* font = node.attr("data-font-name");
+            double fontSize = number(size, 24.0);
+            object->setTextState(*words, font != nullptr ? *font : std::string(), fontSize > 0.0 ? fontSize : 24.0, placed);
+            return object;
+        }
+
         bool parseObjectType(const std::string& name, SketchObjectType& out) {
             static const std::pair<const char*, SketchObjectType> kTypes[] = {
                 {"Line", SketchObjectType::Line}, {"Rect", SketchObjectType::Rect}, {"RoundRect", SketchObjectType::RoundRect},
                 {"Ellipse", SketchObjectType::Ellipse}, {"Polygon", SketchObjectType::Polygon},
-                {"Polyline", SketchObjectType::Polyline}, {"Path", SketchObjectType::Path},
+                {"Polyline", SketchObjectType::Polyline}, {"Path", SketchObjectType::Path}, {"Text", SketchObjectType::Text},
             };
             for (const auto& entry : kTypes) {
                 if (name == entry.first) {
@@ -1143,6 +1188,9 @@ namespace sketch {
             BLPath path = object->geometry();
             path.transform(matrix);
             object->setGeometry(path);
+            if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
+                object.reset(restoreText(node, object.release(), matrix));
+            }
             BLBox box = object->geometryBounds();
             double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
             if (scale <= 1e-9) {
@@ -1160,8 +1208,15 @@ namespace sketch {
                     const std::string* code = child->attr("data-effect");
                     EffectKind effect = EffectKind::DropShadow;
                     if (code != nullptr) {
-                        effect = *code == "outer-glow" ? EffectKind::OuterGlow : (*code == "gaussian-blur" ? EffectKind::GaussianBlur
-                            : (*code == "round-corners" ? EffectKind::RoundCorners : EffectKind::DropShadow));
+                        static const std::pair<const char*, EffectKind> kEffects[] = {
+                            {"drop-shadow", EffectKind::DropShadow}, {"outer-glow", EffectKind::OuterGlow}, {"gaussian-blur", EffectKind::GaussianBlur},
+                            {"round-corners", EffectKind::RoundCorners}, {"inner-shadow", EffectKind::InnerShadow},
+                            {"offset-path", EffectKind::OffsetPath}, {"roughen", EffectKind::Roughen}};
+                        for (const auto& entry : kEffects) {
+                            if (*code == entry.first) {
+                                effect = entry.second;
+                            }
+                        }
                     }
                     item = AppearanceItem::makeEffect(effect);
                     item.softness = number(child->attr("data-softness"), item.softness);
@@ -1226,6 +1281,30 @@ namespace sketch {
                 readAppearanceObject(ctx, node, matrix, style);
                 return;
             }
+            if (node.name == "g" && node.attr("data-sketch") != nullptr && *node.attr("data-sketch") == "graphic-styles") {
+                // Each child is an object wearing one style: read them into a scratch document, keep their appearances.
+                SketchDocument scratch;
+                ReadContext inner;
+                inner.byId = ctx.byId;
+                inner.document = &scratch;
+                for (const auto& child : node.children) {
+                    readNode(inner, *child, identity(), Style());
+                }
+                std::vector<GraphicStyle> styles;
+                for (std::size_t i = 0; i < scratch.objectCount(); ++i) {
+                    const SketchObject& carrier = scratch.object(i);
+                    GraphicStyle loaded;
+                    loaded.name = carrier.name();
+                    loaded.items = carrier.appearance();
+                    loaded.opacity = carrier.opacity();
+                    loaded.blendMode = carrier.blendMode();
+                    styles.push_back(loaded);
+                }
+                if (ctx.document != nullptr) {
+                    ctx.document->setGraphicStyles(styles);
+                }
+                return;
+            }
             if (node.name == "g" || node.name == "svg" || node.name == "a" || node.name == "switch") {
                 bool group = node.name == "g" && ctx.document != nullptr;
                 if (group) {
@@ -1265,6 +1344,9 @@ namespace sketch {
             BLPath path = object->geometry();
             path.transform(matrix);
             object->setGeometry(path);
+            if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
+                object.reset(restoreText(node, object.release(), matrix));
+            }
             BLBox box = object->geometryBounds();
 
             object->setFill(readPaint(ctx, style, "fill", box));
@@ -1335,39 +1417,11 @@ namespace sketch {
 
     }
 
-    // ---------------------------------------------------------------------- public
-
-    std::string svgFromDocument(const SketchDocument& document) {
-        std::ostringstream defs;
-        std::ostringstream body;
-        int gradientCount = 0;
-        std::vector<std::size_t> openGroups;  // <g> elements currently open (group ids)
-        for (std::size_t i = 0; i < document.objectCount(); ++i) {
-            const SketchObject& object = document.object(i);
-            BLBox box = object.geometryBounds();
-            {
-                const std::vector<std::size_t>& groups = object.groups();
-                std::size_t common = 0;
-                while (common < openGroups.size() && common < groups.size() && openGroups[common] == groups[common]) {
-                    ++common;
-                }
-                for (std::size_t k = openGroups.size(); k > common; --k) {
-                    body << "</g>\n";
-                }
-                openGroups.resize(common);
-                for (std::size_t k = common; k < groups.size(); ++k) {
-                    GroupProps props = document.groupProps(groups[k]);
-                    body << "<g";
-                    if (props.opacity < 1.0) {
-                        body << " opacity=\"" << num(props.opacity) << "\"";
-                    }
-                    if (props.blendMode != BlendMode::Normal) {
-                        body << " style=\"mix-blend-mode:" << blendModeCss(props.blendMode) << "\"";
-                    }
-                    body << ">\n";
-                    openGroups.push_back(groups[k]);
-                }
-            }
+    namespace {
+    // One object as SVG: a plain <path>, or - for several fills / strokes, per-item opacity / blend / visibility or effects - a
+    // <g data-sketch="appearance"> with one path per item. `idText` is its id attribute.
+    void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount) {
+        BLBox box = object.geometryBounds();
             {
                 const std::vector<AppearanceItem>& items = object.appearance();
                 bool plain = items.size() == 2 && items[0].kind == AppearanceKind::Fill && items[1].kind == AppearanceKind::Stroke;
@@ -1376,7 +1430,7 @@ namespace sketch {
                 }
                 if (!plain) {
                     // Several fills/strokes (or per-item opacity/blend/visibility): the object is a <g> with one path per item.
-                    body << "<g data-sketch=\"appearance\" id=\"obj" << object.id() << "\" data-type=\"" << typeName(object.type()) << "\"";
+                    body << "<g data-sketch=\"appearance\" id=\"" << idText << "\" data-type=\"" << typeName(object.type()) << "\"" << textAttrs(object);
                     if (!object.name().empty()) {
                         body << " data-name=\"" << escape(object.name()) << "\"";
                     }
@@ -1400,7 +1454,7 @@ namespace sketch {
                         bool stroke = item.kind == AppearanceKind::Stroke;
                         if (item.kind == AppearanceKind::Effect) {
                             // Other viewers draw nothing for it; the reader restores it from these attributes.
-                            static const char* kCodes[] = {"drop-shadow", "outer-glow", "gaussian-blur", "round-corners"};
+                            static const char* kCodes[] = {"drop-shadow", "outer-glow", "gaussian-blur", "round-corners", "inner-shadow", "offset-path", "roughen"};
                             body << "<path d=\"M0 0\" data-item=\"effect\" data-effect=\"" << kCodes[std::size_t(item.effect)] << "\" data-softness=\""
                                  << num(item.softness) << "\" data-dx=\"" << num(item.offsetX) << "\" data-dy=\"" << num(item.offsetY)
                                  << "\" data-radius=\"" << num(item.radius) << "\" stroke=\"none\""
@@ -1436,10 +1490,10 @@ namespace sketch {
                         body << "/>\n";
                     }
                     body << "</g>\n";
-                    continue;
+                    return;
                 }
             }
-            body << "<path id=\"obj" << object.id() << "\" d=\"" << pathData(object.geometry()) << "\" data-type=\"" << typeName(object.type()) << "\"";
+            body << "<path id=\"" << idText << "\" d=\"" << pathData(object.geometry()) << "\" data-type=\"" << typeName(object.type()) << "\"" << textAttrs(object);
             if (!object.name().empty()) {
                 body << " data-name=\"" << escape(object.name()) << "\"";
             }
@@ -1463,10 +1517,61 @@ namespace sketch {
                 body << " data-locked=\"true\"";
             }
             body << "/>\n";
+    }
+
+    }
+
+    // ---------------------------------------------------------------------- public
+
+    std::string svgFromDocument(const SketchDocument& document) {
+        std::ostringstream defs;
+        std::ostringstream body;
+        int gradientCount = 0;
+        std::vector<std::size_t> openGroups;  // <g> elements currently open (group ids)
+        for (std::size_t i = 0; i < document.objectCount(); ++i) {
+            const SketchObject& object = document.object(i);
+            BLBox box = object.geometryBounds();
+            {
+                const std::vector<std::size_t>& groups = object.groups();
+                std::size_t common = 0;
+                while (common < openGroups.size() && common < groups.size() && openGroups[common] == groups[common]) {
+                    ++common;
+                }
+                for (std::size_t k = openGroups.size(); k > common; --k) {
+                    body << "</g>\n";
+                }
+                openGroups.resize(common);
+                for (std::size_t k = common; k < groups.size(); ++k) {
+                    GroupProps props = document.groupProps(groups[k]);
+                    body << "<g";
+                    if (props.opacity < 1.0) {
+                        body << " opacity=\"" << num(props.opacity) << "\"";
+                    }
+                    if (props.blendMode != BlendMode::Normal) {
+                        body << " style=\"mix-blend-mode:" << blendModeCss(props.blendMode) << "\"";
+                    }
+                    body << ">\n";
+                    openGroups.push_back(groups[k]);
+                }
+            }
+            writeObject(object, "obj" + std::to_string(object.id()), body, defs, gradientCount);
         }
         for (std::size_t k = openGroups.size(); k > 0; --k) {
             body << "</g>\n";
         }
+        // Graphic styles: hidden, each one a 100 x 100 rectangle wearing the style, so the ordinary object reader / writer
+        // carries the whole appearance. The group is written even when empty, so "no styles" survives a round trip.
+        body << "<g data-sketch=\"graphic-styles\" display=\"none\">\n";
+        for (std::size_t i = 0; i < document.graphicStyles().size(); ++i) {
+            const GraphicStyle& style = document.graphicStyles()[i];
+            std::unique_ptr<SketchObject> carrier(SketchObject::makeRect(0, 0, 100, 100));
+            carrier->setAppearance(style.items);
+            carrier->setOpacity(style.opacity);
+            carrier->setBlendMode(style.blendMode);
+            carrier->setName(style.name);
+            writeObject(*carrier, "style" + std::to_string(i + 1), body, defs, gradientCount);
+        }
+        body << "</g>\n";
 
         std::ostringstream out;
         out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
@@ -1521,6 +1626,7 @@ namespace sketch {
         }
 
         document.clearObjects();
+        document.setGraphicStyles(defaultGraphicStyles());   // replaced by the file's own group, when it has one
         document.setPageSize(float(width), float(height));
         if (const std::string* ppi = root->attr("data-ppi")) {
             double value = number(ppi, 72.0);

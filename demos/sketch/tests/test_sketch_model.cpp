@@ -1,9 +1,19 @@
 #include "sketchcolor.h"
 #include "sketchdocument.h"
 #include "sketchobject.h"
+#include "cursorset.h"
+#include "shapetools.h"
+#include "pathops.h"
 #include "sketchsvg.h"
+#include "gzip.h"
+#include "sketchbin.h"
 
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 
@@ -2002,4 +2012,1516 @@ TEST(SketchSvg, PageBackgroundRoundTrips) {
     EXPECT_EQ(transparent.find("id=\"pageBackground\""), std::string::npos);
     ASSERT_TRUE(documentFromSvg(transparent, copy));
     EXPECT_FALSE(copy.pageBackground().has_value());
+}
+
+// ---- Graphic Styles --------------------------------------------------------------------------------------------------
+
+namespace {
+    // A document with one selected rectangle wearing a distinctive look: blue fill, red 3 pt stroke, a drop shadow, 60% opacity.
+    SketchObject& addStyledRect(SketchDocument& doc) {
+        SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+        std::vector<AppearanceItem> items = {AppearanceItem::makeFill(SketchPaint::solid(SketchColor::fromHex("#0000ff"))),
+            AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::fromHex("#ff0000")), 3.0), AppearanceItem::makeEffect(EffectKind::DropShadow)};
+        rect.setAppearance(items);
+        rect.setOpacity(0.6);
+        rect.setBlendMode(BlendMode::Multiply);
+        doc.setSelection({rect.id()});
+        return rect;
+    }
+}
+
+TEST(SketchGraphicStyles, ANewDocumentStartsWithTheStarterStyles) {
+    SketchDocument doc;
+    EXPECT_EQ(doc.graphicStyles().size(), defaultGraphicStyles().size());
+    ASSERT_GE(doc.graphicStyles().size(), 5u);
+    EXPECT_EQ(doc.graphicStyles()[0].name, "Default");
+    EXPECT_EQ(doc.graphicStyles()[1].items.back().kind, AppearanceKind::Effect);   // Sunset + shadow
+    EXPECT_NEAR(doc.graphicStyles().back().opacity, 0.55, 1e-9);                    // Ghost
+}
+
+TEST(SketchGraphicStyles, SavingTheSelectionAddsANamedStyleAndIsOneUndoStep) {
+    SketchDocument doc;
+    std::size_t before = doc.graphicStyles().size();
+    EXPECT_FALSE(doc.addGraphicStyleFromSelection());   // nothing selected
+    addStyledRect(doc);
+    doc.undoStack().clear();
+    ASSERT_TRUE(doc.addGraphicStyleFromSelection());
+    ASSERT_EQ(doc.graphicStyles().size(), before + 1);
+    const GraphicStyle& saved = doc.graphicStyles().back();
+    EXPECT_EQ(saved.items.size(), 3u);
+    EXPECT_EQ(saved.blendMode, BlendMode::Multiply);
+    EXPECT_NEAR(saved.opacity, 0.6, 1e-9);
+    EXPECT_EQ(saved.name, "Style " + std::to_string(before + 1));
+    ASSERT_TRUE(doc.addGraphicStyleFromSelection());
+    EXPECT_NE(doc.graphicStyles()[before].name, doc.graphicStyles()[before + 1].name);   // names stay unique
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.graphicStyles().size(), before + 1);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.graphicStyles().size(), before);
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.graphicStyles().size(), before + 1);
+}
+
+TEST(SketchGraphicStyles, ApplyingReplacesTheSelectionsWholeAppearanceAndUndoes) {
+    SketchDocument doc;
+    addStyledRect(doc);
+    ASSERT_TRUE(doc.addGraphicStyleFromSelection());
+    std::size_t index = doc.graphicStyles().size() - 1;
+
+    SketchObject& other = doc.add(SketchObject::makeEllipse(100, 100, 30, 30));
+    other.setFill(SketchPaint::solid(SketchColor::fromHex("#00ff00")));
+    doc.setSelection({other.id()});
+    doc.undoStack().clear();
+    ASSERT_TRUE(doc.applyGraphicStyle(index));
+    EXPECT_EQ(other.appearance().size(), 3u);
+    EXPECT_EQ(other.fill().color().toHex(), "#0000ff");
+    EXPECT_EQ(other.stroke().color().toHex(), "#ff0000");
+    EXPECT_NEAR(other.opacity(), 0.6, 1e-9);
+    EXPECT_EQ(other.blendMode(), BlendMode::Multiply);
+    EXPECT_FALSE(doc.applyGraphicStyle(index));   // already wearing it: nothing changes, no step
+    doc.undoStack().undo();
+    EXPECT_EQ(other.appearance().size(), 2u);
+    EXPECT_EQ(other.fill().color().toHex(), "#00ff00");
+    EXPECT_EQ(other.opacity(), 1.0);
+
+    doc.clearSelection();
+    EXPECT_FALSE(doc.applyGraphicStyle(index));    // nothing selected
+    doc.setSelection({other.id()});
+    EXPECT_FALSE(doc.applyGraphicStyle(9999));     // no such style
+}
+
+TEST(SketchGraphicStyles, DeletingRemovesOneStyleAndUndoes) {
+    SketchDocument doc;
+    std::size_t count = doc.graphicStyles().size();
+    std::string second = doc.graphicStyles()[1].name;
+    EXPECT_FALSE(doc.deleteGraphicStyle(count));
+    ASSERT_TRUE(doc.deleteGraphicStyle(0));
+    EXPECT_EQ(doc.graphicStyles().size(), count - 1);
+    EXPECT_EQ(doc.graphicStyles()[0].name, second);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.graphicStyles()[0].name, "Default");
+    EXPECT_EQ(doc.graphicStyles().size(), count);
+}
+
+TEST(SketchGraphicStyles, StylesRoundTripThroughSvg) {
+    SketchDocument doc;
+    addStyledRect(doc);
+    ASSERT_TRUE(doc.addGraphicStyleFromSelection());
+    std::string svg = svgFromDocument(doc);
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svg, copy));
+    ASSERT_EQ(copy.graphicStyles().size(), doc.graphicStyles().size());
+    for (std::size_t i = 0; i < doc.graphicStyles().size(); ++i) {
+        const GraphicStyle& a = doc.graphicStyles()[i];
+        const GraphicStyle& b = copy.graphicStyles()[i];
+        EXPECT_EQ(a.name, b.name) << i;
+        EXPECT_EQ(a.items.size(), b.items.size()) << a.name;
+        EXPECT_NEAR(a.opacity, b.opacity, 1e-6) << a.name;
+        EXPECT_EQ(a.blendMode, b.blendMode) << a.name;
+    }
+    const GraphicStyle& saved = copy.graphicStyles().back();
+    EXPECT_EQ(saved.items[1].paint.color().toHex(), "#ff0000");
+    EXPECT_NEAR(saved.items[1].strokeWidth, 3.0, 1e-6);
+    EXPECT_EQ(saved.items[2].kind, AppearanceKind::Effect);
+    // The styles are metadata, not drawing: the file still holds just the one real object.
+    EXPECT_EQ(copy.objectCount(), 1u);
+    // Gradient and dashed starter styles keep their look.
+    EXPECT_TRUE(copy.graphicStyles()[1].items[0].paint.isGradient());   // Sunset + shadow
+    EXPECT_FALSE(copy.graphicStyles()[4].items[1].strokeOptions.dashes.empty());   // Dashed red
+}
+
+TEST(SketchGraphicStyles, AnEmptyListSurvivesAndAFileWithoutStylesGetsTheStarterSet) {
+    SketchDocument doc;
+    doc.setGraphicStyles({});
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    EXPECT_TRUE(copy.graphicStyles().empty());   // the user deleted them all: they stay deleted
+
+    SketchDocument plain;
+    plain.setGraphicStyles({});
+    ASSERT_TRUE(documentFromSvg("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>", plain));
+    EXPECT_EQ(plain.graphicStyles().size(), defaultGraphicStyles().size());   // a foreign SVG has none of its own
+}
+
+TEST(SketchGraphicStyles, ColorModeConversionConvertsTheStylesToo) {
+    SketchDocument doc;
+    ASSERT_TRUE(doc.convertToColorMode(ColorSpace::CMYK));
+    EXPECT_EQ(doc.graphicStyles()[2].items[0].paint.color().space(), ColorSpace::CMYK);   // Blue card's fill
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.graphicStyles()[2].items[0].paint.color().space(), ColorSpace::RGB);
+}
+
+// ---- Drawing tool geometry (shapetools.h) ----------------------------------------------------------------------------
+
+TEST(SketchShapeTools, RegularPolygonsAndStars) {
+    std::vector<BLPoint> hexagon = regularPolygonPoints(BLPoint(50, 50), 10.0, 6, -1.5707963267948966);
+    ASSERT_EQ(hexagon.size(), 6u);
+    EXPECT_NEAR(hexagon[0].x, 50.0, 1e-9);   // the first corner points straight up (y grows downward)
+    EXPECT_NEAR(hexagon[0].y, 40.0, 1e-9);
+    for (const BLPoint& p : hexagon) {
+        EXPECT_NEAR(std::hypot(p.x - 50.0, p.y - 50.0), 10.0, 1e-9);
+    }
+    EXPECT_EQ(regularPolygonPoints(BLPoint(0, 0), 5.0, 1, 0.0).size(), 3u);   // fewer than three sides clamps to a triangle
+
+    std::vector<BLPoint> star = starPoints(BLPoint(0, 0), 10.0, 0.5, 5, -1.5707963267948966);
+    ASSERT_EQ(star.size(), 10u);
+    EXPECT_NEAR(std::hypot(star[0].x, star[0].y), 10.0, 1e-9);   // outer corner
+    EXPECT_NEAR(std::hypot(star[1].x, star[1].y), 5.0, 1e-9);    // inner corner
+}
+
+TEST(SketchShapeTools, SimplifyKeepsTheShapeWithinTolerance) {
+    std::vector<BLPoint> line;
+    for (int i = 0; i <= 100; ++i) {
+        line.push_back(BLPoint(double(i), 0.01 * double(i % 2)));   // a straight line with tiny noise
+    }
+    std::vector<BLPoint> simple = simplifyPolyline(line, 0.5);
+    EXPECT_EQ(simple.size(), 2u);
+    EXPECT_NEAR(simple.front().x, 0.0, 1e-9);
+    EXPECT_NEAR(simple.back().x, 100.0, 1e-9);
+
+    std::vector<BLPoint> corner = {BLPoint(0, 0), BLPoint(5, 0), BLPoint(10, 0), BLPoint(10, 5), BLPoint(10, 10)};
+    std::vector<BLPoint> kept = simplifyPolyline(corner, 0.5);
+    ASSERT_EQ(kept.size(), 3u);                       // the corner survives
+    EXPECT_NEAR(kept[1].x, 10.0, 1e-9);
+    EXPECT_NEAR(kept[1].y, 0.0, 1e-9);
+    EXPECT_EQ(simplifyPolyline({BLPoint(1, 1), BLPoint(2, 2)}, 1.0).size(), 2u);
+}
+
+TEST(SketchShapeTools, SmoothPathPassesThroughEveryPoint) {
+    std::vector<BLPoint> points = {BLPoint(0, 0), BLPoint(10, 10), BLPoint(20, 0), BLPoint(30, 10)};
+    BLPath path = smoothPath(points);
+    EXPECT_EQ(path.size(), 1u + 3u * 3u);            // a move and three cubics of three vertices each
+    const BLPoint* v = path.vertex_data();
+    EXPECT_NEAR(v[3].x, 10.0, 1e-9);                 // each cubic ends on the next point
+    EXPECT_NEAR(v[6].x, 20.0, 1e-9);
+    EXPECT_NEAR(v[9].x, 30.0, 1e-9);
+    EXPECT_EQ(smoothPath({BLPoint(0, 0), BLPoint(4, 4)}).size(), 2u);   // two points: a plain line
+    EXPECT_EQ(smoothPath({}).size(), 0u);
+}
+
+TEST(SketchShapeTools, PenPathUsesLinesForCornersAndCubicsForHandles) {
+    PenAnchor a, b, c;
+    a.point = BLPoint(0, 0);
+    b.point = BLPoint(10, 0);
+    c.point = BLPoint(10, 10);
+    BLPath corners = penPath({a, b, c}, false);
+    EXPECT_EQ(corners.size(), 3u);                    // move, line, line
+    b.out = BLPoint(15, 0);
+    b.hasOut = true;
+    BLPath curved = penPath({a, b, c}, false);
+    EXPECT_EQ(curved.size(), 1u + 1u + 3u);           // move, line a-b, cubic b-c
+    BLPath closed = penPath({a, b, c}, true);
+    SketchObject* shape = SketchObject::makePath(closed);
+    EXPECT_TRUE(shape->isClosed());
+    delete shape;
+    EXPECT_EQ(penPath({}, false).size(), 0u);
+}
+
+// ---- Cursor hotspots (cursorset.h) -----------------------------------------------------------------------------------
+
+TEST(SketchCursors, HotspotsAreReadFromTheJsonFile) {
+    std::map<std::string, CursorHotspot> spots = parseCursorHotspots(
+        R"({ "select": { "x": 7, "y": 3, "size": 32 },
+  "pen": { "x": 6, "y": 27, "size": 32 } })");
+    ASSERT_EQ(spots.size(), 2u);
+    EXPECT_EQ(spots["select"].x, 7);
+    EXPECT_EQ(spots["select"].y, 3);
+    EXPECT_EQ(spots["pen"].x, 6);
+    EXPECT_EQ(spots["pen"].y, 27);
+    EXPECT_EQ(spots["pen"].size, 32);
+    EXPECT_TRUE(parseCursorHotspots("").empty());
+    EXPECT_TRUE(parseCursorHotspots("not json").empty());
+    // An entry that cannot be read ends the scan but keeps what came before it.
+    EXPECT_EQ(parseCursorHotspots("{ \"a\": { \"x\": 1 }, \"b\": { \"x\": oops } }").size(), 1u);
+}
+
+TEST(SketchShapeTools, PathsSplitIntoAnchorsAndBackWithoutChange) {
+    // A rectangle: one closed outline of four corners, no handles (the closing line is folded into the first anchor).
+    std::unique_ptr<SketchObject> rect(SketchObject::makeRect(10, 20, 100, 50));
+    std::vector<SubPath> subs = pathToSubPaths(rect->geometry());
+    ASSERT_EQ(subs.size(), 1u);
+    EXPECT_TRUE(subs[0].closed);
+    EXPECT_EQ(subs[0].anchors.size(), 4u);
+    for (const PenAnchor& a : subs[0].anchors) {
+        EXPECT_FALSE(a.hasIn || a.hasOut);
+    }
+    BLBox before, after;
+    rect->geometry().get_bounding_box(&before);
+    subPathsToPath(subs).get_bounding_box(&after);
+    EXPECT_NEAR(before.x0, after.x0, 1e-9);
+    EXPECT_NEAR(before.y1, after.y1, 1e-9);
+
+    // An ellipse: four smooth anchors with handles on both sides.
+    std::unique_ptr<SketchObject> oval(SketchObject::makeEllipse(50, 50, 30, 20));
+    std::vector<SubPath> ovalSubs = pathToSubPaths(oval->geometry());
+    ASSERT_EQ(ovalSubs.size(), 1u);
+    EXPECT_EQ(ovalSubs[0].anchors.size(), 4u);
+    for (const PenAnchor& a : ovalSubs[0].anchors) {
+        EXPECT_TRUE(a.hasIn && a.hasOut);
+    }
+
+    // A pen path round-trips exactly, and a corner anchor keeps no phantom handle.
+    PenAnchor a, b, c;
+    a.point = BLPoint(0, 0);
+    b.point = BLPoint(10, 0);
+    b.out = BLPoint(15, 5);
+    b.hasOut = true;
+    c.point = BLPoint(20, 10);
+    BLPath path = penPath({a, b, c}, false);
+    std::vector<SubPath> penSubs = pathToSubPaths(path);
+    ASSERT_EQ(penSubs.size(), 1u);
+    ASSERT_EQ(penSubs[0].anchors.size(), 3u);
+    EXPECT_FALSE(penSubs[0].closed);
+    EXPECT_FALSE(penSubs[0].anchors[0].hasOut);   // the line a-b has no handles
+    EXPECT_TRUE(penSubs[0].anchors[1].hasOut);
+    EXPECT_FALSE(penSubs[0].anchors[1].hasIn);    // the cubic b-c starts with b's handle and ends with c's own (none: on the anchor)
+    EXPECT_FALSE(penSubs[0].anchors[2].hasIn);
+    EXPECT_EQ(subPathsToPath(penSubs).size(), path.size());
+    EXPECT_TRUE(pathToSubPaths(BLPath()).empty());
+}
+
+// ---- Cursor images: the SVG must SCALE to the requested size, not be cropped to it ------------------------------------
+
+#include <newui/svgimage.h>
+
+namespace {
+    // The box of pixels with any alpha in an image: {x0, y0, x1, y1}, or all -1 when empty.
+    std::array<int, 4> opaqueBox(const BLImage& image) {
+        BLImageData data;
+        const_cast<BLImage&>(image).get_data(&data);
+        int x0 = 1 << 20, y0 = 1 << 20, x1 = -1, y1 = -1;
+        for (int y = 0; y < data.size.h; ++y) {
+            const std::uint32_t* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::size_t(y) * std::size_t(data.stride));
+            for (int x = 0; x < data.size.w; ++x) {
+                if ((row[x] >> 24) != 0) {
+                    if (x < x0) { x0 = x; } if (y < y0) { y0 = y; } if (x > x1) { x1 = x; } if (y > y1) { y1 = y; }
+                }
+            }
+        }
+        return x1 < 0 ? std::array<int, 4>{-1, -1, -1, -1} : std::array<int, 4>{x0, y0, x1, y1};
+    }
+}
+
+TEST(SketchCursors, ASvgCursorScalesToTheSizeItIsRenderedAt) {
+    std::filesystem::path file = std::filesystem::path(__FILE__).parent_path().parent_path() / "Resources" / "cursors" / "select.svg";
+    ASSERT_TRUE(std::filesystem::exists(file)) << file;
+    BLImage fullImage, halfImage;
+    ASSERT_TRUE(newui::renderSvgFile(file.string(), 32, 32, fullImage));
+    ASSERT_TRUE(newui::renderSvgFile(file.string(), 16, 16, halfImage));
+    std::array<int, 4> a = opaqueBox(fullImage), b = opaqueBox(halfImage);
+    // The arrow spans about x 5..25, y 1..30 of the 32 px drawing. At 16 px it must span about half of that - all of it,
+    // not just the corner that happens to fit (a cropped image reaches the 16 px edge and is as big as before).
+    EXPECT_LT(b[2], 15) << "the arrow runs off the right edge: the drawing was cropped, not scaled";
+    EXPECT_LT(b[3], 15) << "the arrow runs off the bottom edge: the drawing was cropped, not scaled";
+    EXPECT_NEAR(double(b[3] - b[1]) * 2.0, double(a[3] - a[1]), 4.0);
+    EXPECT_NEAR(double(b[2] - b[0]) * 2.0, double(a[2] - a[0]), 4.0);
+}
+
+TEST(SketchShapeTools, RegularPolygonsAndStarsAreRecognisedFromTheirCorners) {
+    RegularShape shape;
+    std::vector<BLPoint> pentagon = regularPolygonPoints(BLPoint(100, 80), 40.0, 5, -1.2);
+    ASSERT_TRUE(analyzeRegularShape(pentagon, shape));
+    EXPECT_FALSE(shape.star);
+    EXPECT_EQ(shape.points, 5);
+    EXPECT_NEAR(shape.center.x, 100.0, 1e-9);
+    EXPECT_NEAR(shape.outer, 40.0, 1e-9);
+    EXPECT_NEAR(shape.firstAngle, -1.2, 1e-9);
+
+    std::vector<BLPoint> star = starPoints(BLPoint(10, 20), 50.0, 0.4, 7, 0.3);
+    ASSERT_TRUE(analyzeRegularShape(star, shape));
+    EXPECT_TRUE(shape.star);
+    EXPECT_EQ(shape.points, 7);
+    EXPECT_NEAR(shape.outer, 50.0, 1e-9);
+    EXPECT_NEAR(shape.ratio(), 0.4, 1e-9);
+    EXPECT_NEAR(shape.firstAngle, 0.3, 1e-9);
+
+    // The shape that comes back from its own numbers is the shape it was (the first corner is where it was).
+    BLPath again = regularShapePath(shape);
+    EXPECT_EQ(again.size(), star.size() + 1);   // the corners and a close
+    EXPECT_NEAR(again.vertex_data()[0].x, star[0].x, 1e-9);
+
+    // Not regular: squashed, edited, or too few corners.
+    std::vector<BLPoint> squashed = pentagon;
+    for (BLPoint& p : squashed) { p.y = 80.0 + (p.y - 80.0) * 0.5; }
+    EXPECT_FALSE(analyzeRegularShape(squashed, shape));
+    std::vector<BLPoint> moved = pentagon;
+    moved[2].x += 5.0;
+    EXPECT_FALSE(analyzeRegularShape(moved, shape));
+    EXPECT_FALSE(analyzeRegularShape({BLPoint(0, 0), BLPoint(1, 1)}, shape));
+
+    // A star whose first listed corner is an inner one is still a star (the outer corners are the other parity).
+    std::vector<BLPoint> shifted(star.begin() + 1, star.end());
+    shifted.push_back(star.front());
+    ASSERT_TRUE(analyzeRegularShape(shifted, shape));
+    EXPECT_TRUE(shape.star);
+    EXPECT_EQ(shape.points, 7);
+}
+
+TEST(SketchShapeTools, RoundedRectanglesAreRecognisedWithTheirRadiusAndRebuilt) {
+    std::unique_ptr<SketchObject> plain(SketchObject::makeRect(10, 20, 100, 50));
+    RoundRectShape shape;
+    ASSERT_TRUE(analyzeRoundRect(plain->geometry(), 0.0, shape));
+    EXPECT_NEAR(shape.radius, 0.0, 1e-9);
+    EXPECT_NEAR(shape.box.x1, 110.0, 1e-9);
+
+    std::unique_ptr<SketchObject> round(SketchObject::makeRoundRect(10, 20, 100, 50, 12.0));
+    ASSERT_TRUE(analyzeRoundRect(round->geometry(), 0.0, shape));
+    EXPECT_NEAR(shape.radius, 12.0, 1e-6);
+    EXPECT_NEAR(shape.box.x0, 10.0, 1e-9);
+    EXPECT_NEAR(shape.box.y1, 70.0, 1e-9);
+
+    shape.radius = 20.0;
+    std::unique_ptr<SketchObject> bigger(SketchObject::makePath(roundRectPath(shape)));
+    RoundRectShape again;
+    ASSERT_TRUE(analyzeRoundRect(bigger->geometry(), 0.0, again));
+    EXPECT_NEAR(again.radius, 20.0, 1e-6);
+    shape.radius = 999.0;   // clamped to half the shorter side
+    RoundRectShape clamped;
+    ASSERT_TRUE(analyzeRoundRect(roundRectPath(shape), 0.0, clamped));
+    EXPECT_NEAR(clamped.radius, 25.0, 1e-6);
+
+    // Turned by the frame angle: the same box and radius come out.
+    BLPath turned = round->geometry();
+    turned.transform(BLMatrix2D::make_rotation(0.5));
+    RoundRectShape rotated;
+    ASSERT_TRUE(analyzeRoundRect(turned, 0.5, rotated));
+    EXPECT_NEAR(rotated.radius, 12.0, 1e-6);
+    EXPECT_NEAR(rotated.box.x1 - rotated.box.x0, 100.0, 1e-6);
+
+    // An ellipse or a triangle is no rounded rectangle.
+    std::unique_ptr<SketchObject> oval(SketchObject::makeEllipse(50, 50, 30, 20));
+    EXPECT_FALSE(analyzeRoundRect(oval->geometry(), 0.0, shape));
+    std::unique_ptr<SketchObject> triangle(SketchObject::makePolygon({BLPoint(0, 0), BLPoint(10, 0), BLPoint(5, 8)}));
+    EXPECT_FALSE(analyzeRoundRect(triangle->geometry(), 0.0, shape));
+}
+
+TEST(SketchShapeTools, ArcsAreRebuiltAndRecognisedFromTheirOutline) {
+    ArcShape arc;
+    arc.center = BLPoint(100, 80);
+    arc.radius = 40.0;
+    arc.start = -0.5;
+    arc.sweep = 2.4;   // more than a quarter turn: several segments
+    BLPath path = arcPath(arc);
+    EXPECT_GT(path.size(), 0u);
+    ArcShape found;
+    ASSERT_TRUE(analyzeArc(path, found));
+    EXPECT_NEAR(found.center.x, 100.0, 1e-3);
+    EXPECT_NEAR(found.center.y, 80.0, 1e-3);
+    EXPECT_NEAR(found.radius, 40.0, 0.05);
+    EXPECT_NEAR(found.start, -0.5, 1e-3);
+    EXPECT_NEAR(found.sweep, 2.4, 1e-3);
+    EXPECT_NEAR(arc.endPoint().x, 100.0 + 40.0 * std::cos(1.9), 1e-9);
+
+    // A short arc (one segment), a negative sweep and a nearly full circle.
+    arc.sweep = 0.9;
+    ASSERT_TRUE(analyzeArc(arcPath(arc), found));
+    EXPECT_NEAR(found.sweep, 0.9, 1e-3);
+    arc.sweep = -2.0;
+    ASSERT_TRUE(analyzeArc(arcPath(arc), found));
+    EXPECT_NEAR(found.sweep, -2.0, 1e-3);
+    arc.sweep = 6.0;
+    ASSERT_TRUE(analyzeArc(arcPath(arc), found));
+    EXPECT_NEAR(found.sweep, 6.0, 1e-3);
+
+    // Not arcs: a straight line, a closed outline, a wavy curve.
+    BLPath line;
+    line.move_to(0, 0);
+    line.line_to(10, 10);
+    EXPECT_FALSE(analyzeArc(line, found));
+    std::unique_ptr<SketchObject> oval(SketchObject::makeEllipse(50, 50, 30, 30));
+    EXPECT_FALSE(analyzeArc(oval->geometry(), found));
+    EXPECT_FALSE(analyzeArc(smoothPath({BLPoint(0, 0), BLPoint(10, 10), BLPoint(20, 0), BLPoint(30, 10)}), found));
+    EXPECT_EQ(arcPath(ArcShape()).size(), 0u);
+}
+
+namespace {
+    // The largest distance from any of `points` to the nearest sample of the curve through `anchors` (the curve sampled finely).
+    double deviation(const std::vector<BLPoint>& points, const std::vector<PenAnchor>& anchors) {
+        std::vector<BLPoint> curve;
+        for (std::size_t i = 0; i + 1 < anchors.size(); ++i) {
+            BLPoint p0 = anchors[i].point, p3 = anchors[i + 1].point;
+            BLPoint p1 = anchors[i].hasOut ? anchors[i].out : p0, p2 = anchors[i + 1].hasIn ? anchors[i + 1].in : p3;
+            for (int k = 0; k <= 200; ++k) {
+                double t = k / 200.0, s = 1.0 - t;
+                curve.push_back(BLPoint(s * s * s * p0.x + 3 * s * s * t * p1.x + 3 * s * t * t * p2.x + t * t * t * p3.x,
+                    s * s * s * p0.y + 3 * s * s * t * p1.y + 3 * s * t * t * p2.y + t * t * t * p3.y));
+            }
+        }
+        double worst = 0.0;
+        for (const BLPoint& p : points) {
+            double nearest = 1e18;
+            for (const BLPoint& c : curve) {
+                nearest = std::min(nearest, std::hypot(p.x - c.x, p.y - c.y));
+            }
+            worst = std::max(worst, nearest);
+        }
+        return worst;
+    }
+}
+
+TEST(SketchFitCurve, AStraightStrokeNeedsTwoPoints) {
+    std::vector<BLPoint> points;
+    for (int i = 0; i <= 60; ++i) {
+        points.push_back(BLPoint(i * 2.0, 10.0 + 0.3 * ((i * 7) % 5 - 2)));   // a line with a little jitter
+    }
+    std::vector<PenAnchor> anchors = fitCurve(points, 2.0);
+    EXPECT_EQ(anchors.size(), 2u);
+    EXPECT_LE(deviation(points, anchors), 2.0);
+}
+
+TEST(SketchFitCurve, ASmoothArcNeedsOneOrTwoSegmentsAndStaysClose) {
+    std::vector<BLPoint> points;
+    for (int i = 0; i <= 100; ++i) {
+        double a = 3.14159265358979 * i / 100.0;   // a half circle of radius 80
+        points.push_back(BLPoint(100.0 + 80.0 * std::cos(a), 100.0 + 80.0 * std::sin(a)));
+    }
+    std::vector<PenAnchor> anchors = fitCurve(points, 2.0);
+    EXPECT_LE(anchors.size(), 4u);
+    EXPECT_GE(anchors.size(), 2u);
+    EXPECT_LE(deviation(points, anchors), 2.5);
+    EXPECT_NEAR(anchors.front().point.x, 180.0, 1e-9);   // the ends are the first and last sample
+    EXPECT_NEAR(anchors.back().point.x, 20.0, 1e-9);
+    EXPECT_TRUE(anchors.front().hasOut && anchors.back().hasIn);
+}
+
+TEST(SketchFitCurve, AWavyLineKeepsOnlyAFewPoints) {
+    std::vector<BLPoint> points;
+    for (int i = 0; i <= 200; ++i) {
+        points.push_back(BLPoint(i * 2.0, 100.0 + 40.0 * std::sin(i * 2.0 / 60.0)));   // about 1.3 periods
+    }
+    std::vector<PenAnchor> anchors = fitCurve(points, 2.0);
+    EXPECT_LE(anchors.size(), 8u);
+    EXPECT_LE(deviation(points, anchors), 2.5);
+}
+
+TEST(SketchFitCurve, ASharpCornerStaysSharp) {
+    std::vector<BLPoint> points;
+    for (int i = 0; i <= 40; ++i) { points.push_back(BLPoint(i * 3.0, 0.0)); }          // right...
+    for (int i = 1; i <= 40; ++i) { points.push_back(BLPoint(120.0, i * 3.0)); }        // ...then down: a 90 degree corner
+    std::vector<PenAnchor> anchors = fitCurve(points, 2.0);
+    EXPECT_EQ(anchors.size(), 3u);   // start, the corner, end
+    EXPECT_NEAR(anchors[1].point.x, 120.0, 4.0);
+    EXPECT_NEAR(anchors[1].point.y, 0.0, 4.0);
+    EXPECT_LE(deviation(points, anchors), 2.5);
+}
+
+TEST(SketchFitCurve, DegenerateInput) {
+    EXPECT_TRUE(fitCurve({}, 2.0).empty());
+    EXPECT_EQ(fitCurve({BLPoint(1, 1)}, 2.0).size(), 1u);
+    EXPECT_EQ(fitCurve({BLPoint(1, 1), BLPoint(1, 1), BLPoint(1, 1)}, 2.0).size(), 1u);   // repeats collapse
+    EXPECT_EQ(fitCurve({BLPoint(0, 0), BLPoint(5, 5)}, 2.0).size(), 2u);
+}
+
+namespace {
+    // The farthest any point of the fitted curve is from the drawn stroke (the stroke sampled densely enough that the nearest sample will do).
+    double overshoot(const std::vector<BLPoint>& stroke, const std::vector<PenAnchor>& anchors) {
+        double worst = 0.0;
+        for (std::size_t i = 0; i + 1 < anchors.size(); ++i) {
+            BLPoint p0 = anchors[i].point, p3 = anchors[i + 1].point;
+            BLPoint p1 = anchors[i].hasOut ? anchors[i].out : p0, p2 = anchors[i + 1].hasIn ? anchors[i + 1].in : p3;
+            for (int k = 0; k <= 100; ++k) {
+                double t = k / 100.0, s = 1.0 - t;
+                BLPoint c(s * s * s * p0.x + 3 * s * s * t * p1.x + 3 * s * t * t * p2.x + t * t * t * p3.x,
+                    s * s * s * p0.y + 3 * s * s * t * p1.y + 3 * s * t * t * p2.y + t * t * t * p3.y);
+                double nearest = 1e18;
+                for (const BLPoint& p : stroke) {
+                    nearest = std::min(nearest, std::hypot(p.x - c.x, p.y - c.y));
+                }
+                worst = std::max(worst, nearest);
+            }
+        }
+        return worst;
+    }
+}
+
+TEST(SketchFitCurve, AnAcuteShakyCornerHasNoHook) {
+    // Down and to the left, then a sharp turn back toward the right (a turn of over 100 degrees), drawn with a shaky hand.
+    std::vector<BLPoint> stroke;
+    for (int i = 0; i <= 60; ++i) {
+        double t = i / 60.0;
+        stroke.push_back(BLPoint(100.0 - 60.0 * t + 0.8 * ((i * 7) % 5 - 2), 0.0 + 120.0 * t + 0.8 * ((i * 3) % 4 - 1.5)));
+    }
+    for (int i = 1; i <= 60; ++i) {
+        double t = i / 60.0;
+        stroke.push_back(BLPoint(40.0 + 200.0 * t + 0.8 * ((i * 5) % 5 - 2), 120.0 + 25.0 * t + 0.8 * ((i * 3) % 4 - 1.5)));
+    }
+    std::vector<PenAnchor> anchors = fitCurve(smoothPolyline(stroke, 2), 2.5);
+    EXPECT_LE(overshoot(stroke, anchors), 3.5) << "the fitted curve strays from the stroke (a hook at the corner)";
+    EXPECT_LE(deviation(stroke, anchors), 4.0);
+    // The corner is one anchor, at the tip of the turn.
+    bool atTip = false;
+    for (const PenAnchor& a : anchors) {
+        atTip = atTip || (std::fabs(a.point.x - 40.0) < 5.0 && std::fabs(a.point.y - 120.0) < 5.0);
+    }
+    EXPECT_TRUE(atTip);
+    EXPECT_LE(anchors.size(), 6u);
+}
+
+TEST(SketchFitCurve, HandlesNeverRunLongerThanTheirChord) {
+    std::vector<BLPoint> stroke;
+    for (int i = 0; i <= 80; ++i) {
+        double a = 3.14159265358979 * 1.8 * i / 80.0;   // most of a circle
+        stroke.push_back(BLPoint(100.0 + 50.0 * std::cos(a), 100.0 + 50.0 * std::sin(a)));
+    }
+    std::vector<PenAnchor> anchors = fitCurve(stroke, 1.5);
+    for (std::size_t i = 0; i + 1 < anchors.size(); ++i) {
+        double chord = std::hypot(anchors[i + 1].point.x - anchors[i].point.x, anchors[i + 1].point.y - anchors[i].point.y);
+        EXPECT_LE(std::hypot(anchors[i].out.x - anchors[i].point.x, anchors[i].out.y - anchors[i].point.y), chord * 1.0001);
+        EXPECT_LE(std::hypot(anchors[i + 1].in.x - anchors[i + 1].point.x, anchors[i + 1].in.y - anchors[i + 1].point.y), chord * 1.0001);
+    }
+    EXPECT_LE(overshoot(stroke, anchors), 2.5);
+}
+
+// ---- Text objects ----
+
+TEST(SketchText, OutlineSitsOnTheBaselineAndGrowsWithTheWordsAndSize) {
+    std::unique_ptr<SketchObject> text(SketchObject::makeText("Hi", "", 24.0, BLPoint(100.0, 50.0)));
+    ASSERT_TRUE(text->isText());
+    BLBox box = text->geometryBounds();
+    EXPECT_GE(box.x0, 99.0);
+    EXPECT_LE(box.y1, 50.5) << "H and i stand on the baseline";
+    EXPECT_LT(box.y0, 50.0 - 10.0) << "the capitals rise well above it";
+    double width = box.x1 - box.x0;
+    text->setText("Hi there");
+    EXPECT_GT(text->geometryBounds().x1 - text->geometryBounds().x0, width * 2.0);
+    text->setText("Hi\nthere");
+    EXPECT_GT(text->geometryBounds().y1, 50.0 + 10.0) << "a second line sits below the first";
+    text->setFontSize(48.0);
+    EXPECT_GT(text->geometryBounds().y1 - text->geometryBounds().y0, 40.0);
+}
+
+TEST(SketchText, MovingKeepsLaterEditsWhereTheTextWas) {
+    SketchDocument doc;
+    SketchObject& text = doc.add(SketchObject::makeText("Hi", "", 24.0, BLPoint(100.0, 50.0)));
+    std::size_t id = text.id();
+    doc.transformObjects({id}, BLMatrix2D::make_translation(30.0, 20.0), "Move");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 130.0, 3.0);
+    doc.findById(id)->setText("Hi!");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 130.0, 3.0) << "editing the words does not send the text back";
+    EXPECT_LE(doc.findById(id)->geometryBounds().y1, 70.5);
+    doc.findById(id)->setText("Hi");
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 100.0, 3.0);
+    doc.findById(id)->setText("Hi!");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 100.0, 3.0) << "after undoing the move the placement is the old one too";
+    EXPECT_LE(doc.findById(id)->geometryBounds().y1, 50.5);
+}
+
+TEST(SketchSvg, TextKeepsItsWordsFontAndPlacement) {
+    SketchDocument doc;
+    SketchObject& plain = doc.add(SketchObject::makeText("Line one\nLine \"two\" & <more>", "", 30.0, BLPoint(40.0, 80.0)));
+    plain.setFill(SketchPaint::solid(SketchColor::fromHex("#336699")));
+    plain.transform(BLMatrix2D::make_scaling(1.5, 1.5));
+    SketchObject& styled = doc.add(SketchObject::makeText("Fancy", "", 20.0, BLPoint(10.0, 200.0)));
+    AppearanceItem extra = AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.0f)), 2.0);
+    std::vector<AppearanceItem> items = styled.appearance();
+    items.push_back(extra);
+    styled.setAppearance(items);
+
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    ASSERT_EQ(copy.objectCount(), 2u);
+    for (std::size_t i = 0; i < 2; ++i) {
+        const SketchObject& a = doc.object(i);
+        SketchObject& b = copy.object(i);
+        ASSERT_TRUE(b.isText()) << i;
+        EXPECT_EQ(b.text(), a.text());
+        EXPECT_DOUBLE_EQ(b.fontSize(), a.fontSize());
+        EXPECT_NEAR(b.textMatrix().m00, a.textMatrix().m00, 1e-4);
+        EXPECT_NEAR(b.textMatrix().m20, a.textMatrix().m20, 1e-3);
+        EXPECT_NEAR(b.geometryBounds().x0, a.geometryBounds().x0, 1e-2);
+        EXPECT_NEAR(b.geometryBounds().y1, a.geometryBounds().y1, 1e-2);
+        std::string words = b.text();
+        b.setText(words + "!");   // the restored placement puts an edit in the same spot
+        EXPECT_NEAR(b.geometryBounds().x0, a.geometryBounds().x0, 1e-2);
+    }
+}
+
+// ---- gzip and .svgz ----
+
+TEST(SketchGzip, RoundTripsAndRejectsDamagedData) {
+    std::string text;
+    for (int i = 0; i < 2000; ++i) {
+        text += "<path d=\"M" + std::to_string(i) + " 0 L10 10\"/>\n";
+    }
+    std::string packed = gzipCompress(text);
+    EXPECT_TRUE(isGzip(packed));
+    EXPECT_FALSE(isGzip(text));
+    EXPECT_LT(packed.size(), text.size() / 4) << "repetitive text shrinks a lot";
+    std::string back;
+    ASSERT_TRUE(gzipDecompress(packed, back));
+    EXPECT_EQ(back, text);
+
+    std::string empty;
+    ASSERT_TRUE(gzipDecompress(gzipCompress(""), empty));
+    EXPECT_TRUE(empty.empty());
+
+    std::string cut = packed.substr(0, packed.size() / 2);
+    EXPECT_FALSE(gzipDecompress(cut, back)) << "a cut-short stream is refused";
+    std::string damaged = packed;
+    damaged[damaged.size() / 2] = char(damaged[damaged.size() / 2] ^ 0x55);
+    EXPECT_FALSE(gzipDecompress(damaged, back));
+    EXPECT_FALSE(gzipDecompress("plain text, not gzip", back));
+}
+
+TEST(SketchSvg, SvgzFilesSaveAndLoadAndShrink) {
+    SketchDocument doc;
+    for (int i = 0; i < 200; ++i) {
+        doc.add(SketchObject::makeRect(i, i * 2, 30, 20)).setName("Box " + std::to_string(i));
+    }
+    doc.add(SketchObject::makeText("Fine & dandy", "", 18.0, BLPoint(5.0, 50.0)));
+    std::filesystem::path folder = std::filesystem::temp_directory_path();
+    std::string plain = (folder / "sketch_test_a.svg").string();
+    std::string packed = (folder / "sketch_test_b.SVGZ").string();
+    ASSERT_TRUE(doc.save(plain));
+    ASSERT_TRUE(doc.save(packed));
+    EXPECT_LT(std::filesystem::file_size(packed), std::filesystem::file_size(plain) / 3);
+
+    SketchDocument fromPacked, fromPlain;
+    ASSERT_TRUE(fromPacked.load(packed));
+    ASSERT_TRUE(fromPlain.load(plain));
+    EXPECT_EQ(fromPacked.objectCount(), 201u);
+    EXPECT_EQ(svgFromDocument(fromPacked), svgFromDocument(fromPlain));
+    EXPECT_TRUE(fromPacked.object(200).isText());
+
+    // A gzip stream is recognised by its bytes, whatever the file is called.
+    std::string renamed = (folder / "sketch_test_c.svg").string();
+    std::filesystem::copy_file(packed, renamed, std::filesystem::copy_options::overwrite_existing);
+    SketchDocument fromRenamed;
+    EXPECT_TRUE(fromRenamed.load(renamed));
+    std::filesystem::remove(plain);
+    std::filesystem::remove(packed);
+    std::filesystem::remove(renamed);
+}
+
+// ---- how long a big document takes (SKETCH_PERF_SHAPES = shape count, default 5000) ----
+
+TEST(SketchPerf, LargeDocumentSaveAndLoadTimes) {
+    std::size_t count = 5000;
+    if (const char* text = std::getenv("SKETCH_PERF_SHAPES")) {
+        count = std::max<std::size_t>(1, std::strtoull(text, nullptr, 10));
+    }
+    using Clock = std::chrono::steady_clock;
+    auto since = [](Clock::time_point start) { return std::chrono::duration<double, std::milli>(Clock::now() - start).count(); };
+
+    auto start = Clock::now();
+    SketchDocument doc;
+    doc.setPageSize(20000, 20000);
+    for (std::size_t i = 0; i < count; ++i) {
+        double x = double(i % 500) * 36.0, y = double(i / 500) * 36.0;
+        SketchObject* object = nullptr;
+        switch (i % 5) {
+            case 0: object = SketchObject::makeRect(x, y, 30, 30); break;
+            case 1: object = SketchObject::makeEllipse(x + 15, y + 15, 15, 12); break;
+            case 2: object = SketchObject::makePolygon({BLPoint(x, y), BLPoint(x + 30, y + 5), BLPoint(x + 15, y + 30)}); break;
+            case 3: {
+                BLPath path;
+                path.move_to(x, y);
+                path.cubic_to(x + 10, y - 10, x + 20, y + 40, x + 30, y + 30);
+                object = SketchObject::makePath(path);
+                break;
+            }
+            default: object = SketchObject::makeLine(x, y, x + 30, y + 30); break;
+        }
+        SketchObject& added = doc.add(object);
+        added.setFill(SketchPaint::solid(SketchColor::gray(float(i % 7) / 7.0f)));
+    }
+    double build = since(start);
+
+    start = Clock::now();
+    std::string svg = svgFromDocument(doc);
+    double write = since(start);
+    start = Clock::now();
+    std::string packed = gzipCompress(svg);
+    double compress = since(start);
+    start = Clock::now();
+    std::string inflated;
+    ASSERT_TRUE(gzipDecompress(packed, inflated));
+    double decompress = since(start);
+    start = Clock::now();
+    SketchDocument copy;
+    ASSERT_TRUE(documentFromSvg(svg, copy));
+    double parse = since(start);
+
+    // The same document as .skb, raw and gzipped.
+    start = Clock::now();
+    std::string raw = binaryFromDocument(doc, false);
+    double binWrite = since(start);
+    start = Clock::now();
+    std::string binPacked = binaryFromDocument(doc, true);
+    double binPackedWrite = since(start);
+    SketchDocument fromRaw, fromPacked;
+    start = Clock::now();
+    ASSERT_TRUE(documentFromBinary(raw, fromRaw));
+    double binRead = since(start);
+    start = Clock::now();
+    ASSERT_TRUE(documentFromBinary(binPacked, fromPacked));
+    double binPackedRead = since(start);
+    EXPECT_EQ(fromRaw.objectCount(), count);
+    EXPECT_EQ(fromPacked.objectCount(), count);
+    std::printf("PERF %zu shapes as .skb: raw %.1f MB write %.0f ms read %.0f ms (%.2f us/shape) | gzipped %.1f MB write %.0f ms read %.0f ms\n",
+        count, double(raw.size()) / 1048576.0, binWrite, binRead, binRead * 1000.0 / double(count), double(binPacked.size()) / 1048576.0,
+        binPackedWrite, binPackedRead);
+
+    EXPECT_EQ(copy.objectCount(), count);
+    EXPECT_EQ(inflated, svg);
+    EXPECT_LT(packed.size(), svg.size());
+    std::printf("PERF %zu shapes: build %.0f ms | svg %.1f MB write %.0f ms | gzip %.1f MB (%.1fx) %.0f ms, inflate %.0f ms | read+parse %.0f ms (%.2f us/shape)\n",
+        count, build, double(svg.size()) / 1048576.0, write, double(packed.size()) / 1048576.0, double(svg.size()) / double(packed.size()),
+        compress, decompress, parse, parse * 1000.0 / double(count));
+}
+
+// A real, large drawing: examples/peacockspider.svg (skipped when the file is not there).
+TEST(SketchPerf, PeacockSpiderExample) {
+    std::filesystem::path file = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path() / "examples" / "peacockspider.svg";
+    if (!std::filesystem::exists(file)) {
+        GTEST_SKIP() << file.string() << " not found";
+    }
+    using Clock = std::chrono::steady_clock;
+    auto since = [](Clock::time_point start) { return std::chrono::duration<double, std::milli>(Clock::now() - start).count(); };
+    auto start = Clock::now();
+    SketchDocument doc;
+    bool loaded = doc.load(file.string());
+    double load = since(start);
+    ASSERT_TRUE(loaded);
+    start = Clock::now();
+    std::string svg = svgFromDocument(doc);
+    double write = since(start);
+    std::string packed = gzipCompress(svg);
+    std::printf("PEACOCK %.1f MB file: %zu objects, load %.0f ms, rewrite as sketch SVG %.1f MB in %.0f ms (gzip %.1f MB)\n",
+        double(std::filesystem::file_size(file)) / 1048576.0, doc.objectCount(), load, double(svg.size()) / 1048576.0, write,
+        double(packed.size()) / 1048576.0);
+    EXPECT_GT(doc.objectCount(), 100u);
+    std::string raw = binaryFromDocument(doc, false), binPacked = binaryFromDocument(doc, true);
+    SketchDocument back;
+    start = Clock::now();
+    ASSERT_TRUE(documentFromBinary(binPacked, back));
+    std::printf("PEACOCK as .skb: raw %.1f MB, gzipped %.1f MB, read %.0f ms\n", double(raw.size()) / 1048576.0, double(binPacked.size()) / 1048576.0, since(start));
+    EXPECT_EQ(back.objectCount(), doc.objectCount());
+}
+
+// ---- the binary format (.skb) ----
+
+namespace {
+    // "" when equal, else a short description of the first place two long strings differ (a failed EXPECT_EQ would print megabytes).
+    std::string firstDifference(const std::string& a, const std::string& b) {
+        std::size_t i = 0;
+        while (i < a.size() && i < b.size() && a[i] == b[i]) {
+            ++i;
+        }
+        if (i == a.size() && i == b.size()) {
+            return std::string();
+        }
+        auto around = [i](const std::string& s) { return s.substr(i > 60 ? i - 60 : 0, 140); };
+        return "differ at byte " + std::to_string(i) + ":\n  first : " + around(a) + "\n  second: " + around(b);
+    }
+
+    // A document that uses most of what the format carries.
+    void fillRichDocument(SketchDocument& doc) {
+        doc.setPageSize(500, 400);
+        doc.setPpi(144);
+        doc.setPageBackground(SketchColor::rgb(0.9f, 0.95f, 1.0f));
+        doc.setColorMode(ColorSpace::CMYK);
+        SketchObject& card = doc.add(SketchObject::makeRoundRect(10, 20, 100, 60, 8));
+        card.setName("Card & <co>");
+        card.setOpacity(0.5);
+        card.setBlendMode(BlendMode::Multiply);
+        card.setLocked(true);
+        SketchGradient gradient = SketchGradient::fromColor(SketchColor::cmyk(0.2f, 0.4f, 0.6f, 0.1f));
+        gradient.setAxis(card.geometryBounds(), BLPoint(20, 30), BLPoint(90, 70));
+        card.setFill(SketchPaint::linear(gradient));
+        StrokeOptions options;
+        options.cap = StrokeCap::Round;
+        options.dashes = {4.0, 2.0};
+        options.widths = {{0.0, 0.5, 0.5}, {1.0, 1.5, 1.0}};
+        card.setStroke(SketchPaint::solid(SketchColor::gray(0.2f, 0.8f)));
+        card.setStrokeWidth(3.0);
+        card.setStrokeOptions(options);
+        std::vector<AppearanceItem> items = card.appearance();
+        AppearanceItem shadow = AppearanceItem::makeEffect(EffectKind::DropShadow);
+        shadow.offsetX = 7.5;
+        items.push_back(shadow);
+        items.push_back(AppearanceItem::makeFill(SketchPaint::radial(SketchGradient::fromColor(SketchColor::rgb(1, 0, 0)))));
+        card.setAppearance(items);
+        card.setActiveIndices(0, 1, 2);
+        card.transform(BLMatrix2D::make_rotation(0.3));
+        card.setFrameAngle(0.3);
+
+        SketchObject& a = doc.add(SketchObject::makeEllipse(200, 100, 40, 30));
+        SketchObject& b = doc.add(SketchObject::makeLine(0, 0, 50, 60));
+        std::size_t outer = doc.newGroupId(), inner = doc.newGroupId();
+        a.setGroups({outer, inner});
+        b.setGroups({outer});
+        GroupProps props;
+        props.opacity = 0.4;
+        props.blendMode = BlendMode::Screen;
+        doc.setGroupProps(outer, props);
+        BLPath curve;
+        curve.move_to(5, 5);
+        curve.quad_to(20, 40, 50, 5);
+        curve.cubic_to(60, 0, 70, 30, 90, 20);
+        curve.close();
+        doc.add(SketchObject::makePath(curve)).setVisible(false);
+        doc.add(SketchObject::makeText("Fine\nand \"dandy\" \xC3\xA9", "", 22.0, BLPoint(40, 300)));
+        doc.setGraphicStyles({GraphicStyle{"Mine", {AppearanceItem::makeFill(SketchPaint::solid(SketchColor::gray(0.5f))),
+            AppearanceItem::makeStroke(SketchPaint::none(), 2.0)}, 0.7, BlendMode::Overlay}});
+    }
+}
+
+TEST(SketchBinary, ADocumentRoundTripsWithNothingLost) {
+    SketchDocument doc;
+    fillRichDocument(doc);
+    for (bool compress : {true, false}) {
+        std::string file = binaryFromDocument(doc, compress);
+        ASSERT_TRUE(isBinaryDocument(file));
+        SketchDocument copy;
+        copy.add(SketchObject::makeRect(0, 0, 1, 1));   // replaced by the load
+        ASSERT_TRUE(documentFromBinary(file, copy)) << "compress " << compress;
+        ASSERT_EQ(copy.objectCount(), doc.objectCount());
+        // The SVG writer reads every part of the model, so equal SVG means equal documents.
+        EXPECT_EQ(firstDifference(svgFromDocument(copy), svgFromDocument(doc)), "");
+        EXPECT_TRUE(copy.object(4).isText());
+        EXPECT_EQ(copy.object(4).text(), doc.object(4).text());
+        EXPECT_EQ(copy.object(0).activeEffectIndex(), 2u);
+        EXPECT_EQ(copy.object(1).groups().size(), 2u);
+        EXPECT_EQ(copy.object(1).groups()[0], copy.object(2).groups()[0]) << "members of a group share it";
+        EXPECT_DOUBLE_EQ(copy.groupProps(copy.object(1).groups()[0]).opacity, 0.4);
+        EXPECT_EQ(copy.graphicStyles().size(), 1u);
+        EXPECT_EQ(copy.colorMode(), ColorSpace::CMYK);
+        EXPECT_FALSE(copy.undoStack().canUndo());
+        // Geometry is bit-exact (the format keeps f64 outlines).
+        BLBox x = doc.object(0).geometryBounds(), y = copy.object(0).geometryBounds();
+        EXPECT_EQ(x.x0, y.x0);
+        EXPECT_EQ(x.y1, y.y1);
+    }
+}
+
+TEST(SketchBinary, SharedAppearancesAreWrittenOnce) {
+    SketchDocument one, many;
+    one.add(SketchObject::makeRect(0, 0, 10, 10));
+    for (int i = 0; i < 1000; ++i) {
+        many.add(SketchObject::makeRect(i, 0, 10, 10));
+    }
+    std::size_t base = binaryFromDocument(one, false).size();
+    std::size_t big = binaryFromDocument(many, false).size();
+    EXPECT_LT(big, base + 1000 * 150) << "each extra rectangle costs its outline and a few bytes, not another appearance";
+}
+
+TEST(SketchBinary, DamagedFilesAreRefusedWithoutHarm) {
+    SketchDocument doc;
+    fillRichDocument(doc);
+    std::string file = binaryFromDocument(doc, false);
+    SketchDocument keep;
+    keep.add(SketchObject::makeRect(1, 2, 3, 4));
+    EXPECT_FALSE(documentFromBinary("", keep));
+    EXPECT_FALSE(documentFromBinary("SKB1", keep));
+    EXPECT_FALSE(documentFromBinary("not a sketch file at all", keep));
+    // Every cut-short prefix is refused (and the document stays as it was).
+    for (std::size_t length = 0; length < file.size(); length += 7) {
+        EXPECT_FALSE(documentFromBinary(file.substr(0, length), keep)) << "prefix of " << length;
+    }
+    EXPECT_EQ(keep.objectCount(), 1u);
+    // Flipped bytes anywhere must never crash; they may load (a changed number) or be refused.
+    for (std::size_t at = 8; at < file.size(); at += 3) {
+        std::string damaged = file;
+        damaged[at] = char(damaged[at] ^ 0xA5);
+        SketchDocument target;
+        documentFromBinary(damaged, target);
+    }
+    // A newer version than this reader knows is refused.
+    std::string future = file;
+    future[4] = 9;
+    EXPECT_FALSE(documentFromBinary(future, keep));
+    // An unknown chunk is skipped.
+    std::string extra = file;
+    std::string chunk = "ZZZZ";
+    std::uint64_t size = 3;
+    chunk.append(reinterpret_cast<const char*>(&size), 8);
+    chunk += "abc";
+    extra.insert(8, chunk);
+    SketchDocument skipped;
+    EXPECT_TRUE(documentFromBinary(extra, skipped));
+    EXPECT_EQ(skipped.objectCount(), doc.objectCount());
+}
+
+TEST(SketchBinary, FilesSaveAndLoadByExtensionAndByContent) {
+    SketchDocument doc;
+    fillRichDocument(doc);
+    std::filesystem::path folder = std::filesystem::temp_directory_path();
+    std::string path = (folder / "sketch_test_d.skb").string();
+    ASSERT_TRUE(doc.save(path));
+    std::ifstream in(path, std::ios::binary);
+    char magic[4] = {};
+    in.read(magic, 4);
+    EXPECT_EQ(std::string(magic, 4), "SKB1");
+    in.close();
+    SketchDocument loaded;
+    ASSERT_TRUE(loaded.load(path));
+    EXPECT_EQ(firstDifference(svgFromDocument(loaded), svgFromDocument(doc)), "");
+    std::string renamed = (folder / "sketch_test_e.svg").string();
+    std::filesystem::copy_file(path, renamed, std::filesystem::copy_options::overwrite_existing);
+    SketchDocument fromRenamed;
+    EXPECT_TRUE(fromRenamed.load(renamed)) << "a binary file is recognised by its bytes";
+    std::filesystem::remove(path);
+    std::filesystem::remove(renamed);
+}
+
+// ---- Inner Shadow, Offset Path, Roughen ----
+
+namespace {
+    // The bounds of what an object paints, found by painting it into an image and looking for non-transparent pixels.
+    bool paintedBox(const SketchObject& object, int size, BLBox& box) {
+        BLImage image(size, size, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        object.paint(ctx);
+        ctx.end();
+        BLImageData data;
+        image.get_data(&data);
+        int x0 = size, y0 = size, x1 = -1, y1 = -1;
+        for (int y = 0; y < size; ++y) {
+            const uint32_t* row = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride);
+            for (int x = 0; x < size; ++x) {
+                if ((row[x] >> 24) > 8) {
+                    x0 = std::min(x0, x);
+                    x1 = std::max(x1, x);
+                    y0 = std::min(y0, y);
+                    y1 = std::max(y1, y);
+                }
+            }
+        }
+        box = BLBox(x0, y0, x1 + 1, y1 + 1);
+        return x1 >= 0;
+    }
+
+    uint32_t pixelAt(const SketchObject& object, int size, int px, int py) {
+        BLImage image(size, size, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.clear_all();
+        object.paint(ctx);
+        ctx.end();
+        BLImageData data;
+        image.get_data(&data);
+        return reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(data.pixel_data) + std::ptrdiff_t(py) * data.stride)[px];
+    }
+
+    void addEffect(SketchObject& object, const AppearanceItem& effect) {
+        std::vector<AppearanceItem> items = object.appearance();
+        items.push_back(effect);
+        object.setAppearance(items);
+    }
+}
+
+TEST(SketchEffects, OffsetPathGrowsAndShrinksTheOutline) {
+    std::unique_ptr<SketchObject> grown(SketchObject::makeRect(40, 40, 60, 40));
+    grown->setStroke(SketchPaint::none());
+    AppearanceItem offset = AppearanceItem::makeEffect(EffectKind::OffsetPath);
+    offset.radius = 10.0;
+    addEffect(*grown, offset);
+    BLBox box;
+    ASSERT_TRUE(paintedBox(*grown, 200, box));
+    EXPECT_NEAR(box.x0, 30.0, 1.5);
+    EXPECT_NEAR(box.x1, 110.0, 1.5);
+    EXPECT_NEAR(box.y0, 30.0, 1.5);
+    EXPECT_NEAR(box.y1, 90.0, 1.5);
+    EXPECT_LE(grown->paintBounds().x0, 40.0 - 10.0) << "the paint bounds cover the grown outline";
+    EXPECT_NEAR(grown->geometryBounds().x0, 40.0, 1e-9) << "the outline of the object itself is unchanged";
+
+    std::unique_ptr<SketchObject> shrunk(SketchObject::makeRect(40, 40, 60, 40));
+    shrunk->setStroke(SketchPaint::none());
+    offset.radius = -10.0;
+    addEffect(*shrunk, offset);
+    ASSERT_TRUE(paintedBox(*shrunk, 200, box));
+    EXPECT_NEAR(box.x0, 50.0, 1.5);
+    EXPECT_NEAR(box.x1, 90.0, 1.5);
+    EXPECT_NEAR(box.y0, 50.0, 1.5);
+    EXPECT_NEAR(box.y1, 70.0, 1.5);
+
+    // Orientation does not matter: the same rectangle drawn the other way round grows the same way.
+    std::unique_ptr<SketchObject> reversed(SketchObject::makePolygon({BLPoint(40, 40), BLPoint(40, 80), BLPoint(100, 80), BLPoint(100, 40)}));
+    reversed->setStroke(SketchPaint::none());
+    offset.radius = 10.0;
+    addEffect(*reversed, offset);
+    ASSERT_TRUE(paintedBox(*reversed, 200, box));
+    EXPECT_NEAR(box.x0, 30.0, 1.5);
+    EXPECT_NEAR(box.x1, 110.0, 1.5);
+}
+
+TEST(SketchEffects, RoughenIsRepeatableAndStaysNearTheOutline) {
+    std::unique_ptr<SketchObject> plain(SketchObject::makeRect(40, 40, 100, 100));
+    plain->setStroke(SketchPaint::none());
+    std::unique_ptr<SketchObject> rough(plain->clone());
+    AppearanceItem effect = AppearanceItem::makeEffect(EffectKind::Roughen);
+    effect.radius = 4.0;
+    effect.offsetX = 10.0;
+    addEffect(*rough, effect);
+    BLBox a, b;
+    ASSERT_TRUE(paintedBox(*plain, 200, a));
+    ASSERT_TRUE(paintedBox(*rough, 200, b));
+    EXPECT_NE(a.x0, b.x0) << "the outline moved";
+    EXPECT_GE(b.x0, a.x0 - 5.0) << "by no more than the size";
+    EXPECT_LE(b.x1, a.x1 + 5.0);
+    // The same seed gives the same shape; another seed a different one.
+    std::unique_ptr<SketchObject> again(rough->clone());
+    EXPECT_EQ(pixelAt(*rough, 200, 90, 38), pixelAt(*again, 200, 90, 38));
+    std::vector<AppearanceItem> items = again->appearance();
+    items.back().offsetY = 7.0;
+    again->setAppearance(items);
+    bool differs = false;
+    for (int x = 40; x < 140 && !differs; x += 3) {
+        differs = pixelAt(*rough, 200, x, 40) != pixelAt(*again, 200, x, 40);
+    }
+    EXPECT_TRUE(differs);
+    // Moving the object moves the wobble with it, unchanged.
+    std::unique_ptr<SketchObject> moved(rough->clone());
+    moved->transform(BLMatrix2D::make_translation(20, 0));
+    EXPECT_EQ(pixelAt(*rough, 200, 90, 38), pixelAt(*moved, 200, 110, 38));
+    // Size 0 does nothing.
+    std::vector<AppearanceItem> zero = rough->appearance();
+    zero.back().radius = 0.0;
+    rough->setAppearance(zero);
+    BLBox d;
+    ASSERT_TRUE(paintedBox(*rough, 200, d));
+    EXPECT_EQ(d.x0, a.x0);
+}
+
+TEST(SketchEffects, InnerShadowStaysInsideAndDarkensTheEdgesItIsCastFrom) {
+    std::unique_ptr<SketchObject> shape(SketchObject::makeRect(50, 50, 100, 100));
+    shape->setStroke(SketchPaint::none());
+    shape->setFill(SketchPaint::solid(SketchColor::rgb(1, 1, 1)));
+    AppearanceItem shadow = AppearanceItem::makeEffect(EffectKind::InnerShadow);
+    shadow.offsetX = 12.0;
+    shadow.offsetY = 12.0;
+    shadow.softness = 4.0;
+    shadow.opacity = 1.0;
+    shadow.blendMode = BlendMode::Normal;
+    addEffect(*shape, shadow);
+    BLBox box;
+    ASSERT_TRUE(paintedBox(*shape, 200, box));
+    EXPECT_NEAR(box.x0, 50.0, 1.5) << "nothing is cast outside the shape";
+    EXPECT_NEAR(box.x1, 150.0, 1.5);
+    EXPECT_NEAR(shape->paintBounds().x0, 50.0, 1e-9) << "an inner shadow has no reach";
+    auto green = [&](int x, int y) { return (pixelAt(*shape, 200, x, y) >> 8) & 255u; };
+    EXPECT_LT(green(54, 54), 110u) << "next to the top-left edges, where the offset pushes the shade in, it is dark";
+    EXPECT_GT(green(120, 120), 230u) << "far from them the shape stays white";
+    EXPECT_GT(green(146, 146), 230u) << "and the edges away from the light stay clear";
+}
+
+TEST(SketchEffects, NewEffectsSurviveSvgAndBinaryAndHaveNames) {
+    SketchDocument doc;
+    SketchObject& object = doc.add(SketchObject::makeRect(0, 0, 50, 50));
+    std::vector<AppearanceItem> items = object.appearance();
+    items.push_back(AppearanceItem::makeEffect(EffectKind::InnerShadow));
+    AppearanceItem offset = AppearanceItem::makeEffect(EffectKind::OffsetPath);
+    offset.radius = -3.5;
+    items.push_back(offset);
+    AppearanceItem rough = AppearanceItem::makeEffect(EffectKind::Roughen);
+    rough.radius = 1.25;
+    rough.offsetX = 6.0;
+    rough.offsetY = 9.0;
+    items.push_back(rough);
+    object.setAppearance(items);
+    EXPECT_STREQ(effectName(EffectKind::InnerShadow), "Inner Shadow");
+    EXPECT_STREQ(effectName(EffectKind::OffsetPath), "Offset Path");
+    EXPECT_STREQ(effectName(EffectKind::Roughen), "Roughen");
+    EXPECT_TRUE(isGeometryEffect(EffectKind::Roughen));
+    EXPECT_FALSE(isGeometryEffect(EffectKind::InnerShadow));
+    EXPECT_TRUE(isTintedEffect(EffectKind::InnerShadow));
+
+    SketchDocument fromSvg, fromBinary;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), fromBinary));
+    for (SketchDocument* copy : {&fromSvg, &fromBinary}) {
+        const std::vector<AppearanceItem>& back = copy->object(0).appearance();
+        ASSERT_EQ(back.size(), 5u);
+        EXPECT_EQ(back[2].effect, EffectKind::InnerShadow);
+        EXPECT_EQ(back[3].effect, EffectKind::OffsetPath);
+        EXPECT_DOUBLE_EQ(back[3].radius, -3.5);
+        EXPECT_EQ(back[4].effect, EffectKind::Roughen);
+        EXPECT_DOUBLE_EQ(back[4].radius, 1.25);
+        EXPECT_DOUBLE_EQ(back[4].offsetX, 6.0);
+        EXPECT_DOUBLE_EQ(back[4].offsetY, 9.0);
+    }
+}
+
+// ---- path operations (cutting tools and Pathfinder) ----
+
+namespace {
+    Loop box(double x0, double y0, double x1, double y1) { return Loop{BLPoint(x0, y0), BLPoint(x1, y0), BLPoint(x1, y1), BLPoint(x0, y1)}; }
+    // The area a set of outlines fills: outer outlines count positive, holes negative (as combineLoops produces them).
+    double filled(const Loops& loops) {
+        double total = 0.0;
+        for (const Loop& loop : loops) { total += signedArea(loop); }
+        return total;
+    }
+}
+
+TEST(SketchPathOps, BooleanOperationsOnOverlappingRectangles) {
+    Loops a{box(0, 0, 100, 100)}, b{box(50, 50, 150, 150)};
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Union)), 10000 + 10000 - 2500, 1e-3);
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Intersect)), 2500, 1e-3);
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Subtract)), 7500, 1e-3);
+    EXPECT_NEAR(filled(combineLoops(b, a, BoolOp::Subtract)), 7500, 1e-3);
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Exclude)), 15000, 1e-3);
+    // One outline for the union, shaped like two squares joined; the subtraction is an L with six corners.
+    EXPECT_EQ(combineLoops(a, b, BoolOp::Union).size(), 1u);
+    ASSERT_EQ(combineLoops(a, b, BoolOp::Subtract).size(), 1u);
+    EXPECT_EQ(combineLoops(a, b, BoolOp::Subtract)[0].size(), 6u);
+    EXPECT_EQ(combineLoops(a, b, BoolOp::Exclude).size(), 2u);
+}
+
+TEST(SketchPathOps, HolesDisjointAndTouchingShapes) {
+    Loops big{box(0, 0, 100, 100)}, inner{box(30, 30, 70, 70)};
+    Loops ring = combineLoops(big, inner, BoolOp::Subtract);
+    ASSERT_EQ(ring.size(), 2u);
+    EXPECT_NEAR(filled(ring), 10000 - 1600, 1e-3);
+    std::vector<Loops> regions = splitIntoRegions(ring);
+    ASSERT_EQ(regions.size(), 1u);
+    EXPECT_EQ(regions[0].size(), 2u) << "the hole belongs to the outline around it";
+    EXPECT_TRUE(pointInLoops(BLPoint(10, 10), ring));
+    EXPECT_FALSE(pointInLoops(BLPoint(50, 50), ring));
+
+    Loops apart{box(200, 0, 300, 100)};
+    EXPECT_EQ(combineLoops(big, apart, BoolOp::Union).size(), 2u);
+    EXPECT_TRUE(combineLoops(big, apart, BoolOp::Intersect).empty());
+    EXPECT_NEAR(filled(combineLoops(big, apart, BoolOp::Subtract)), 10000, 1e-3);
+
+    // Shapes that share an edge: the seam disappears.
+    Loops next{box(100, 0, 200, 100)};
+    Loops joined = combineLoops(big, next, BoolOp::Union);
+    ASSERT_EQ(joined.size(), 1u);
+    EXPECT_NEAR(filled(joined), 20000, 1e-3);
+    EXPECT_EQ(joined[0].size(), 4u);
+    EXPECT_TRUE(combineLoops(big, next, BoolOp::Intersect).empty());
+    // The same shape twice.
+    EXPECT_NEAR(filled(combineLoops(big, big, BoolOp::Union)), 10000, 1e-3);
+    EXPECT_NEAR(filled(combineLoops(big, big, BoolOp::Intersect)), 10000, 1e-3);
+    EXPECT_TRUE(combineLoops(big, big, BoolOp::Subtract).empty());
+    EXPECT_TRUE(combineLoops(big, big, BoolOp::Exclude).empty());
+    // An outline that touches another only at a corner.
+    Loops corner{box(100, 100, 150, 150)};
+    EXPECT_NEAR(filled(combineLoops(big, corner, BoolOp::Union)), 12500, 1e-3);
+}
+
+TEST(SketchPathOps, CurvesAreFlattenedAndCombined) {
+    BLPath circleA, circleB;
+    circleA.add_circle(BLCircle(100, 100, 50));
+    circleB.add_circle(BLCircle(150, 100, 50));
+    Loops a = flattenToLoops(circleA, 0.01), b = flattenToLoops(circleB, 0.01);
+    const double pi = 3.14159265358979;
+    EXPECT_NEAR(std::fabs(filled(a)), pi * 2500, 6.0);
+    double lens = 2 * 2500 * std::acos(0.5) - 25 * std::sqrt(3.0) * 50;   // overlap of two circles of radius 50 whose centers are 50 apart
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Intersect)), lens, 12.0);
+    EXPECT_NEAR(filled(combineLoops(a, b, BoolOp::Union)), 2 * pi * 2500 - lens, 20.0);
+    BLPath out = loopsToPath(combineLoops(a, b, BoolOp::Union));
+    BLBox bounds;
+    out.get_bounding_box(&bounds);
+    EXPECT_NEAR(bounds.x0, 50.0, 0.1);
+    EXPECT_NEAR(bounds.x1, 200.0, 0.1);
+}
+
+TEST(SketchPathOps, AnOutlineThatCrossesItselfIsUnderstood) {
+    // A stroke polygon from a path that loops back over itself overlaps itself.
+    std::vector<BLPoint> scribble{BLPoint(10, 50), BLPoint(90, 50), BLPoint(90, 60), BLPoint(50, 60), BLPoint(50, 30), BLPoint(50, 90)};
+    Loops pen = strokeToLoops(scribble, 8.0);
+    ASSERT_FALSE(pen.empty());
+    Loops sheet{box(0, 0, 100, 100)};
+    Loops left = combineLoops(sheet, pen, BoolOp::Subtract);
+    EXPECT_FALSE(pointInLoops(BLPoint(50, 50), left)) << "inside the stroke";
+    EXPECT_TRUE(pointInLoops(BLPoint(20, 20), left));
+    EXPECT_FALSE(pointInLoops(BLPoint(30, 50), left));
+    double removed = 10000 - filled(left);
+    EXPECT_GT(removed, 80 * 8 * 0.8);
+    EXPECT_LT(removed, 80 * 8 + 40 * 8 + 60 * 8 + 120);
+    for (const Loop& loop : left) {
+        EXPECT_NE(signedArea(loop), 0.0);
+    }
+}
+
+TEST(SketchPathOps, AKnifeLineDividesAShapeWithoutGapOrLoss) {
+    Loops sheet{box(0, 0, 100, 100)};
+    std::vector<Loops> pieces = cutAlongLine(sheet, {BLPoint(50, -20), BLPoint(50, 120)});
+    ASSERT_EQ(pieces.size(), 2u);
+    EXPECT_NEAR(filled(pieces[0]) + filled(pieces[1]), 10000, 1e-3);
+    EXPECT_NEAR(filled(pieces[0]), 5000, 1e-3);
+    // A slanting, bent cut.
+    pieces = cutAlongLine(sheet, {BLPoint(-10, 30), BLPoint(60, 50), BLPoint(110, 20)});
+    ASSERT_EQ(pieces.size(), 2u);
+    EXPECT_NEAR(filled(pieces[0]) + filled(pieces[1]), 10000, 1e-2);
+    // A line that misses the shape divides nothing.
+    EXPECT_TRUE(cutAlongLine(sheet, {BLPoint(200, -20), BLPoint(200, 120)}).empty());
+    // A shape with a hole cut across it comes out as two pieces, one of them carrying half the hole's edge.
+    Loops donut = combineLoops(sheet, Loops{box(40, 40, 60, 60)}, BoolOp::Subtract);
+    pieces = cutAlongLine(donut, {BLPoint(50, -20), BLPoint(50, 120)});
+    ASSERT_EQ(pieces.size(), 2u);
+    EXPECT_NEAR(filled(pieces[0]) + filled(pieces[1]), 10000 - 400, 1e-2);
+    // A cut that stops inside still divides the shape along its extension (documented).
+    EXPECT_EQ(cutAlongLine(sheet, {BLPoint(50, -20), BLPoint(50, 60)}).size(), 2u);
+}
+
+TEST(SketchPathOps, ClippingALineLeavesTheOutsideParts) {
+    Loops hole{box(40, 0, 60, 100)};
+    bool touched = false;
+    std::vector<std::vector<BLPoint>> parts = clipLineOutside({BLPoint(0, 50), BLPoint(100, 50)}, false, hole, touched);
+    EXPECT_TRUE(touched);
+    ASSERT_EQ(parts.size(), 2u);
+    EXPECT_NEAR(parts[0].back().x, 40.0, 1e-9);
+    EXPECT_NEAR(parts[1].front().x, 60.0, 1e-9);
+    parts = clipLineOutside({BLPoint(0, 200), BLPoint(100, 200)}, false, hole, touched);
+    EXPECT_FALSE(touched);
+    EXPECT_TRUE(parts.empty());
+    // A closed outline cut open once comes back as one open piece (the seam is not a break).
+    std::vector<std::vector<BLPoint>> ring = clipLineOutside({BLPoint(0, 0), BLPoint(100, 0), BLPoint(100, 100), BLPoint(0, 100)}, true,
+        Loops{box(90, -10, 110, 10)}, touched);
+    EXPECT_TRUE(touched);
+    ASSERT_EQ(ring.size(), 1u);
+    EXPECT_NEAR(ring[0].front().x, 100.0, 1e-9);
+    EXPECT_NEAR(ring[0].front().y, 10.0, 1e-9);
+    EXPECT_NEAR(ring[0].back().x, 90.0, 1e-9);
+    EXPECT_NEAR(ring[0].back().y, 0.0, 1e-9);
+}
+
+TEST(SketchPathOps, ScissorsCutAPathKeepingItsCurves) {
+    SubPath square;
+    square.closed = true;
+    for (BLPoint p : {BLPoint(0, 0), BLPoint(100, 0), BLPoint(100, 100), BLPoint(0, 100)}) {
+        PenAnchor a;
+        a.point = p;
+        square.anchors.push_back(a);
+    }
+    std::size_t segment = 0;
+    double t = 0.0, distance = 0.0;
+    ASSERT_TRUE(nearestOnSubPath(square, BLPoint(40, 3), segment, t, distance));
+    EXPECT_EQ(segment, 0u);
+    EXPECT_NEAR(t, 0.4, 1e-9);
+    EXPECT_NEAR(distance, 3.0, 1e-9);
+    std::vector<SubPath> pieces;
+    ASSERT_TRUE(splitSubPath(square, segment, t, pieces));
+    ASSERT_EQ(pieces.size(), 1u) << "a closed outline opens into one path";
+    EXPECT_FALSE(pieces[0].closed);
+    ASSERT_EQ(pieces[0].anchors.size(), 6u);
+    EXPECT_NEAR(pieces[0].anchors.front().point.x, 40.0, 1e-9);
+    EXPECT_NEAR(pieces[0].anchors.back().point.x, 40.0, 1e-9);
+    EXPECT_NEAR(pieces[0].anchors[1].point.x, 100.0, 1e-9);
+
+    // A curve: the two halves still follow the original.
+    SubPath arc;
+    PenAnchor a0, a1;
+    a0.point = BLPoint(0, 0);
+    a0.out = BLPoint(0, 60);
+    a0.hasOut = true;
+    a1.point = BLPoint(100, 0);
+    a1.in = BLPoint(100, 60);
+    a1.hasIn = true;
+    arc.anchors = {a0, a1};
+    ASSERT_TRUE(splitSubPath(arc, 0, 0.5, pieces));
+    ASSERT_EQ(pieces.size(), 2u);
+    BLPoint mid(0.125 * 0 + 0.375 * 0 + 0.375 * 100 + 0.125 * 100, 0.125 * 0 + 0.375 * 60 + 0.375 * 60 + 0.125 * 0);
+    EXPECT_NEAR(pieces[0].anchors.back().point.x, mid.x, 1e-9);
+    EXPECT_NEAR(pieces[0].anchors.back().point.y, mid.y, 1e-9);
+    EXPECT_TRUE(pieces[0].anchors.back().hasIn);
+    EXPECT_FALSE(pieces[0].anchors.back().hasOut);
+    EXPECT_FALSE(pieces[1].anchors.front().hasIn);
+    EXPECT_TRUE(pieces[1].anchors.front().hasOut);
+    BLPath whole = subPathsToPath({arc}), first = subPathsToPath({pieces[0]}), second = subPathsToPath({pieces[1]});
+    BLBox wb, fb, sb;
+    whole.get_bounding_box(&wb);
+    first.get_bounding_box(&fb);
+    second.get_bounding_box(&sb);
+    EXPECT_NEAR(std::min(fb.y0, sb.y0), wb.y0, 1e-6);
+    EXPECT_NEAR(std::max(fb.y1, sb.y1), wb.y1, 1e-6);
+
+    // An open path: cutting an end does nothing; a middle anchor splits it in two.
+    SubPath line;
+    for (BLPoint p : {BLPoint(0, 0), BLPoint(50, 0), BLPoint(100, 0)}) {
+        PenAnchor a;
+        a.point = p;
+        line.anchors.push_back(a);
+    }
+    EXPECT_FALSE(splitSubPath(line, 0, 0.0, pieces));
+    ASSERT_TRUE(splitSubPath(line, 0, 1.0, pieces));
+    ASSERT_EQ(pieces.size(), 2u);
+    EXPECT_EQ(pieces[0].anchors.size(), 2u);
+    EXPECT_EQ(pieces[1].anchors.size(), 2u);
+}
+
+// ---- the document's cutting and combining commands ----
+
+namespace {
+    // The area the object's outline encloses (non-zero rule), from its flattened outline.
+    double areaOf(const SketchObject& object) {
+        Loops flat = flattenToLoops(object.geometry(), 0.01);
+        Loops cleaned = combineLoops(flat, Loops{}, BoolOp::Union);
+        double total = 0.0;
+        for (const Loop& loop : cleaned) { total += signedArea(loop); }
+        return total;
+    }
+}
+
+TEST(SketchCutting, PathfinderCombinesTheSelectionIntoOnePath) {
+    SketchDocument doc;
+    SketchObject& a = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    SketchObject& b = doc.add(SketchObject::makeRect(50, 50, 100, 100));
+    a.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    b.setFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    std::size_t idA = a.id(), idB = b.id();
+    doc.setSelection({idA, idB});
+    ASSERT_TRUE(doc.combineSelection(BoolOp::Union));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.object(0).type(), SketchObjectType::Path);
+    EXPECT_NEAR(areaOf(doc.object(0)), 17500.0, 1.0);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#0000ff") << "Unite wears the look of the top object";
+    EXPECT_EQ(doc.selection().size(), 1u);
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(0).id(), idA);
+    EXPECT_EQ(doc.object(1).id(), idB);
+    EXPECT_EQ(doc.selection().size(), 2u) << "undo selects the originals again";
+    doc.undoStack().redo();
+    EXPECT_EQ(doc.objectCount(), 1u);
+    doc.undoStack().undo();
+
+    doc.setSelection({idA, idB});
+    ASSERT_TRUE(doc.combineSelection(BoolOp::Subtract));
+    EXPECT_NEAR(areaOf(doc.object(0)), 7500.0, 1.0);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#ff0000") << "Minus Front keeps the look of the lowest object";
+    doc.undoStack().undo();
+    doc.setSelection({idA, idB});
+    ASSERT_TRUE(doc.combineSelection(BoolOp::Intersect));
+    EXPECT_NEAR(areaOf(doc.object(0)), 2500.0, 1.0);
+    doc.undoStack().undo();
+    doc.setSelection({idA, idB});
+    ASSERT_TRUE(doc.combineSelection(BoolOp::Exclude));
+    EXPECT_NEAR(areaOf(doc.object(0)), 15000.0, 1.0);
+    doc.undoStack().undo();
+
+    // Not enough selected, or nothing left: nothing changes.
+    doc.setSelection({idA});
+    EXPECT_FALSE(doc.combineSelection(BoolOp::Union));
+    SketchObject& distant = doc.add(SketchObject::makeRect(500, 500, 10, 10));
+    doc.setSelection({idA, distant.id()});
+    EXPECT_FALSE(doc.combineSelection(BoolOp::Intersect));
+    EXPECT_EQ(doc.objectCount(), 3u);
+}
+
+TEST(SketchCutting, ResultsKeepTheirPlaceInTheStack) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 100, 100)).id();
+    std::size_t b = doc.add(SketchObject::makeRect(300, 300, 10, 10)).id();
+    std::size_t c = doc.add(SketchObject::makeRect(50, 50, 100, 100)).id();
+    doc.setSelection({a, c});
+    ASSERT_TRUE(doc.combineSelection(BoolOp::Union));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(0).id(), b);
+    EXPECT_NE(doc.object(1).id(), a) << "the united shape is on top, where the top object was";
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(doc.object(0).id(), a);
+    EXPECT_EQ(doc.object(1).id(), b);
+    EXPECT_EQ(doc.object(2).id(), c);
+}
+
+TEST(SketchCutting, TheKnifeDividesFilledShapesAndSkipsTheRest) {
+    SketchDocument doc;
+    SketchObject& card = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    SketchObject& locked = doc.add(SketchObject::makeRect(0, 200, 100, 100));
+    locked.setLocked(true);
+    SketchObject& aside = doc.add(SketchObject::makeRect(300, 0, 100, 100));
+    card.setName("Card");
+    (void)aside;
+    // The line as drawn crosses only the first shape (the locked one is never touched; the last is out of its way).
+    ASSERT_TRUE(doc.knifeCut({BLPoint(50, -10), BLPoint(50, 110)}));
+    ASSERT_EQ(doc.objectCount(), 4u);
+    double total = 0.0;
+    int pieces = 0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        if (doc.object(i).name() == "Card") {
+            total += areaOf(doc.object(i));
+            ++pieces;
+            EXPECT_EQ(doc.object(i).type(), SketchObjectType::Path);
+        }
+    }
+    EXPECT_EQ(pieces, 2);
+    EXPECT_NEAR(total, 10000.0, 1.0) << "the pieces together are the shape, with no gap";
+    EXPECT_EQ(doc.selection().size(), 2u) << "the pieces are selected";
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 3u);
+    // A line that misses everything changes nothing.
+    EXPECT_FALSE(doc.knifeCut({BLPoint(200, -10), BLPoint(200, 110)}));
+    // A line across two shapes cuts both - unless some of them are selected, and then only those.
+    std::size_t asideId = doc.object(2).id();
+    doc.clearSelection();
+    ASSERT_TRUE(doc.knifeCut({BLPoint(50, 50), BLPoint(350, 50)}));
+    EXPECT_EQ(doc.objectCount(), 5u) << "both shapes were cut (2 pieces each) and the locked one was left alone";
+    doc.undoStack().undo();
+    doc.setSelection({asideId});
+    ASSERT_TRUE(doc.knifeCut({BLPoint(50, 50), BLPoint(350, 50)}));
+    EXPECT_EQ(doc.objectCount(), 4u) << "only the selected shape was cut";
+    EXPECT_NE(doc.findById(card.id()), nullptr) << "the card is still whole";
+}
+
+TEST(SketchCutting, TheEraserRemovesWhatItTouches) {
+    SketchDocument doc;
+    SketchObject& card = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    card.setName("Card");
+    std::size_t line = doc.add(SketchObject::makeLine(0, 200, 100, 200)).id();
+    // A stroke across the middle of the card, and of the line: the card falls into two pieces, the line into two lines.
+    ASSERT_TRUE(doc.erase({BLPoint(50, -20), BLPoint(50, 220)}, 20.0));
+    int cardPieces = 0, lines = 0;
+    double total = 0.0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        if (doc.object(i).name() == "Card") {
+            ++cardPieces;
+            total += areaOf(doc.object(i));
+        } else {
+            ++lines;
+            EXPECT_NE(doc.object(i).id(), line);
+        }
+    }
+    EXPECT_EQ(cardPieces, 2);
+    EXPECT_NEAR(total, 100.0 * 80.0, 3.0) << "a 20 point wide stroke took a 20 wide slice";
+    EXPECT_EQ(lines, 2);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(1).id(), line);
+    // Rubbing out a whole small shape removes it; a stroke that touches nothing does nothing.
+    EXPECT_FALSE(doc.erase({BLPoint(300, 300), BLPoint(320, 300)}, 10.0));
+    doc.clearSelection();   // (undo selected the objects it brought back, and a selection limits the eraser to it)
+    SketchObject& dot = doc.add(SketchObject::makeRect(500, 500, 6, 6));
+    std::size_t dotId = dot.id();
+    EXPECT_TRUE(doc.erase({BLPoint(503, 503)}, 30.0));
+    EXPECT_EQ(doc.findById(dotId), nullptr);
+    doc.undoStack().undo();
+    EXPECT_NE(doc.findById(dotId), nullptr);
+}
+
+TEST(SketchCutting, TheScissorsOpenAClosedPathAndDivideAnOpenOne) {
+    SketchDocument doc;
+    SketchObject& square = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    square.setName("Square");
+    std::size_t squareId = square.id();
+    EXPECT_FALSE(doc.scissorsCut(BLPoint(50, 50), 5.0)) << "the middle of a shape is not on its path";
+    ASSERT_TRUE(doc.scissorsCut(BLPoint(40, 3), 5.0));
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_NE(doc.object(0).id(), squareId);
+    EXPECT_EQ(doc.object(0).name(), "Square");
+    std::vector<SubPath> subs = pathToSubPaths(doc.object(0).geometry());
+    ASSERT_EQ(subs.size(), 1u);
+    EXPECT_FALSE(subs[0].closed);
+    EXPECT_EQ(subs[0].anchors.size(), 6u);
+    EXPECT_NEAR(subs[0].anchors.front().point.x, 40.0, 1e-6);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.object(0).id(), squareId);
+
+    doc.clearObjects();
+    doc.add(SketchObject::makeLine(0, 0, 100, 0));
+    ASSERT_TRUE(doc.scissorsCut(BLPoint(30, 2), 5.0));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    BLBox first = doc.object(0).geometryBounds(), second = doc.object(1).geometryBounds();
+    EXPECT_NEAR(first.x0, 0.0, 1e-6);
+    EXPECT_NEAR(first.x1, 30.0, 1e-6);
+    EXPECT_NEAR(second.x0, 30.0, 1e-6);
+    EXPECT_NEAR(second.x1, 100.0, 1e-6);
+    EXPECT_FALSE(doc.scissorsCut(BLPoint(0, 0), 5.0)) << "cutting at the end of an open path changes nothing";
+    EXPECT_EQ(doc.objectCount(), 2u);
 }

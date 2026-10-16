@@ -4910,6 +4910,7 @@ namespace newui {
                 return SyncReturn::Handled;
             case HitKind::ColumnHeader:
                 selectColumn(hit.column, shift);
+                onColumnHeaderClicked(*this, hit.column, keyMask);
                 return SyncReturn::Handled;
             case HitKind::RowHeader:
                 selectRow(hit.row, shift);

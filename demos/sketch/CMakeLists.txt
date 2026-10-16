@@ -3,6 +3,15 @@
 add_executable(sketch
     main.cpp
     canvasview.h canvasview.cpp
+    canvastools.cpp
+    texttool.cpp
+    cuttools.cpp
+    cursorset.h cursorset.cpp
+    shapetools.h shapetools.cpp
+    pathops.h pathops.cpp
+    textoutline.h textoutline.cpp
+    gzip.h gzip.cpp
+    sketchbin.h sketchbin.cpp
     gradientbar.h gradientbar.cpp
     swatchgrid.h swatchgrid.cpp
     pagepreview.h pagepreview.cpp
@@ -10,13 +19,17 @@ add_executable(sketch
     sketchcolor.h sketchcolor.cpp
     sketchobject.h sketchobject.cpp
     sketchdocument.h sketchdocument.cpp
+    documentcutting.cpp
     sketchsvg.h sketchsvg.cpp
     sketchcontroller.h sketchcontroller.cpp
+    sketchcommands.h sketchcommands.cpp
+    sketchwindow.h sketchwindow.cpp
+    sketchchecks.h sketchchecks.cpp
     newdocumentmodel.h newdocumentmodel.cpp
     newdocumentdialog.h newdocumentdialog.cpp
 )
 
-target_link_libraries(sketch PRIVATE newui)
+target_link_libraries(sketch PRIVATE newui zlib_static)
 target_include_directories(sketch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # sketch's own reflected classes (CanvasView, GradientBar, SwatchGrid, PagePreview) so sketch.newui can name
@@ -37,8 +50,15 @@ add_executable(sketch_tests
     sketchcolor.cpp
     sketchobject.cpp
     sketchdocument.cpp
+    documentcutting.cpp
     sketchsvg.cpp
+    shapetools.cpp
+    pathops.cpp
+    textoutline.cpp
+    gzip.cpp
+    sketchbin.cpp
+    cursorset.cpp
     newdocumentmodel.cpp
 )
-target_link_libraries(sketch_tests PRIVATE newui GTest::gtest_main)
+target_link_libraries(sketch_tests PRIVATE newui zlib_static GTest::gtest_main)
 target_include_directories(sketch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

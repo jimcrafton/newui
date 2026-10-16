@@ -314,6 +314,35 @@ TEST(TableView, ClickingAColumnHeaderSelectsTheWholeColumn) {
     delete view;
 }
 
+TEST(TableView, ClickingAColumnHeaderReportsTheColumnAndModifiers) {
+    TableView* view = makeTableView(100, 5);
+    std::size_t clicked = 99;
+    std::uint32_t modifiers = 99;
+    int calls = 0;
+    view->onColumnHeaderClicked.add([&](TableView&, std::size_t column, std::uint32_t keys) {
+        clicked = column;
+        modifiers = keys;
+        ++calls;
+        return SyncReturn::Handled;
+    });
+    const TableController& c = view->controller();
+    Point pt(c.rowHeaderWidth() + c.columnWidth(0) + 40.0f, c.headerHeight() * 0.5f);
+    view->onMouseDown(*view, pt, 1, kmShift);
+    view->onMouseUp(*view, pt, 1, kmShift);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(clicked, 1u);
+    EXPECT_EQ(modifiers, std::uint32_t(kmShift));
+    EXPECT_TRUE(view->selectedRange().has_value());   // the column was selected before the event fired
+
+    // A click in the cell area is not a header click.
+    Point cell(c.rowHeaderWidth() + 5.0f, c.headerHeight() + 5.0f);
+    view->onMouseDown(*view, cell, 1, 0);
+    view->onMouseUp(*view, cell, 1, 0);
+    EXPECT_EQ(calls, 1);
+    view->destroy();
+    delete view;
+}
+
 TEST(TableView, ClickingARowNumberSelectsTheWholeRow) {
     TableView* view = makeTableView(100, 5);
     const TableController& c = view->controller();

@@ -3,6 +3,7 @@
 #include "menubinding.h"
 #include "textformat.h"
 
+#include <newui/dialogs.h>
 #include <newui/keyboard_constants.h>
 #include <newui/rootview.h>
 #include <newui/runloop.h>
@@ -87,6 +88,7 @@ namespace manyrows {
 
         bindTitle();
         bindFileMenu();
+        bindHelpMenu();
         bindProgressStrip();
         bindSheetPicker();
 
@@ -137,6 +139,35 @@ namespace manyrows {
             if (files_->canClose()) {
                 newui::RunLoop::current().quit();
             }
+        });
+    }
+
+    void ManyRowsWindow::bindHelpMenu() {
+        bindMenuItem(menuBar_, "Help", "Keyboard Shortcuts", [this](newui::MenuItem&) {
+            newui::Dialog::showMessageBox(frame_.frameHandle(),
+                "Moving and selecting\n"
+                "  Arrows, Tab, PgUp / PgDn, Home / End, Ctrl+arrows move; Shift extends the selection\n"
+                "  Ctrl+A selects all; click a header to select a whole column or row\n"
+                "  Ctrl+G (or the name box) goes to a cell like C4 or a row number\n\n"
+                "Editing\n"
+                "  F2, double-click or just typing edits a cell; Enter / Tab commit, Esc cancels\n"
+                "  Delete clears; Ctrl+Z / Ctrl+Y undo / redo\n"
+                "  Ctrl+X / C / V cut, copy, paste (tab-separated text, so it works with Excel)\n"
+                "  Ctrl+D / Ctrl+R fill down / right\n\n"
+                "Sort and filter\n"
+                "  Click a column header to sort by it: ascending, then descending, then unsorted\n"
+                "  Alt+Up / Alt+Down sort by the active cell's column; Alt+Backspace resets\n"
+                "  Ctrl+L builds a filter; Ctrl+Shift+F filters to the active cell's value\n\n"
+                "Files\n"
+                "  Ctrl+N new, Ctrl+O open (CSV, TSV, XLS, XLSX), Ctrl+S save, Ctrl+Shift+S save as",
+                "Keyboard shortcuts", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Information);
+        });
+        bindMenuItem(menuBar_, "Help", "About manyrows", [this](newui::MenuItem&) {
+            newui::Dialog::showMessageBox(frame_.frameHandle(),
+                "manyrows - a million-row table demo built with newui.\n\n"
+                "A virtualized table over 1,000,000 generated rows (or a CSV / XLS / XLSX file), with in-cell editing, undo / redo,\n"
+                "clipboard, fill, sort and filter. The lite version shows just the table.",
+                "About manyrows", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Information);
         });
     }
 

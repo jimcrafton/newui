@@ -170,6 +170,11 @@
     <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Rectangle (R)"><img src="../Resources/icons/tool-rectangle.svg" alt=""></button>
     <button class="tb" title="Ellipse (E)"><img src="../Resources/icons/tool-ellipse.svg" alt=""></button>
+    <button class="tb" title="Circle: drag out from the center" data-newui="ToolbarButton (circleTool)"><img src="../Resources/icons/tool-circle.svg" alt=""></button>
+    <button class="tb" title="Rounded rectangle: drag out; Up / Down arrows change the corner radius while dragging" data-newui="ToolbarButton (roundRectTool)"><img src="../Resources/icons/tool-roundrect.svg" alt=""></button>
+    <button class="tb" title="Polygon: drag from the center; Up / Down arrows change the number of sides while dragging" data-newui="ToolbarButton (polygonTool)"><img src="../Resources/icons/tool-polygon.svg" alt=""></button>
+    <button class="tb" title="Star: drag from the center; Up / Down arrows change the number of points while dragging" data-newui="ToolbarButton (starTool)"><img src="../Resources/icons/tool-star.svg" alt=""></button>
+    <button class="tb" title="Arc: drag out from the center (the first point of the arc is where you start); Up / Down arrows change the sweep; handles on its two ends change the angles" data-newui="ToolbarButton (arcTool)"><img src="../Resources/icons/tool-arc.svg" alt=""></button>
     <button class="tb" title="Line (L)"><img src="../Resources/icons/tool-line.svg" alt=""></button>
     <button class="tb" title="Pen (P)"><img src="../Resources/icons/tool-pen.svg" alt=""></button>
     <button class="tb" title="Pencil (N)"><img src="../Resources/icons/tool-pencil.svg" alt=""></button>
@@ -177,6 +182,11 @@
     <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Gradient (G)"><img src="../Resources/icons/tool-gradient.svg" alt=""></button>
     <button class="tb" title="Width (Shift+W)"><img src="../Resources/icons/tool-width.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Scissors (C): click a path to cut it there"><img src="../Resources/icons/tool-scissors.svg" alt=""></button>
+    <button class="tb" title="Knife (K): drag across filled shapes to cut them into pieces"><img src="../Resources/icons/tool-knife.svg" alt=""></button>
+    <button class="tb" title="Eraser (Shift+E): drag over shapes and lines to rub them out"><img src="../Resources/icons/tool-eraser.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Hand (H)"><img src="../Resources/icons/tool-hand.svg" alt=""></button>
     <button class="tb" title="Zoom (Z)"><img src="../Resources/icons/tool-zoom.svg" alt=""></button>
     <div class="well" title="Fill / stroke"><i class="stroke"></i><i class="fill"></i></div>
@@ -285,15 +295,20 @@
       <h3>Appearance <span>Path: Rounded Rectangle</span></h3>
       <div class="stack" data-newui="ListView (attribute stack)">
         <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Stroke</b><span class="sw stroke" style="border-color:#1b3a6b"></span><span class="dim">4 pt &nbsp; 100%</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
-        <div class="arow sel"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Fill</b><span class="sw" style="background:linear-gradient(90deg,#f2b824,#e8452c,#6a4fc7)"></span><span class="dim">Gradient &nbsp; 100%</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
+        <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Fill</b><span class="sw" style="background:linear-gradient(90deg,#f2b824,#e8452c,#6a4fc7)"></span><span class="dim">Gradient &nbsp; 100%</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
         <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Fill</b><span class="sw" style="background:#0078d4"></span><span class="dim">Solid &nbsp; 30% &middot; Multiply</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
-        <div class="arow fxrow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Drop Shadow</b><span class="dim">Multiply, 75%, x 4 y 4, blur 6</span></div>
+        <div class="arow fxrow sel"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Drop Shadow</b><span class="dim">Multiply, 75%, x 4 y 4, blur 6</span></div>
         <div class="arow fxrow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Round Corners</b><span class="dim">14 pt</span></div>
         <div class="arow base"><span class="grip"></span><span style="width:14px"></span><b>Opacity</b><span class="dim">75% &middot; Multiply</span></div>
       </div>
       <div class="body" data-newui="SubView (selected item options)">
         <div class="slider" style="grid-template-columns:62px 1fr 44px"><span style="color:var(--text-dim)">Opacity</span><div class="track" style="--v:75%;background:linear-gradient(90deg,transparent,#555),repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/8px 8px"></div><input class="field" value="75%"></div>
         <div class="row"><label style="min-width:62px">Blend</label><select class="field" data-newui="DropDownList (blend mode)" style="flex:1"><option>Normal</option><option selected>Multiply</option><option>Screen</option><option>Overlay</option><option>Darken</option><option>Lighten</option><option>Color Dodge</option><option>Color Burn</option><option>Hard Light</option><option>Soft Light</option><option>Difference</option><option>Exclusion</option></select></div>
+        <div class="row" data-newui="SubView (effectRow: X / Y / Blur - shown only while an effect row is chosen; Blur reads Radius for Round Corners and Offset for Offset Path, Size for Roughen; Gaussian Blur, Round Corners and Offset Path show only that one field; Outer Glow shows Blur + Color; Inner Shadow shows everything Drop Shadow does; Roughen shows Size plus X / Y relabelled Detail / Seed)">
+          <label style="min-width:auto">X</label><input class="field" value="4" style="width:46px" data-newui="TextField (effectXField)">
+          <label style="min-width:auto">Y</label><input class="field" value="4" style="width:46px" data-newui="TextField (effectYField)">
+          <label style="min-width:auto" data-newui="Label (effectSizeLabel)">Blur</label><input class="field" value="6" style="width:46px" data-newui="TextField (effectSizeField)"></div>
+        <div class="row" data-newui="SubView (effectColorRow: shadow / glow tint)"><label style="min-width:62px">Color</label><span class="sw" style="width:22px;height:14px;border:1px solid #333;background:#000"></span><input class="field" value="#000000" style="width:84px" data-newui="TextField (effectColorField)"></div>
       </div>
       <div class="atb" data-newui="Toolbar (appearance actions)">
         <button class="tb" title="Add new stroke"><img src="../Resources/icons/new-stroke.svg" width="18" alt=""></button>
@@ -308,7 +323,7 @@
         <button class="tb" title="Duplicate selected item"><img src="../Resources/icons/duplicate-item.svg" width="18" alt=""></button>
         <button class="tb" title="Delete selected item"><img src="../Resources/icons/delete.svg" width="18" alt=""></button>
       </div>
-      <div class="fxmenu" data-newui="PopupMenu (effects)"><b>Effects</b> &nbsp;Drop Shadow &middot; Inner Shadow &middot; Outer Glow &middot; Gaussian Blur &middot; Round Corners &middot; Offset Path &middot; Roughen</div>
+      <div class="fxmenu" data-newui="ContextMenu (effects, opened by the fx button at the cursor)"><b>Add Effect</b> &nbsp;Drop Shadow &middot; Outer Glow &middot; Gaussian Blur &middot; Round Corners &middot; Inner Shadow &middot; Offset Path &middot; Roughen &nbsp;<i>(Inner Shadow: x / y / blur / color like Drop Shadow, cast inside the shape. Offset Path: one field, Offset, negative shrinks. Roughen: Size, with X / Y relabelled Detail / Seed)</i></div>
     </section>
 
     <section class="panel" data-newui="GraphicStylesPanel (SubView)">

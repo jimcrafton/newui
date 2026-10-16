@@ -1,10 +1,12 @@
 #include "stylepanel.h"
 
 #include <newui/color.h>
+#include <newui/menus.h>
 #include <newui/models.h>
 #include <newui/mouse_constants.h>
 
 #include <algorithm>
+#include <memory>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -301,13 +303,30 @@ namespace sketch {
                 };
             }
         };
-        onTool("newStrokeButton", [this]() { baseRowSelected_ = false; target_ = Target::Stroke; document_.addAppearanceItem(AppearanceKind::Stroke); refresh(); onTargetChanged(*this); });
-        onTool("newFillButton", [this]() { baseRowSelected_ = false; target_ = Target::Fill; document_.addAppearanceItem(AppearanceKind::Fill); refresh(); onTargetChanged(*this); });
+        onTool("newEffectButton", [this]() { showEffectMenu(); });
+        onTool("newStrokeButton", [this]() { baseRowSelected_ = false; effectRowSelected_ = false; target_ = Target::Stroke; document_.addAppearanceItem(AppearanceKind::Stroke); refresh(); onTargetChanged(*this); });
+        onTool("newFillButton", [this]() { baseRowSelected_ = false; effectRowSelected_ = false; target_ = Target::Fill; document_.addAppearanceItem(AppearanceKind::Fill); refresh(); onTargetChanged(*this); });
         onTool("duplicateItemButton", [this]() { if (!baseRowSelected_) { document_.duplicateActiveItem(targetKind()); } });
         onTool("deleteItemButton", [this]() { if (!baseRowSelected_) { document_.deleteActiveItem(targetKind()); } });
         onTool("moveItemUpButton", [this]() { if (!baseRowSelected_) { document_.moveActiveItem(targetKind(), 1); } });
         onTool("moveItemDownButton", [this]() { if (!baseRowSelected_) { document_.moveActiveItem(targetKind(), -1); } });
-        onTool("clearAppearanceButton", [this]() { baseRowSelected_ = false; document_.clearAppearance(); });
+        onTool("clearAppearanceButton", [this]() { baseRowSelected_ = false; effectRowSelected_ = false; document_.clearAppearance(); });
+        // Effect options: Enter or leaving a field applies it.
+        for (auto [name, field] : std::initializer_list<std::pair<const char*, EffectField>>{
+                {"effectXField", EffectField::X}, {"effectYField", EffectField::Y},
+                {"effectSizeField", EffectField::Size}, {"effectColorField", EffectField::Color}}) {
+            if (auto* edit = find<TextField>(name)) {
+                EffectField which = field;
+                edit->onReturnPressed += [this, which](TextField&) {
+                    applyEffectField(which);
+                    return SyncReturn::Handled;
+                };
+                edit->onLostFocus += [this, which](View&) {
+                    applyEffectField(which);
+                    return SyncReturn::Handled;
+                };
+            }
+        }
         if (auto* eye = find<ToolbarButton>("itemVisibleButton")) {
             eye->onCheckedChanged += [this](ToolbarButton& changed) {
                 if (updating_ || baseRowSelected_ || document_.selection().empty()) {
@@ -320,6 +339,28 @@ namespace sketch {
             };
         }
 
+        if (auto* styles = find<SwatchGrid>("graphicStyleGrid")) {
+            styles->onSwatchPicked += [this](SwatchGrid&) {
+                styleTilePicked();
+                return SyncReturn::Handled;
+            };
+        }
+        onTool("newGraphicStyleButton", [this]() {
+            if (document_.addGraphicStyleFromSelection()) {
+                if (auto* grid = find<SwatchGrid>("graphicStyleGrid")) {
+                    grid->setSelectedIndex(document_.graphicStyles().size() - 1);   // the new style
+                }
+            }
+            refreshGraphicStyles();
+        });
+        onTool("deleteGraphicStyleButton", [this]() {
+            if (auto* grid = find<SwatchGrid>("graphicStyleGrid")) {
+                if (document_.deleteGraphicStyle(grid->selectedIndex())) {
+                    grid->setSelectedIndex(document_.graphicStyles().size());   // none
+                }
+            }
+            refreshGraphicStyles();
+        });
         if (auto* swatches = find<SwatchGrid>("swatchGrid")) {
             swatches->onSwatchPicked += [this](SwatchGrid& grid) {
                 std::size_t index = grid.selectedIndex();
@@ -546,6 +587,32 @@ namespace sketch {
     namespace {
         // One row of the Appearance stack: "Stroke  4 pt  Solid #1b3a6b  50%  Multiply  (hidden)".
         std::string appearanceRowText(const AppearanceItem& item) {
+            if (item.kind == AppearanceKind::Effect) {
+                // "Drop Shadow   Multiply   75%   x 4 y 4   blur 6"
+                char buffer[64];
+                std::string text = std::string(effectName(item.effect)) + "   ";
+                if (isTintedEffect(item.effect)) {
+                    if (item.blendMode != BlendMode::Normal) {
+                        text += std::string(blendModeName(item.blendMode)) + "   ";
+                    }
+                    text += std::to_string(int(item.opacity * 100.0 + 0.5)) + "%   ";
+                }
+                if (item.effect == EffectKind::DropShadow || item.effect == EffectKind::InnerShadow) {
+                    std::snprintf(buffer, sizeof(buffer), "x %g y %g   ", item.offsetX, item.offsetY);
+                    text += buffer;
+                }
+                switch (item.effect) {
+                    case EffectKind::RoundCorners: std::snprintf(buffer, sizeof(buffer), "radius %g", item.radius); break;
+                    case EffectKind::OffsetPath: std::snprintf(buffer, sizeof(buffer), "offset %g", item.radius); break;
+                    case EffectKind::Roughen: std::snprintf(buffer, sizeof(buffer), "size %g   detail %g", item.radius, item.offsetX); break;
+                    default: std::snprintf(buffer, sizeof(buffer), "blur %g", item.softness); break;
+                }
+                text += buffer;
+                if (!item.visible) {
+                    text += "   (hidden)";
+                }
+                return text;
+            }
             std::string text = item.kind == AppearanceKind::Fill ? "Fill   " : "Stroke   ";
             if (item.kind == AppearanceKind::Stroke) {
                 char buffer[32];
@@ -620,7 +687,7 @@ namespace sketch {
                 button->setEnabled(itemRow);
             }
         }
-        for (const char* name : {"newStrokeButton", "newFillButton", "clearAppearanceButton"}) {
+        for (const char* name : {"newStrokeButton", "newFillButton", "newEffectButton", "clearAppearanceButton"}) {
             if (auto* button = find<Control>(name)) {
                 button->setEnabled(first != nullptr);
             }
@@ -640,9 +707,18 @@ namespace sketch {
         }
         std::size_t index = count - 1 - row;
         baseRowSelected_ = false;
+        AppearanceKind chosen = first->appearance()[index].kind;
+        if (chosen == AppearanceKind::Effect) {
+            // An effect row leaves the fill / stroke target alone: the Color and Stroke panels keep their paint.
+            effectRowSelected_ = true;
+            document_.setActiveItem(chosen, index);
+            refresh();
+            return;
+        }
+        effectRowSelected_ = false;
         Target before = target_;
-        target_ = first->appearance()[index].kind == AppearanceKind::Fill ? Target::Fill : Target::Stroke;
-        document_.setActiveItem(first->appearance()[index].kind, index);
+        target_ = chosen == AppearanceKind::Fill ? Target::Fill : Target::Stroke;
+        document_.setActiveItem(chosen, index);
         refresh();
         if (target_ != before) {
             onTargetChanged(*this);
@@ -652,6 +728,7 @@ namespace sketch {
     void StylePanel::setTarget(Target target) {
         target_ = target;
         baseRowSelected_ = false;
+        effectRowSelected_ = false;
         refresh();
         onTargetChanged(*this);
     }
@@ -951,6 +1028,17 @@ namespace sketch {
         if (auto* info = find<Label>("colorPanelHeaderInfo")) {
             info->setText(target_ == Target::Fill ? "Fill \xE2\x97\x8F   Stroke \xE2\x97\x8B" : "Fill \xE2\x97\x8B   Stroke \xE2\x97\x8F");
         }
+        // What the Appearance panel is showing: the kind of the selected object ("3 objects" for several).
+        if (auto* info = find<Label>("appearancePanelHeaderInfo")) {
+            static const char* kKinds[] = {"Line", "Rectangle", "Rounded Rectangle", "Ellipse", "Polygon", "Polyline", "Path", "Text"};
+            std::string kind;
+            if (document_.selection().size() > 1) {
+                kind = std::to_string(document_.selection().size()) + " objects";
+            } else if (first != nullptr) {
+                kind = kKinds[std::size_t(first->type())];
+            }
+            info->setText(kind);
+        }
     }
 
     void StylePanel::refresh() {
@@ -1094,6 +1182,11 @@ namespace sketch {
             std::snprintf(buffer, sizeof(buffer), "%g", options.miterLimit);
             field->setText(widen(buffer));
         }
+        // An effect row stays chosen only while the object still has an active effect (it was deleted, or another
+        // object without effects was selected).
+        if (effectRowSelected_ && (first == nullptr || first->activeIndex(AppearanceKind::Effect) >= first->appearance().size())) {
+            effectRowSelected_ = false;
+        }
         const AppearanceItem* shownItem = first != nullptr ? &first->activeItem(targetKind()) : nullptr;
         bool showBase = first == nullptr || baseRowSelected_;
         std::size_t group = document_.selectedGroup();
@@ -1109,8 +1202,256 @@ namespace sketch {
         }
         syncWells();
         refreshAppearance(first);
+        refreshEffectOptions(first);
+        refreshGraphicStyles();
 
         updating_ = false;
+    }
+
+    // ---- Effects ----
+
+    void StylePanel::addEffect(EffectKind kind) {
+        if (document_.selection().empty()) {
+            return;
+        }
+        effectRowSelected_ = true;   // set first: the document's change refreshes the panel, which must already show the new row chosen
+        baseRowSelected_ = false;
+        if (!document_.addEffect(kind)) {
+            effectRowSelected_ = false;
+        }
+        refresh();
+    }
+
+    void StylePanel::showEffectMenu() {
+        if (document_.selection().empty()) {
+            return;
+        }
+        // A throwaway menu: the parent item only holds the children the popup is built from.
+        MenuItem menu;
+        static const EffectKind kKinds[] = {EffectKind::DropShadow, EffectKind::OuterGlow, EffectKind::InnerShadow, EffectKind::GaussianBlur,
+            EffectKind::RoundCorners, EffectKind::OffsetPath, EffectKind::Roughen};
+        for (EffectKind kind : kKinds) {
+            auto* item = new MenuItem(effectName(kind));
+            item->onClick += [this, kind](MenuItem&) {
+                addEffect(kind);
+                return SyncReturn::Handled;
+            };
+            menu.addChild(item);
+        }
+        POINT cursor{0, 0};
+        ::GetCursorPos(&cursor);
+        ContextMenu popup;
+        popup.show(root_.windowHandle(), menu, cursor.x, cursor.y);
+    }
+
+    void StylePanel::refreshEffectOptions(const SketchObject* first) {
+        const AppearanceItem* effect = (first != nullptr && effectRowSelected_) ? &first->activeItem(AppearanceKind::Effect) : nullptr;
+        // X / Y: a shadow's offset, or (Roughen) the detail and the seed. Only the effects with a color show the color row.
+        bool shadow = effect != nullptr && (effect->effect == EffectKind::DropShadow || effect->effect == EffectKind::InnerShadow);
+        bool rough = effect != nullptr && effect->effect == EffectKind::Roughen;
+        bool tinted = effect != nullptr && isTintedEffect(effect->effect);
+        if (auto* row = find<View>("effectRow")) {
+            row->setVisible(effect != nullptr);
+        }
+        if (auto* row = find<View>("effectColorRow")) {
+            row->setVisible(tinted);
+        }
+        for (const char* name : {"effectXLabel", "effectXField", "effectYLabel", "effectYField"}) {
+            if (auto* view = find<View>(name)) {
+                view->setVisible(shadow || rough);
+            }
+        }
+        // Each options row left out frees its height plus the gap above it.
+        constexpr float kRow = 24.0f + 6.0f;
+        fitAppearancePanel(effect == nullptr ? 2.0f * kRow : (tinted ? 0.0f : kRow));
+        if (effect == nullptr) {
+            return;
+        }
+        auto number = [](double value) {
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "%g", value);
+            return widen(buffer);
+        };
+        // The size field is the radius of Round Corners / the distance of Offset Path / the size of Roughen, else the blur.
+        bool uses_radius = effect->effect == EffectKind::RoundCorners || effect->effect == EffectKind::OffsetPath || rough;
+        if (auto* label = find<Label>("effectSizeLabel")) {
+            label->setText(effect->effect == EffectKind::OffsetPath ? "Offset" : (rough ? "Size" : (uses_radius ? "Radius" : "Blur")));
+        }
+        if (auto* label = find<Label>("effectXLabel")) {
+            label->setText(rough ? "Detail" : "X");
+        }
+        if (auto* label = find<Label>("effectYLabel")) {
+            label->setText(rough ? "Seed" : "Y");
+        }
+        // Roughen's labels are longer than a shadow's "X" / "Y" / "Blur": give them the room (and take it back for the others).
+        auto labelWidth = [this](const char* name, float width) {
+            if (auto* label = find<Label>(name)) {
+                if (label->desiredSize().width != width) {
+                    label->setDesiredSize(Size(width, label->desiredSize().height));
+                }
+            }
+        };
+        labelWidth("effectXLabel", rough ? 38.0f : 14.0f);
+        labelWidth("effectYLabel", rough ? 30.0f : 14.0f);
+        labelWidth("effectSizeLabel", rough ? 28.0f : 34.0f);
+        if (auto* row = find<SubView>("effectRow")) {
+            row->updateLayout();
+        }
+        if (auto* field = find<TextField>("effectXField")) {
+            field->setText(number(effect->offsetX));
+        }
+        if (auto* field = find<TextField>("effectYField")) {
+            field->setText(number(effect->offsetY));
+        }
+        if (auto* field = find<TextField>("effectSizeField")) {
+            field->setText(number(uses_radius ? effect->radius : effect->softness));
+        }
+        if (tinted) {
+            if (auto* field = find<TextField>("effectColorField")) {
+                field->setText(widen(effect->color.toHex()));
+            }
+            if (auto* well = find<SubView>("effectColorWell")) {
+                gfx::Fill& fill = well->style().backgroundFill();
+                fill.setKind(gfx::PaintKind::Color);
+                fill.setColor(toColor(effect->color));
+                well->style().markDirty();
+            }
+        }
+    }
+
+    void StylePanel::fitAppearancePanel(float hidden) {
+        fitSection("appearancePanel", "appearancePanelBody", hidden);
+    }
+
+    void StylePanel::fitSection(const char* panelName, const char* bodyName, float shrink, const char* childName) {
+        auto* panel = find<SubView>(panelName);
+        auto* body = find<SubView>(bodyName);
+        auto* content = find<SubView>("sidebarContent");
+        auto* scroll = find<ScrollView>("sidebar");
+        auto* child = childName != nullptr ? find<SubView>(childName) : nullptr;
+        if (panel == nullptr || body == nullptr || content == nullptr || scroll == nullptr) {
+            return;
+        }
+        if (sidebarContentHeight_ == 0.0f) {
+            sidebarContentHeight_ = content->bounds().height();
+        }
+        Section& section = sections_[panelName];
+        if (section.panelHeight == 0.0f) {
+            section.panelHeight = panel->desiredSize().height;
+            section.bodyHeight = body->desiredSize().height;
+            section.childHeight = child != nullptr ? child->desiredSize().height : 0.0f;
+        }
+        if (section.shrink == shrink && panel->desiredSize().height == section.panelHeight - shrink) {
+            return;
+        }
+        section.shrink = shrink;
+        panel->setDesiredSize(Size(panel->desiredSize().width, section.panelHeight - shrink));
+        body->setDesiredSize(Size(body->desiredSize().width, section.bodyHeight - shrink));
+        if (child != nullptr) {
+            child->setDesiredSize(Size(child->desiredSize().width, section.childHeight - shrink));
+        }
+        float total = 0.0f;
+        for (const auto& entry : sections_) {
+            total += entry.second.shrink;
+        }
+        float contentHeight = sidebarContentHeight_ - total;
+        content->setBounds(Rect(content->bounds().left(), content->bounds().top(), content->bounds().width(), contentHeight));
+        scroll->setContentSize(Size(scroll->contentSize().width, contentHeight));
+        content->updateLayout();
+    }
+
+    // ---- Graphic Styles ----
+
+    void StylePanel::refreshGraphicStyles() {
+        auto* grid = find<SwatchGrid>("graphicStyleGrid");
+        if (grid == nullptr) {
+            return;
+        }
+        const std::vector<GraphicStyle>& styles = document_.graphicStyles();
+        // Each tile: a white square (so a Ghost style's transparency reads), then a rounded rectangle wearing the style.
+        std::vector<GraphicStyle> copy = styles;
+        grid->setTilePainter([copy](BLContext& ctx, const Rect& tile, std::size_t index) {
+            if (index >= copy.size()) {
+                return;
+            }
+            ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
+            ctx.fill_rect(BLRect(tile.left(), tile.top(), tile.width(), tile.height()));
+            double inset = std::max(5.0, double(tile.width()) * 0.18);
+            std::unique_ptr<SketchObject> sample(SketchObject::makeRoundRect(
+                tile.left() + inset, tile.top() + inset, tile.width() - 2.0 * inset, tile.height() - 2.0 * inset, 4.0));
+            sample->setAppearance(copy[index].items);
+            sample->setOpacity(copy[index].opacity);
+            sample->setBlendMode(copy[index].blendMode);
+            sample->paint(ctx);
+        }, copy.size());
+        if (styleTiles_ == static_cast<std::size_t>(-1) || grid->selectedIndex() > copy.size()) {
+            grid->setSelectedIndex(copy.size());   // none chosen yet
+        }
+        // The grid grows by rows as styles are added (its height and the panel's are fixed sizes in the layout).
+        if (styleTiles_ != copy.size()) {
+            styleTiles_ = copy.size();
+            float wanted = std::max(grid->heightFor(copy.size()), grid->heightFor(1));
+            float base = 40.0f;   // the layout's one-row height
+            fitSection("stylesPanel", "stylesPanelBody", base - wanted, "graphicStyleGrid");
+        }
+        bool haveSelection = !document_.selection().empty();
+        if (auto* button = find<Control>("newGraphicStyleButton")) {
+            button->setEnabled(haveSelection);
+        }
+        if (auto* button = find<Control>("deleteGraphicStyleButton")) {
+            button->setEnabled(grid->selectedIndex() < copy.size());
+        }
+    }
+
+    // A click on a tile applies that style to the selection.
+    void StylePanel::styleTilePicked() {
+        auto* grid = find<SwatchGrid>("graphicStyleGrid");
+        if (grid != nullptr && !document_.selection().empty()) {
+            document_.applyGraphicStyle(grid->selectedIndex());
+        }
+        refreshGraphicStyles();
+    }
+
+    void StylePanel::applyEffectField(EffectField which) {
+        if (updating_ || !effectRowSelected_ || document_.selection().empty()) {
+            return;
+        }
+        const char* names[] = {"effectXField", "effectYField", "effectSizeField", "effectColorField"};
+        auto* field = find<TextField>(names[int(which)]);
+        if (field == nullptr) {
+            return;
+        }
+        if (which == EffectField::Color) {
+            try {
+                SketchColor parsed = SketchColor::fromHex(narrow(field->text())).convertedTo(document_.colorMode());
+                document_.changeActiveEffect([parsed](AppearanceItem& item) { item.color = parsed; }, "Effect Color");
+            } catch (const std::runtime_error&) {
+            }
+        } else {
+            double value = 0.0;
+            if (leadingNumber(field->text(), value)) {
+                switch (which) {
+                    case EffectField::X:
+                        document_.changeActiveEffect([value](AppearanceItem& item) { item.offsetX = value; }, "Effect Offset");
+                        break;
+                    case EffectField::Y:
+                        document_.changeActiveEffect([value](AppearanceItem& item) { item.offsetY = value; }, "Effect Offset");
+                        break;
+                    default:
+                        document_.changeActiveEffect([value](AppearanceItem& item) {
+                            if (item.effect == EffectKind::OffsetPath) {
+                                item.radius = value;   // negative moves the outline inward
+                            } else if (item.effect == EffectKind::RoundCorners || item.effect == EffectKind::Roughen) {
+                                item.radius = std::max(0.0, value);
+                            } else {
+                                item.softness = std::max(0.0, value);
+                            }
+                        }, "Effect Size");
+                        break;
+                }
+            }
+        }
+        refresh();   // reads back the clamped / normalized value (and restores the field when the text was not valid)
     }
 
 }

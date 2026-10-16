@@ -1,5 +1,7 @@
 ﻿#include "canvasview.h"
 
+#include <newui/bundle.h>
+
 #include <newui/newui.h>
 #include <newui/color.h>
 #include <newui/mouse_constants.h>
@@ -28,12 +30,16 @@ namespace sketch {
         onMouseUp.add(this, &CanvasView::handleMouseUp);
         onMouseWheel.add(this, &CanvasView::handleMouseWheel);
         onKeyDown.add(this, &CanvasView::handleKeyDown);
+        onKeyPress.add(this, &CanvasView::handleKeyPress);
+        onMouseDblClick.add(this, &CanvasView::handleMouseDblClick);
     }
 
     void CanvasView::setDocument(SketchDocument* document) {
         if (document_ != nullptr) {
             document_->removeView(this);
         }
+        textEditing_ = false;   // text being edited belongs to the old document
+        textDraft_.reset();
         document_ = document;
         if (document_ != nullptr) {
             document_->addView(this);
@@ -80,29 +86,15 @@ namespace sketch {
         if (tool == tool_) {
             return;
         }
+        if (tool_ == SketchTool::Pen && tool != SketchTool::Pen && document_ != nullptr) {
+            finishPen(false);   // leaving the pen keeps what was drawn
+        }
+        if (tool_ == SketchTool::Text) {
+            commitText();   // leaving the Text tool finishes the text
+        }
         tool_ = tool;
         drag_ = Drag::None;
-        switch (tool) {  // the system cursor that best says what a drag will do
-            case SketchTool::Rectangle:
-            case SketchTool::Ellipse:
-            case SketchTool::Line:
-            case SketchTool::Pen:
-            case SketchTool::Pencil:
-            case SketchTool::Gradient:
-            case SketchTool::Width:
-            case SketchTool::Zoom:
-                cursor().setCursorKind(CursorKind::Cross);
-                break;
-            case SketchTool::Text:
-                cursor().setCursorKind(CursorKind::IBeam);
-                break;
-            case SketchTool::Hand:
-                cursor().setCursorKind(CursorKind::Hand);
-                break;
-            default:
-                cursor().setCursorKind(CursorKind::Arrow);
-                break;
-        }
+        refreshCursor(lastPointer_, 0);
         style().markDirty();
         onToolChanged(*this);
     }
@@ -154,11 +146,18 @@ namespace sketch {
             panAnchor_ = pt;
             panStartX_ = panX_;
             panStartY_ = panY_;
+            refreshCursor(pt, keys);
             return SyncReturn::Handled;
         }
         if ((buttons & mbmLeftButton) == 0 || document_ == nullptr) {
             return SyncReturn::Ignored;
         }
+
+        if (tool_ == SketchTool::Text) {
+            beginText(pt);   // finishes any text being edited first
+            return SyncReturn::Handled;
+        }
+        commitText();
 
         dragStartDoc_ = toDocument(pt);
         dragNowDoc_ = dragStartDoc_;
@@ -170,9 +169,28 @@ namespace sketch {
             zoomAt(pt, zoom_ * ((keys & kmShift) != 0 ? 1.0f / 1.5f : 1.5f));
             return SyncReturn::Handled;
         }
-        if (tool_ == SketchTool::Rectangle || tool_ == SketchTool::Ellipse || tool_ == SketchTool::Line) {
+        if (tool_ == SketchTool::Rectangle || tool_ == SketchTool::Ellipse || tool_ == SketchTool::Line || isShapeTool()) {
             dragStartDoc_ = snapPoint(dragStartDoc_);
             drag_ = Drag::Draw;
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Pencil) {
+            pencilPoints_.assign(1, dragStartDoc_);
+            drag_ = Drag::Pencil;
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Scissors) {
+            document_->scissorsCut(dragStartDoc_, 6.0 / double(zoom_));   // a click on a path cuts it there
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Knife || tool_ == SketchTool::Eraser) {
+            cutPoints_.assign(1, dragStartDoc_);
+            drag_ = tool_ == SketchTool::Knife ? Drag::Knife : Drag::Erase;
+            style().markDirty();
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Pen) {
+            penBegin(pt, keys);
             return SyncReturn::Handled;
         }
         if (tool_ == SketchTool::Gradient) {
@@ -183,13 +201,27 @@ namespace sketch {
             beginWidthDrag(pt, keys);
             return SyncReturn::Handled;
         }
+        if (tool_ == SketchTool::DirectSelect) {
+            directMouseDown(pt, keys);
+            return SyncReturn::Handled;
+        }
         if (tool_ != SketchTool::Select) {
             return SyncReturn::Ignored;  // palette entries not implemented yet
         }
 
+        LiveShape live;
+        if (liveShape(live)) {
+            int liveHandle = liveHandleAt(pt, live);
+            if (liveHandle != kLiveNone) {
+                beginLiveDrag(liveHandle, live, pt);
+                refreshCursor(pt, keys);
+                return SyncReturn::Handled;
+            }
+        }
         int handle = hitHandle(pt);
         if (handle >= 0) {
             beginResize(handle, keys);
+            refreshCursor(pt, keys);
             return SyncReturn::Handled;
         }
 
@@ -219,6 +251,7 @@ namespace sketch {
                 dragBefore_ = document_->snapshotSelection();
                 dragFrameBefore_ = document_->frameState();
                 document_->selectionFrame(dragFrame_);
+                refreshCursor(pt, keys);   // the move cursor for the drag
             }
             return SyncReturn::Handled;
         }
@@ -259,6 +292,7 @@ namespace sketch {
         for (const GeometryState& entry : dragBefore_) {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
+                object->setTextMatrix(entry.textMatrix);
                 object->warp(map);
                 object->setFrameAngle(entry.angle);
             }
@@ -271,6 +305,7 @@ namespace sketch {
         for (const GeometryState& entry : dragBefore_) {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
+                object->setTextMatrix(entry.textMatrix);
                 object->transform(matrix);
                 object->setFrameAngle(entry.angle + angleDelta);
             }
@@ -290,6 +325,7 @@ namespace sketch {
         dragNowView_ = pt;
         dragNowDoc_ = toDocument(pt);
         bool shift = (keys & kmShift) != 0;
+        dragShift_ = shift;
         const double kPi = 3.14159265358979323846;
 
         switch (drag_) {
@@ -470,6 +506,22 @@ namespace sketch {
             case Drag::Width:
                 updateWidthDrag(keys);
                 break;
+            case Drag::Pencil:
+                pencilMove(dragNowDoc_);
+                break;
+            case Drag::Knife:
+            case Drag::Erase:
+                cutMove(dragNowDoc_);
+                break;
+            case Drag::PenHandle:
+                penDrag(dragNowDoc_, (keys & kmAlt) != 0);
+                break;
+            case Drag::DirectEdit:
+                directDrag(dragNowDoc_, (keys & kmAlt) != 0);
+                break;
+            case Drag::LiveShape:
+                updateLiveDrag(dragNowDoc_, pt);
+                break;
             case Drag::None:
                 break;
         }
@@ -524,6 +576,10 @@ namespace sketch {
                 break;
             }
             case Drag::Draw: {
+                if (isShapeTool()) {
+                    finishShapeDraw(shift);
+                    break;
+                }
                 BLPoint a = dragStartDoc_;
                 BLPoint b = dragNowDoc_;
                 double w = b.x - a.x, h = b.y - a.y;
@@ -573,6 +629,23 @@ namespace sketch {
             case Drag::Width:
                 finishWidthDrag();
                 break;
+            case Drag::Pencil:
+                finishPencil();
+                break;
+            case Drag::Knife:
+                finishKnife();
+                break;
+            case Drag::Erase:
+                finishErase();
+                break;
+            case Drag::PenHandle:
+                break;   // the anchor was placed on mouse-down; the drag only shaped its handles
+            case Drag::DirectEdit:
+                finishDirectDrag();
+                break;
+            case Drag::LiveShape:
+                finishLiveDrag();
+                break;
             case Drag::None:
                 break;
         }
@@ -583,6 +656,7 @@ namespace sketch {
     SyncReturn CanvasView::handleMouseMove(View& /*sender*/, const Point& pt, std::uint32_t /*buttons*/, std::uint32_t keys) {
         pointerDoc_ = toDocument(pt);
         onPointerMoved(*this);
+        refreshCursor(pt, keys);
         if (panning_) {
             setPan(panStartX_ + (pt.x - panAnchor_.x), panStartY_ + (pt.y - panAnchor_.y));
             return SyncReturn::Handled;
@@ -591,51 +665,159 @@ namespace sketch {
             updateDrag(pt, keys);
             return SyncReturn::Handled;
         }
-        updateHoverCursor(pt);
+        if (tool_ == SketchTool::Pen && !penAnchors_.empty()) {
+            dragNowView_ = pt;
+            dragNowDoc_ = toDocument(pt);
+            style().markDirty();   // the segment from the last point follows the pointer
+        }
         return SyncReturn::Ignored;
     }
 
     namespace {
         // The two-headed arrow along the direction (dx, dy), in 45 degree steps - so a handle of a turned frame
         // shows the arrow that matches how it will actually stretch.
-        CursorKind resizeCursorFor(double dx, double dy) {
+        const char* resizeCursorFor(double dx, double dy) {
             double steps = std::atan2(dy, dx) / (3.14159265358979323846 / 4.0);
             int k = ((int(std::lround(steps)) % 4) + 4) % 4;  // 0 = horizontal, 1 = down-right, 2 = vertical, 3 = up-right
-            static const CursorKind kKinds[4] = {CursorKind::SizeWE, CursorKind::SizeNWSE, CursorKind::SizeNS, CursorKind::SizeNESW};
-            return kKinds[k];
+            static const char* const kNames[4] = {"resize-we", "resize-nwse", "resize-ns", "resize-nesw"};
+            return kNames[k];
+        }
+
+        // The system cursor that stands in when a cursor image cannot be loaded.
+        CursorKind fallbackFor(const std::string& name) {
+            if (name == "crosshair" || name == "gradient" || name == "pen" || name == "pencil" || name == "scissors" || name == "knife" || name == "eraser") return CursorKind::Cross;
+            if (name == "text") return CursorKind::IBeam;
+            if (name == "hand" || name == "hand-grab" || name == "rotate") return CursorKind::Hand;
+            if (name == "resize-ns") return CursorKind::SizeNS;
+            if (name == "resize-we") return CursorKind::SizeWE;
+            if (name == "resize-nwse") return CursorKind::SizeNWSE;
+            if (name == "resize-nesw") return CursorKind::SizeNESW;
+            if (name == "move") return CursorKind::SizeAll;
+            return CursorKind::Arrow;
         }
     }
 
-    // With the Select tool the pointer shows what the handle under it does; other tools keep their own cursor.
-    void CanvasView::updateHoverCursor(const Point& pt) {
-        if (tool_ != SketchTool::Select || document_ == nullptr) {
+    const char* CanvasView::liveHandleCursor(const LiveShape& shape, int handle) const {
+        BLPoint at = liveHandlePoint(shape, handle);
+        switch (handle) {
+            case kLivePoints:
+                return "resize-we";   // dragged left and right, whatever the shape turn
+            case kLiveInner: {
+                BLPoint center = toView(shape.regular.center);
+                return resizeCursorFor(at.x - center.x, at.y - center.y);   // toward or away from the center
+            }
+            case kLiveRadius: {
+                double c = std::cos(shape.rect.angle), s = std::sin(shape.rect.angle);
+                return resizeCursorFor(c - s, s + c);   // along the corner diagonal, turned with the frame
+            }
+            case kLiveArcStart:
+            case kLiveArcEnd: {
+                BLPoint center = toView(shape.arc.center);
+                return resizeCursorFor(-(at.y - center.y), at.x - center.x);   // around the center: along the tangent
+            }
+            default:
+                return "move";
+        }
+    }
+
+    const char* CanvasView::toolCursorName(SketchTool tool) {
+        switch (tool) {
+            case SketchTool::Select: return "select";
+            case SketchTool::DirectSelect: return "direct-select";
+            case SketchTool::Pen: return "pen";
+            case SketchTool::Pencil: return "pencil";
+            case SketchTool::Scissors: return "scissors";
+            case SketchTool::Knife: return "knife";
+            case SketchTool::Eraser: return "eraser";
+            case SketchTool::Text: return "text";
+            case SketchTool::Gradient: return "gradient";
+            case SketchTool::Hand: return "hand";
+            case SketchTool::Zoom: return "zoom-in";
+            default: return "crosshair";   // the shape tools, line and width
+        }
+    }
+
+    // Shows Resources/cursors/<name>.svg with its hotspot from cursors.json; a system cursor if the image is missing.
+    void CanvasView::setCanvasCursor(const std::string& name) {
+        if (name == cursorName_) {
             return;
         }
-        CursorKind kind = CursorKind::Arrow;
-        SelectionFrame frame;
-        int handle = hitHandle(pt);
-        if (handle >= 0 && document_->selectionFrame(frame)) {
-            if (handle == kOriginHandle) {
-                kind = CursorKind::SizeAll;
-            } else if (handle == kRotateHandle) {
-                kind = CursorKind::Hand;
-            } else {
-                BLPoint center = toView(frame.pointAt(0.5, 0.5)), at = handlePosition(handle, frame);
-                kind = resizeCursorFor(at.x - center.x, at.y - center.y);
+        cursorName_ = name;
+        if (!cursorHotspotsLoaded_) {
+            cursorHotspotsLoaded_ = true;
+            cursorHotspots_ = parseCursorHotspots(Bundle::instance().loadTextFile("cursors/cursors.json"));
+        }
+        CursorHotspot spot;
+        auto found = cursorHotspots_.find(name);
+        if (found != cursorHotspots_.end()) {
+            spot = found->second;
+        }
+        // The SVGs are drawn for a 32 px cursor, which looks large on screen: rasterize them smaller (see kCursorScale)
+        // and move the hotspot with the image so the point stays where it was drawn.
+        static const double scale = [] {
+            const char* text = std::getenv("SKETCH_CURSOR_SCALE");
+            double value = text != nullptr ? std::atof(text) : 0.0;
+            return value >= 0.2 && value <= 2.0 ? value : kCursorScale;
+        }();
+        int size = std::max(12, int(std::lround(double(spot.size) * scale)));
+        int hotX = int(std::lround(double(spot.x) * scale));
+        int hotY = int(std::lround(double(spot.y) * scale));
+        BLImage image;
+        if (Bundle::instance().loadCachedImage("cursors/" + name + ".svg", image, size, size) && cursor().setImage(image, hotX, hotY, size)) {
+            return;
+        }
+        cursor().setCursorKind(fallbackFor(name));
+    }
+
+    void CanvasView::refreshCursor(const Point& pt, std::uint32_t keys) {
+        lastPointer_ = pt;
+        std::string name = toolCursorName(tool_);
+        if (panning_) {
+            name = "hand-grab";
+        } else if (drag_ == Drag::Move || drag_ == Drag::Origin) {
+            name = "move";
+        } else if (drag_ == Drag::Rotate) {
+            name = "rotate";
+        } else if (drag_ == Drag::LiveShape) {
+            name = liveHandleCursor(liveStart_, liveHandle_);   // keeps its arrow for the whole drag
+        } else if (drag_ != Drag::None) {
+            // A resize keeps the arrow it began with; any other drag keeps the tool's own cursor.
+            if (drag_ == Drag::Resize || drag_ == Drag::Shear || drag_ == Drag::Warp) {
+                return;
+            }
+        } else if (tool_ == SketchTool::Zoom) {
+            name = (keys & kmShift) != 0 ? "zoom-out" : "zoom-in";
+        } else if (tool_ == SketchTool::Select && document_ != nullptr) {
+            SelectionFrame frame;
+            LiveShape live;
+            int liveHandle = liveShape(live) ? liveHandleAt(pt, live) : kLiveNone;
+            int handle = liveHandle != kLiveNone ? -1 : hitHandle(pt);
+            if (liveHandle != kLiveNone) {
+                name = liveHandleCursor(live, liveHandle);
+            }
+            if (handle >= 0 && document_->selectionFrame(frame)) {
+                if (handle == kOriginHandle) {
+                    name = "move";
+                } else if (handle == kRotateHandle) {
+                    name = "rotate";
+                } else {
+                    BLPoint center = toView(frame.pointAt(0.5, 0.5)), at = handlePosition(handle, frame);
+                    name = resizeCursorFor(at.x - center.x, at.y - center.y);
+                }
             }
         }
-        if (cursorKind() != kind) {
-            cursor().setCursorKind(kind);
-        }
+        setCanvasCursor(name);
     }
 
     SyncReturn CanvasView::handleMouseUp(View& /*sender*/, const Point& pt, std::uint32_t /*buttons*/, std::uint32_t keys) {
         if (panning_) {
             panning_ = false;
+            refreshCursor(pt, keys);
             return SyncReturn::Handled;
         }
         if (drag_ != Drag::None) {
             finishDrag(pt, keys);
+            refreshCursor(pt, keys);
             return SyncReturn::Handled;
         }
         return SyncReturn::Ignored;
@@ -692,6 +874,9 @@ namespace sketch {
         if (document_ == nullptr) {
             return SyncReturn::Ignored;
         }
+        if (textEditing_ && textKeyDown(keyMask, vkCode)) {
+            return SyncReturn::Handled;   // typing text: no shortcut or Delete reaches the objects
+        }
         bool ctrl = (keyMask & kmCtrl) != 0;
         bool shift = (keyMask & kmShift) != 0;
         if (ctrl && onControlKey && onControlKey(vkCode, shift)) {
@@ -733,11 +918,28 @@ namespace sketch {
             document_->duplicateSelection(12.0, 12.0);
             return SyncReturn::Handled;
         }
+        if (tool_ == SketchTool::Pen && !penAnchors_.empty()) {
+            if (vkCode == vkReturn) { finishPen(false); return SyncReturn::Handled; }
+            if (vkCode == vkEscape) { if (penAnchors_.size() >= 2) { finishPen(false); } else { cancelPen(); } return SyncReturn::Handled; }
+            if (vkCode == vkBackSpace || vkCode == vkDelete) { penUndoLast(); return SyncReturn::Handled; }
+        }
+        if (tool_ == SketchTool::Eraser && (vkCode == vkUpArrow || vkCode == vkDownArrow)) {
+            setEraserSize(eraserSize_ + (vkCode == vkUpArrow ? 2.0 : -2.0));
+            return SyncReturn::Handled;
+        }
+        if ((vkCode == vkUpArrow || vkCode == vkDownArrow) && adjustShapeParameter(vkCode == vkUpArrow ? 1 : -1)) {
+            return SyncReturn::Handled;
+        }
+        if (vkCode == vkDelete && tool_ == SketchTool::DirectSelect && deleteDirectAnchor()) {
+            return SyncReturn::Handled;
+        }
         if (vkCode == vkDelete) {
             document_->deleteSelection();
             return SyncReturn::Handled;
         }
         if (vkCode == vkEscape) {
+            pencilPoints_.clear();
+            cutPoints_.clear();
             if (drag_ != Drag::None) {  // cancel an in-progress drag, restoring the outlines
                 if (drag_ == Drag::GradientNew || drag_ == Drag::GradientEnd || drag_ == Drag::GradientStop) {
                     cancelGradientDrag();
@@ -769,9 +971,25 @@ namespace sketch {
         return SyncReturn::Handled;
     }
 
+    // A double click on text with the Select tool edits it.
+    SyncReturn CanvasView::handleMouseDblClick(View& /*sender*/, const Point& pt, std::uint32_t buttons, std::uint32_t /*keys*/) {
+        if (document_ == nullptr || (buttons & mbmLeftButton) == 0 || tool_ != SketchTool::Select) {
+            return SyncReturn::Ignored;
+        }
+        if (textObjectAt(toDocument(pt)) == nullptr) {
+            return SyncReturn::Ignored;
+        }
+        setTool(SketchTool::Text);
+        beginText(pt);
+        return SyncReturn::Handled;
+    }
+
     void CanvasView::paintOverlay(BLContext& ctx) const {
         if (document_ == nullptr) {
             return;
+        }
+        if (textEditing_) {
+            paintTextEditor(ctx);
         }
         const BLRgba32 accent(0xFF1E6FE0u);
         ctx.save();
@@ -808,7 +1026,7 @@ namespace sketch {
         SelectionFrame frame;
         if (document_->selectionFrame(frame)) {
             ctx.stroke_path(frameOutline(frame));
-            if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width) {
+            if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width && tool_ != SketchTool::DirectSelect) {
                 BLPoint knob = handlePosition(kRotateHandle, frame);
                 BLPoint topCenter = handlePosition(1, frame);
                 BLPath stem;
@@ -835,7 +1053,7 @@ namespace sketch {
 
         // The transform origin: a ringed dot (drag it to move the rotate/shear pivot).
         SelectionFrame originFrame;
-        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width && document_->selectionFrame(originFrame)) {
+        if (drag_ != Drag::Marquee && drag_ != Drag::Draw && tool_ != SketchTool::Gradient && tool_ != SketchTool::Width && tool_ != SketchTool::DirectSelect && document_->selectionFrame(originFrame)) {
             BLPoint o = handlePosition(kOriginHandle, originFrame);
             BLPath ring;
             ring.add_circle(BLCircle(o.x, o.y, 4.5));
@@ -858,9 +1076,26 @@ namespace sketch {
         if (tool_ == SketchTool::Width) {
             paintWidthOverlay(ctx);
         }
+        if (drag_ == Drag::Pencil) {
+            paintPencilPreview(ctx);
+        }
+        if (drag_ == Drag::Knife || drag_ == Drag::Erase || tool_ == SketchTool::Eraser) {
+            paintCutOverlay(ctx);
+        }
+        if (tool_ == SketchTool::Pen) {
+            paintPenOverlay(ctx);
+        }
+        if (tool_ == SketchTool::DirectSelect) {
+            paintDirectOverlay(ctx);
+        }
+        if (tool_ == SketchTool::Select) {
+            paintLiveOverlay(ctx);
+        }
 
         // Rubber band for marquee / shape being drawn.
-        if (drag_ == Drag::Marquee || drag_ == Drag::Draw) {
+        if (drag_ == Drag::Draw && isShapeTool()) {
+            paintShapePreview(ctx);
+        } else if (drag_ == Drag::Marquee || drag_ == Drag::Draw) {
             BLPoint a = toView(dragStartDoc_);
             BLPoint b(double(dragNowView_.x), double(dragNowView_.y));
             if (drag_ == Drag::Draw && tool_ == SketchTool::Line) {
