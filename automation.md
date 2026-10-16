@@ -95,6 +95,7 @@ request's `"id"` (a number) is echoed back when given. A failure is
 |---------|--------------|
 | `{"cmd":"hello"}` | `protocol` |
 | `{"cmd":"scrollInfo","name":"explorerScroll"}` | For a `ScrollView`: per bar (prefix `v` or `h`) `Value`, `Min`, `Max`, `Page`, `Visible`, and the thumb's screen rect `x`, `y`, `w`, `h` (e.g. `vValue`, `vx`). Lets a test aim a scrollbar drag and check the position |
+| `{"cmd":"caret","name":"cppEditorText"}` | For a `TextControl`: the caret's `line` and `column` (1-based) and `offset` |
 | `{"cmd":"describe","name":"filterInput"}` | `type` and `properties`: every reflected property of the view that has a plain value (bool, number, string), by name. Works for any control newui reflects, with no per-control code |
 | `{"cmd":"get","name":"filterInput","property":"text"}` | `value` of one reflected property |
 | `{"cmd":"tree","name":"explorerTree","limit":50}` | For a `TreeView`: `count` (visible rows) and `rows`, the first `limit` (default 50) as `{"depth":n,"text":"...","expanded":b,"hasChildren":b,"x":..,"y":..,"w":..,"h":..}` (the row's screen rect; the text is the model's `value()` for the row's path when it is a string, else empty) |

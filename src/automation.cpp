@@ -30,6 +30,7 @@
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
 //   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
 //   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
+//   {"cmd":"caret","name":"editor"}              -> line, column (1-based), offset (a TextControl's caret)
 //   {"cmd":"describe","name":"v"}                -> type, properties:{name:value,..} (every reflected property with a plain value)
 //   {"cmd":"get","name":"v","property":"text"}  -> value (one reflected property)
 //   {"cmd":"tree","name":"tree","limit":50}      -> count (visible rows), rows:[{depth,text,expanded,hasChildren,x,y,w,h}] (a TreeView)
@@ -354,6 +355,20 @@ std::string treeReply(const Request& request) {
     return reply(request, true, "\"count\":" + std::to_string(count) + ",\"rows\":[" + rows + "]");
 }
 
+// A TextControl's caret: 1-based line and column, and the offset it is at.
+std::string caretReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    auto* edit = dynamic_cast<TextControl*>(view);
+    if (edit == nullptr) {
+        return failure(request, "'" + request.text("name") + "' is not a TextControl");
+    }
+    const size_t offset = edit->caret().position().offset();
+    const size_t line = edit->model().storage().lineOfOffset(offset);
+    const size_t column = offset - edit->model().storage().lineStart(line);
+    return reply(request, true, "\"line\":" + std::to_string(line + 1) + ",\"column\":" + std::to_string(column + 1) +
+                                ",\"offset\":" + std::to_string(offset));
+}
+
 // One segment of a SegmentedControl: the control's count/selected plus the segment's label and screen rect.
 std::string segmentReply(const Request& request) {
     View* view = findNamed(request.text("name"));
@@ -490,6 +505,9 @@ std::string Automation::handle(const std::string& requestJson) {
     }
     if (cmd == "scrollInfo") {
         return scrollInfoReply(request);
+    }
+    if (cmd == "caret") {
+        return caretReply(request);
     }
     if (cmd == "describe") {
         return describeReply(request);

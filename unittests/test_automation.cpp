@@ -173,3 +173,14 @@ TEST_F(AutomationFixture, DescribeAndGetReadReflectedProperties) {
     EXPECT_TRUE(contains(one, "\"value\":\"autoEditor\"")) << one;
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"get\",\"name\":\"autoEditor\",\"property\":\"nope\"}"), "no reflected property 'nope'"));
 }
+
+TEST_F(AutomationFixture, CaretReportsALineAndColumn) {
+    editor->setText(L"one\ntwo\nthree\n");
+    editor->caret().setPosition(text::TextPosition(5));   // "two": the 2nd character of line 2
+
+    std::string answer = Automation::handle("{\"cmd\":\"caret\",\"name\":\"autoEditor\"}");
+    EXPECT_TRUE(contains(answer, "\"line\":2")) << answer;
+    EXPECT_TRUE(contains(answer, "\"column\":2")) << answer;
+    EXPECT_TRUE(contains(answer, "\"offset\":5")) << answer;
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"caret\",\"name\":\"autoRoot\"}"), "is not a TextControl"));
+}
