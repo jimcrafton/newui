@@ -686,3 +686,15 @@ TEST(UIColorManagerTest, TheHostCanOverrideTheWindowsLightDarkSetting) {
     newui::UIColorManager::setDarkModeOverride(std::nullopt);
     EXPECT_EQ(newui::UIColorManager::isDarkMode(), system) << "no override: the Windows setting again";
 }
+
+TEST(UIColorManagerTest, TheHostCanGiveARolesColor) {
+    const newui::Color computed = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground);
+    const newui::Color other = newui::UIColorManager::colorFor(newui::UIColorRole::WindowText);
+
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::ControlBackground, newui::Color(0x181818u, false));
+    EXPECT_EQ(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground), newui::Color(0x181818u, false));
+    EXPECT_EQ(newui::UIColorManager::colorFor(newui::UIColorRole::WindowText), other) << "other roles are left alone";
+
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::ControlBackground, std::nullopt);
+    EXPECT_EQ(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground), computed);
+}

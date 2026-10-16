@@ -83,6 +83,11 @@ namespace newui {
         // host calls RootView::refreshThemes() on each root) follows a later change.
         static void setDarkModeOverride(std::optional<bool> dark);
 
+        // Makes colorFor(role) answer `color` (opaque; its alpha is dropped) whatever the mode - the host's own palette,
+        // for when inverting the light one is not what the host looks like. std::nullopt goes back to the computed
+        // color. Any thread; the same timing as setDarkModeOverride().
+        static void setColorOverride(UIColorRole role, std::optional<Color> color);
+
         // HighlightBackground/HighlightText follow the user's actual
         // Windows accent color (DwmGetColorizationColor(), a real,
         // documented Win32 API - no WinRT needed) rather than a fixed
