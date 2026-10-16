@@ -1,6 +1,7 @@
 #include "newui/automation.h"
 
 #include "newui/controls.h"
+#include "newui/reflection.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
 #include "newui/segmentedcontrol.h"
@@ -17,7 +18,9 @@
 #include <cstdio>
 #include <future>
 #include <mutex>
+#include <any>
 #include <thread>
+#include <typeindex>
 #include <typeinfo>
 
 // Protocol v1: one JSON object per line in, one per line out.
@@ -27,6 +30,9 @@
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
 //   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
 //   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
+//   {"cmd":"describe","name":"v"}                -> type, properties:{name:value,..} (every reflected property with a plain value)
+//   {"cmd":"get","name":"v","property":"text"}  -> value (one reflected property)
+//   {"cmd":"tree","name":"tree","limit":50}      -> count (visible rows), rows:[{"depth":n,"text":".."}] (a TreeView)
 //   {"cmd":"segment","name":"modes","index":1}   -> count, selected, label, x/y/w/h of that segment (a SegmentedControl)
 //   {"cmd":"screenshot","name":"root","path":"C:\\x.bmp"}  -> {"ok":true,"path":".."}  (name = a RootView)
 //   {"cmd":"idle"}                                -> replies once the loop has nothing pending
@@ -235,6 +241,114 @@ std::string scrollInfoReply(const Request& request) {
     return reply(request, true, fields);
 }
 
+// A reflected property value as a JSON literal; empty when its type has no plain form (collections,
+// objects, enums), which callers skip.
+std::string valueToJson(const std::any& value) {
+    if (const bool* v = std::any_cast<bool>(&value)) return *v ? "true" : "false";
+    if (const int* v = std::any_cast<int>(&value)) return std::to_string(*v);
+    if (const unsigned* v = std::any_cast<unsigned>(&value)) return std::to_string(*v);
+    if (const long long* v = std::any_cast<long long>(&value)) return std::to_string(*v);
+    if (const unsigned long long* v = std::any_cast<unsigned long long>(&value)) return std::to_string(*v);
+    if (const std::size_t* v = std::any_cast<std::size_t>(&value)) return std::to_string(*v);
+    if (const float* v = std::any_cast<float>(&value)) return number(*v);
+    if (const double* v = std::any_cast<double>(&value)) return number(*v);
+    if (const std::string* v = std::any_cast<std::string>(&value)) return quote(*v);
+    if (const std::wstring* v = std::any_cast<std::wstring>(&value)) return quote(wideToUtf8(*v));
+    return std::string();
+}
+
+// The reflected class of a view's real (most derived) type, and the pointer its properties read from.
+const reflection::Class* classOf(View& view, void*& instance) {
+    instance = dynamic_cast<void*>(&view);
+    return reflection::classinfo(std::type_index(typeid(view)));
+}
+
+// Every reflected property of a view that has a plain value, and its class name. Reflection is
+// whatever newui registers for the class, so this needs no per-control code.
+std::string describeReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    if (view == nullptr) {
+        return failure(request, "no view named '" + request.text("name") + "'");
+    }
+    void* instance = nullptr;
+    const reflection::Class* clazz = classOf(*view, instance);
+    if (clazz == nullptr) {
+        return failure(request, typeName(*view) + " has no reflection info");
+    }
+    std::vector<const reflection::Property*> properties;
+    clazz->allProperties(properties);
+    std::string fields;
+    for (const reflection::Property* property : properties) {
+        try {
+            std::string json = valueToJson(property->get(instance));
+            if (!json.empty()) {
+                fields += (fields.empty() ? "" : ",") + quote(property->name()) + ":" + json;
+            }
+        } catch (const std::exception&) {
+            // a property that can't be read just isn't listed
+        }
+    }
+    return reply(request, true, "\"type\":" + quote(typeName(*view)) + ",\"properties\":{" + fields + "}");
+}
+
+// One reflected property by name: {"cmd":"get","name":"filterInput","property":"text"}
+std::string getReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    if (view == nullptr) {
+        return failure(request, "no view named '" + request.text("name") + "'");
+    }
+    void* instance = nullptr;
+    const reflection::Class* clazz = classOf(*view, instance);
+    if (clazz == nullptr) {
+        return failure(request, typeName(*view) + " has no reflection info");
+    }
+    std::vector<const reflection::Property*> properties;
+    clazz->allProperties(properties);
+    for (const reflection::Property* property : properties) {
+        if (property->name() != request.text("property")) {
+            continue;
+        }
+        std::string json;
+        try {
+            json = valueToJson(property->get(instance));
+        } catch (const std::exception& error) {
+            return failure(request, std::string("reading it failed: ") + error.what());
+        }
+        if (json.empty()) {
+            return failure(request, "'" + property->name() + "' has no plain value to report");
+        }
+        return reply(request, true, "\"value\":" + json);
+    }
+    return failure(request, typeName(*view) + " has no reflected property '" + request.text("property") + "'");
+}
+
+// A TreeView's visible rows, top to bottom: total count and the first `limit` rows' depth and text
+// (the model's value() for the row's path, when it answers with a string).
+std::string treeReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    auto* tree = dynamic_cast<TreeView*>(view);
+    if (tree == nullptr) {
+        return failure(request, "'" + request.text("name") + "' is not a TreeView");
+    }
+    TreeController& controller = tree->controller();
+    TreeModel* model = controller.model();
+    size_t count = controller.visibleCount();
+    size_t limit = request.hasNumber("limit") ? static_cast<size_t>(request.number("limit")) : 50;
+    std::string rows;
+    for (size_t i = 0; i < count && i < limit; ++i) {
+        const std::vector<std::size_t>& path = controller.pathAt(i);
+        std::string text;
+        if (model != nullptr) {
+            std::any value = model->value(std::any(path));
+            if (const std::string* shown = std::any_cast<std::string>(&value)) {
+                text = *shown;
+            }
+        }
+        rows += (rows.empty() ? "" : ",") + std::string("{\"depth\":") + std::to_string(path.size()) + ",\"text\":" + quote(text) + "}";
+    }
+    return reply(request, true, "\"count\":" + std::to_string(count) + ",\"rows\":[" + rows + "]");
+}
+
 // One segment of a SegmentedControl: the control's count/selected plus the segment's label and screen rect.
 std::string segmentReply(const Request& request) {
     View* view = findNamed(request.text("name"));
@@ -371,6 +485,15 @@ std::string Automation::handle(const std::string& requestJson) {
     }
     if (cmd == "scrollInfo") {
         return scrollInfoReply(request);
+    }
+    if (cmd == "describe") {
+        return describeReply(request);
+    }
+    if (cmd == "get") {
+        return getReply(request);
+    }
+    if (cmd == "tree") {
+        return treeReply(request);
     }
     if (cmd == "segment") {
         return segmentReply(request);

@@ -10,6 +10,8 @@
 
 using namespace newui;
 
+extern void registerReflectionData();
+
 namespace {
 
 // A headless RootView (no HWND) holding one named TextControl, as the other view tests do.
@@ -139,4 +141,33 @@ TEST_F(AutomationFixture, SegmentReportsALabelAndTheSelectionAndScreenRect) {
 
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"segment\",\"name\":\"autoModes\",\"index\":9}"), "out of range"));
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"segment\",\"name\":\"autoEditor\",\"index\":0}"), "is not a SegmentedControl"));
+}
+
+TEST_F(AutomationFixture, TreeListsTheVisibleRowsWithTheirText) {
+    auto* tree = new TreeView();
+    tree->setName("autoTree");
+    tree->setBounds(Rect(0, 260, 200, 100));
+    root->addChild(tree);
+    auto model = std::make_unique<StringTreeModel>();
+    model->addItem("alpha");
+    model->addItem("beta");
+    tree->controller().setModel(std::move(model));
+
+    std::string answer = Automation::handle("{\"cmd\":\"tree\",\"name\":\"autoTree\"}");
+    EXPECT_TRUE(contains(answer, "\"count\":2")) << answer;
+    EXPECT_TRUE(contains(answer, "\"text\":\"alpha\"")) << answer;
+    EXPECT_TRUE(contains(answer, "\"text\":\"beta\"")) << answer;
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"tree\",\"name\":\"autoEditor\"}"), "is not a TreeView"));
+}
+
+TEST_F(AutomationFixture, DescribeAndGetReadReflectedProperties) {
+    registerReflectionData();   // idempotent; reflection lookups find nothing without it
+    std::string described = Automation::handle("{\"cmd\":\"describe\",\"name\":\"autoEditor\"}");
+    EXPECT_TRUE(contains(described, "\"ok\":true")) << described;
+    EXPECT_TRUE(contains(described, "\"type\":\"TextControl\"")) << described;
+    EXPECT_TRUE(contains(described, "\"name\":\"autoEditor\"")) << described;
+
+    std::string one = Automation::handle("{\"cmd\":\"get\",\"name\":\"autoEditor\",\"property\":\"name\"}");
+    EXPECT_TRUE(contains(one, "\"value\":\"autoEditor\"")) << one;
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"get\",\"name\":\"autoEditor\",\"property\":\"nope\"}"), "no reflected property 'nope'"));
 }
