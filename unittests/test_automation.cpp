@@ -108,3 +108,17 @@ TEST(AutomationServer, AnswersRequestsOverTheNamedPipe) {
     loopThread.loop->quit();
     loopThread.thread.join();
 }
+
+TEST_F(AutomationFixture, ScrollInfoReportsABarsStateAndThumb) {
+    auto* scroll = new ScrollView();
+    scroll->setName("autoScroll");
+    scroll->setBounds(Rect(0, 120, 200, 100));
+    root->addChild(scroll);
+
+    std::string answer = Automation::handle("{\"cmd\":\"scrollInfo\",\"name\":\"autoScroll\"}");
+    EXPECT_TRUE(contains(answer, "\"ok\":true")) << answer;
+    EXPECT_TRUE(contains(answer, "\"vValue\":0.00")) << answer;
+    EXPECT_TRUE(contains(answer, "\"vh\":")) << answer;
+
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"scrollInfo\",\"name\":\"autoEditor\"}"), "is not a ScrollView"));
+}

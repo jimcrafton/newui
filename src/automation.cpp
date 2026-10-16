@@ -25,6 +25,7 @@
 //       x/y/w/h are screen pixels of the view's whole bounds, ready for SendInput.
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
 //   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
+//   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
 //   {"cmd":"screenshot","name":"root","path":"C:\\x.bmp"}  -> {"ok":true,"path":".."}  (name = a RootView)
 //   {"cmd":"idle"}                                -> replies once the loop has nothing pending
 // Failure: {"id":..,"ok":false,"error":".."}. "id" is echoed when given.
@@ -205,6 +206,33 @@ std::string getTextReply(const Request& request) {
     return failure(request, "'" + request.text("name") + "' (" + typeName(*view) + ") has no text to read");
 }
 
+// A ScrollView's bars as flat fields: <prefix>Value/Min/Max/Page and the thumb's screen rect.
+std::string barFields(const char* prefix, const ScrollBar& bar) {
+    Rect thumb = bar.localToScreen(bar.thumbBounds());
+    std::string p = prefix;
+    return "\"" + p + "Value\":" + number(bar.value()) + ",\"" + p + "Min\":" + number(bar.minValue()) +
+        ",\"" + p + "Max\":" + number(bar.maxValue()) + ",\"" + p + "Page\":" + number(bar.pageSize()) +
+        ",\"" + p + "x\":" + number(thumb.left()) + ",\"" + p + "y\":" + number(thumb.top()) +
+        ",\"" + p + "w\":" + number(thumb.width()) + ",\"" + p + "h\":" + number(thumb.height()) +
+        ",\"" + p + "Visible\":" + (bar.isVisible() ? "true" : "false");
+}
+
+std::string scrollInfoReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    auto* scroll = dynamic_cast<ScrollView*>(view);
+    if (scroll == nullptr) {
+        return failure(request, "'" + request.text("name") + "' is not a ScrollView");
+    }
+    std::string fields;
+    if (scroll->vBar() != nullptr) {
+        fields += barFields("v", *scroll->vBar());
+    }
+    if (scroll->hBar() != nullptr) {
+        fields += (fields.empty() ? "" : ",") + barFields("h", *scroll->hBar());
+    }
+    return reply(request, true, fields);
+}
+
 std::string screenshotReply(const Request& request) {
     View* view = findNamed(request.text("name"));
     auto* root = dynamic_cast<RootView*>(view);
@@ -318,6 +346,9 @@ std::string Automation::handle(const std::string& requestJson) {
     }
     if (cmd == "getText") {
         return getTextReply(request);
+    }
+    if (cmd == "scrollInfo") {
+        return scrollInfoReply(request);
     }
     if (cmd == "screenshot") {
         return screenshotReply(request);
