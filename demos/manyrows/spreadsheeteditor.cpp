@@ -166,6 +166,126 @@ namespace manyrows {
         return true;
     }
 
+    void SpreadsheetEditor::addEdit(std::vector<CellEdit>& edits, std::size_t row, std::size_t column, const std::string& text) const {
+        if (model_->cellText(row, column) == text) {
+            return;
+        }
+        CellEdit edit;
+        edit.row = row;
+        edit.column = column;
+        edit.before = model_->editAt(row, column);
+        edit.after = text;
+        edits.push_back(std::move(edit));
+    }
+
+    std::string SpreadsheetEditor::rangeName(const newui::CellRange& range) {
+        std::string name = cellName(range.firstRow, range.firstColumn);
+        if (range.rowCount() * range.columnCount() > 1) {
+            name += ":" + cellName(range.lastRow, range.lastColumn);
+        }
+        return name;
+    }
+
+    SpreadsheetEditor::PasteOutcome SpreadsheetEditor::paste(
+        const newui::CellRange& target, const std::vector<std::vector<std::string>>& cells, bool typed) {
+        PasteOutcome outcome;
+        std::size_t width = 0;
+        for (const std::vector<std::string>& row : cells) {
+            width = row.size() > width ? row.size() : width;
+        }
+        if (cells.empty() || width == 0) {
+            outcome.error = "Nothing to paste";
+            return outcome;
+        }
+        std::size_t rows = model_->rowCount();
+        std::size_t columns = model_->columnCount();
+        if (target.firstRow >= rows || target.firstColumn >= columns) {
+            outcome.error = "Nothing to paste there";
+            return outcome;
+        }
+        // One cell pasted over a bigger selection fills the selection; otherwise the clipboard's own shape rules.
+        bool single = cells.size() == 1 && width == 1;
+        bool fillTarget = single && target.rowCount() * target.columnCount() > 1;
+        std::size_t high = fillTarget ? target.rowCount() : cells.size();
+        std::size_t wide = fillTarget ? target.columnCount() : width;
+        if (double(high) * double(wide) > double(kMaxRangeCells)) {
+            outcome.error = "Too much to paste at once (limit " + std::to_string(kMaxRangeCells) + " cells)";
+            return outcome;
+        }
+        std::size_t lastRow = target.firstRow + high - 1;
+        std::size_t lastColumn = target.firstColumn + wide - 1;
+        if (lastRow >= rows) {
+            lastRow = rows - 1;
+            outcome.clipped = true;
+        }
+        if (lastColumn >= columns) {
+            lastColumn = columns - 1;
+            outcome.clipped = true;
+        }
+        std::vector<CellEdit> edits;
+        for (std::size_t r = target.firstRow; r <= lastRow; ++r) {
+            for (std::size_t c = target.firstColumn; c <= lastColumn; ++c) {
+                std::size_t i = fillTarget ? 0 : r - target.firstRow;
+                std::size_t j = fillTarget ? 0 : c - target.firstColumn;
+                std::string text = j < cells[i].size() ? cells[i][j] : std::string();
+                if (typed) {
+                    std::string error = validate(c, text);
+                    if (!error.empty()) {
+                        outcome.error = cellName(r, c) + ": " + error;
+                        return outcome;
+                    }
+                }
+                addEdit(edits, r, c, text);
+            }
+        }
+        outcome.block.firstRow = target.firstRow;
+        outcome.block.firstColumn = target.firstColumn;
+        outcome.block.lastRow = lastRow;
+        outcome.block.lastColumn = lastColumn;
+        outcome.changed = edits.size();
+        if (!edits.empty()) {
+            push("Paste " + rangeName(outcome.block), std::move(edits));
+        }
+        return outcome;
+    }
+
+    bool SpreadsheetEditor::fill(const newui::CellRange& range, bool down) {
+        if (double(range.rowCount()) * double(range.columnCount()) > double(kMaxRangeCells)) {
+            return false;
+        }
+        newui::CellRange area = range;   // the cells that get overwritten
+        std::size_t source = down ? range.firstRow : range.firstColumn;   // the row / column copied from
+        if (down ? range.rowCount() == 1 : range.columnCount() == 1) {
+            if (source == 0) {
+                return false;   // nothing above / to the left to copy
+            }
+            --source;
+        } else if (down) {
+            ++area.firstRow;
+        } else {
+            ++area.firstColumn;
+        }
+        std::vector<CellEdit> edits;
+        for (std::size_t r = area.firstRow; r <= area.lastRow; ++r) {
+            for (std::size_t c = area.firstColumn; c <= area.lastColumn; ++c) {
+                std::string text = down ? model_->cellText(source, c) : model_->cellText(r, source);
+                // Filling right carries text across columns; the generated table's typed columns only take their own kind.
+                if (!down && model_->isGenerated() && !validate(c, text).empty()) {
+                    continue;
+                }
+                addEdit(edits, r, c, text);
+            }
+        }
+        if (edits.empty()) {
+            return false;
+        }
+        push(std::string(down ? "Fill down " : "Fill right ") + rangeName(area), std::move(edits));
+        return true;
+    }
+
+    bool SpreadsheetEditor::fillDown(const newui::CellRange& range) { return fill(range, true); }
+    bool SpreadsheetEditor::fillRight(const newui::CellRange& range) { return fill(range, false); }
+
     void SpreadsheetEditor::replay(bool undoing) {
         if (undoing ? !stack_.canUndo() : !stack_.canRedo()) {
             return;
