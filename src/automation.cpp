@@ -377,9 +377,13 @@ std::string menuBarReply(const Request& request) {
     return reply(request, true, "\"menus\":[" + out + "]");
 }
 
+// The UI loop's thread (set by start()); 0 when no server runs, then the calling thread is the one asked about.
+std::atomic<DWORD> uiThreadId{0};
+
 HWND openPopupMenuWindow() {
     struct Search { HWND found = nullptr; } search;
-    ::EnumThreadWindows(::GetCurrentThreadId(), [](HWND window, LPARAM param) -> BOOL {
+    const DWORD thread = uiThreadId != 0 ? uiThreadId.load() : ::GetCurrentThreadId();
+    ::EnumThreadWindows(thread, [](HWND window, LPARAM param) -> BOOL {
         char className[16] = {};
         ::GetClassNameA(window, className, sizeof(className));
         if (std::string(className) == "#32768" && ::IsWindowVisible(window)) {
@@ -549,6 +553,11 @@ std::string runOnLoop(RunLoop& loop, const std::string& line) {
     auto promise = std::make_shared<std::promise<std::string>>();
     std::future<std::string> future = promise->get_future();
     Request request(line);
+    if (request.valid && request.text("cmd") == "popupMenu") {
+        // A native menu runs its own modal loop on the UI thread, which never picks up posted work, so this one
+        // is answered right here (a sent message to the menu window is still dispatched by that loop).
+        return Automation::handle(line);
+    }
     if (request.valid && request.text("cmd") == "idle") {
         loop.postIdle([promise, line]() {
             promise->set_value(Automation::handle(line));
@@ -632,6 +641,7 @@ bool Automation::start(const std::string& pipeName, RunLoop& loop) {
     if (running.exchange(true)) {
         return false;
     }
+    uiThreadId = static_cast<DWORD>(loop.threadId());
     std::wstring path = utf8ToWide(kPipePrefix + pipeName);
     // Only the account that runs the app may connect, and never over the network.
     SecurityDescriptor access;
