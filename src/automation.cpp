@@ -24,7 +24,7 @@
 //   {"cmd":"findView","name":"filterEdit"}        -> {"ok":true,"x":..,"y":..,"w":..,"h":..,"visible":true}
 //       x/y/w/h are screen pixels of the view's whole bounds, ready for SendInput.
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
-//   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}
+//   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
 //   {"cmd":"screenshot","name":"root","path":"C:\\x.bmp"}  -> {"ok":true,"path":".."}  (name = a RootView)
 //   {"cmd":"idle"}                                -> replies once the loop has nothing pending
 // Failure: {"id":..,"ok":false,"error":".."}. "id" is echoed when given.
@@ -198,6 +198,9 @@ std::string getTextReply(const Request& request) {
     }
     if (auto* edit = dynamic_cast<TextControl*>(view)) {
         return reply(request, true, "\"text\":" + quote(wideToUtf8(edit->text())));
+    }
+    if (auto* field = dynamic_cast<TextField*>(view)) {
+        return reply(request, true, "\"text\":" + quote(wideToUtf8(field->text())));
     }
     return failure(request, "'" + request.text("name") + "' (" + typeName(*view) + ") has no text to read");
 }
