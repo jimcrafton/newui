@@ -1,4 +1,5 @@
 #include "newui/color.h"
+#include "newui/uicolormanager.h"
 
 #include <gtest/gtest.h>
 
@@ -668,4 +669,20 @@ TEST(Color, FromSystemColorProducesValidComponentsForEveryEnumerator) {
         EXPECT_LE(c.b, 1.0f);
         EXPECT_FLOAT_EQ(c.a, 1.0f);
     }
+}
+
+TEST(UIColorManagerTest, TheHostCanOverrideTheWindowsLightDarkSetting) {
+    const bool system = newui::UIColorManager::isDarkMode();
+
+    newui::UIColorManager::setDarkModeOverride(true);
+    EXPECT_TRUE(newui::UIColorManager::isDarkMode());
+    const newui::Color dark = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground);
+
+    newui::UIColorManager::setDarkModeOverride(false);
+    EXPECT_FALSE(newui::UIColorManager::isDarkMode());
+    const newui::Color light = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground);
+    EXPECT_FALSE(dark == light) << "a role's color follows the forced mode";
+
+    newui::UIColorManager::setDarkModeOverride(std::nullopt);
+    EXPECT_EQ(newui::UIColorManager::isDarkMode(), system) << "no override: the Windows setting again";
 }

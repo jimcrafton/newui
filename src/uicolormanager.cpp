@@ -1,6 +1,8 @@
 #include "newui/uicolormanager.h"
 #include "newui/themedata.h"
 
+#include <atomic>
+
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <vssym32.h>
@@ -158,7 +160,22 @@ namespace newui {
 		return instance;
 	}
 
+	namespace {
+		// -1: follow Windows; 0 light; 1 dark.
+		std::atomic<int> g_darkModeOverride{ -1 };
+	}
+
+	void UIColorManager::setDarkModeOverride(std::optional<bool> dark) {
+		g_darkModeOverride.store(dark.has_value() ? (*dark ? 1 : 0) : -1);
+		// What loads its palette from the mode (Themes/dark.theme or light.theme) follows at once.
+		ThemeData::instance().reloadForCurrentMode();
+	}
+
 	bool UIColorManager::isDarkMode() {
+		const int forced = g_darkModeOverride.load();
+		if (forced >= 0) {
+			return forced == 1;
+		}
 		DWORD value = 1;
 		DWORD size = sizeof(value);
 		LONG status = ::RegGetValueW(

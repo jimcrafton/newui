@@ -3,6 +3,8 @@
 #include <newui/newui.h>
 #include <newui/color.h>
 
+#include <optional>
+
 namespace newui {
 
     // Semantic color roles this toolkit's own app-drawn UI (panel
@@ -73,6 +75,13 @@ namespace newui {
         // key/value, or 1, = light - matches Microsoft's own default for
         // a system that's never had the setting touched.
         static bool isDarkMode();
+
+        // Makes isDarkMode() answer `dark` instead of reading the Windows setting, for a host that has a theme of
+        // its own (an IDE hosting this toolkit in a pane follows the IDE's theme, not the OS's). std::nullopt goes
+        // back to the Windows setting. Any thread. Set it before the first window is built: colors that views take at
+        // construction are not revisited, only what is asked for while painting (and the themed chrome, once the
+        // host calls RootView::refreshThemes() on each root) follows a later change.
+        static void setDarkModeOverride(std::optional<bool> dark);
 
         // HighlightBackground/HighlightText follow the user's actual
         // Windows accent color (DwmGetColorizationColor(), a real,
