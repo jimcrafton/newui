@@ -39,6 +39,38 @@ namespace manyrows {
         return letters + std::to_string(row + 1);
     }
 
+    std::optional<SpreadsheetEditor::CellRef> SpreadsheetEditor::parseCellRef(const std::string& typed) {
+        std::string text = trimmed(typed);
+        std::size_t i = 0;
+        std::size_t letters = 0;
+        std::size_t column = 0;
+        while (i < text.size() && std::isalpha((unsigned char)text[i])) {
+            column = column * 26 + std::size_t(std::toupper((unsigned char)text[i]) - 'A' + 1);
+            ++i;
+            if (++letters > 4) {
+                return std::nullopt;
+            }
+        }
+        std::size_t digitsAt = i;
+        std::size_t row = 0;
+        while (i < text.size() && std::isdigit((unsigned char)text[i])) {
+            row = row * 10 + std::size_t(text[i] - '0');
+            ++i;
+            if (i - digitsAt > 9) {
+                return std::nullopt;
+            }
+        }
+        if (i != text.size() || i == digitsAt || row == 0) {
+            return std::nullopt;
+        }
+        CellRef ref;
+        ref.row = row - 1;
+        if (letters > 0) {
+            ref.column = column - 1;
+        }
+        return ref;
+    }
+
     std::string SpreadsheetEditor::validate(std::size_t column, std::string& text) {
         text = trimmed(text);
         if (text.empty()) {
@@ -93,26 +125,18 @@ namespace manyrows {
         return std::string();
     }
 
+    // `edits` are keyed by STORED row (see ManyRowsModel), so a step stays valid however the table is re-sorted.
     void SpreadsheetEditor::push(std::string description, std::vector<CellEdit> edits) {
-        newui::CellRange block;
-        block.firstRow = block.lastRow = edits.front().row;
-        block.firstColumn = block.lastColumn = edits.front().column;
-        for (const CellEdit& edit : edits) {
-            block.firstRow = edit.row < block.firstRow ? edit.row : block.firstRow;
-            block.lastRow = edit.row > block.lastRow ? edit.row : block.lastRow;
-            block.firstColumn = edit.column < block.firstColumn ? edit.column : block.firstColumn;
-            block.lastColumn = edit.column > block.lastColumn ? edit.column : block.lastColumn;
-        }
         auto shared = std::make_shared<std::vector<CellEdit>>(std::move(edits));
         newui::UndoableAction action;
         action.description = std::move(description);
-        action.doIt = [this, shared, block]() {
+        action.doIt = [this, shared]() {
             model_->applyEdits(*shared, true);
-            lastBlock_ = block;
+            lastEdits_ = shared;
         };
-        action.undoIt = [this, shared, block]() {
+        action.undoIt = [this, shared]() {
             model_->applyEdits(*shared, false);
-            lastBlock_ = block;
+            lastEdits_ = shared;
         };
         stack_.push(std::move(action));   // also drops every redo step
         if (saved_.has_value() && *saved_ > position_) {
@@ -125,11 +149,11 @@ namespace manyrows {
     }
 
     bool SpreadsheetEditor::setCell(std::size_t row, std::size_t column, const std::string& text) {
-        if (model_->cellText(row, column) == text) {
+        if (row >= model_->rowCount() || column >= model_->columnCount() || model_->cellText(row, column) == text) {
             return false;
         }
         CellEdit edit;
-        edit.row = row;
+        edit.row = model_->sourceRow(row);
         edit.column = column;
         edit.before = model_->editAt(row, column);
         edit.after = text;
@@ -148,7 +172,7 @@ namespace manyrows {
                     continue;
                 }
                 CellEdit edit;
-                edit.row = r;
+                edit.row = model_->sourceRow(r);
                 edit.column = c;
                 edit.before = model_->editAt(r, c);
                 edit.after = std::string();
@@ -167,11 +191,11 @@ namespace manyrows {
     }
 
     void SpreadsheetEditor::addEdit(std::vector<CellEdit>& edits, std::size_t row, std::size_t column, const std::string& text) const {
-        if (model_->cellText(row, column) == text) {
+        if (row >= model_->rowCount() || model_->cellText(row, column) == text) {
             return;
         }
         CellEdit edit;
-        edit.row = row;
+        edit.row = model_->sourceRow(row);
         edit.column = column;
         edit.before = model_->editAt(row, column);
         edit.after = text;
@@ -297,8 +321,28 @@ namespace manyrows {
             stack_.redo();
             ++position_;
         }
-        if (onReplayed) {
-            onReplayed(lastBlock_);
+        if (onReplayed && lastEdits_ != nullptr) {
+            // Where the step's cells are on screen NOW; rows the filter hides cannot be selected.
+            std::optional<newui::CellRange> block;
+            for (const CellEdit& edit : *lastEdits_) {
+                std::optional<std::size_t> shown = model_->displayRowOf(edit.row);
+                if (!shown.has_value()) {
+                    continue;
+                }
+                if (!block.has_value()) {
+                    block = newui::CellRange();
+                    block->firstRow = block->lastRow = *shown;
+                    block->firstColumn = block->lastColumn = edit.column;
+                    continue;
+                }
+                block->firstRow = *shown < block->firstRow ? *shown : block->firstRow;
+                block->lastRow = *shown > block->lastRow ? *shown : block->lastRow;
+                block->firstColumn = edit.column < block->firstColumn ? edit.column : block->firstColumn;
+                block->lastColumn = edit.column > block->lastColumn ? edit.column : block->lastColumn;
+            }
+            if (block.has_value()) {
+                onReplayed(*block);
+            }
         }
         if (onHistoryChanged) {
             onHistoryChanged();

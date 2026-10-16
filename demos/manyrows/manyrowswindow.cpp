@@ -38,6 +38,10 @@ namespace manyrows {
         spreadsheet_->setFormulaBar(find<newui::TextField>(frame, "nameBox"), find<newui::TextField>(frame, "formulaField"));
         spreadsheet_->setEditMenu(menuBar_);
         spreadsheet_->setViewMenu(menuBar_);
+        spreadsheet_->setDataMenu(menuBar_);
+        filterStrip_ = std::make_unique<FilterStrip>(frame, *spreadsheet_, *model_);
+        bindMenuItem(menuBar_, "Data", "Filter...", [this](newui::MenuItem&) { filterStrip_->show(); });
+        toolbar_ = std::make_unique<ManyRowsToolbar>(frame, *spreadsheet_, [this]() { filterStrip_->show(); });
 
         // The file behind them, and how the two meet.
         document_ = std::make_unique<ManyRowsDocument>(*model_);
@@ -49,9 +53,16 @@ namespace manyrows {
         // Any change to the cells (typing, clearing, undo, redo) makes the file modified; undoing back to the
         // saved step makes it clean again.
         spreadsheet_->onEdited += [this](SpreadsheetController& sheet) {
-            if (sheet.editor().isAtSavedState()) {
+            if (sheet.editor().isAtSavedState() && !model_->isSorted()) {
                 document_->markUnmodified();
             } else {
+                document_->markModified();
+            }
+            return newui::SyncReturn::Handled;
+        };
+        // A save keeps the sort order, so sorting makes the document modified (a filter is only a view).
+        spreadsheet_->onViewChanged += [this](SpreadsheetController&) {
+            if (model_->isSorted()) {
                 document_->markModified();
             }
             return newui::SyncReturn::Handled;
@@ -66,6 +77,7 @@ namespace manyrows {
         // New content: the old undo history, selection and formula bar no longer apply.
         files_->onDocumentReplaced += [this](ManyRowsController&) {
             spreadsheet_->documentReplaced();
+            filterStrip_->refresh();   // the new file has other columns
             return newui::SyncReturn::Handled;
         };
         files_->onStatus += [this](ManyRowsController&, std::string text) {
@@ -82,6 +94,7 @@ namespace manyrows {
         table_->onKeyDown += [this](newui::View&, std::uint32_t keyMask, int, int, std::uint32_t vkey) {
             bool ctrl = (keyMask & newui::kmCtrl) != 0;
             bool shift = (keyMask & newui::kmShift) != 0;
+            if (ctrl && vkey == newui::vkLetterL) { filterStrip_->show(); return newui::SyncReturn::Handled; }
             if (ctrl && vkey == newui::vkLetterN) { files_->newDocument(); return newui::SyncReturn::Handled; }
             if (ctrl && vkey == newui::vkLetterO) { files_->open(); return newui::SyncReturn::Handled; }
             if (ctrl && vkey == newui::vkLetterS) {

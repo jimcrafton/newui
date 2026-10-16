@@ -1,5 +1,8 @@
 #pragma once
 
+#include "filterrule.h"
+#include "rowindex.h"
+
 #include <newui/models.h>
 
 #include <cstdint>
@@ -36,6 +39,13 @@ namespace manyrows {
     // row), so a million-row file stays in the hundreds of MB at most. Column types are inferred from the
     // first rows (all-numeric columns right-align).
     //
+    // SORT AND FILTER are a view over the stored rows (see RowIndex): the cells never move. Every row number the
+    // table, the editor and the clipboard use - rowCount(), cellText(), editAt() - is a DISPLAY row; the stored
+    // row behind it comes from sourceRow(). Edits (CellEdit::row) and the overlay are keyed by STORED row, so
+    // sorting or filtering never loses or misplaces an edit, and undo steps stay valid across re-sorting. A
+    // sort or filter is not re-applied when a cell is edited (what a spreadsheet does) - sort or filter again.
+    // A saved file keeps every row, in sort order (orderedSourceRow()), whatever the filter hides.
+    //
     // Edits live in a sparse overlay (only the cells the user changed are remembered); a cell not in the
     // overlay shows its generated / loaded value. Values are handed to TableView as strings - the paint path
     // only ever asks for the rows on screen.
@@ -55,9 +65,13 @@ namespace manyrows {
         // Starts as the generated table.
         explicit ManyRowsModel(std::size_t rows = 1000000, std::uint64_t seed = 20260101);
 
-        std::size_t rowCount() const override { return rows_; }
+        // Rows on screen: all of them, or only those passing the filter.
+        std::size_t rowCount() const override { return index_.rowCount(rows_); }
         std::size_t columnCount() const override { return columns_; }
+        // The title the table paints: titleText() plus an arrow on the sorted column.
         std::string columnTitle(std::size_t column) const override;
+        // The title itself, without the sort arrow - what a saved file's header row holds.
+        std::string titleText(std::size_t column) const;
 
         // Key is a std::pair<std::size_t, std::size_t> (row, column) - see TableModel::valueAt().
         // Returns the cell text (a std::string), or an empty std::any for a bad key.
@@ -67,8 +81,40 @@ namespace manyrows {
         // const char*; anything else is ignored. Out-of-range cells throw std::runtime_error.
         void setValue(const std::any& newValue, const std::any& key = std::any()) override;
 
-        // Text of a cell without the std::any boxing - the hot path for anything iterating cells.
+        // Text of a cell (by DISPLAY row) without the std::any boxing - the hot path for anything iterating cells.
         std::string cellText(std::size_t row, std::size_t column) const;
+        // The same by STORED row (what sorting, filtering and saving read).
+        std::string sourceText(std::size_t sourceRow, std::size_t column) const;
+
+        // ---- sort and filter ----
+        struct SortKey {
+            std::size_t column = 0;
+            bool ascending = true;
+        };
+        // Stored rows, and the stored row shown at a display row / the display row of a stored row (nullopt:
+        // hidden by the filter).
+        std::size_t sourceRowCount() const { return rows_; }
+        std::size_t sourceRow(std::size_t displayRow) const { return index_.sourceRow(displayRow); }
+        std::optional<std::size_t> displayRowOf(std::size_t sourceRow) const { return index_.displayRowOf(sourceRow, rows_); }
+        // The i-th stored row in sort order, ignoring the filter - the order a file is written in.
+        std::size_t orderedSourceRow(std::size_t i) const { return index_.orderedSourceRow(i); }
+
+        // Stable sort of the current order by one column (blanks last either way); ties keep their previous order,
+        // so sorting by B and then by A gives A, then B. Re-applies the filter. Fires onChanged once.
+        // Throws std::runtime_error for a column past the last.
+        void sortBy(std::size_t column, bool ascending);
+        void clearSort();
+        const std::optional<SortKey>& sortKey() const { return sortKey_; }
+        bool isSorted() const { return sortKey_.has_value(); }
+
+        // Shows only the rows passing ALL the rules (an empty list shows everything). Fires onChanged once.
+        // Throws std::runtime_error for a rule on a column past the last (nothing changes).
+        void setFilters(std::vector<FilterRule> rules);
+        void clearFilters() { setFilters({}); }
+        const std::vector<FilterRule>& filters() const { return filters_; }
+        bool isFiltered() const { return !filters_.empty(); }
+        // Both back to showing every row in stored order, without firing onChanged (a load calls this).
+        void resetView();
 
         // The generated schema's column types (what SpreadsheetEditor validates against).
         static ColumnType columnType(std::size_t column);
@@ -124,6 +170,11 @@ namespace manyrows {
         std::size_t columns_ = kColumnCount;
         std::uint64_t seed_;
         std::unordered_map<std::uint64_t, std::string> edits_;
+
+        RowIndex index_;
+        std::optional<SortKey> sortKey_;
+        std::vector<FilterRule> filters_;
+        void applyFilters();
 
         // Loaded content (empty while generated_).
         std::string arena_;

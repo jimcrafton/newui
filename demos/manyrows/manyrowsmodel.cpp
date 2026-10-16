@@ -1,5 +1,7 @@
 #include "manyrowsmodel.h"
 
+#include "tablequery.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
@@ -24,11 +26,25 @@ namespace manyrows {
 
     ManyRowsModel::ManyRowsModel(std::size_t rows, std::uint64_t seed) : rows_(rows), seed_(seed) {}
 
-    std::string ManyRowsModel::columnTitle(std::size_t column) const {
+    std::string ManyRowsModel::titleText(std::size_t column) const {
         if (generated_) {
             return column < kColumnCount ? kTitles[column] : std::string();
         }
         return column < titles_.size() ? titles_[column] : std::string();
+    }
+
+    std::string ManyRowsModel::columnTitle(std::size_t column) const {
+        std::string title = titleText(column);
+        if (sortKey_.has_value() && sortKey_->column == column) {
+            if (title.empty()) {
+                // An untitled column is painted A, B, C... by the view; the arrow needs the letters too.
+                for (std::size_t n = column + 1; n > 0; n = (n - 1) / 26) {
+                    title.insert(title.begin(), char('A' + (n - 1) % 26));
+                }
+            }
+            title += sortKey_->ascending ? " \xE2\x96\xB2" : " \xE2\x96\xBC";   // black up / down pointing triangle
+        }
+        return title;
     }
 
     ManyRowsModel::ColumnType ManyRowsModel::columnType(std::size_t column) {
@@ -66,6 +82,7 @@ namespace manyrows {
         rows_ = 0;
         columns_ = columns;
         edits_.clear();
+        resetView();
         arena_.clear();
         cellEnd_.clear();
         rowFirst_.assign(1, 0);
@@ -133,6 +150,7 @@ namespace manyrows {
         rows_ = staged.rows_;
         columns_ = staged.columns_;
         edits_.clear();
+        resetView();
         arena_.swap(staged.arena_);
         rowFirst_.swap(staged.rowFirst_);
         cellEnd_.swap(staged.cellEnd_);
@@ -156,6 +174,7 @@ namespace manyrows {
         rows_ = rows;
         columns_ = kColumnCount;
         edits_.clear();
+        resetView();
         arena_.clear();
         arena_.shrink_to_fit();
         cellEnd_.clear();
@@ -222,6 +241,13 @@ namespace manyrows {
     }
 
     std::string ManyRowsModel::cellText(std::size_t row, std::size_t column) const {
+        if (row >= rowCount() || column >= columns_) {
+            return std::string();
+        }
+        return sourceText(index_.sourceRow(row), column);
+    }
+
+    std::string ManyRowsModel::sourceText(std::size_t row, std::size_t column) const {
         if (row >= rows_ || column >= columns_) {
             return std::string();
         }
@@ -235,10 +261,10 @@ namespace manyrows {
     }
 
     std::optional<std::string> ManyRowsModel::editAt(std::size_t row, std::size_t column) const {
-        if (edits_.empty()) {
+        if (edits_.empty() || row >= rowCount()) {
             return std::nullopt;
         }
-        auto found = edits_.find(cellKey(row, column));
+        auto found = edits_.find(cellKey(index_.sourceRow(row), column));
         if (found == edits_.end()) {
             return std::nullopt;
         }
@@ -275,7 +301,7 @@ namespace manyrows {
         if (cell == nullptr) {
             return;
         }
-        if (cell->first >= rows_ || cell->second >= columns_) {
+        if (cell->first >= rowCount() || cell->second >= columns_) {
             throw std::runtime_error("ManyRowsModel::setValue: cell out of range");
         }
         std::string text;
@@ -286,8 +312,56 @@ namespace manyrows {
         } else {
             return;
         }
-        edits_[cellKey(cell->first, cell->second)] = std::move(text);
+        edits_[cellKey(index_.sourceRow(cell->first), cell->second)] = std::move(text);
         onChanged(*this);
+    }
+
+    // ---- sort and filter ----
+
+    void ManyRowsModel::resetView() {
+        index_.reset();
+        sortKey_.reset();
+        filters_.clear();
+    }
+
+    void ManyRowsModel::sortBy(std::size_t column, bool ascending) {
+        if (column >= columns_) {
+            throw std::runtime_error("ManyRowsModel::sortBy: column out of range");
+        }
+        index_.setOrder(TableQuery::sortedOrder(*this, column, ascending));
+        sortKey_ = SortKey{column, ascending};
+        applyFilters();   // the visible rows must follow the new order
+        onChanged(*this);
+    }
+
+    void ManyRowsModel::clearSort() {
+        if (!sortKey_.has_value()) {
+            return;
+        }
+        index_.clearOrder();
+        sortKey_.reset();
+        applyFilters();
+        onChanged(*this);
+    }
+
+    void ManyRowsModel::setFilters(std::vector<FilterRule> rules) {
+        for (const FilterRule& rule : rules) {
+            if (rule.column >= columns_) {
+                throw std::runtime_error("ManyRowsModel::setFilters: column out of range");
+            }
+        }
+        filters_ = std::move(rules);
+        applyFilters();
+        onChanged(*this);
+    }
+
+    // Recomputes the visible rows from filters_ in the current order (no event).
+    void ManyRowsModel::applyFilters() {
+        if (filters_.empty()) {
+            index_.clearView();
+        } else {
+            index_.setView(TableQuery::filteredRows(*this, filters_));
+        }
     }
 
 }

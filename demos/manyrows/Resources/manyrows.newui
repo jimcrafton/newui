@@ -69,6 +69,131 @@
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Reset Render Stats" }
             ]
+          },
+          {
+            type: "MenuItem",
+            text: "Data",
+            children: [
+              { type: "MenuItem", text: "Sort Ascending", shortcutText: "Alt+Up" },
+              { type: "MenuItem", text: "Sort Descending", shortcutText: "Alt+Down" },
+              { type: "MenuItem", text: "Clear Sort" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Filter...", shortcutText: "Ctrl+L" },
+              { type: "MenuItem", text: "Filter by Selected Value", shortcutText: "Ctrl+Shift+F" },
+              { type: "MenuItem", text: "Clear Filters" }
+            ]
+          }
+        ]
+      },
+      {
+        // The main toolbar (mockup/manyrows-mockup.html): icon buttons like the sketch demo's. Every button repeats a menu
+        // command; the lite app has none.
+        type: "SubView",
+        name: "toolbar",
+        visible: true,
+        desiredSize: { type: "Size", width: 0, height: 34 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 3, padding: 3 },
+        childViews: [
+          {
+            type: "ToolbarButton",
+            name: "tbUndo",
+            icon: "icons/undo.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbRedo",
+            icon: "icons/redo.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbCopy",
+            icon: "icons/copy.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbPaste",
+            icon: "icons/paste.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbFillDown",
+            icon: "icons/fill-down.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbSortAsc",
+            text: "A-Z",
+            icon: "icons/sort-asc.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 62, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbSortDesc",
+            text: "Z-A",
+            icon: "icons/sort-desc.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 62, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbFilter",
+            icon: "icons/filter.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbGoTo",
+            text: "Go to",
+            desiredSize: { type: "Size", width: 58, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
           }
         ]
       },
@@ -100,6 +225,105 @@
             type: "TextField",
             name: "formulaField",
             layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          }
+        ]
+      },
+      {
+        // Data > Filter... : build a filter rule by rule. Hidden until asked for; Close hides it, Clear all removes the filter.
+        type: "SubView",
+        name: "filterStrip",
+        visible: false,
+        desiredSize: { type: "Size", width: 0, height: 62 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4, padding: 4 },
+        childViews: [
+          {
+            type: "SubView",
+            name: "filterRuleRow",
+            desiredSize: { type: "Size", width: 0, height: 26 },
+            desiredSizeOverride: true,
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 6 },
+            layoutParams: { type: "FlexLayoutParams", weight: 0 },
+            childViews: [
+              {
+                type: "Label",
+                text: "Show rows where",
+                style: { type: "LabelStyle", text: "Show rows where", textAlignment: "Left" },
+                desiredSize: { type: "Size", width: 110, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "DropDownList",
+                name: "filterColumn",
+                desiredSize: { type: "Size", width: 160, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 },
+                model: { type: "StringListModel", items: ["Column"] },
+                selectedIndex: 0
+              },
+              {
+                type: "DropDownList",
+                name: "filterOp",
+                desiredSize: { type: "Size", width: 150, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 },
+                model: { type: "StringListModel", items: ["="] },
+                selectedIndex: 0
+              },
+              {
+                type: "TextField",
+                name: "filterValue",
+                desiredSize: { type: "Size", width: 170, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterAdd",
+                text: "Add",
+                desiredSize: { type: "Size", width: 70, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterRemoveLast",
+                text: "Remove last",
+                desiredSize: { type: "Size", width: 100, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterClear",
+                text: "Clear all",
+                desiredSize: { type: "Size", width: 80, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "SubView",
+                layoutParams: { type: "FlexLayoutParams", weight: 1 }
+              },
+              {
+                type: "Button",
+                name: "filterClose",
+                text: "Close",
+                desiredSize: { type: "Size", width: 70, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              }
+            ]
+          },
+          {
+            type: "Label",
+            name: "filterSummary",
+            text: "No filter",
+            style: { type: "LabelStyle", text: "No filter", textAlignment: "Left" },
+            desiredSize: { type: "Size", width: 0, height: 20 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
           }
         ]
       },

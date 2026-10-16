@@ -3,6 +3,8 @@
 #include "manyrowscontroller.h"
 #include "manyrowsdocument.h"
 #include "manyrowsmodel.h"
+#include "filterstrip.h"
+#include "manyrowstoolbar.h"
 #include "spreadsheetcontroller.h"
 #include "timedtableview.h"
 
@@ -54,6 +56,8 @@ namespace manyrows {
         TimedTableView* table_ = nullptr;           // owned by the frame's view tree
         ManyRowsModel* model_ = nullptr;            // owned by the table
         std::unique_ptr<SpreadsheetController> spreadsheet_;
+        std::unique_ptr<FilterStrip> filterStrip_;
+        std::unique_ptr<ManyRowsToolbar> toolbar_;
         std::unique_ptr<ManyRowsDocument> document_;
         std::unique_ptr<ManyRowsController> files_;
 

@@ -9,6 +9,8 @@
 #include <newui/rootview.h>
 #include <newui/utils.h>
 
+#include <chrono>
+#include <cstdio>
 #include <stdexcept>
 
 namespace manyrows {
@@ -22,6 +24,7 @@ namespace manyrows {
         editor_.onReplayed = [this](const newui::CellRange& block) { selectBlock(block); };
         editor_.onHistoryChanged = [this]() {
             syncHistoryMenu();
+            onHistoryChanged(*this);
             if (!replacing_) {
                 onEdited(*this);
             }
@@ -43,7 +46,15 @@ namespace manyrows {
         nameBox_ = nameBox;
         formulaField_ = formulaField;
         if (nameBox_ != nullptr) {
-            nameBox_->controller().inputTraits().setReadOnly(true);
+            // The name box is also the Go to box: Enter jumps to what was typed.
+            nameBox_->onReturnPressed += [this](newui::TextField&) {
+                if (goTo(newui::wideToUtf8(nameBox_->text()))) {
+                    focusTable();
+                } else {
+                    syncFormulaBar();   // back to the active cell's name
+                }
+                return newui::SyncReturn::Handled;
+            };
         }
         if (formulaField_ != nullptr) {
             // Enter in the field commits it to the active cell and hands the focus back to the table.
@@ -83,6 +94,14 @@ namespace manyrows {
         bind("Edit Cell", [this]() { table_.beginEdit(); });
         bind("Select All", [this]() { table_.selectAll(); });
         syncHistoryMenu();
+    }
+
+    void SpreadsheetController::setDataMenu(newui::MenuBar* menuBar) {
+        bindMenuItem(menuBar, "Data", "Sort Ascending", [this](newui::MenuItem&) { sortActiveColumn(true); });
+        bindMenuItem(menuBar, "Data", "Sort Descending", [this](newui::MenuItem&) { sortActiveColumn(false); });
+        bindMenuItem(menuBar, "Data", "Clear Sort", [this](newui::MenuItem&) { clearSort(); });
+        bindMenuItem(menuBar, "Data", "Filter by Selected Value", [this](newui::MenuItem&) { filterBySelectedValue(); });
+        bindMenuItem(menuBar, "Data", "Clear Filters", [this](newui::MenuItem&) { clearFilters(); });
     }
 
     void SpreadsheetController::setViewMenu(newui::MenuBar* menuBar) {
@@ -216,6 +235,175 @@ namespace manyrows {
         }
     }
 
+    // ---- sort and filter ----
+
+    namespace {
+        double secondsSince(std::chrono::steady_clock::time_point start) {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        }
+
+        // The column's title, or "column 3" for an untitled table.
+        std::string columnName(const ManyRowsModel& model, std::size_t column) {
+            std::string title = model.titleText(column);
+            return title.empty() ? "column " + std::to_string(column + 1) : title;
+        }
+    }
+
+    std::string SpreadsheetController::viewSummary() const {
+        std::string text;
+        if (model_.isSorted()) {
+            text = "Sorted by " + columnName(model_, model_.sortKey()->column) + (model_.sortKey()->ascending ? " (ascending)" : " (descending)");
+        }
+        for (const FilterRule& rule : model_.filters()) {
+            text += (text.empty() ? "" : "; ") + rule.describe(columnName(model_, rule.column));
+        }
+        if (model_.isFiltered()) {
+            text += " - " + withCommas(model_.rowCount()) + " of " + withCommas(model_.sourceRowCount()) + " rows";
+        }
+        return text;
+    }
+
+    void SpreadsheetController::sortActiveColumn(bool ascending) {
+        if (!table_.hasActiveCell()) {
+            say("Click a cell in the column to sort by");
+            return;
+        }
+        if (refused()) {
+            return;
+        }
+        table_.cancelEdit();
+        auto start = std::chrono::steady_clock::now();
+        model_.sortBy(table_.activeColumn(), ascending);
+        char took[32];
+        std::snprintf(took, sizeof(took), "%.2f", secondsSince(start));
+        say(viewSummary() + " - " + withCommas(model_.sourceRowCount()) + " rows in " + took + " s");
+        showTotals();
+        onViewChanged(*this);
+    }
+
+    void SpreadsheetController::clearSort() {
+        if (!model_.isSorted() || refused()) {
+            return;
+        }
+        table_.cancelEdit();
+        model_.clearSort();
+        say("Sort cleared");
+        showTotals();
+        onViewChanged(*this);
+    }
+
+    bool SpreadsheetController::setFilters(std::vector<FilterRule> rules) {
+        if (refused()) {
+            return false;
+        }
+        table_.cancelEdit();
+        auto start = std::chrono::steady_clock::now();
+        try {
+            model_.setFilters(std::move(rules));
+        } catch (const std::runtime_error&) {
+            say("That filter names a column the table does not have");
+            return false;
+        }
+        table_.clearSelection();   // the rows under the old selection are gone or different
+        char took[32];
+        std::snprintf(took, sizeof(took), "%.2f", secondsSince(start));
+        say(model_.isFiltered() ? "Filtered: " + viewSummary() + " (" + took + " s)" : std::string("Filter cleared"));
+        showTotals();
+        onViewChanged(*this);
+        return true;
+    }
+
+    void SpreadsheetController::clearFilters() {
+        if (model_.isFiltered()) {
+            setFilters({});
+        }
+    }
+
+    void SpreadsheetController::filterBySelectedValue() {
+        if (!table_.hasActiveCell()) {
+            say("Click the cell whose value to filter by");
+            return;
+        }
+        std::size_t column = table_.activeColumn();
+        std::string text = model_.cellText(table_.activeRow(), column);
+        FilterRule wanted = text.empty() ? FilterRule(column, FilterRule::Op::Blank) : FilterRule(column, FilterRule::Op::Equals, text);
+        std::vector<FilterRule> rules;
+        bool alreadyThere = false;
+        for (const FilterRule& rule : model_.filters()) {
+            if (rule == wanted) {
+                alreadyThere = true;   // the same filter again switches it off
+            }
+            if (rule.column != column) {
+                rules.push_back(rule);
+            }
+        }
+        if (!alreadyThere) {
+            rules.push_back(wanted);
+        }
+        setFilters(std::move(rules));
+    }
+
+    void SpreadsheetController::resetView() {
+        if ((!model_.isSorted() && !model_.isFiltered()) || refused()) {
+            return;
+        }
+        table_.cancelEdit();
+        model_.clearSort();
+        model_.clearFilters();
+        table_.clearSelection();
+        say("Sort and filters cleared");
+        showTotals();
+        onViewChanged(*this);
+    }
+
+    bool SpreadsheetController::goTo(const std::string& where) {
+        std::optional<SpreadsheetEditor::CellRef> ref = SpreadsheetEditor::parseCellRef(where);
+        if (!ref.has_value()) {
+            say("Go to: type a cell like C4 or a row number");
+            return false;
+        }
+        if (model_.rowCount() == 0 || model_.columnCount() == 0) {
+            return false;
+        }
+        std::size_t row = ref->row;
+        std::size_t column = ref->column.has_value() ? *ref->column : (table_.hasActiveCell() ? table_.activeColumn() : 0);
+        bool clamped = false;
+        if (row >= model_.rowCount()) {
+            row = model_.rowCount() - 1;
+            clamped = true;
+        }
+        if (column >= model_.columnCount()) {
+            column = model_.columnCount() - 1;
+            clamped = true;
+        }
+        table_.setActiveCell(row, column);
+        say(clamped ? "Go to: past the end of the table - went to " + SpreadsheetEditor::cellName(row, column)
+                    : "Went to " + SpreadsheetEditor::cellName(row, column));
+        return true;
+    }
+
+    void SpreadsheetController::focusNameBox() {
+        if (nameBox_ == nullptr) {
+            return;
+        }
+        if (auto* root = nameBox_->rootView()) {
+            root->setFocusedSubView(nameBox_);
+        }
+    }
+
+    std::optional<std::size_t> SpreadsheetController::activeColumn() const {
+        if (!table_.hasActiveCell()) {
+            return std::nullopt;
+        }
+        return table_.activeColumn();
+    }
+
+    void SpreadsheetController::focusTable() {
+        if (auto* root = table_.rootView()) {
+            root->setFocusedSubView(&table_);
+        }
+    }
+
     void SpreadsheetController::documentReplaced() {
         replacing_ = true;
         editor_.reset();
@@ -223,6 +411,7 @@ namespace manyrows {
         table_.clearSelection();
         syncFormulaBar();
         showTotals();
+        onViewChanged(*this);   // the load dropped any sort and filter
     }
 
     // ---- readouts ----
@@ -234,6 +423,10 @@ namespace manyrows {
     }
 
     void SpreadsheetController::showTotals() {
+        if (model_.isFiltered()) {
+            setPaneText(TotalPane, withCommas(model_.rowCount()) + " of " + withCommas(model_.sourceRowCount()) + " rows");
+            return;
+        }
         setPaneText(TotalPane, withCommas(model_.rowCount()) + " rows x " + std::to_string(model_.columnCount()) + " cols");
     }
 
@@ -284,6 +477,7 @@ namespace manyrows {
         bool ctrl = (keyMask & newui::kmCtrl) != 0;
         if (ctrl) {
             switch (vkey) {
+                case newui::vkLetterG: focusNameBox(); return newui::SyncReturn::Handled;
                 case newui::vkLetterZ: undo(); return newui::SyncReturn::Handled;
                 case newui::vkLetterY: redo(); return newui::SyncReturn::Handled;
                 case newui::vkLetterC: copy(); return newui::SyncReturn::Handled;
@@ -294,6 +488,12 @@ namespace manyrows {
                 default: break;
             }
         }
+        bool alt = (keyMask & newui::kmAlt) != 0;
+        bool shift = (keyMask & newui::kmShift) != 0;
+        if (alt && vkey == newui::vkUpArrow) { sortActiveColumn(true); return newui::SyncReturn::Handled; }
+        if (alt && vkey == newui::vkDownArrow) { sortActiveColumn(false); return newui::SyncReturn::Handled; }
+        if (alt && vkey == newui::vkBackSpace) { resetView(); return newui::SyncReturn::Handled; }
+        if (ctrl && shift && vkey == newui::vkLetterF) { filterBySelectedValue(); return newui::SyncReturn::Handled; }
         if (vkey == newui::vkDelete) {
             clearSelection();
             return newui::SyncReturn::Handled;

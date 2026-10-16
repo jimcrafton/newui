@@ -6,6 +6,7 @@
 #include <newui/undostack.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -83,6 +84,16 @@ namespace manyrows {
         // "A1", "AA10" - the spreadsheet name of a cell.
         static std::string cellName(std::size_t row, std::size_t column);
 
+        // What a Go to box accepts: a cell name ("c4", "AA10") or just a row number ("2500"), both 1-based as
+        // typed; the result is 0-based. `column` is empty for a bare row number. Nullopt for anything else
+        // (including row 0 and more than 4 letters / 9 digits).
+        // @reflect ignore=true
+        struct CellRef {
+            std::size_t row = 0;
+            std::optional<std::size_t> column;
+        };
+        static std::optional<CellRef> parseCellRef(const std::string& text);
+
     private:
         void push(std::string description, std::vector<CellEdit> edits);
         // A CellEdit setting (row, column) to `text`, or nothing when the cell already shows it.
@@ -95,7 +106,7 @@ namespace manyrows {
         newui::UndoStack stack_;
         std::size_t position_ = 0;               // steps currently applied (the undo depth)
         std::optional<std::size_t> saved_ = 0;   // position_ at the last save; none once it was discarded
-        newui::CellRange lastBlock_;   // set by the action closures; read by replay()
+        std::shared_ptr<std::vector<CellEdit>> lastEdits_;   // the step just done / undone; read by replay()
     };
 
 }

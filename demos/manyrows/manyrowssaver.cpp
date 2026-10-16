@@ -15,7 +15,7 @@ namespace manyrows {
 
     ManyRowsSaver::ManyRowsSaver(const ManyRowsModel& model, std::string target)
         : model_(model), target_(std::move(target)), temp_(tempPathFor(target_)),
-          totalRows_(model.rowCount() + (model.hasTitles() ? 1 : 0)) {
+          totalRows_(model.sourceRowCount() + (model.hasTitles() ? 1 : 0)) {
         worker_ = std::thread([this]() { run(); });
     }
 
@@ -65,7 +65,8 @@ namespace manyrows {
             throw std::runtime_error("manyrows cannot write " + format->name() + " files - save as .csv");
         }
         const bool header = model.hasTitles();
-        const std::size_t rows = model.rowCount() + (header ? 1 : 0);
+        // Every stored row is written, in sort order, whatever the filter hides.
+        const std::size_t rows = model.sourceRowCount() + (header ? 1 : 0);
         try {
             // The writer asks for cells row by row, left to right: the first column of a row marks its start.
             format->write(path, rows, model.columnCount(), [&](std::size_t row, std::size_t column) {
@@ -78,9 +79,9 @@ namespace manyrows {
                     }
                 }
                 if (header) {
-                    return row == 0 ? model.columnTitle(column) : model.cellText(row - 1, column);
+                    return row == 0 ? model.titleText(column) : model.sourceText(model.orderedSourceRow(row - 1), column);
                 }
-                return model.cellText(row, column);
+                return model.sourceText(model.orderedSourceRow(row), column);
             });
         } catch (const SaveCancelled&) {
             return false;

@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
 
     manyrows::SpreadsheetController spreadsheet(*table, *model);   // must outlive app.run()
     spreadsheet.setStatusBar(status);
-    spreadsheet.say("Click a cell; F2, double-click or type to edit; arrows / Tab / PgUp / PgDn / Ctrl+arrows move; drag a header edge to resize");
+    spreadsheet.say("Click a cell; F2 or type to edit; Alt+Up / Alt+Down sort by its column; Ctrl+Shift+F filters to its value; Alt+Backspace resets");
 
     app.run();
     return 0;

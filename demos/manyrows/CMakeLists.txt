@@ -15,6 +15,9 @@ add_library(manyrows_core STATIC
     spreadsheeteditor.h spreadsheeteditor.cpp
     spreadsheetcontroller.h spreadsheetcontroller.cpp
     tablecliptext.h tablecliptext.cpp
+    filterrule.h filterrule.cpp
+    rowindex.h rowindex.cpp
+    tablequery.h tablequery.cpp
     menubinding.h
     textformat.h
 )
@@ -49,6 +52,8 @@ target_link_libraries(manyrows_files PUBLIC manyrows_core zlib_inflate)
 add_executable(manyrows
     main.cpp
     manyrowswindow.h manyrowswindow.cpp
+    filterstrip.h filterstrip.cpp
+    manyrowstoolbar.h manyrowstoolbar.cpp
 )
 target_link_libraries(manyrows PRIVATE manyrows_files)
 newui_add_resources(manyrows "${CMAKE_CURRENT_SOURCE_DIR}/Resources")
@@ -65,6 +70,7 @@ add_executable(manyrows_tests
     tests/test_manyrows_model.cpp
     tests/test_spreadsheet_editor.cpp
     tests/test_clipboard_fill.cpp
+    tests/test_sort_filter.cpp
     tests/test_csv_format.cpp
     tests/test_xls_format.cpp
     tests/test_xlsx_format.cpp

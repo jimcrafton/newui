@@ -4,12 +4,15 @@
 #include "spreadsheeteditor.h"
 #include "timedtableview.h"
 
+#include <newui/controllers.h>
 #include <newui/controls.h>
 #include <newui/delegate.h>
 #include <newui/menus.h>
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace manyrows {
 
@@ -27,20 +30,27 @@ namespace manyrows {
     // loading, saving) and connects the two through onEdited, documentReplaced() and setEditGuard() - this
     // class never mentions a file.
     //
+    // It is a newui::Controller (the C between the table and the model) but does not call Controller::setModel():
+    // that would make it a second owner, and the table's own TableController already owns the ManyRowsModel. It
+    // observes the model through a plain reference instead, so the model must outlive it (the demos keep both
+    // for the whole run).
+    //
     // Lifetime: it registers handlers on the table and the controls it is given, so it must be created
     // after them and destroyed no earlier than them (the demos keep it for the whole run).
     // @reflect ignore=true
-    class SpreadsheetController {
+    class SpreadsheetController : public newui::Controller {
     public:
         // Status bar pane order (the order of the StatusPane children in the .newui files).
         enum Pane : std::size_t { MessagePane = 0, PaintPane = 1, RowsPane = 2, SelectionPane = 3, TotalPane = 4 };
 
         SpreadsheetController(TimedTableView& table, ManyRowsModel& model);
+        ~SpreadsheetController() override = default;
         SpreadsheetController(const SpreadsheetController&) = delete;
         SpreadsheetController& operator=(const SpreadsheetController&) = delete;
 
         // ---- optional parts ----
-        // Either may be null. The name box is made read-only; Enter in the field commits the active cell.
+        // Either may be null. The name box shows the active cell and is also the Go to box (type C4 or a row
+        // number, Enter); Enter in the field commits the active cell.
         void setFormulaBar(newui::TextField* nameBox, newui::TextField* formulaField);
         // Fills the panes as the table paints, scrolls and selects. Null detaches nothing (set once).
         void setStatusBar(newui::StatusBar* status);
@@ -48,6 +58,8 @@ namespace manyrows {
         // Select All (those that exist, matched by text) and keeps the Undo / Redo items' text and enabled
         // state current ("Undo Edit C4").
         void setEditMenu(newui::MenuBar* menuBar);
+        // Binds Data > Sort Ascending / Sort Descending / Clear Sort / Filter by Selected Value / Clear Filters.
+        void setDataMenu(newui::MenuBar* menuBar);
         // Binds View > Show Headers (a check item) and View > Reset Render Stats.
         void setViewMenu(newui::MenuBar* menuBar);
 
@@ -64,6 +76,31 @@ namespace manyrows {
         void paste();
         void fillDown();
         void fillRight();
+
+        // ---- sort and filter (a view over the rows: nothing moves, nothing is undone) ----
+        // Sorts by the active cell's column. Alt+Up / Alt+Down.
+        void sortActiveColumn(bool ascending);
+        void clearSort();
+        // Shows only the rows whose cell in the active cell's column equals the active cell (a blank cell: the
+        // blank rows). Repeating it on another column narrows further; on the same column replaces; on the very
+        // same value switches that filter off. Ctrl+Shift+F.
+        void filterBySelectedValue();
+        // Replaces the whole filter (empty = show everything). False when a rule names a column that is not there.
+        bool setFilters(std::vector<FilterRule> rules);
+        void clearFilters();
+        // Alt+Backspace: no sort, no filter.
+        void resetView();
+        // Moves the selection to a cell named like "C4" or to a row number (the active column stays). Out of range
+        // clamps to the last row / column and says so; text that is neither says what is accepted. False then.
+        bool goTo(const std::string& where);
+        // Puts the cursor in the name box (Ctrl+G, the toolbar's Go to). No-op without a formula bar.
+        void focusNameBox();
+        // The active cell's column, or nullopt with no active cell.
+        std::optional<std::size_t> activeColumn() const;
+        // Gives the keyboard focus back to the table (after a strip closes).
+        void focusTable();
+        // "Sorted by Total (descending); Region = North - 23,410 of 1,000,000 rows".
+        std::string viewSummary() const;
 
         // Validates (generated table only) and applies one typed value - the path for the in-cell editor and
         // the formula bar. False when refused (the status bar says why).
@@ -87,6 +124,14 @@ namespace manyrows {
         // fired by documentReplaced().
         typedef newui::Delegate<SpreadsheetController> EditedDelegate;
         EditedDelegate onEdited;
+        // After a sort or filter changed (or was cleared): the full app marks a sorted document modified (a
+        // save keeps the sort order) and shows the filter in its strip.
+        typedef newui::Delegate<SpreadsheetController> ViewDelegate;
+        ViewDelegate onViewChanged;
+        // Whenever the undo history changed in any way (an edit, undo, redo, a reset): the toolbar enables its
+        // Undo / Redo buttons from canUndo() / canRedo().
+        typedef newui::Delegate<SpreadsheetController> HistoryDelegate;
+        HistoryDelegate onHistoryChanged;
 
     private:
         // True (after saying why in the status bar) when the edit guard refuses edits right now.

@@ -210,3 +210,27 @@ TEST(SpreadsheetEditor, SavedStateIsLostWhenANewEditDiscardsIt) {
     editor.reset();
     EXPECT_TRUE(editor.isAtSavedState());          // replaced content is clean
 }
+
+TEST(SpreadsheetEditor, ParsesGoToText) {
+    auto ref = SpreadsheetEditor::parseCellRef(" c4 ");
+    ASSERT_TRUE(ref.has_value());
+    EXPECT_EQ(ref->row, 3u);
+    ASSERT_TRUE(ref->column.has_value());
+    EXPECT_EQ(*ref->column, 2u);
+    ref = SpreadsheetEditor::parseCellRef("AA10");
+    ASSERT_TRUE(ref.has_value());
+    EXPECT_EQ(*ref->column, 26u);   // AA is the 27th column
+    EXPECT_EQ(ref->row, 9u);
+    ref = SpreadsheetEditor::parseCellRef("2500");
+    ASSERT_TRUE(ref.has_value());
+    EXPECT_EQ(ref->row, 2499u);
+    EXPECT_FALSE(ref->column.has_value());   // a bare row number keeps the column
+    EXPECT_EQ(SpreadsheetEditor::cellName(ref->row, 5), "F2500");   // round trip with cellName
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("C").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("C0").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("4C").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("C4x").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("ABCDE1").has_value());
+    EXPECT_FALSE(SpreadsheetEditor::parseCellRef("1234567890").has_value());
+}
