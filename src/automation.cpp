@@ -1,6 +1,7 @@
 #include "newui/automation.h"
 
 #include "newui/controls.h"
+#include "newui/menus.h"
 #include "newui/reflection.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
@@ -30,6 +31,8 @@
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
 //   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
 //   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
+//   {"cmd":"menuBar","name":"bar"}              -> menus:[{text,x,y,w,h}] (a MenuBar's top-level buttons)
+//   {"cmd":"popupMenu"}                         -> items:[{text,separator,enabled,checked,hasSubmenu,x,y,w,h}] of the native menu open now
 //   {"cmd":"caret","name":"editor"}              -> line, column (1-based), offset (a TextControl's caret)
 //   {"cmd":"describe","name":"v"}                -> type, properties:{name:value,..} (every reflected property with a plain value)
 //   {"cmd":"get","name":"v","property":"text"}  -> value (one reflected property)
@@ -355,6 +358,80 @@ std::string treeReply(const Request& request) {
     return reply(request, true, "\"count\":" + std::to_string(count) + ",\"rows\":[" + rows + "]");
 }
 
+// A MenuBar's top-level menus, left to right: the text and screen rect of each button.
+std::string menuBarReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    auto* bar = dynamic_cast<MenuBar*>(view);
+    if (bar == nullptr) {
+        return failure(request, "'" + request.text("name") + "' is not a MenuBar");
+    }
+    const std::vector<MenuItem*>& menus = bar->menus();
+    const std::vector<SubView*>& buttons = bar->childViews();
+    std::string out;
+    for (size_t i = 0; i < menus.size() && i < buttons.size(); ++i) {
+        Rect box = buttons[i]->screenBounds();
+        out += (out.empty() ? "" : ",") + std::string("{\"text\":") + quote(stripMnemonics(menus[i]->text())) +
+            ",\"x\":" + number(box.left()) + ",\"y\":" + number(box.top()) +
+            ",\"w\":" + number(box.width()) + ",\"h\":" + number(box.height()) + "}";
+    }
+    return reply(request, true, "\"menus\":[" + out + "]");
+}
+
+HWND openPopupMenuWindow() {
+    struct Search { HWND found = nullptr; } search;
+    ::EnumThreadWindows(::GetCurrentThreadId(), [](HWND window, LPARAM param) -> BOOL {
+        char className[16] = {};
+        ::GetClassNameA(window, className, sizeof(className));
+        if (std::string(className) == "#32768" && ::IsWindowVisible(window)) {
+            reinterpret_cast<Search*>(param)->found = window;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+// The native popup menu that is open right now (a menu bar button's dropdown or a context menu): each item's
+// label (mnemonic marker and shortcut text removed), state and screen rect. Native menus run their own modal
+// loop, so this is how a driver finds what to click.
+std::string popupMenuReply(const Request& request) {
+    HWND window = openPopupMenuWindow();
+    if (window == nullptr) {
+        return failure(request, "no menu is open");
+    }
+    constexpr UINT kGetMenuHandle = 0x01E1;   // MN_GETHMENU
+    HMENU menu = reinterpret_cast<HMENU>(::SendMessageW(window, kGetMenuHandle, 0, 0));
+    if (menu == nullptr) {
+        return failure(request, "the open menu has no handle");
+    }
+    std::string items;
+    const int count = ::GetMenuItemCount(menu);
+    for (int i = 0; i < count; ++i) {
+        wchar_t text[256] = {};
+        MENUITEMINFOW info = { sizeof(info) };
+        info.fMask = MIIM_STRING | MIIM_FTYPE | MIIM_STATE | MIIM_SUBMENU;
+        info.dwTypeData = text;
+        info.cch = 255;
+        ::GetMenuItemInfoW(menu, static_cast<UINT>(i), TRUE, &info);
+        RECT box = {};
+        ::GetMenuItemRect(nullptr, menu, static_cast<UINT>(i), &box);
+        std::string label = stripMnemonics(wideToUtf8(text));
+        size_t tab = label.find('\t');
+        if (tab != std::string::npos) {
+            label.resize(tab);
+        }
+        const bool separator = (info.fType & MFT_SEPARATOR) != 0;
+        const bool enabled = (info.fState & (MFS_DISABLED | MFS_GRAYED)) == 0;
+        items += (items.empty() ? "" : ",") + std::string("{\"text\":") + quote(label) +
+            ",\"separator\":" + (separator ? "true" : "false") + ",\"enabled\":" + (enabled ? "true" : "false") +
+            ",\"checked\":" + ((info.fState & MFS_CHECKED) != 0 ? "true" : "false") +
+            ",\"hasSubmenu\":" + (info.hSubMenu != nullptr ? "true" : "false") +
+            ",\"x\":" + std::to_string(box.left) + ",\"y\":" + std::to_string(box.top) +
+            ",\"w\":" + std::to_string(box.right - box.left) + ",\"h\":" + std::to_string(box.bottom - box.top) + "}";
+    }
+    return reply(request, true, "\"items\":[" + items + "]");
+}
+
 // A TextControl's caret: 1-based line and column, and the offset it is at.
 std::string caretReply(const Request& request) {
     View* view = findNamed(request.text("name"));
@@ -505,6 +582,12 @@ std::string Automation::handle(const std::string& requestJson) {
     }
     if (cmd == "scrollInfo") {
         return scrollInfoReply(request);
+    }
+    if (cmd == "menuBar") {
+        return menuBarReply(request);
+    }
+    if (cmd == "popupMenu") {
+        return popupMenuReply(request);
     }
     if (cmd == "caret") {
         return caretReply(request);

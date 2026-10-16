@@ -1,5 +1,6 @@
 #include "newui/automation.h"
 #include "newui/controls.h"
+#include "newui/menus.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
 #include "newui/segmentedcontrol.h"
@@ -183,4 +184,20 @@ TEST_F(AutomationFixture, CaretReportsALineAndColumn) {
     EXPECT_TRUE(contains(answer, "\"column\":2")) << answer;
     EXPECT_TRUE(contains(answer, "\"offset\":5")) << answer;
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"caret\",\"name\":\"autoRoot\"}"), "is not a TextControl"));
+}
+
+TEST_F(AutomationFixture, MenuBarListsItsTopLevelButtons) {
+    auto* bar = new MenuBar();
+    bar->setName("autoBar");
+    bar->setBounds(Rect(0, 0, 300, 24));
+    std::vector<std::unique_ptr<MenuItem>> items;
+    items.push_back(std::make_unique<MenuItem>("&File"));
+    items.push_back(std::make_unique<MenuItem>("&Edit"));
+    bar->setMenuItems(std::move(items));
+    root->addChild(bar);
+
+    std::string answer = Automation::handle("{\"cmd\":\"menuBar\",\"name\":\"autoBar\"}");
+    EXPECT_TRUE(contains(answer, "\"text\":\"File\"")) << answer;
+    EXPECT_TRUE(contains(answer, "\"text\":\"Edit\"")) << answer;
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"popupMenu\"}"), "no menu is open"));
 }

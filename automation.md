@@ -95,6 +95,8 @@ request's `"id"` (a number) is echoed back when given. A failure is
 |---------|--------------|
 | `{"cmd":"hello"}` | `protocol` |
 | `{"cmd":"scrollInfo","name":"explorerScroll"}` | For a `ScrollView`: per bar (prefix `v` or `h`) `Value`, `Min`, `Max`, `Page`, `Visible`, and the thumb's screen rect `x`, `y`, `w`, `h` (e.g. `vValue`, `vx`). Lets a test aim a scrollbar drag and check the position |
+| `{"cmd":"menuBar","name":"testharnessMenuBar"}` | For a `MenuBar`: `menus`, each top-level button as `{"text","x","y","w","h"}` (screen pixels) |
+| `{"cmd":"popupMenu"}` | The native popup menu open right now (a menu bar dropdown or context menu): `items`, each `{"text","separator","enabled","checked","hasSubmenu","x","y","w","h"}`; text has the `&` and shortcut removed. Native menus run their own modal loop, so `idle` does not answer while one is open; poll this instead. Error `no menu is open` otherwise |
 | `{"cmd":"caret","name":"cppEditorText"}` | For a `TextControl`: the caret's `line` and `column` (1-based) and `offset` |
 | `{"cmd":"describe","name":"filterInput"}` | `type` and `properties`: every reflected property of the view that has a plain value (bool, number, string), by name. Works for any control newui reflects, with no per-control code |
 | `{"cmd":"get","name":"filterInput","property":"text"}` | `value` of one reflected property |
