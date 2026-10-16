@@ -266,4 +266,8 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(3rdparty/googletest)
 
 enable_testing()
+# Opt-in GUI-test automation (see include/newui/automation.h): only test builds link this.
+add_library(newui_automation STATIC include/newui/automation.h src/automation.cpp)
+target_link_libraries(newui_automation PUBLIC newui)
+
 add_subdirectory(unittests)

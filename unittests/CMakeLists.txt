@@ -2,6 +2,7 @@ find_package(Threads REQUIRED)
 
 add_executable(newui_tests
     test_version.cpp
+    test_automation.cpp
     test_application.cpp
     test_delegate.cpp
     test_runloop.cpp
@@ -55,7 +56,7 @@ add_executable(newui_tests
     test_svgimage.cpp
 )
 
-target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)
+target_link_libraries(newui_tests PRIVATE newui newui_automation GTest::gtest_main Threads::Threads)
 
 include(GoogleTest)
 gtest_discover_tests(newui_tests)
