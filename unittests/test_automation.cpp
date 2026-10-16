@@ -2,6 +2,7 @@
 #include "newui/controls.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
+#include "newui/segmentedcontrol.h"
 
 #include <gtest/gtest.h>
 
@@ -121,4 +122,21 @@ TEST_F(AutomationFixture, ScrollInfoReportsABarsStateAndThumb) {
     EXPECT_TRUE(contains(answer, "\"vh\":")) << answer;
 
     EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"scrollInfo\",\"name\":\"autoEditor\"}"), "is not a ScrollView"));
+}
+
+TEST_F(AutomationFixture, SegmentReportsALabelAndTheSelectionAndScreenRect) {
+    auto* modes = new SegmentedControl();
+    modes->setName("autoModes");
+    modes->setSegments({ "One", "Two", "Three" });
+    modes->setBounds(Rect(0, 230, 300, 24));
+    root->addChild(modes);
+    modes->setSelectedIndex(2);
+
+    std::string answer = Automation::handle("{\"cmd\":\"segment\",\"name\":\"autoModes\",\"index\":1}");
+    EXPECT_TRUE(contains(answer, "\"count\":3")) << answer;
+    EXPECT_TRUE(contains(answer, "\"selected\":2")) << answer;
+    EXPECT_TRUE(contains(answer, "\"label\":\"Two\"")) << answer;
+
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"segment\",\"name\":\"autoModes\",\"index\":9}"), "out of range"));
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"segment\",\"name\":\"autoEditor\",\"index\":0}"), "is not a SegmentedControl"));
 }

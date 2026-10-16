@@ -3,6 +3,7 @@
 #include "newui/controls.h"
 #include "newui/rootview.h"
 #include "newui/runloop.h"
+#include "newui/segmentedcontrol.h"
 #include "newui/subview.h"
 #include "newui/utils.h"
 
@@ -26,6 +27,7 @@
 //   {"cmd":"focused"}                             -> {"ok":true,"name":"..","type":".."}
 //   {"cmd":"getText","name":"editor"}             -> {"ok":true,"text":".."}   (TextControl or TextField)
 //   {"cmd":"scrollInfo","name":"tree scroll"}     -> v/h + Value,Min,Max,Page,x,y,w,h,Visible (bar state and thumb screen rect)
+//   {"cmd":"segment","name":"modes","index":1}   -> count, selected, label, x/y/w/h of that segment (a SegmentedControl)
 //   {"cmd":"screenshot","name":"root","path":"C:\\x.bmp"}  -> {"ok":true,"path":".."}  (name = a RootView)
 //   {"cmd":"idle"}                                -> replies once the loop has nothing pending
 // Failure: {"id":..,"ok":false,"error":".."}. "id" is echoed when given.
@@ -233,6 +235,26 @@ std::string scrollInfoReply(const Request& request) {
     return reply(request, true, fields);
 }
 
+// One segment of a SegmentedControl: the control's count/selected plus the segment's label and screen rect.
+std::string segmentReply(const Request& request) {
+    View* view = findNamed(request.text("name"));
+    auto* control = dynamic_cast<SegmentedControl*>(view);
+    if (control == nullptr) {
+        return failure(request, "'" + request.text("name") + "' is not a SegmentedControl");
+    }
+    size_t index = static_cast<size_t>(request.number("index"));
+    if (index >= control->segments().size()) {
+        return failure(request, "segment " + std::to_string(index) + " is out of range");
+    }
+    Rect bounds = control->localToScreen(control->segmentBounds(index));
+    return reply(request, true,
+        "\"count\":" + std::to_string(control->segments().size()) +
+        ",\"selected\":" + std::to_string(control->selectedIndex()) +
+        ",\"label\":" + quote(control->segments()[index]) +
+        ",\"x\":" + number(bounds.left()) + ",\"y\":" + number(bounds.top()) +
+        ",\"w\":" + number(bounds.width()) + ",\"h\":" + number(bounds.height()));
+}
+
 std::string screenshotReply(const Request& request) {
     View* view = findNamed(request.text("name"));
     auto* root = dynamic_cast<RootView*>(view);
@@ -349,6 +371,9 @@ std::string Automation::handle(const std::string& requestJson) {
     }
     if (cmd == "scrollInfo") {
         return scrollInfoReply(request);
+    }
+    if (cmd == "segment") {
+        return segmentReply(request);
     }
     if (cmd == "screenshot") {
         return screenshotReply(request);
