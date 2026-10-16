@@ -317,6 +317,11 @@ namespace newui {
         // loading isn't "modified", it's just now equal to what's on disk.
         void markModified();
 
+        // The opposite of markModified(): the content is back to what is on disk (e.g. the user undid every
+        // change made since the last save), so isModified() becomes false, firing onModifiedChanged() if it
+        // was true. The caller is responsible for knowing that is really so.
+        void markUnmodified();
+
         // Loads via readFromFile(path); on success (only), adopts path as
         // filePath() and clears isModified(). Returns readFromFile()'s
         // result - on failure, filePath()/isModified() are left exactly
