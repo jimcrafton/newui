@@ -4,8 +4,37 @@ An opt-in, in-process server that lets a separate driver process test a newui ap
 meets it: the driver sends real input with `SendInput` and asks the app, over a named pipe, where
 things are and what they show.
 
+> **This works ONLY with apps built on the newui framework.** The driver does not look at the screen or use Windows UI
+> Automation: it asks the app, over a named pipe, questions that only newui's own automation server
+> (`newui_automation`, linked into the app and started with `--automation <pipe>`) can answer: where a *named* view is, what
+> it shows, what is focused. An app that is not built on newui (Win32, Qt, WPF, a browser...) has no such server, so
+> `python -m newui_guitest check` fails with "no automation pipe" and nothing else here applies. An app that *is* built on newui
+> works only after it links the server and starts it (see "Setting it up in an app"), and only the views it has named
+> can be found.
+>
+> **It is not a general-purpose Win32 (or any other) GUI-testing tool.** `SendInput` is the easy part. What makes it work is the list of newui features below, which the app has to have.
+
 The server answers questions; it does not inject input. Input comes from the driver (Win32
 `SendInput`), so focus, capture, scrollbars and DPI go through the real message pump.
+
+## What newui provides that makes this possible
+
+The driver is deliberately thin: it injects input and asks questions. Every answer comes from a feature of the newui
+framework itself, and a toolkit without them cannot be tested this way.
+
+| newui feature | What the driver gets from it |
+|---|---|
+| **The automation server** (`newui_automation`, `newui::Automation::expose/start/stop`, `--automation <pipe>`) | A named pipe the driver can talk to, one JSON line per request. Nothing else works without it. |
+| **A view tree with names** (`View::setName()`, names in `.newui` files) | `findView` returns the screen rectangle of a *named* view, so tests never hard-code coordinates. An unnamed view cannot be found. |
+| **Reflection** (reflectgen: `describe` / `get` of a control's reflected properties) | Plain state (a number, a flag, a string, a combo's value) is read without scraping pixels. |
+| **Typed controls that report themselves** (`TextControl`, `TreeView`, `ScrollView`, `SegmentedControl`, menu bars) | `getText`, `tree` rows, `scrollInfo` thumb rectangles, `segment` labels, `menuBar` button rectangles, `caret` line and column. |
+| **Native popup menus answered off the UI thread** (`popupMenu`) | The items of an open menu while its modal loop is running, so a driver can choose them. |
+| **The run loop** (`idle`) | "The UI has nothing pending": the driver waits on this instead of sleeping after every input. |
+| **Framework-side rendering** (`RootView` painted by Blend2D into a bitmap, `screenshot`) | A picture of exactly what the app draws, which cannot be covered by another window. |
+| **The framework's own input path** (Win32 messages through `RootView`, key state read with `GetKeyState` in `src/utils.cpp`) | Real `SendInput` events reach the app like a person's would, including Ctrl/Shift chords injected in one batch. |
+
+A command the server does not have (see "Adding a command to the server") is a change to newui, not to the driver. A
+custom control shows up only through what it reflects, so give it reflected properties or a command.
 
 ## It is off unless the app writes code to turn it on
 
@@ -586,7 +615,14 @@ menu's modal loop is running.
 
 A *skill* is a folder that Claude Code loads when a request matches its description. A skill for a driver lets Claude
 write and extend GUI tests without being walked through the protocol each time. The reference skill is
-`.claude/skills/newui-gui-driver/`, which points at the Python driver in `tools/guitest`.
+`tools/guitest/skill/newui-gui-driver/` (a committed reference copy; `.claude/` itself is not committed), which points at the Python
+driver in `tools/guitest`. Install it by copying the folder into `.claude/skills/` (steps in `tools/guitest/skill/README.md`).
+
+### Using the reference skill
+
+This repository ships a reference copy in `tools/guitest/skill/newui-gui-driver/`. To use it: copy that folder into `.claude/skills/` (this project or `%USERPROFILE%\.claude\skills\` for all projects), start a new Claude Code session, then ask for a GUI test or type `/newui-gui-driver`. The install commands, example requests, what Claude will and will not do on its own, and how to keep the copy current are in `tools/guitest/README.md` ("Using the Claude Code skill") and `tools/guitest/skill/README.md`.
+
+The rest of this section is for writing a skill for a driver of your own.
 
 ### Layout
 
