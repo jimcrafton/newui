@@ -213,6 +213,20 @@ namespace sketch {
         if (anchors.size() < 2) {
             return;
         }
+        if (tool_ == SketchTool::Paintbrush) {
+            // The Paintbrush draws the same line, stroked by the active brush: a weight of 1 shows artwork at its own size, a nib wants a real
+            // weight.
+            SketchObject* object = SketchObject::makePath(penPath(anchors, false));
+            object->setName("Brush Path");
+            object->setFill(SketchPaint::none());
+            object->setStroke(document_->defaultStroke().isNone() ? SketchPaint::solid(SketchColor::gray(0.0f)) : document_->defaultStroke());
+            StrokeOptions options = document_->defaultStrokeOptions();
+            options.brush = document_->findBrush(document_->activeBrush());
+            object->setStrokeOptions(options);
+            object->setStrokeWidth(options.brush && options.brush->kind != BrushKind::Calligraphic ? 1.0 : std::max(2.0, document_->defaultStrokeWidth()));
+            document_->addUndoable(object, "Draw with Paintbrush");
+            return;
+        }
         addDrawn(SketchObject::makePath(penPath(anchors, false)), "Pencil Path", "Draw with Pencil", false);
     }
 

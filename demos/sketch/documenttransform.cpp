@@ -1,6 +1,8 @@
 #include "sketchdocument.h"
 
+#include <algorithm>
 #include <cmath>
+#include <map>
 
 // Numeric transforms of the selection (the Transform panel) and Transform Again.
 
@@ -83,6 +85,153 @@ namespace sketch {
             return false;   // nothing changes
         }
         transformObjects(selection_, m, resized ? "Resize" : "Move");
+        return true;
+    }
+
+    BLMatrix2D SketchDocument::rotationAbout(const BLPoint& origin, double radians) {
+        // make_rotation(angle, x, y) does not pivot about (x, y) in this Blend2D - build it.
+        BLMatrix2D m = BLMatrix2D::make_translation(-origin.x, -origin.y);
+        m.post_rotate(radians);
+        m.post_translate(origin.x, origin.y);
+        return m;
+    }
+
+    BLMatrix2D SketchDocument::scalingAbout(const BLPoint& origin, double sx, double sy) {
+        BLMatrix2D m = BLMatrix2D::make_translation(-origin.x, -origin.y);
+        m.post_scale(sx, sy);
+        m.post_translate(origin.x, origin.y);
+        return m;
+    }
+
+    BLMatrix2D SketchDocument::reflectionAcross(const BLPoint& origin, double axisRadians) {
+        BLMatrix2D m = BLMatrix2D::make_translation(-origin.x, -origin.y);
+        m.post_rotate(-axisRadians);   // the axis lies along x ...
+        m.post_scale(1.0, -1.0);       // ... mirror across it ...
+        m.post_rotate(axisRadians);    // ... and put it back
+        m.post_translate(origin.x, origin.y);
+        return m;
+    }
+
+    void SketchDocument::duplicateTransformed(const BLMatrix2D& matrix, double angleScale, double angleOffset, const std::string& description) {
+        std::vector<std::unique_ptr<SketchObject>> copies;
+        for (std::size_t id : selection_) {
+            if (const SketchObject* source = findById(id)) {
+                copies.emplace_back(source->clone());
+                copies.back()->transform(matrix);
+                copies.back()->setFrameAngle(angleScale * source->frameAngle() + angleOffset);
+            }
+        }
+        addObjectsUndoable(std::move(copies), description);
+    }
+
+    namespace {
+        // The selection as pieces that move together: a group is one piece. `box` is the piece's combined outline bounds.
+        struct Piece {
+            std::vector<std::size_t> members;
+            BLBox box;
+        };
+
+        std::vector<Piece> piecesOf(SketchDocument& document, const std::vector<GeometryState>& selected) {
+            std::vector<Piece> pieces;
+            std::map<std::size_t, std::size_t> indexOf;   // group (or object) key -> index in pieces
+            for (const GeometryState& entry : selected) {
+                const SketchObject* object = document.findById(entry.id);
+                if (object == nullptr) {
+                    continue;
+                }
+                const std::size_t key = object->groups().empty() ? object->id() * 2 : object->groups().front() * 2 + 1;
+                const BLBox b = object->geometryBounds();
+                auto [it, fresh] = indexOf.emplace(key, pieces.size());
+                if (fresh) {
+                    pieces.push_back({{entry.id}, b});
+                } else {
+                    Piece& piece = pieces[it->second];
+                    piece.members.push_back(entry.id);
+                    piece.box = BLBox(std::min(piece.box.x0, b.x0), std::min(piece.box.y0, b.y0), std::max(piece.box.x1, b.x1), std::max(piece.box.y1, b.y1));
+                }
+            }
+            return pieces;
+        }
+
+        double lowOf(const BLBox& b, bool horizontal) { return horizontal ? b.x0 : b.y0; }
+        double highOf(const BLBox& b, bool horizontal) { return horizontal ? b.x1 : b.y1; }
+    }
+
+    bool SketchDocument::distributeSelection(AlignMode mode) {
+        std::vector<GeometryState> before = snapshotSelection();
+        std::vector<Piece> pieces = piecesOf(*this, before);
+        if (pieces.size() < 3) {
+            return false;
+        }
+        const bool horizontal = mode == AlignMode::Left || mode == AlignMode::Center || mode == AlignMode::Right;
+        const bool low = mode == AlignMode::Left || mode == AlignMode::Top, high = mode == AlignMode::Right || mode == AlignMode::Bottom;
+        auto key = [&](const BLBox& b) {
+            return low ? lowOf(b, horizontal) : (high ? highOf(b, horizontal) : (lowOf(b, horizontal) + highOf(b, horizontal)) * 0.5);
+        };
+        std::stable_sort(pieces.begin(), pieces.end(), [&](const Piece& a, const Piece& b) { return key(a.box) < key(b.box); });
+        const double first = key(pieces.front().box), last = key(pieces.back().box);
+        FrameState frameBefore = frameState();
+        bool moved = false;
+        for (std::size_t i = 1; i + 1 < pieces.size(); ++i) {
+            const double delta = first + (last - first) * double(i) / double(pieces.size() - 1) - key(pieces[i].box);
+            if (std::fabs(delta) < 1e-9) {
+                continue;
+            }
+            for (std::size_t id : pieces[i].members) {
+                if (SketchObject* object = findById(id)) {
+                    object->transform(horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta));
+                }
+            }
+            moved = true;
+        }
+        if (!moved) {
+            return false;
+        }
+        quadFrame_.reset();
+        static const char* kNames[] = {"Distribute Left", "Distribute Horizontal Centers", "Distribute Right", "Distribute Top", "Distribute Vertical Centers", "Distribute Bottom"};
+        commitGeometry(before, kNames[int(mode)], frameBefore);
+        return true;
+    }
+
+    bool SketchDocument::distributeSpacing(bool horizontal, std::optional<double> gap) {
+        std::vector<GeometryState> before = snapshotSelection();
+        std::vector<Piece> pieces = piecesOf(*this, before);
+        if (pieces.size() < (gap.has_value() ? 2u : 3u) || (gap.has_value() && !std::isfinite(*gap))) {
+            return false;
+        }
+        std::stable_sort(pieces.begin(), pieces.end(), [&](const Piece& a, const Piece& b) { return lowOf(a.box, horizontal) < lowOf(b.box, horizontal); });
+        double between = 0.0;
+        if (gap.has_value()) {
+            between = *gap;
+        } else {
+            double sizes = 0.0;
+            for (const Piece& piece : pieces) {
+                sizes += highOf(piece.box, horizontal) - lowOf(piece.box, horizontal);
+            }
+            const double span = highOf(pieces.back().box, horizontal) - lowOf(pieces.front().box, horizontal);
+            between = (span - sizes) / double(pieces.size() - 1);
+        }
+        FrameState frameBefore = frameState();
+        bool moved = false;
+        double at = lowOf(pieces.front().box, horizontal);   // where the next piece starts
+        for (const Piece& piece : pieces) {
+            const double delta = at - lowOf(piece.box, horizontal);
+            at += highOf(piece.box, horizontal) - lowOf(piece.box, horizontal) + between;
+            if (std::fabs(delta) < 1e-9) {
+                continue;
+            }
+            for (std::size_t id : piece.members) {
+                if (SketchObject* object = findById(id)) {
+                    object->transform(horizontal ? BLMatrix2D::make_translation(delta, 0.0) : BLMatrix2D::make_translation(0.0, delta));
+                }
+            }
+            moved = true;
+        }
+        if (!moved) {
+            return false;
+        }
+        quadFrame_.reset();
+        commitGeometry(before, horizontal ? "Distribute Horizontal Spacing" : "Distribute Vertical Spacing", frameBefore);
         return true;
     }
 

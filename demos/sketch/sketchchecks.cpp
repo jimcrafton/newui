@@ -56,13 +56,19 @@ namespace sketch {
                 checkPathMenu();
                 checkTransformPanel();
                 checkScrubbing();
+                checkTextScrubbing();
+                checkTextPath();
                 checkGuides();
                 checkLayers();
+                checkLayerObjects();
                 checkTextPanel();
                 checkSelectTools();
                 checkArtboards();
+                checkTransformTools();
+                checkDistribute();
                 checkClippingMenu();
                 checkLibraries();
+                checkBrushes();
                 checkShapeBuilder();
                 checkColorPanel();
                 checkGradientTool();
@@ -101,20 +107,26 @@ namespace sketch {
         // Magic Wand, Lasso and Edit > Select Same.
         void checkSelectTools();
         void checkArtboards();
+        void checkTransformTools();
+        void checkDistribute();
         void checkClippingMenu();
         void checkLibraries();
+        void checkBrushes();
 
         // The Text panel: size, weight, alignment, tracking of the selected text.
         void checkTextPanel();
 
         // Layers: the tree, the panel (buttons, rows, drag and drop), visibility / lock, moving the selection, delete and undo.
         void checkLayers();
+        void checkLayerObjects();
 
         // Ruler guides: dragged out of the rulers, moved, deleted, locked; snapping to guides and (Smart Guides) to other objects; the View menu.
         void checkGuides();
 
         // Dragging the captions of the number fields changes the numbers (Shift and Ctrl+Shift for finer steps), one undo step a drag.
         void checkScrubbing();
+        void checkTextScrubbing();
+        void checkTextPath();
 
         // Object > Path and File > Export As Image are in the menus and act on the selection.
         void checkPathMenu();
@@ -178,7 +190,7 @@ namespace sketch {
         (void)view; (void)mouse;
         int& failures = failures_;
         static const char* kNames[] = {"selectTool", "directSelectTool", "rectangleTool", "ellipseTool", "lineTool",
-            "penTool", "pencilTool", "textTool", "gradientTool", "widthTool", "scissorsTool", "knifeTool", "eraserTool", "shapeBuilderTool", "eyedropperTool", "magicWandTool", "lassoTool", "artboardTool", "handTool", "zoomTool"};
+            "penTool", "pencilTool", "paintbrushTool", "textTool", "gradientTool", "widthTool", "scissorsTool", "knifeTool", "eraserTool", "shapeBuilderTool", "eyedropperTool", "magicWandTool", "lassoTool", "artboardTool", "rotateTool", "scaleTool", "reflectTool", "handTool", "zoomTool"};
         for (const char* name : kNames) {
             auto* button = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView(name));
             if (button == nullptr || canvas == nullptr) {
@@ -609,9 +621,167 @@ namespace sketch {
             expect(document.artboards().size() == 3, "Object > Artboards > New Artboard adds one");
         }
         expect(window_.menuItem("File", "Export All Artboards...") != nullptr, "File has Export All Artboards");
+        expect(window_.menuItem("File", "Place Image...") != nullptr && window_.commands().has("file.placeImage"), "File has Place Image");
         document.clearObjects();
         document.undoStack().clear();
         canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    // Rotate, Scale and Reflect: a click sets the origin, a drag changes the selection about it, Alt leaves a copy.
+    void ToolChecks::checkTransformTools() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        canvas->setSnapToGrid(false);
+        canvas->setPan(20.0f, 20.0f);
+        std::size_t id = document.add(SketchObject::makeRect(100, 100, 60, 40)).id();
+        auto bounds = [&]() { return document.findById(id)->geometryBounds(); };
+        auto same = [](double a, double b) { return std::fabs(a - b) < 1e-6; };
+
+        document.clearSelection();
+        canvas->setTool(sketch::SketchTool::Rotate);
+        mouse(0, view(130, 120));
+        mouse(2, view(130, 120));
+        expect(document.selection().size() == 1, "a click with a transform tool selects an object when nothing is selected");
+
+        mouse(0, view(300, 300));   // a click elsewhere only moves the origin
+        mouse(2, view(300, 300));
+        SelectionFrame frame;
+        expect(document.selectionFrame(frame) && same(document.selectionOrigin(frame).x, 300.0) && same(document.selectionOrigin(frame).y, 300.0), "a click sets the transform origin");
+        expect(same(bounds().x0, 100.0), "and changes nothing else");
+        mouse(0, view(130, 120));   // back to the middle of the rectangle
+        mouse(2, view(130, 120));
+
+        mouse(0, view(230, 120));   // Rotate: from the right of the origin to below it is a quarter turn
+        mouse(1, view(200, 160));
+        mouse(1, view(130, 220));
+        mouse(2, view(130, 220));
+        expect(same(bounds().x0, 110.0) && same(bounds().x1, 150.0) && same(bounds().y0, 90.0) && same(bounds().y1, 150.0), "Rotate turns the selection about the origin");
+        expect(std::fabs(document.findById(id)->frameAngle() - 1.5707963267948966) < 1e-6, "and its frame turns with it");
+        document.undoStack().undo();
+        expect(same(bounds().x0, 100.0) && same(bounds().y1, 140.0), "a Rotate drag is one undo step");
+
+        canvas->setTool(sketch::SketchTool::Scale);
+        mouse(0, view(230, 120));   // Scale: twice as far from the origin is twice the size
+        mouse(1, view(280, 120));
+        mouse(1, view(330, 120));
+        mouse(2, view(330, 120));
+        expect(same(bounds().x0, 70.0) && same(bounds().x1, 190.0) && same(bounds().y0, 80.0) && same(bounds().y1, 160.0), "Scale resizes the selection about the origin");
+        document.undoStack().undo();
+        mouse(0, view(230, 120));   // with Shift each direction follows the pointer: x doubles, y stays
+        mouse(1, view(280, 120), newui::kmShift);
+        mouse(1, view(330, 120), newui::kmShift);
+        mouse(2, view(330, 120), newui::kmShift);
+        expect(same(bounds().x1 - bounds().x0, 120.0) && same(bounds().y1 - bounds().y0, 40.0), "Shift scales each direction on its own");
+        document.undoStack().undo();
+
+        canvas->setTool(sketch::SketchTool::Reflect);
+        mouse(0, view(100, 120));   // Reflect: a click on the left edge, then an axis that runs straight down
+        mouse(2, view(100, 120));
+        mouse(0, view(400, 400));
+        mouse(1, view(200, 300));
+        mouse(1, view(100, 220));
+        mouse(2, view(100, 220));
+        expect(same(bounds().x0, 40.0) && same(bounds().x1, 100.0) && same(bounds().y0, 100.0), "Reflect mirrors the selection across the axis through the origin");
+        document.undoStack().undo();
+
+        mouse(0, view(400, 400));   // Alt: the original stays and a mirrored copy is added
+        mouse(1, view(200, 300), newui::kmAlt);
+        mouse(1, view(100, 220), newui::kmAlt);
+        mouse(2, view(100, 220), newui::kmAlt);
+        expect(document.objectCount() == 2 && same(bounds().x0, 100.0), "Alt leaves the original where it was");
+        expect(document.selection().size() == 1 && document.selection()[0] != id && same(document.findById(document.selection()[0])->geometryBounds().x0, 40.0), "and the copy is mirrored and selected");
+        document.undoStack().undo();
+        expect(document.objectCount() == 1, "a copy is one undo step");
+
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    // Arrange > Distribute through the menu.
+    void ToolChecks::checkDistribute() {
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        std::size_t a = document.add(SketchObject::makeRect(0, 0, 40, 40)).id();
+        std::size_t b = document.add(SketchObject::makeRect(60, 0, 20, 20)).id();
+        std::size_t c = document.add(SketchObject::makeRect(200, 0, 60, 40)).id();
+        document.setSelection({a, b, c});
+        newui::MenuItem* spacing = window_.menuItem("Arrange/Distribute", "Horizontal Spacing");
+        expect(spacing != nullptr, "Arrange has a Distribute submenu");
+        if (spacing != nullptr) {
+            spacing->onClick(*spacing);
+            expect(std::fabs(document.findById(b)->geometryBounds().x0 - 110.0) < 1e-6, "Horizontal Spacing makes the gaps equal");
+        }
+        newui::MenuItem* edges = window_.menuItem("Arrange/Distribute", "Top Edges");
+        if (edges != nullptr) {
+            document.transformObjects({b}, BLMatrix2D::make_translation(0, 30), "Move");   // tops 0, 30 and (after this) 40
+            document.transformObjects({c}, BLMatrix2D::make_translation(0, 40), "Move");
+            edges->onClick(*edges);
+            expect(std::fabs(document.findById(b)->geometryBounds().y0 - 20.0) < 1e-6, "Top Edges spreads the tops between the outermost");
+        }
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    // The Brushes panel and menu, and the Paintbrush tool.
+    void ToolChecks::checkBrushes() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        canvas->setSnapToGrid(false);
+        canvas->setPan(20.0f, 20.0f);
+        auto menu = [&](const char* label) { return window_.menuItem("Object/Brush", label); };
+        newui::MenuItem* presets = menu("Add Brush Presets");
+        newui::MenuItem* apply = menu("Apply Brush");
+        newui::MenuItem* remove = menu("Remove Brush");
+        newui::MenuItem* nib = menu("New Calligraphic Brush");
+        expect(presets != nullptr && apply != nullptr && remove != nullptr && nib != nullptr && menu("New Art Brush") != nullptr && menu("New Scatter Brush") != nullptr, "Object has a Brush submenu");
+        expect(dynamic_cast<newui::DropDownList*>(frame_.rootView().findView("brushCombo")) != nullptr, "the Brushes panel is in the layout");
+        if (presets == nullptr || apply == nullptr || remove == nullptr || nib == nullptr) {
+            return;
+        }
+        presets->onClick(*presets);
+        expect(document.brushes().size() == 6 && document.activeBrush() != 0, "Add Brush Presets fills the library");
+        nib->onClick(*nib);
+        expect(document.brushes().size() == 7, "New Calligraphic Brush adds one");
+
+        canvas->setTool(sketch::SketchTool::Paintbrush);
+        mouse(0, view(100, 100));
+        mouse(1, view(140, 130));
+        mouse(1, view(180, 110));
+        mouse(1, view(220, 140));
+        mouse(1, view(260, 100));
+        mouse(2, view(260, 100));
+        expect(document.objectCount() == 1, "the Paintbrush draws a path");
+        if (document.objectCount() == 1) {
+            const sketch::SketchObject& drawn = document.object(0);
+            expect(drawn.strokeOptions().brush != nullptr && drawn.strokeOptions().brush->id == document.activeBrush(), "stroked with the active brush");
+            expect(drawn.fill().isNone(), "and not filled");
+        }
+        document.undoStack().undo();
+        expect(document.objectCount() == 0, "a Paintbrush stroke is one undo step");
+
+        canvas->setTool(sketch::SketchTool::Select);
+        document.add(sketch::SketchObject::makeLine(10, 10, 200, 10));
+        document.selectAll();
+        apply->onClick(*apply);
+        expect(document.selectedBrush() != nullptr, "Apply Brush gives the selection the active brush");
+        auto* combo = dynamic_cast<newui::DropDownList*>(frame_.rootView().findView("brushCombo"));
+        expect(combo != nullptr && combo->selectedIndex().has_value() && document.brushes()[*combo->selectedIndex()]->id == document.activeBrush(), "the Brushes panel shows it");
+        remove->onClick(*remove);
+        expect(document.selectedBrush() == nullptr, "Remove Brush returns to the plain stroke");
+        document.clearObjects();
+        document.undoStack().clear();
     }
 
     void ToolChecks::checkLibraries() {
@@ -700,6 +870,78 @@ namespace sketch {
         canvas->setTool(sketch::SketchTool::Select);
     }
 
+    // Dragging the captions of the Text panel (Size, Track, Lead).
+    void ToolChecks::checkTextScrubbing() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto label = [&frame](const char* name) { return dynamic_cast<newui::Label*>(frame.rootView().findView(name)); };
+        const std::uint32_t left = newui::mbmLeftButton;
+        auto drag = [&label, left](const char* name, float pixels) {
+            newui::Label* caption = label(name);
+            caption->onMouseDown(*caption, newui::Point(20, 5), left, 0u);
+            caption->onMouseMove(*caption, newui::Point(20 + pixels / 2, 5), left, 0u);
+            caption->onMouseMove(*caption, newui::Point(20 + pixels, 5), left, 0u);
+            caption->onMouseUp(*caption, newui::Point(20 + pixels, 5), left, 0u);
+        };
+        expect(label("textSizeLabel") != nullptr && label("textTrackingLabel") != nullptr && label("textLeadingLabel") != nullptr, "the captions of the Text panel are named in the layout");
+        sketch::SketchObject& text = document.add(sketch::SketchObject::makeText("Hello", "", 24.0, BLPoint(20, 60)));
+        document.setSelection({text.id()});
+        drag("textSizeLabel", 6.0f);
+        expect(text.fontSize() == 30.0 && document.undoStack().undoDescription() == "Text Size", "dragging Size changes the font size, one undo step");
+        document.undoStack().undo();
+        expect(text.fontSize() == 24.0 && !document.undoStack().canUndo(), "and undo puts it back");
+        drag("textTrackingLabel", 8.0f);
+        expect(text.textStyle().tracking == 8.0 && document.undoStack().undoDescription() == "Tracking", "dragging Track changes the tracking");
+        document.undoStack().undo();
+        expect(text.textStyle().tracking == 0.0, "and undo puts it back");
+        drag("textLeadingLabel", 20.0f);
+        expect(std::fabs(text.textStyle().leading - 1.2) < 1e-9 && document.undoStack().undoDescription() == "Leading", "dragging Lead changes the leading (a percent a pixel)");
+        document.undoStack().undo();
+        document.clearSelection();
+        drag("textSizeLabel", 6.0f);
+        expect(!document.undoStack().canUndo(), "with no text selected a drag does nothing");
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    // Object > Text on Path and the Start / Flip controls of the Text panel.
+    void ToolChecks::checkTextPath() {
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto menu = [&](const char* label) { return window_.menuItem("Object/Text on Path", label); };
+        newui::MenuItem* onPath = menu("Make Text on Path");
+        newui::MenuItem* between = menu("Make Text Between Paths");
+        newui::MenuItem* release = menu("Release Text from Path");
+        expect(onPath && between && release, "Object has a Text on Path submenu");
+        if (!(onPath && between && release)) {
+            return;
+        }
+        auto field = [this](const char* name) { return dynamic_cast<newui::TextField*>(frame_.rootView().findView(name)); };
+        const std::size_t text = document.add(sketch::SketchObject::makeText("Around", "", 24.0, BLPoint(10, 300))).id();
+        const std::size_t top = document.add(sketch::SketchObject::makeLine(0, 50, 300, 50)).id();
+        const std::size_t bottom = document.add(sketch::SketchObject::makeLine(0, 150, 300, 150)).id();
+        document.setSelection({text, top});
+        onPath->onClick(*onPath);
+        expect(document.findById(text)->textWarp().kind == sketch::TextWarp::Kind::OnPath, "Make Text on Path puts the text on the path");
+        expect(field("textPathStartField") != nullptr && field("textPathStartField")->isEnabled(), "the Text panel offers the start of the text on the path");
+        field("textPathStartField")->setText(L"50");
+        field("textPathStartField")->onReturnPressed(*field("textPathStartField"));
+        expect(document.findById(text)->textWarp().start == 50.0, "typing a start moves the text along the path");
+        release->onClick(*release);
+        expect(!document.findById(text)->textWarp().active(), "Release Text from Path makes it plain text again");
+        document.setSelection({text, top, bottom});
+        between->onClick(*between);
+        expect(document.findById(text)->textWarp().kind == sketch::TextWarp::Kind::Between, "Make Text Between Paths stretches it between two paths");
+        expect(document.selection().size() == 1 && document.selection()[0] == text, "and leaves the text selected");
+        document.undoStack().undo();
+        expect(!document.findById(text)->textWarp().active(), "one undo takes it off again");
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
     void ToolChecks::checkTextPanel() {
         newui::Frame& frame = frame_;
         SketchDocument& document = document_;
@@ -743,19 +985,26 @@ namespace sketch {
                 button->onClick(*button);
             }
         };
-        expect(tree != nullptr && tree->rows().size() == 1 && tree->rows()[0].name == "Layer 1", "the Layers panel lists the document's one layer");
+        auto layerRows = [&]() {
+            std::size_t n = 0;
+            if (tree != nullptr) {
+                for (const sketch::LayerRow& row : tree->rows()) { n += row.kind == sketch::LayerRow::Kind::Layer ? 1 : 0; }
+            }
+            return n;
+        };
+        expect(tree != nullptr && layerRows() == 1 && tree->rows()[0].name == "Layer 1", "the Layers panel lists the document's one layer");
         if (tree == nullptr) {
             return;
         }
         const std::size_t base = document.activeLayer();
         document.add(sketch::SketchObject::makeRect(0, 0, 10, 10));
         press("addLayerButton");
-        expect(document.layers().size() == 2 && tree->rows().size() == 2 && tree->rows()[0].active, "New Layer adds a row on top and makes it active");
+        expect(document.layers().size() == 2 && layerRows() == 2 && tree->rows()[0].active, "New Layer adds a row on top and makes it active");
         std::size_t second = document.activeLayer();
         document.add(sketch::SketchObject::makeRect(20, 0, 10, 10));
         expect(document.object(1).layer() == second, "new objects go to the active layer");
         press("addSublayerButton");
-        expect(document.layers().size() == 3 && document.layerDepth(document.activeLayer()) == 1 && tree->rows().size() == 3 && tree->rows()[1].depth == 1,
+        expect(document.layers().size() == 3 && document.layerDepth(document.activeLayer()) == 1 && layerRows() == 3 && tree->rows()[2].depth == 1,
                "New Sublayer adds an indented row under the active layer");
         std::size_t sub = document.activeLayer();
 
@@ -791,10 +1040,139 @@ namespace sketch {
         press("deleteLayerButton");
         expect(document.layers().size() == 2, "Delete removes the active layer");
         document.undoStack().undo();
-        expect(document.layers().size() == 3 && tree->rows().size() == 3, "and undo brings it back with its row");
+        expect(document.layers().size() == 3 && layerRows() == 3, "and undo brings it back with its row");
         document.clearObjects();
         document.undoStack().clear();
-        expect(document.layers().size() == 1 && tree->rows().size() == 1, "a new document has the one layer again");
+        expect(document.layers().size() == 1 && layerRows() == 1, "a new document has the one layer again");
+    }
+
+    // Objects and groups in the Layers tree, the wheel, and the Layer menu.
+    void ToolChecks::checkLayerObjects() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto* tree = dynamic_cast<sketch::LayerTree*>(frame.rootView().findView("layersTree"));
+        expect(tree != nullptr, "the Layers tree is in the layout");
+        if (tree == nullptr) {
+            return;
+        }
+        using Kind = sketch::LayerRow::Kind;
+        const std::size_t a = document.add(sketch::SketchObject::makeRect(0, 0, 10, 10)).id();
+        const std::size_t b = document.add(sketch::SketchObject::makeRect(20, 0, 10, 10)).id();
+        const std::size_t c = document.add(sketch::SketchObject::makeEllipse(50, 5, 5, 5)).id();
+        auto indexOf = [&](Kind kind, std::size_t id) {
+            for (std::size_t i = 0; i < tree->rows().size(); ++i) {
+                if (tree->rows()[i].kind == kind && tree->rows()[i].id == id) { return i; }
+            }
+            return tree->rows().size();
+        };
+        auto centre = [](const newui::Rect& r) { return newui::Point(r.left() + r.width() * 0.5f, r.top() + r.height() * 0.5f); };
+        auto click = [&](const newui::Rect& where, std::uint32_t keys = 0) {
+            newui::Point pt = centre(where);
+            tree->onMouseDown(*tree, pt, std::uint32_t(1), keys);
+            tree->onMouseUp(*tree, pt, std::uint32_t(1), keys);
+        };
+        expect(tree->rows().size() == 4 && tree->rows()[0].kind == Kind::Layer && tree->rows()[1].id == c && tree->rows()[3].id == a, "the tree lists the objects of a layer under it, the front one first");
+        expect(tree->rows()[1].name == "<Ellipse>" && tree->rows()[3].name == "<Rectangle>", "an unnamed object shows its kind");
+
+        click(tree->nameRect(indexOf(Kind::Object, a)));
+        expect(document.selection() == std::vector<std::size_t>{a}, "clicking an object row selects the object");
+        expect(tree->rows()[indexOf(Kind::Object, a)].holdsSelection, "and its row shows it");
+        click(tree->nameRect(indexOf(Kind::Object, b)), newui::kmCtrl);
+        expect(document.selection().size() == 2, "Ctrl-click adds another");
+        click(tree->eyeRect(indexOf(Kind::Object, c)));
+        expect(!document.findById(c)->ownVisible(), "the eye of an object row hides the object");
+        document.undoStack().undo();
+        expect(document.findById(c)->ownVisible(), "and undo shows it");
+        click(tree->lockRect(indexOf(Kind::Object, c)));
+        expect(document.findById(c)->ownLocked(), "the lock of an object row locks it");
+        document.undoStack().undo();
+
+        document.setSelection({a, b});
+        document.groupSelection();
+        expect(indexOf(Kind::Group, document.findById(a)->groups().front()) < tree->rows().size() && indexOf(Kind::Object, a) == tree->rows().size(), "a group is a row of its own, closed");
+        const std::size_t group = document.findById(a)->groups().front();
+        click(tree->triangleRect(indexOf(Kind::Group, group)));
+        expect(indexOf(Kind::Object, a) < tree->rows().size() && tree->rows()[indexOf(Kind::Object, a)].depth == 2, "opening it lists its members one level in");
+        click(tree->nameRect(indexOf(Kind::Group, group)));
+        expect(document.selection().size() == 2, "clicking a group row selects all its members");
+
+        // Drag an object onto another layer's row.
+        const std::size_t first = document.activeLayer();
+        const std::size_t other = document.addLayer(0);
+        newui::Point from = centre(tree->nameRect(indexOf(Kind::Object, c)));
+        newui::Point to = centre(tree->nameRect(indexOf(Kind::Layer, first)));
+        tree->onMouseDown(*tree, from, std::uint32_t(1), 0u);
+        tree->onMouseMove(*tree, to, std::uint32_t(1), 0u);
+        tree->onMouseUp(*tree, to, std::uint32_t(1), 0u);
+        expect(document.findById(c)->layer() == first, "dropping an object on its own layer changes nothing");
+        to = centre(tree->nameRect(indexOf(Kind::Layer, other)));
+        from = centre(tree->nameRect(indexOf(Kind::Object, c)));
+        tree->onMouseDown(*tree, from, std::uint32_t(1), 0u);
+        tree->onMouseMove(*tree, to, std::uint32_t(1), 0u);
+        tree->onMouseUp(*tree, to, std::uint32_t(1), 0u);
+        expect(document.findById(c)->layer() == other, "dropping an object row on a layer row moves it there");
+        document.undoStack().undo();
+        expect(document.findById(c)->layer() == first, "and undo puts it back");
+
+        // The layer colour reaches the rows.
+        document.setLayerColor(first, 0xFF0000);
+        expect(tree->rows()[indexOf(Kind::Layer, first)].color == 0xFF0000u && tree->rows()[indexOf(Kind::Object, c)].color == 0xFF0000u, "the layer colour shows on its rows");
+
+        // Wheel scrolling.
+        document.setActiveLayer(first);
+        for (int i = 0; i < 30; ++i) {
+            document.add(sketch::SketchObject::makeRect(double(i), 100, 5, 5));
+        }
+        expect(tree->rows().size() > tree->visibleRows(), "many objects do not all fit");
+        const std::size_t top = tree->firstRow();
+        tree->onMouseWheel(*tree, newui::Point(10.0f, 10.0f), -120.0f);
+        expect(tree->firstRow() > top, "the mouse wheel scrolls the tree");
+        tree->onMouseWheel(*tree, newui::Point(10.0f, 10.0f), 600.0f);
+        expect(tree->firstRow() == 0, "and back up to the first row");
+
+        // The Layer menu.
+        document.clearObjects();
+        document.undoStack().clear();
+        document.add(sketch::SketchObject::makeRect(0, 0, 10, 10));
+        auto menu = [&](const char* label) { return window_.menuItem("Layer", label); };
+        newui::MenuItem* add = menu("New Layer");
+        newui::MenuItem* duplicate = menu("Duplicate Layer");
+        newui::MenuItem* merge = menu("Merge Layer Down");
+        newui::MenuItem* flatten = menu("Flatten Artwork");
+        newui::MenuItem* hideOthers = menu("Hide Other Layers");
+        newui::MenuItem* showAll = menu("Show All Layers");
+        expect(add && duplicate && merge && flatten && hideOthers && showAll && menu("Lock Other Layers") && menu("Unlock All Layers") && menu("Select Objects in Layer") &&
+            menu("Bring Layer Forward") && menu("Collapse All Layers"), "there is a Layer menu");
+        if (!(add && duplicate && merge && flatten && hideOthers && showAll)) {
+            return;
+        }
+        add->onClick(*add);
+        document.add(sketch::SketchObject::makeRect(20, 0, 10, 10));
+        expect(document.layers().size() == 2 && document.objectCount() == 2, "New Layer adds a layer");
+        duplicate->onClick(*duplicate);
+        expect(document.layers().size() == 3 && document.objectCount() == 3, "Duplicate Layer copies the layer and its objects");
+        document.undoStack().undo();
+        expect(document.layers().size() == 2 && document.objectCount() == 2, "and undo takes the copy away");
+        document.undoStack().redo();
+        expect(document.layers().size() == 3 && document.objectCount() == 3, "and redo brings it back");
+        hideOthers->onClick(*hideOthers);
+        std::size_t hidden = 0;
+        for (const sketch::Layer& layer : document.layers()) { hidden += layer.visible ? 0 : 1; }
+        expect(hidden == 2, "Hide Other Layers hides the rest");
+        showAll->onClick(*showAll);
+        hidden = 0;
+        for (const sketch::Layer& layer : document.layers()) { hidden += layer.visible ? 0 : 1; }
+        expect(hidden == 0, "Show All Layers shows them again");
+        merge->onClick(*merge);
+        expect(document.layers().size() == 2 && document.objectCount() == 3, "Merge Layer Down joins a layer into the one behind it");
+        flatten->onClick(*flatten);
+        expect(document.layers().size() == 1 && document.objectCount() == 3, "Flatten Artwork leaves one layer");
+        document.undoStack().undo();
+        expect(document.layers().size() == 2, "and undo brings the layers back");
+        document.clearObjects();
+        document.undoStack().clear();
     }
 
     void ToolChecks::checkCommands() {

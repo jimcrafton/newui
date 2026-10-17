@@ -20,6 +20,7 @@
 #include "newui/rootview.h"
 
 #include "newdocumentdialog.h"
+#include "tracedialog.h"
 #include "sketchchecks.h"
 #include "sketchdocument.h"
 #include "sketchwindow.h"
@@ -111,7 +112,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (options.checkNewDocument) {
-        return sketch::NewDocumentDialog::check();
+        return sketch::NewDocumentDialog::check() + sketch::TraceDialog::check();
     }
     if (options.check) {
         return printLayouts(frame, options.checkDepth);

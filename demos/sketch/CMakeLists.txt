@@ -7,6 +7,7 @@ add_executable(sketch
     texttool.cpp
     cuttools.cpp
     artboardtool.cpp
+    transformtools.cpp
     guides.cpp
     cursorset.h cursorset.cpp
     shapetools.h shapetools.cpp
@@ -23,6 +24,14 @@ add_executable(sketch
     layerspanel.h layerspanel.cpp
     artboardpanel.h artboardpanel.cpp
     librarypanel.h librarypanel.cpp
+    brushpanel.h brushpanel.cpp
+    brush.h brush.cpp
+    pathflatten.h pathflatten.cpp
+    imagedata.h imagedata.cpp
+    textwarp.h textwarp.cpp
+    documenttextpath.cpp
+    documentimages.cpp
+    documentbrushes.cpp
     textpanel.h textpanel.cpp
     numberscrubber.h numberscrubber.cpp
     sketchcolor.h sketchcolor.cpp
@@ -48,9 +57,10 @@ add_executable(sketch
     sketchchecks.h sketchchecks.cpp
     newdocumentmodel.h newdocumentmodel.cpp
     newdocumentdialog.h newdocumentdialog.cpp
+    tracedialog.h tracedialog.cpp
 )
 
-target_link_libraries(sketch PRIVATE newui zlib_static)
+target_link_libraries(sketch PRIVATE newui zlib_static windowscodecs ole32)
 target_include_directories(sketch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # sketch's own reflected classes (CanvasView, GradientBar, SwatchGrid, PagePreview) so sketch.newui can name
@@ -80,6 +90,13 @@ add_executable(sketch_tests
     documentselect.cpp
     documentclip.cpp
     documentsymbols.cpp
+    documentbrushes.cpp
+    brush.cpp
+    pathflatten.cpp
+    textwarp.cpp
+    imagedata.cpp
+    documenttextpath.cpp
+    documentimages.cpp
     documentartboards.cpp
     documenttrace.cpp
     imagetrace.cpp
@@ -94,5 +111,5 @@ add_executable(sketch_tests
     cursorset.cpp
     newdocumentmodel.cpp
 )
-target_link_libraries(sketch_tests PRIVATE newui zlib_static GTest::gtest_main)
+target_link_libraries(sketch_tests PRIVATE newui zlib_static windowscodecs ole32 GTest::gtest_main)
 target_include_directories(sketch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

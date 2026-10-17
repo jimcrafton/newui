@@ -24,6 +24,7 @@ namespace sketch {
     };
 
     struct SymbolDef;
+    struct BrushDef;
     class SketchDocument;
 
     enum class GradientSpread { Pad, Repeat, Reflect };
@@ -188,9 +189,14 @@ namespace sketch {
         // Variable width, sorted by t; empty = the plain stroke weight all along. Drawn as a filled outline, so
         // dashes and "gradient along stroke" do not apply while it is set.
         std::vector<WidthPoint> widths;
+        // A brush that draws the stroke (see brush.h); then cap, join, dashes and widths do not apply. `brushRef` is the id while a file
+        // is being read, before the library is in.
+        std::shared_ptr<const BrushDef> brush;
+        std::size_t brushRef = 0;
 
         bool operator==(const StrokeOptions& other) const {
-            return cap == other.cap && join == other.join && miterLimit == other.miterLimit && dashes == other.dashes && widths == other.widths;
+            return cap == other.cap && join == other.join && miterLimit == other.miterLimit && dashes == other.dashes && widths == other.widths &&
+                brush == other.brush && brushRef == other.brushRef;
         }
         bool operator!=(const StrokeOptions& other) const { return !(*this == other); }
     };
@@ -291,7 +297,40 @@ namespace sketch {
     // Like paintIsolated, with opacity 1 and Normal, but only what lies inside `mask` (document units, filled non-zero) is kept - a clipping mask.
     void paintClipped(BLContext& ctx, const BLBox& userBounds, const BLPath& mask, const std::function<void(BLContext&)>& content);
 
-    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text, Symbol };
+    // A picture in a document (imagedata.h): the file it came from and its decoded pixels. Shared by every Image object made from it.
+    // @reflect ignore=true
+    struct ImageData {
+        std::string name;
+        std::string bytes;       // the file as it was (PNG, JPEG, BMP or QOI), saved as it is
+        std::string mime;        // "image/png" ...
+        int width = 0, height = 0;
+        BLImage image;           // PRGB32
+        // The picture to draw when it is shown at `scale` times its own size (pixels on screen per pixel of the picture): a copy halved as
+        // often as that stays sharp, so a 12-megapixel photo is not read through in full to draw a thumbnail. `extra` is how much bigger
+        // than the returned image's own pixels each of them is (1 for the picture itself).
+        const BLImage& levelFor(double scale, double& extra) const;
+        mutable std::vector<BLImage> mips;
+    };
+
+    // Image: a picture drawn into a quadrilateral (like a Symbol, so it moves, scales, turns and shears like any object).
+    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text, Symbol, Image };
+
+    // Text that follows a path, or is stretched between two (see TextWarper in textwarp.h). The paths are copies, kept in the text's own
+    // flat space (the one SketchObject::textMatrix() places on the page), so moving, turning or scaling the text carries them along.
+    // @reflect ignore=true
+    struct TextWarp {
+        enum class Kind { None, OnPath, Between };
+        Kind kind = Kind::None;
+        BLPath first;          // OnPath: the path the baseline follows; Between: the top path
+        BLPath second;         // Between: the bottom path
+        double start = 0.0;    // OnPath: where the text starts, as a percentage of the path length
+        bool flip = false;     // OnPath: the other side of the path; Between: top and bottom swapped
+        bool active() const { return kind != Kind::None; }
+        bool operator==(const TextWarp& o) const {
+            return kind == o.kind && start == o.start && flip == o.flip && first.equals(o.first) && second.equals(o.second);
+        }
+        bool operator!=(const TextWarp& o) const { return !(*this == o); }
+    };
 
 
 
@@ -385,6 +424,13 @@ namespace sketch {
         void setSymbol(const std::shared_ptr<const SymbolDef>& def) { symbol_ = def; }
         BLMatrix2D symbolMatrix() const;
 
+        // Image objects only: the picture, and the matrix that carries its pixels (0,0 .. width,height) onto the object's outline.
+        static SketchObject* makeImageObject(const std::shared_ptr<const ImageData>& image, const BLMatrix2D& placement);
+        bool isImage() const { return type_ == SketchObjectType::Image; }
+        const std::shared_ptr<const ImageData>& image() const { return image_; }
+        void setImage(const std::shared_ptr<const ImageData>& image) { image_ = image; }
+        BLMatrix2D imageMatrix() const;
+
         // Text objects only (type() == SketchObjectType::Text). The words ('\n' separates lines), the font name ("" = the default
         // font) and size, and the matrix that places the un-transformed outline (baseline at the origin) in the document.
         bool isText() const { return type_ == SketchObjectType::Text; }
@@ -402,6 +448,14 @@ namespace sketch {
         // Weight, slant, alignment, tracking and leading (see TextStyle); the outline is rebuilt.
         const TextStyle& textStyle() const { return textStyle_; }
         void setTextStyle(const TextStyle& style);
+        // Text on a path / between two paths; the outline is rebuilt. None (the default) is plain text.
+        const TextWarp& textWarp() const { return textWarp_; }
+        void setTextWarp(const TextWarp& warp);
+        // A point of the text's flat space (x along the first baseline, y down from it) as it is on the page now: through the warp, if any,
+        // and the placement. What the editing caret uses.
+        BLPoint mapTextPoint(double x, double y) const;
+        // The left edge of the text as last set (the warp stretches from there).
+        double warpFrameLeft() const { return warpFrame_.x0; }
         // Everything that shapes the words at once (one rebuild) - what undo of a text change restores.
         void setTextAll(const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style);
 
@@ -456,6 +510,7 @@ namespace sketch {
         void paintWithEffects(BLContext& ctx) const;
         void drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const;
         void drawSymbol(BLContext& ctx) const;
+        void drawImage(BLContext& ctx) const;
         // Text objects: path_ = the outlines of text_ placed by textMatrix_.
         void rebuildText();
         std::size_t storedActive(AppearanceKind kind) const { return kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_); }
@@ -485,7 +540,10 @@ namespace sketch {
         double fontSize_ = 24.0;
         BLMatrix2D textMatrix_ = BLMatrix2D::make_identity();
         TextStyle textStyle_;
+        TextWarp textWarp_;
+        BLBox warpFrame_ = BLBox(0, 0, 1, 1);   // x0, y0 = top, x1, y1 = bottom of the text as last set, for the warp
         std::shared_ptr<const SymbolDef> symbol_;
+        std::shared_ptr<const ImageData> image_;
     };
 
 }

@@ -1,5 +1,7 @@
 #include "sketchsvg.h"
 
+#include "imagedata.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -218,7 +220,7 @@ namespace sketch {
 
         std::string layerAttr(const SketchDocument& document) {
             const std::vector<Layer>& layers = document.layers();
-            if (layers.size() == 1 && layers[0].name == "Layer 1" && layers[0].visible && !layers[0].locked) {
+            if (layers.size() == 1 && layers[0].name == "Layer 1" && layers[0].visible && !layers[0].locked && layers[0].color == 0) {
                 return std::string();
             }
             std::string text = " data-layers=\"";
@@ -226,6 +228,11 @@ namespace sketch {
                 const Layer& l = layers[i];
                 std::string flags = std::string(l.visible ? "" : "h") + (l.locked ? "l" : "") + (l.expanded ? "" : "c");
                 text += (i ? ";" : "") + std::to_string(l.id) + "," + std::to_string(l.parent) + "," + (flags.empty() ? "-" : flags) + "," + encodeName(l.name);
+                if (l.color != 0) {
+                    char hex[16];
+                    std::snprintf(hex, sizeof(hex), ",%06X", unsigned(l.color));
+                    text += hex;   // a layer colour of its own
+                }
             }
             return text + "\"";
         }
@@ -258,6 +265,9 @@ namespace sketch {
                 l.locked = parts[2].find('l') != std::string::npos;
                 l.expanded = parts[2].find('c') == std::string::npos;
                 l.name = parts.size() > 3 ? decodeName(parts[3]) : "Layer " + std::to_string(l.id);
+                if (parts.size() > 4) {
+                    l.color = std::uint32_t(std::strtoul(parts[4].c_str(), nullptr, 16)) & 0xFFFFFFu;
+                }
                 layers.push_back(l);
             }
             // A parent the list does not have (or itself) makes the layer a top-level one.
@@ -365,6 +375,7 @@ namespace sketch {
                 case SketchObjectType::Polyline: return "Polyline";
                 case SketchObjectType::Text: return "Text";
                 case SketchObjectType::Symbol: return "Symbol";
+                case SketchObjectType::Image: return "Image";
                 default: return "Path";
             }
         }
@@ -937,7 +948,7 @@ namespace sketch {
             style.props.erase("mix-blend-mode");
             static const char* kKeys[] = {
                 "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
-                "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile",
+                "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile", "data-brush",
                 "data-fill-color", "data-stroke-color", "data-fill-pattern", "data-stroke-pattern",
             };
             for (const char* key : kKeys) {
@@ -968,6 +979,7 @@ namespace sketch {
             SketchDocument* document = nullptr;
             float pageWidth = 612.0f, pageHeight = 792.0f;
             std::vector<std::size_t> groupStack;  // the <g> elements being read (document group ids, outermost first)
+            int depth = 0;                        // <use> inside <use>: stops a reference that leads back to itself
         };
 
         void collectIds(const XmlNode& node, std::map<std::string, const XmlNode*>& out) {
@@ -1194,6 +1206,14 @@ namespace sketch {
             if (style.align != TextStyle::Left) { out << " data-text-align=\"" << (style.align == TextStyle::Center ? "center" : "right") << "\""; }
             if (style.tracking != 0.0) { out << " data-text-tracking=\"" << num(style.tracking) << "\""; }
             if (style.leading != 1.0) { out << " data-text-leading=\"" << num(style.leading) << "\""; }
+            if (object.textWarp().active()) {   // text on a path / between two paths: the paths, in the text's own space
+                const TextWarp& warp = object.textWarp();
+                out << " data-text-warp=\"" << (warp.kind == TextWarp::Kind::OnPath ? "path" : "between") << ";" << num(warp.start) << ";" << (warp.flip ? "flip" : "-")
+                    << "\" data-warp-a=\"" << pathData(warp.first) << "\"";
+                if (warp.kind == TextWarp::Kind::Between) {
+                    out << " data-warp-b=\"" << pathData(warp.second) << "\"";
+                }
+            }
             out << " data-text=\"" << escape(object.text()) << "\" data-font-name=\"" << escape(object.fontName()) << "\" data-font-size=\""
                 << num(object.fontSize()) << "\" data-text-matrix=\"" << num(m.m00) << " " << num(m.m01) << " " << num(m.m10) << " "
                 << num(m.m11) << " " << num(m.m20) << " " << num(m.m21) << "\"";
@@ -1249,6 +1269,26 @@ namespace sketch {
             double fontSize = number(size, 24.0);
             object->setTextState(*words, font != nullptr ? *font : std::string(), fontSize > 0.0 ? fontSize : 24.0, placed);
             object->setTextStyle(textStyle);
+            if (const std::string* mode = node.attr("data-text-warp")) {
+                TextWarp warp;
+                std::istringstream in(*mode);
+                std::string kind, start, flip;
+                std::getline(in, kind, ';');
+                std::getline(in, start, ';');
+                std::getline(in, flip, ';');
+                warp.kind = kind == "path" ? TextWarp::Kind::OnPath : (kind == "between" ? TextWarp::Kind::Between : TextWarp::Kind::None);
+                warp.start = std::strtod(start.c_str(), nullptr);
+                warp.flip = flip == "flip";
+                const std::string* a = node.attr("data-warp-a");
+                const std::string* b = node.attr("data-warp-b");
+                bool ok = a != nullptr && parsePathData(*a, warp.first);
+                if (warp.kind == TextWarp::Kind::Between) {
+                    ok = ok && b != nullptr && parsePathData(*b, warp.second);
+                }
+                if (ok && warp.active() && std::isfinite(warp.start)) {
+                    object->setTextWarp(warp);
+                }
+            }
             return object;
         }
 
@@ -1257,7 +1297,7 @@ namespace sketch {
                 {"Line", SketchObjectType::Line}, {"Rect", SketchObjectType::Rect}, {"RoundRect", SketchObjectType::RoundRect},
                 {"Ellipse", SketchObjectType::Ellipse}, {"Polygon", SketchObjectType::Polygon},
                 {"Polyline", SketchObjectType::Polyline}, {"Path", SketchObjectType::Path}, {"Text", SketchObjectType::Text},
-                {"Symbol", SketchObjectType::Symbol},
+                {"Symbol", SketchObjectType::Symbol}, {"Image", SketchObjectType::Image},
             };
             for (const auto& entry : kTypes) {
                 if (name == entry.first) {
@@ -1365,6 +1405,9 @@ namespace sketch {
             if (total > 0.0) {
                 strokeOptions.dashes = values;
             }
+        }
+        if (const std::string* brush = style.get("data-brush")) {
+            strokeOptions.brushRef = std::size_t(std::strtoull(brush->c_str(), nullptr, 10));   // bound to the brush once the library is in
         }
         if (const std::string* profile = style.get("data-width-profile")) {
             std::string text = *profile;
@@ -1506,7 +1549,289 @@ namespace sketch {
             ctx.document->add(object.release());
         }
 
-        void readNode(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& parentMatrix, const Style& inherited) {
+        void readNode(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& parentMatrix, const Style& inherited, unsigned done = 0);
+
+        // <image>: the picture of a data: URI (or of a file the href names) drawn into x, y, width, height, as an Image object.
+        void readImage(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& matrix, const Style& style) {
+            if (ctx.document == nullptr) {
+                return;
+            }
+            const std::string* href = node.attr("href");
+            if (href == nullptr) { href = node.attr("xlink:href"); }
+            if (href == nullptr || href->empty()) {
+                return;
+            }
+            std::shared_ptr<const ImageData> image;
+            std::string bytes;
+            if (bytesFromDataUri(*href, bytes)) {
+                image = decodeImage(bytes, std::string());
+            } else if ((*href)[0] != '#') {
+                image = loadImageFile(*href);   // a file next to where sketch runs; relative paths of other documents are not followed
+            }
+            if (!image) {
+                return;
+            }
+            double x = number(node.attr("x"), 0.0), y = number(node.attr("y"), 0.0), w = 0.0, h = 0.0;
+            parseLength(node.attr("width"), w);
+            parseLength(node.attr("height"), h);
+            if (!(w > 0.0)) { w = double(image->width); }
+            if (!(h > 0.0)) { h = double(image->height); }
+            // preserveAspectRatio: the default keeps the proportions (meet, centred); "none" stretches.
+            double dx = x, dy = y, dw = w, dh = h;
+            const std::string* preserve = node.attr("preserveAspectRatio");
+            if (preserve == nullptr || preserve->compare(0, 4, "none") != 0) {
+                const double scale = std::min(w / double(image->width), h / double(image->height));
+                dw = double(image->width) * scale;
+                dh = double(image->height) * scale;
+                dx = x + (w - dw) * 0.5;
+                dy = y + (h - dh) * 0.5;
+            }
+            BLMatrix2D placement = concat(matrix, BLMatrix2D::make_translation(dx, dy));
+            placement = concat(placement, BLMatrix2D::make_scaling(dw / double(image->width), dh / double(image->height)));
+            std::unique_ptr<SketchObject> object(SketchObject::makeImageObject(image, placement));
+            object->setOpacity(std::min(1.0, std::max(0.0, number(style.get("opacity"), 1.0))));
+            if (const std::string* blend = style.get("mix-blend-mode")) {
+                object->setBlendMode(blendModeFromCss(*blend));
+            }
+            if (const std::string* display = style.get("display")) {
+                object->setVisible(*display != "none");
+            }
+            if (const std::string* locked = node.attr("data-locked")) {
+                object->setLocked(*locked == "true");
+            }
+            if (const std::string* layer = node.attr("data-layer")) {
+                object->setLayer(std::size_t(std::strtoull(layer->c_str(), nullptr, 10)));
+            }
+            if (const std::string* name = node.attr("data-name")) {
+                object->setName(*name);
+            } else if (const std::string* id = node.attr("id")) {
+                object->setName(*id);
+            }
+            object->setGroups(ctx.groupStack);
+            ctx.document->add(object.release());
+        }
+
+        // A property of the element itself (these do not inherit): the attribute, else its declaration in style="".
+        std::string ownProperty(const XmlNode& node, const char* name) {
+            if (const std::string* attribute = node.attr(name)) {
+                return trim(*attribute);
+            }
+            if (const std::string* css = node.attr("style")) {
+                const std::string key = std::string(name) + ":";
+                std::size_t at = 0;
+                while ((at = css->find(key, at)) != std::string::npos) {
+                    if (at == 0 || (*css)[at - 1] == ';' || (*css)[at - 1] == ' ') {
+                        std::size_t end = css->find(';', at);
+                        return trim(css->substr(at + key.size(), end == std::string::npos ? std::string::npos : end - at - key.size()));
+                    }
+                    at += key.size();
+                }
+            }
+            return std::string();
+        }
+
+        // "url(#id)" -> "id"; empty for anything else (including "none").
+        std::string urlId(const std::string& text) {
+            if (text.compare(0, 4, "url(") != 0) {
+                return std::string();
+            }
+            const std::size_t hash = text.find('#'), close = text.find(')');
+            if (hash == std::string::npos || close == std::string::npos || close < hash) {
+                return std::string();
+            }
+            std::string id = text.substr(hash + 1, close - hash - 1);
+            while (!id.empty() && (id.back() == '\'' || id.back() == '"')) { id.pop_back(); }
+            return id;
+        }
+
+        const std::string* hrefOf(const XmlNode& node) {
+            const std::string* href = node.attr("href");
+            return href != nullptr ? href : node.attr("xlink:href");
+        }
+
+        // The matrix of a viewport: a `width` x `height` box at the origin showing the region `viewBox` of its content, placed by
+        // preserveAspectRatio (xMidYMid meet unless it says otherwise). Identity without a viewBox.
+        BLMatrix2D viewportMatrix(const XmlNode& node, double width, double height) {
+            const std::string* box = node.attr("viewBox");
+            if (box == nullptr) {
+                return identity();
+            }
+            const std::vector<double> v = numberList(*box);
+            if (v.size() != 4 || !(v[2] > 0.0) || !(v[3] > 0.0) || !(width > 0.0) || !(height > 0.0)) {
+                return identity();
+            }
+            std::string align = "xMidYMid";
+            bool slice = false;
+            if (const std::string* preserve = node.attr("preserveAspectRatio")) {
+                std::istringstream in(*preserve);
+                std::string word;
+                while (in >> word) {
+                    if (word == "defer") { continue; }
+                    if (word == "slice") { slice = true; } else if (word == "meet") { slice = false; } else { align = word; }
+                }
+            }
+            double sx = width / v[2], sy = height / v[3];
+            if (align != "none") {
+                const double s = slice ? std::max(sx, sy) : std::min(sx, sy);
+                sx = sy = s;
+            }
+            const double slackX = width - v[2] * sx, slackY = height - v[3] * sy;
+            const double fx = align.find("xMin") == 0 ? 0.0 : (align.find("xMax") == 0 ? 1.0 : 0.5);
+            const double fy = align.find("YMin") != std::string::npos ? 0.0 : (align.find("YMax") != std::string::npos ? 1.0 : 0.5);
+            return BLMatrix2D(sx, 0.0, 0.0, sy, slackX * (align == "none" ? 0.0 : fx) - v[0] * sx, slackY * (align == "none" ? 0.0 : fy) - v[1] * sy);
+        }
+
+        // A nested <svg> or a <symbol> shown through <use>: its viewport (x, y, width, height) and then its children.
+        void readViewport(ReadContext& ctx, const XmlNode& viewport, const XmlNode* sizeFrom, const BLMatrix2D& matrix, const Style& style) {
+            double x = number(viewport.attr("x"), 0.0), y = number(viewport.attr("y"), 0.0);
+            double w = 0.0, h = 0.0;
+            const XmlNode& sized = sizeFrom != nullptr ? *sizeFrom : viewport;
+            if (!parseLength(sized.attr("width"), w) && !parseLength(viewport.attr("width"), w)) { w = 0.0; }
+            if (!parseLength(sized.attr("height"), h) && !parseLength(viewport.attr("height"), h)) { h = 0.0; }
+            const std::vector<double> vb = viewport.attr("viewBox") != nullptr ? numberList(*viewport.attr("viewBox")) : std::vector<double>();
+            if (w <= 0.0 && vb.size() == 4) { w = vb[2]; }
+            if (h <= 0.0 && vb.size() == 4) { h = vb[3]; }
+            BLMatrix2D inner = concat(matrix, BLMatrix2D::make_translation(x, y));
+            inner = concat(inner, viewportMatrix(viewport, w, h));
+            for (const auto& child : viewport.children) {
+                readNode(ctx, *child, inner, style);
+            }
+        }
+
+        // <use>: the element it names drawn again at (x, y); a <symbol> or <svg> is drawn in a viewport of the use's size.
+        void readUse(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& matrix, const Style& style) {
+            const std::string* href = hrefOf(node);
+            if (href == nullptr || href->empty() || (*href)[0] != '#' || ctx.depth > 12) {
+                return;
+            }
+            auto it = ctx.byId.find(href->substr(1));
+            if (it == ctx.byId.end()) {
+                return;
+            }
+            const XmlNode& target = *it->second;
+            const BLMatrix2D at = concat(matrix, BLMatrix2D::make_translation(number(node.attr("x"), 0.0), number(node.attr("y"), 0.0)));
+            ++ctx.depth;
+            if (target.name == "symbol" || target.name == "svg") {
+                // The use's own width and height replace the symbol's.
+                XmlNode copy;
+                copy.attrs = target.attrs;
+                if (const std::string* w = node.attr("width")) { copy.attrs["width"] = *w; }
+                if (const std::string* h = node.attr("height")) { copy.attrs["height"] = *h; }
+                copy.attrs["x"] = "0";
+                copy.attrs["y"] = "0";
+                double w = 0.0, h = 0.0;
+                parseLength(copy.attrs.count("width") ? &copy.attrs["width"] : nullptr, w);
+                parseLength(copy.attrs.count("height") ? &copy.attrs["height"] : nullptr, h);
+                const std::vector<double> vb = target.attr("viewBox") != nullptr ? numberList(*target.attr("viewBox")) : std::vector<double>();
+                if (w <= 0.0 && vb.size() == 4) { w = vb[2]; }
+                if (h <= 0.0 && vb.size() == 4) { h = vb[3]; }
+                const BLMatrix2D inner = concat(at, viewportMatrix(copy, w, h));
+                for (const auto& child : target.children) {
+                    readNode(ctx, *child, inner, style);
+                }
+            } else {
+                readNode(ctx, target, at, style);
+            }
+            --ctx.depth;
+        }
+
+        // Content with clip-path="url(#id)": the content and, on top of it, the clip shapes as one object, in a clipping group (the
+        // topmost member of a clipping group is its mask). `matrix` is the element's own (user space of the clip).
+        void readClipped(ReadContext& ctx, const XmlNode& node, const XmlNode& clip, const BLMatrix2D& matrix, const BLMatrix2D& parentMatrix, const Style& inherited, unsigned done) {
+            BLMatrix2D clipMatrix = matrix;
+            if (const std::string* t = clip.attr("transform")) {
+                clipMatrix = concat(matrix, parseTransform(*t));
+            }
+            BLPath mask;
+            for (const auto& child : clip.children) {
+                SketchObjectType type = SketchObjectType::Path;
+                std::unique_ptr<SketchObject> shape(makeShape(*child, type));
+                if (!shape) {
+                    continue;
+                }
+                BLPath part = shape->geometry();
+                BLMatrix2D m = clipMatrix;
+                if (const std::string* t = child->attr("transform")) {
+                    m = concat(clipMatrix, parseTransform(*t));
+                }
+                part.transform(m);
+                mask.add_path(part);
+            }
+            BLBox bounds(0, 0, 0, 0);
+            mask.get_bounding_box(&bounds);
+            if (mask.size() == 0 || !(bounds.x1 - bounds.x0 > 1e-6) || !(bounds.y1 - bounds.y0 > 1e-6)) {
+                readNode(ctx, node, parentMatrix, inherited, done | 1u);   // nothing to clip with: the content as it is
+                return;
+            }
+            const std::size_t before = ctx.document->objectCount();
+            const std::size_t group = ctx.document->newGroupId();
+            ctx.groupStack.push_back(group);
+            readNode(ctx, node, parentMatrix, inherited, done | 1u);
+            if (ctx.document->objectCount() > before) {
+                SketchObject* maskObject = SketchObject::makePath(mask);
+                maskObject->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+                maskObject->setStroke(SketchPaint::none());
+                maskObject->setName("Clipping Path");
+                maskObject->setGroups(ctx.groupStack);
+                ctx.document->add(maskObject);
+                GroupProps props;
+                props.clip = true;
+                ctx.document->setGroupProps(group, props);
+            }
+            ctx.groupStack.pop_back();
+        }
+
+        // The effects a <filter> of simple primitives amounts to: a drop shadow (feDropShadow, or feGaussianBlur of SourceAlpha with an
+        // feOffset and perhaps an feFlood) or a blur of the graphic. `scale` carries lengths from user space to the page.
+        std::vector<AppearanceItem> filterEffects(const XmlNode& filter, double scale) {
+            std::vector<AppearanceItem> effects;
+            double blur = -1.0, shadowBlur = 0.0, dx = 0.0, dy = 0.0, floodOpacity = 1.0;
+            bool shadow = false;
+            SketchColor flood = SketchColor::gray(0.0f);
+            auto color = [](const XmlNode& n, SketchColor& out, double& opacity) {
+                std::string text = ownProperty(n, "flood-color");
+                if (!text.empty()) { parseColor(text, out); }
+                const std::string o = ownProperty(n, "flood-opacity");
+                if (!o.empty()) { opacity = std::min(1.0, std::max(0.0, std::strtod(o.c_str(), nullptr))); }
+            };
+            for (const auto& child : filter.children) {
+                if (child->name == "feGaussianBlur") {
+                    const std::vector<double> sd = child->attr("stdDeviation") != nullptr ? numberList(*child->attr("stdDeviation")) : std::vector<double>();
+                    const double deviation = sd.empty() ? 0.0 : std::max(sd[0], sd.size() > 1 ? sd[1] : sd[0]);
+                    const std::string* in = child->attr("in");
+                    if (in != nullptr && *in == "SourceAlpha") { shadowBlur = deviation; } else { blur = deviation; }
+                } else if (child->name == "feOffset") {
+                    dx = number(child->attr("dx"), 0.0);
+                    dy = number(child->attr("dy"), 0.0);
+                    shadow = true;
+                } else if (child->name == "feFlood") {
+                    color(*child, flood, floodOpacity);
+                } else if (child->name == "feDropShadow") {
+                    dx = number(child->attr("dx"), 2.0);
+                    dy = number(child->attr("dy"), 2.0);
+                    shadowBlur = child->attr("stdDeviation") != nullptr ? std::max(0.0, number(child->attr("stdDeviation"), 2.0)) : 2.0;
+                    color(*child, flood, floodOpacity);
+                    shadow = true;
+                }
+            }
+            if (shadow) {
+                AppearanceItem item = AppearanceItem::makeEffect(EffectKind::DropShadow);
+                item.offsetX = dx * scale;
+                item.offsetY = dy * scale;
+                item.softness = shadowBlur * scale;
+                item.color = SketchColor::rgb(flood.component(0), flood.component(1), flood.component(2), 1.0f);
+                item.opacity = floodOpacity;
+                item.blendMode = BlendMode::Normal;
+                effects.push_back(item);
+            } else if (blur > 0.0) {
+                AppearanceItem item = AppearanceItem::makeEffect(EffectKind::GaussianBlur);
+                item.softness = blur * scale;
+                effects.push_back(item);
+            }
+            return effects;
+        }
+
+        void readNode(ReadContext& ctx, const XmlNode& node, const BLMatrix2D& parentMatrix, const Style& inherited, unsigned done) {
             if (node.name == "defs" || node.name == "linearGradient" || node.name == "radialGradient" || node.name == "clipPath"
                 || node.name == "mask" || node.name == "pattern" || node.name == "symbol" || node.name == "style" || node.name == "metadata") {
                 return;
@@ -1516,6 +1841,43 @@ namespace sketch {
                 matrix = concat(parentMatrix, parseTransform(*t));
             }
             Style style = styleFor(node, inherited);
+            // clip-path and filter belong to the element itself: they are handled around reading it (the `done` bits keep that from repeating).
+            if ((done & 1u) == 0 && ctx.document != nullptr) {
+                const std::string clipId = urlId(ownProperty(node, "clip-path"));
+                auto clip = ctx.byId.find(clipId);
+                if (!clipId.empty() && clip != ctx.byId.end() && clip->second->name == "clipPath") {
+                    readClipped(ctx, node, *clip->second, matrix, parentMatrix, inherited, done);
+                    return;
+                }
+            }
+            if ((done & 2u) == 0 && ctx.document != nullptr) {
+                const std::string filterId = urlId(ownProperty(node, "filter"));
+                auto filter = ctx.byId.find(filterId);
+                if (!filterId.empty() && filter != ctx.byId.end() && filter->second->name == "filter") {
+                    const double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
+                    const std::vector<AppearanceItem> effects = filterEffects(*filter->second, scale > 1e-9 ? scale : 1.0);
+                    const std::size_t before = ctx.document->objectCount();
+                    readNode(ctx, node, parentMatrix, inherited, done | 2u);
+                    for (std::size_t i = before; i < ctx.document->objectCount() && !effects.empty(); ++i) {
+                        std::vector<AppearanceItem> items = ctx.document->object(i).appearance();
+                        items.insert(items.end(), effects.begin(), effects.end());
+                        ctx.document->object(i).setAppearance(items);
+                    }
+                    return;
+                }
+            }
+            if (node.name == "use") {
+                readUse(ctx, node, matrix, style);
+                return;
+            }
+            if (node.name == "image") {
+                readImage(ctx, node, matrix, style);
+                return;
+            }
+            if (node.name == "svg") {
+                readViewport(ctx, node, nullptr, matrix, style);   // a nested <svg>: its own viewport
+                return;
+            }
             if (node.name == "g" && node.attr("data-sketch") != nullptr && *node.attr("data-sketch") == "appearance") {
                 readAppearanceObject(ctx, node, matrix, style);
                 return;
@@ -1544,7 +1906,7 @@ namespace sketch {
                 }
                 return;
             }
-            if (node.name == "g" || node.name == "svg" || node.name == "a" || node.name == "switch") {
+            if (node.name == "g" || node.name == "a" || node.name == "switch") {
                 bool group = node.name == "g" && ctx.document != nullptr;
                 if (group) {
                     ctx.groupStack.push_back(ctx.document->newGroupId());
@@ -1655,6 +2017,9 @@ namespace sketch {
                 }
                 out << "\"";
             }
+            if (options.brush) {  // other viewers ignore this and show the plain stroke
+                out << " data-brush=\"" << options.brush->id << "\"";
+            }
             if (options.miterLimit != 4.0) {  // 4 is SVG's default
                 out << " stroke-miterlimit=\"" << num(options.miterLimit) << "\"";
             }
@@ -1667,6 +2032,33 @@ namespace sketch {
     // One object as SVG: a plain <path>, or - for several fills / strokes, per-item opacity / blend / visibility or effects - a
     // <g data-sketch="appearance"> with one path per item. `idText` is its id attribute.
     void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount, bool withLayers = false) {
+        if (object.isImage() && object.image()) {
+            // A real <image>, so that other viewers show the picture; its quadrilateral is the matrix that places the pixels.
+            const BLMatrix2D m = object.imageMatrix();
+            body << "<image id=\"" << idText << "\" x=\"0\" y=\"0\" width=\"" << object.image()->width << "\" height=\"" << object.image()->height
+                 << "\" transform=\"matrix(" << num(m.m00) << " " << num(m.m01) << " " << num(m.m10) << " " << num(m.m11) << " " << num(m.m20) << " " << num(m.m21)
+                 << ")\" preserveAspectRatio=\"none\" data-type=\"Image\"";
+            if (!object.name().empty()) {
+                body << " data-name=\"" << escape(object.name()) << "\"";
+            }
+            if (object.opacity() < 1.0) {
+                body << " opacity=\"" << num(object.opacity()) << "\"";
+            }
+            if (object.blendMode() != BlendMode::Normal) {
+                body << " style=\"mix-blend-mode:" << blendModeCss(object.blendMode()) << "\"";
+            }
+            if (!object.ownVisible()) {
+                body << " display=\"none\"";
+            }
+            if (object.ownLocked()) {
+                body << " data-locked=\"true\"";
+            }
+            if (withLayers) {
+                body << " data-layer=\"" << object.layer() << "\"";
+            }
+            body << " href=\"" << imageDataUri(*object.image()) << "\"/>\n";
+            return;
+        }
         BLBox box = object.geometryBounds();
             {
                 const std::vector<AppearanceItem>& items = object.appearance();
@@ -1861,6 +2253,22 @@ namespace sketch {
             defsText += "<svg data-sketch-pattern=\"" + std::to_string(def->id) + "\" data-name=\"" + escape(def->name) + "\" data-box=\"" + num(def->box.x0) + " " +
                 num(def->box.y0) + " " + num(def->box.x1) + " " + num(def->box.y1) + "\" " + inner.substr(at + 5);
         }
+        // The brush library: the numbers on the element, the artwork of an art or scatter brush as its own nested content.
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            std::string numbers;
+            for (double value : def->params()) {
+                numbers += (numbers.empty() ? "" : ",") + num(value);
+            }
+            defsText += "<svg data-sketch-brush=\"" + std::to_string(def->id) + "\" data-name=\"" + escape(def->name) + "\" data-brush-kind=\"" +
+                std::to_string(int(def->kind)) + "\" data-brush-params=\"" + numbers + "\"";
+            std::string inner = def->art && def->art->content ? svgFromDocument(*def->art->content) : std::string();
+            std::size_t at = inner.find("<svg ");
+            if (def->hasArt() && at != std::string::npos) {
+                defsText += " data-box=\"" + num(def->art->box.x0) + " " + num(def->art->box.y0) + " " + num(def->art->box.x1) + " " + num(def->art->box.y1) + "\" " + inner.substr(at + 5);
+            } else {
+                defsText += "></svg>\n";
+            }
+        }
         if (!defsText.empty()) {
             out << "<defs>\n" << defsText << "</defs>\n";
         }
@@ -1891,6 +2299,7 @@ namespace sketch {
     }
 
     static bool documentFromXml(const XmlNode* root, SketchDocument& document) {
+        SketchDocument::Batch batch(document);   // one announcement at the end, not one per object
         ReadContext ctx;
         collectIds(*root, ctx.byId);
 
@@ -1957,11 +2366,43 @@ namespace sketch {
         {
             // The symbol library comes first: the instances are resolved against it as they are read.
             std::vector<std::shared_ptr<const SymbolDef>> library, patterns;
+            std::vector<std::shared_ptr<const BrushDef>> brushes;
             for (const auto& child : root->children) {
                 if (child->name != "defs") {
                     continue;
                 }
                 for (const auto& entry : child->children) {
+                    if (const std::string* brushId = entry->attr("data-sketch-brush")) {
+                        auto brush = std::make_shared<BrushDef>();
+                        brush->id = std::size_t(std::strtoull(brushId->c_str(), nullptr, 10));
+                        if (const std::string* name = entry->attr("data-name")) {
+                            brush->name = *name;
+                        }
+                        const double kind = entry->attr("data-brush-kind") != nullptr ? number(entry->attr("data-brush-kind"), 0.0) : 0.0;
+                        brush->kind = kind >= 1.0 && kind < 2.0 ? BrushKind::Scatter : (kind >= 2.0 && kind < 3.0 ? BrushKind::Art : BrushKind::Calligraphic);
+                        if (const std::string* params = entry->attr("data-brush-params")) {
+                            brush->setParams(numberList(*params));
+                        }
+                        if (brush->hasArt()) {
+                            std::vector<double> box = entry->attr("data-box") != nullptr ? numberList(*entry->attr("data-box")) : std::vector<double>();
+                            if (box.size() != 4 || !(box[2] > box[0]) || !(box[3] > box[1])) {
+                                continue;
+                            }
+                            auto art = std::make_shared<SymbolDef>();
+                            art->id = brush->id;
+                            art->name = brush->name;
+                            art->box = BLBox(box[0], box[1], box[2], box[3]);
+                            art->content = std::make_shared<SketchDocument>();
+                            if (!documentFromXml(entry.get(), *art->content)) {
+                                continue;
+                            }
+                            brush->art = art;
+                        }
+                        if (brush->id != 0) {
+                            brushes.push_back(brush);
+                        }
+                        continue;
+                    }
                     const std::string* id = entry->attr("data-sketch-symbol");
                     const bool isPattern = id == nullptr;
                     if (isPattern) {
@@ -1988,6 +2429,7 @@ namespace sketch {
             }
             document.setSymbols(library);
             document.setPatterns(patterns);
+            document.setBrushes(brushes);
         }
         ctx.document = &document;
         Style rootStyle = styleFor(*root, Style());
@@ -2012,6 +2454,7 @@ namespace sketch {
                 document.object(i).setGroups(kept);
             }
         }
+        document.bindBrushStrokes();
         document.undoStack().clear();
         document.clearSelection();
         return true;

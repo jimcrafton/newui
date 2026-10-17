@@ -237,7 +237,7 @@ MENUS = [
     mi("File", children=[
         mi("New", "Ctrl+N"), mi("Open...", "Ctrl+O"), mi("Open Recent"), SEP,
         mi("Save", "Ctrl+S"), mi("Save As...", "Ctrl+Shift+S"), SEP,
-        mi("Export As Image..."), mi("Export All Artboards..."), mi("Trace Image..."), mi("Export As PDF..."), SEP,
+        mi("Export As Image..."), mi("Export All Artboards..."), mi("Trace Image..."), mi("Place Image..."), mi("Export As PDF..."), SEP,
         mi("Document Setup..."), SEP, mi("Exit", "Alt+F4")]),
     mi("Edit", children=[
         mi("Undo", "Ctrl+Z"), mi("Redo", "Ctrl+Y"), SEP,
@@ -249,7 +249,9 @@ MENUS = [
         mi("Group", "Ctrl+G"), mi("Ungroup", "Ctrl+Shift+G"),
         mi("Clipping Mask", children=[mi("Make", "Ctrl+7"), mi("Release", "Ctrl+Shift+7")]),
         mi("Symbol", children=[mi("New Symbol"), mi("Place Symbol"), mi("Redefine Symbol"), mi("Break Link to Symbol")]),
+        mi("Text on Path", children=[mi("Make Text on Path"), mi("Make Text Between Paths"), mi("Release Text from Path")]),
         mi("Pattern", children=[mi("Make Pattern"), SEP, mi("Fill with Pattern"), mi("Stroke with Pattern")]),
+        mi("Brush", children=[mi("New Calligraphic Brush"), mi("New Art Brush"), mi("New Scatter Brush"), SEP, mi("Apply Brush"), mi("Remove Brush"), SEP, mi("Add Brush Presets")]),
         mi("Artboards", children=[mi("New Artboard"), mi("Delete Artboard"), SEP, mi("Previous Artboard"), mi("Next Artboard"), SEP, mi("Fit Artboard in Window")]), SEP,
         mi("Lock", "Ctrl+2"), mi("Unlock All"), mi("Hide", "Ctrl+3"), mi("Show All"), SEP,
         mi("Transform", children=[mi("Transform Again", "Ctrl+Shift+D"), SEP, mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
@@ -259,7 +261,14 @@ MENUS = [
     mi("Arrange", children=[
         mi("Bring to Front", "Ctrl+Shift+]"), mi("Bring Forward", "Ctrl+]"),
         mi("Send Backward", "Ctrl+["), mi("Send to Back", "Ctrl+Shift+["), SEP,
-        mi("Align Left"), mi("Align Center"), mi("Align Right"), mi("Align Top"), mi("Align Middle"), mi("Align Bottom")]),
+        mi("Align Left"), mi("Align Center"), mi("Align Right"), mi("Align Top"), mi("Align Middle"), mi("Align Bottom"), SEP,
+        mi("Distribute", children=[mi("Left Edges"), mi("Horizontal Centers"), mi("Right Edges"), mi("Top Edges"), mi("Vertical Centers"), mi("Bottom Edges"), SEP,
+                                   mi("Horizontal Spacing"), mi("Vertical Spacing")])]),
+    mi("Layer", children=[
+        mi("New Layer"), mi("New Sublayer"), mi("Duplicate Layer"), mi("Delete Layer"), SEP,
+        mi("Bring Layer Forward"), mi("Send Layer Backward"), mi("Merge Layer Down"), mi("Flatten Artwork"), SEP,
+        mi("Show All Layers"), mi("Hide Other Layers"), mi("Lock Other Layers"), mi("Unlock All Layers"), SEP,
+        mi("Select Objects in Layer"), mi("Expand All Layers"), mi("Collapse All Layers")]),
     mi("View", children=[
         mi("Zoom In", "Ctrl++"), mi("Zoom Out", "Ctrl+-"), mi("Fit Page", "Ctrl+0"), mi("Actual Size", "Ctrl+1"), SEP,
         mi("Show Grid", "Ctrl+'", checked=True), mi("Snap to Grid", "Ctrl+Shift+'", checked=True),
@@ -307,6 +316,7 @@ def tool_palette():
         tbtn("lineTool", "tool-line", toggle=True, s=32), tsep(False),
         tbtn("penTool", "tool-pen", toggle=True, s=32),
         tbtn("pencilTool", "tool-pencil", toggle=True, s=32),
+        tbtn("paintbrushTool", "tool-paintbrush", toggle=True, s=32),
         tbtn("textTool", "tool-text", toggle=True, s=32),
         tbtn("gradientTool", "tool-gradient", toggle=True, s=32),
         tbtn("widthTool", "tool-width", toggle=True, s=32),
@@ -320,6 +330,9 @@ def tool_palette():
         tbtn("magicWandTool", "tool-magicwand", toggle=True, s=32),
         tbtn("lassoTool", "tool-lasso", toggle=True, s=32),
         tbtn("artboardTool", "tool-artboard", toggle=True, s=32), tsep(False),
+        tbtn("rotateTool", "tool-rotate", toggle=True, s=32),
+        tbtn("scaleTool", "tool-scale", toggle=True, s=32),
+        tbtn("reflectTool", "tool-reflect", toggle=True, s=32), tsep(False),
         tbtn("handTool", "tool-hand", toggle=True, s=32),
         tbtn("zoomTool", "tool-zoom", toggle=True, s=32),
         spacer(1),
@@ -473,12 +486,14 @@ def text_panel():
     # TextPanel (textpanel.h) fills the font list and follows the selected text; the controls are disabled when none is selected.
     body = [
         hbox("textFontRow", [label("Font", w=44), dropdown("textFontCombo", ["Segoe UI"], weight=1)]),
-        hbox("textSizeRow", [label("Size", w=44), field("textSizeField", "24", w=56),
+        hbox("textSizeRow", [label("Size", w=44, name="textSizeLabel"), field("textSizeField", "24", w=56),
                              tbtn("textBoldButton", "text-bold", toggle=True, s=24), tbtn("textItalicButton", "text-italic", toggle=True, s=24),
                              tbtn("textAlignLeftButton", "text-align-left", checked=True, s=24),
                              tbtn("textAlignCenterButton", "text-align-center", toggle=True, s=24),
                              tbtn("textAlignRightButton", "text-align-right", toggle=True, s=24)], h=26),
-        hbox("textSpacingRow", [label("Track", w=44), field("textTrackingField", "0", w=50), label("Lead", w=34), field("textLeadingField", "100", w=50), label("%", w=14)]),
+        hbox("textPathRow", [label("On path", w=44, name="textPathLabel"), label("Start", w=34), field("textPathStartField", "0", w=50), label("%", w=14),
+                             tbtn("textPathFlipButton", "text-flip", toggle=True, s=24)], h=26),
+        hbox("textSpacingRow", [label("Track", w=44, name="textTrackingLabel"), field("textTrackingField", "0", w=50), label("Lead", w=34, name="textLeadingLabel"), field("textLeadingField", "100", w=50), label("%", w=14)]),
     ]
     return panel("textPanel", "Text", body)
 
@@ -524,6 +539,25 @@ def patterns_panel():
     return panel("patternsPanel", "Patterns", body)
 
 
+def brushes_panel():
+    # BrushPanel (brushpanel.h): the brush library. A brush is calligraphic (a slanted oval nib), art (artwork stretched along the stroke)
+    # or scatter (copies of artwork along it); Apply gives the selected strokes the active brush and the Paintbrush tool draws with it.
+    body = [
+        hbox("brushCombos", [dropdown("brushCombo", ["(none)"], weight=1)], h=24),
+        hbox("brushActions", [
+            tbtn("newCalligraphicBrushButton", "brush-new", s=24), tbtn("newArtBrushButton", "brush-art", s=24),
+            tbtn("newScatterBrushButton", "brush-scatter", s=24), tbtn("applyBrushButton", "brush-apply", s=24),
+            tbtn("removeBrushButton", "brush-remove", s=24), tbtn("presetBrushButton", "brush-presets", s=24),
+            tbtn("deleteBrushButton", "layer-delete", s=24)], h=26),
+        hbox("brushNameRow", [label("Name", w=44), field("brushNameField", "", weight=1)]),
+        hbox("brushNibRow", [label("Angle", w=44), field("brushAngleField", "", weight=1), label("Round", w=44), field("brushRoundnessField", "", weight=1)]),
+        hbox("brushSpacingRow", [label("Space", w=44), field("brushSpacingField", "", weight=1), label("Stray", w=44), field("brushScatterField", "", weight=1)]),
+        hbox("brushVariationRow", [label("Size", w=44), field("brushSizeVariationField", "", weight=1), label("Turn", w=44), field("brushRotationField", "", weight=1)]),
+        hbox("brushFollowRow", [label("Follow path", w=70), tbtn("brushFollowButton", "brush-follow", toggle=True, s=24)], h=26),
+    ]
+    return panel("brushesPanel", "Brushes", body)
+
+
 def layers_panel():
     # LayerTree (layertree.h) draws the rows; LayersPanel feeds it from the document: eye, lock, open triangle, name and the
     # selection square per layer, sublayers indented. Drag a row to reorder / nest it.
@@ -531,8 +565,9 @@ def layers_panel():
         hbox("layerActions", [
             tbtn("addLayerButton", "layer-add", s=24), tbtn("addSublayerButton", "layer-sublayer", s=24),
             tbtn("deleteLayerButton", "layer-delete", s=24)], h=26),
-        node("LayerTree", "layersTree", h=160),
+        node("LayerTree", "layersTree", h=260),
         hbox("layerNameRow", [label("Name", w=44), field("layerNameField", "Layer 1", weight=1)]),
+        hbox("layerColorRow", [label("Color", w=44), dropdown("layerColorCombo", ["Light Blue"], weight=1)], h=26),
     ]
     return panel("layersPanel", "Layers", body)
 
@@ -546,7 +581,7 @@ def sidebar():
     SubView - and the real content goes inside it. Putting the content directly in childViews[0]
     would merge it into the viewport (it then gets resized to the viewport on every layout)."""
     panels = []
-    for i, p in enumerate([transform_panel(), color_panel(), stroke_panel(), text_panel(), appearance_panel(), styles_panel(), symbols_panel(), patterns_panel(), layers_panel(), artboards_panel()]):
+    for i, p in enumerate([transform_panel(), color_panel(), stroke_panel(), text_panel(), appearance_panel(), styles_panel(), symbols_panel(), patterns_panel(), brushes_panel(), layers_panel(), artboards_panel()]):
         if i:
             panels += divider("panelDivider%d" % i)
         panels.append(p)
@@ -679,6 +714,40 @@ def new_document_document():
     }
 
 
+# Image Trace options dialog -> Resources/tracedialog.newui (TraceDialog in tracedialog.h reads and writes the named controls)
+TRACE_W = 430
+TRACE_H = 270
+TRACE_LABEL_W = 150
+
+
+def trace_row(name, caption, controls, h=26):
+    return hbox(name, [label(caption, w=TRACE_LABEL_W, name=name + "Caption")] + controls, h=h)
+
+
+def trace_dialog_document():
+    note = label("Turns a picture into filled vector shapes, one layer per color.", h=34, name="traceNote")
+    note["style"]["wordWrap"] = True
+    form = [
+        trace_row("tracePictureRow", "Picture", [label("picture.png", name="tracePictureLabel", weight=1)]),
+        trace_row("traceColorsRow", "Colors (2 - 32)", [field("traceColorsField", "8", w=80)]),
+        trace_row("traceSizeRow", "Largest side (pixels)", [field("traceSizeField", "400", w=80)]),
+        trace_row("traceSpecksRow", "Ignore specks (pixels)", [field("traceSpecksField", "6", w=80)]),
+        trace_row("traceSmoothnessRow", "Curves", [dropdown("traceSmoothnessCombo", ["Tight", "Normal", "Smooth"], weight=1, selected=1)]),
+        trace_row("traceWhiteRow", "White background", [dropdown("traceWhiteCombo", ["Keep", "Leave out"], weight=1, selected=0)]),
+    ]
+    footer = hbox("traceFooter", [spacer(1),
+                                  node("Button", "traceButton", w=96, h=28, text="Trace"),
+                                  node("Button", "traceCancelButton", w=96, h=28, text="Cancel")], h=30)
+    root = node("RootView", "rootview", visible=True, layout=flex("Vertical", 8, 12),
+                bounds=rect(0, 0, TRACE_W, TRACE_H), childViews=[note] + form + [spacer(1), footer])
+    return {
+        "meta": {"author": "", "date": "2026-10-16", "copyright": "", "version": "0.1.0.0"},
+        "type": "Frame", "title": "Trace Image", "name": "tracedialog", "position": "CenterOnRootView",
+        "bounds": rect(120, 120, TRACE_W, TRACE_H),
+        "rootView": root,
+    }
+
+
 def write(doc, name, source):
     path = os.path.join(os.path.dirname(OUT), name)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -691,6 +760,7 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     write(document(), "sketch.newui", "sketch-mockup.html")
     write(new_document_document(), "newdocument.newui", "new-document-dialog.html")
+    write(trace_dialog_document(), "tracedialog.newui", "sketch-mockup.html")
 
 
 if __name__ == "__main__":

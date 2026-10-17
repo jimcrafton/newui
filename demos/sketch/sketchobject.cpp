@@ -1,6 +1,9 @@
 #include "sketchobject.h"
 #include "sketchdocument.h"
 
+#include "pathflatten.h"
+#include "brush.h"
+#include "textwarp.h"
 #include "textoutline.h"
 
 #include <newui/shapes.h>
@@ -251,67 +254,6 @@ namespace sketch {
         BLStrokeJoin blJoin(StrokeJoin join) {
             // SVG's miter falls back to a bevel past the miter limit.
             return join == StrokeJoin::Round ? BL_STROKE_JOIN_ROUND : (join == StrokeJoin::Bevel ? BL_STROKE_JOIN_BEVEL : BL_STROKE_JOIN_MITER_BEVEL);
-        }
-
-        // The path as polylines (curves sampled), one per subpath.
-        struct Polyline {
-            std::vector<BLPoint> points;
-            bool closed = false;
-        };
-
-        std::vector<Polyline> flattenPath(const BLPath& path) {
-            std::vector<Polyline> result;
-            const uint8_t* cmd = path.command_data();
-            const BLPoint* v = path.vertex_data();
-            std::size_t n = path.size();
-            auto curveSteps = [](double length) { return std::min(96, std::max(8, int(length / 3.0))); };
-            for (std::size_t i = 0; i < n; ++i) {
-                switch (cmd[i]) {
-                    case BL_PATH_CMD_MOVE:
-                        result.emplace_back();
-                        result.back().points.push_back(v[i]);
-                        break;
-                    case BL_PATH_CMD_ON:
-                        if (!result.empty()) { result.back().points.push_back(v[i]); }
-                        break;
-                    case BL_PATH_CMD_QUAD:
-                        if (i + 1 < n && !result.empty()) {
-                            BLPoint p0 = result.back().points.back(), c = v[i], p1 = v[i + 1];
-                            int steps = curveSteps(std::hypot(c.x - p0.x, c.y - p0.y) + std::hypot(p1.x - c.x, p1.y - c.y));
-                            for (int s = 1; s <= steps; ++s) {
-                                double t = double(s) / steps, u = 1.0 - t;
-                                result.back().points.push_back(BLPoint(u * u * p0.x + 2 * u * t * c.x + t * t * p1.x,
-                                    u * u * p0.y + 2 * u * t * c.y + t * t * p1.y));
-                            }
-                        }
-                        i += 1;
-                        break;
-                    case BL_PATH_CMD_CUBIC:
-                        if (i + 2 < n && !result.empty()) {
-                            BLPoint p0 = result.back().points.back(), c1 = v[i], c2 = v[i + 1], p1 = v[i + 2];
-                            int steps = curveSteps(std::hypot(c1.x - p0.x, c1.y - p0.y) + std::hypot(c2.x - c1.x, c2.y - c1.y) +
-                                std::hypot(p1.x - c2.x, p1.y - c2.y));
-                            for (int s = 1; s <= steps; ++s) {
-                                double t = double(s) / steps, u = 1.0 - t;
-                                result.back().points.push_back(BLPoint(
-                                    u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
-                                    u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y));
-                            }
-                        }
-                        i += 2;
-                        break;
-                    case BL_PATH_CMD_CLOSE:
-                        if (!result.empty()) {
-                            result.back().closed = true;
-                            result.emplace_back();  // a path may continue from the start point; MOVE normally follows
-                            result.back().points.push_back(result[result.size() - 2].points.front());
-                        }
-                        break;
-                    default: break;
-                }
-            }
-            result.erase(std::remove_if(result.begin(), result.end(), [](const Polyline& p) { return p.points.size() < 2; }), result.end());
-            return result;
         }
 
         // `path` cut into dashes (this Blend2D's stroker does not dash): the pattern is dash, gap, dash, gap...
@@ -798,6 +740,51 @@ namespace sketch {
         return BLMatrix2D(a, bb, c, d, p0.x - (a * b.x0 + c * b.y0), p0.y - (bb * b.x0 + d * b.y0));
     }
 
+    SketchObject* SketchObject::makeImageObject(const std::shared_ptr<const ImageData>& image, const BLMatrix2D& placement) {
+        BLPoint corners[4] = {placement.map_point(0.0, 0.0), placement.map_point(double(image->width), 0.0),
+            placement.map_point(double(image->width), double(image->height)), placement.map_point(0.0, double(image->height))};
+        BLPath path;
+        path.move_to(corners[0]);
+        path.line_to(corners[1]);
+        path.line_to(corners[2]);
+        path.line_to(corners[3]);
+        path.close();
+        SketchObject* object = new SketchObject(SketchObjectType::Image, path);
+        object->image_ = image;
+        object->name_ = image->name;
+        object->setFill(SketchPaint::none());
+        object->setStroke(SketchPaint::none());
+        return object;
+    }
+
+    BLMatrix2D SketchObject::imageMatrix() const {
+        BLPathView view = path_.view();
+        if (!image_ || view.size < 4 || image_->width <= 0 || image_->height <= 0) {
+            return BLMatrix2D::make_identity();
+        }
+        const double u = double(image_->width), v = double(image_->height);
+        const BLPoint p0 = view.vertex_data[0], p1 = view.vertex_data[1], p3 = view.vertex_data[3];
+        return BLMatrix2D((p1.x - p0.x) / u, (p1.y - p0.y) / u, (p3.x - p0.x) / v, (p3.y - p0.y) / v, p0.x, p0.y);
+    }
+
+    void SketchObject::drawImage(BLContext& ctx) const {
+        if (!image_ || image_->image.is_empty()) {
+            return;
+        }
+        ctx.save();
+        const BLMatrix2D place = imageMatrix();
+        ctx.apply_transform(place);
+        // How big a picture pixel is on the device now.
+        const BLMatrix2D total = ctx.final_transform();
+        const double shown = std::sqrt(std::fabs(total.m00 * total.m11 - total.m01 * total.m10));
+        double extra = 1.0;
+        const BLImage& level = image_->levelFor(shown, extra);
+        ctx.scale(extra, extra);
+        ctx.set_pattern_quality(BL_PATTERN_QUALITY_BILINEAR);
+        ctx.blit_image(BLPoint(0.0, 0.0), level);
+        ctx.restore();
+    }
+
     void SketchObject::drawSymbol(BLContext& ctx) const {
         if (!symbol_ || !symbol_->content) {
             return;
@@ -852,8 +839,36 @@ namespace sketch {
 
     void SketchObject::rebuildText() {
         BLPath outline = textOutline(text_, fontName_, fontSize_, textStyle_);
+        if (textWarp_.active() && outline.size() > 0) {
+            BLBox box(0, 0, 0, 0);
+            outline.get_bounding_box(&box);
+            // The height the warp stretches: from just above the capitals to just under the baseline of the last line.
+            const std::size_t lines = std::size_t(std::count(text_.begin(), text_.end(), char(10))) + 1;
+            const double lineHeight = textLineHeight(fontName_, fontSize_, textStyle_);
+            warpFrame_ = BLBox(box.x0, -0.78 * fontSize_, box.x1, double(lines - 1) * lineHeight + 0.22 * fontSize_);
+            TextWarper warper(textWarp_, warpFrame_.x0, warpFrame_.x1, warpFrame_.y0, warpFrame_.y1);
+            if (warper.valid()) {
+                outline = warper.apply(outline);
+            }
+        }
         outline.transform(textMatrix_);
         path_ = outline;
+    }
+
+    void SketchObject::setTextWarp(const TextWarp& warp) {
+        textWarp_ = warp;
+        rebuildText();
+    }
+
+    BLPoint SketchObject::mapTextPoint(double x, double y) const {
+        BLPoint p(x, y);
+        if (textWarp_.active()) {
+            TextWarper warper(textWarp_, warpFrame_.x0, warpFrame_.x1, warpFrame_.y0, warpFrame_.y1);
+            if (warper.valid()) {
+                p = warper.map(x, y);
+            }
+        }
+        return textMatrix_.map_point(p);
     }
 
     void SketchObject::setText(const std::string& text) {
@@ -1045,7 +1060,10 @@ namespace sketch {
         copy->fontSize_ = fontSize_;
         copy->textMatrix_ = textMatrix_;
         copy->textStyle_ = textStyle_;
+        copy->textWarp_ = textWarp_;
+        copy->warpFrame_ = warpFrame_;
         copy->symbol_ = symbol_;
+        copy->image_ = image_;
         return copy;
     }
 
@@ -1149,7 +1167,9 @@ namespace sketch {
                 continue;
             }
             double h = item.strokeWidth * 0.5;
-            if (!item.strokeOptions.widths.empty()) {
+            if (item.strokeOptions.brush) {
+                h = item.strokeOptions.brush->reach(item.strokeWidth);
+            } else if (!item.strokeOptions.widths.empty()) {
                 double widest = 0.0;
                 for (const WidthPoint& p : item.strokeOptions.widths) { widest = std::max(widest, std::max(p.left, p.right)); }
                 h *= std::max(widest, 1.0);
@@ -1165,7 +1185,7 @@ namespace sketch {
             point.y < box.y0 - tolerance || point.y > box.y1 + tolerance) {
             return false;
         }
-        if (type_ == SketchObjectType::Symbol) {
+        if (type_ == SketchObjectType::Symbol || type_ == SketchObjectType::Image) {
             return path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
         }
         if (isClosed() && path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
@@ -1181,7 +1201,8 @@ namespace sketch {
         for (const AppearanceItem& item : items_) {
             if (item.kind == AppearanceKind::Stroke && item.visible && !item.paint.isNone() && item.strokeWidth > 0.0) {
                 any = true;
-                if (strokeHit(path_, item.strokeWidth + tolerance * 2.0, item.strokeOptions, point)) {
+                const double covered = item.strokeOptions.brush ? item.strokeOptions.brush->reach(item.strokeWidth) * 2.0 : item.strokeWidth;
+                if (strokeHit(path_, covered + tolerance * 2.0, item.strokeOptions, point)) {
                     return true;
                 }
             }
@@ -1190,6 +1211,54 @@ namespace sketch {
     }
 
     namespace {
+        // Fills (and strokes) the outlines of brush artwork with their own paints.
+        void paintBrushParts(BLContext& ctx, const std::vector<BrushPart>& parts) {
+            for (const BrushPart& part : parts) {
+                BLBox box(0, 0, 0, 0);
+                part.path.get_bounding_box(&box);
+                if (part.closed && setPaintStyle(ctx, part.fill, box, false)) {
+                    ctx.fill_path(part.path);
+                }
+                if (part.strokeWidth > 0.0 && setPaintStyle(ctx, part.stroke, box, true)) {
+                    ctx.set_stroke_width(part.strokeWidth);
+                    ctx.stroke_path(part.path);
+                }
+            }
+        }
+
+        // A stroke drawn by a brush: the nib swept along the path in the stroke paint, or the artwork bent or scattered along it.
+        void paintBrushStroke(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const BLBox& box) {
+            const BrushDef& brush = *item.strokeOptions.brush;
+            const double width = item.strokeWidth;
+            if (brush.kind == BrushKind::Calligraphic) {
+                if (setPaintStyle(ctx, item.paint, box, false)) {
+                    ctx.set_global_alpha(alpha);
+                    ctx.fill_path(brush.nibOutline(path, width));
+                }
+                return;
+            }
+            auto draw = [&](BLContext& target) {
+                target.set_global_alpha(1.0);
+                if (brush.kind == BrushKind::Art) {
+                    paintBrushParts(target, brush.bendAlong(path, width));
+                } else {
+                    const std::vector<BrushPart>& parts = brush.parts();
+                    for (const BLMatrix2D& matrix : brush.placements(path, width)) {
+                        target.save();
+                        target.apply_transform(matrix);
+                        paintBrushParts(target, parts);
+                        target.restore();
+                    }
+                }
+            };
+            if (alpha >= 1.0) {
+                draw(ctx);
+            } else {
+                const double reach = brush.reach(width);
+                paintIsolated(ctx, BLBox(box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach), alpha, BlendMode::Normal, draw);
+            }
+        }
+
         // One stroke item painted over the object's outline (box = the outline's bounds, for gradients).
         void paintStrokeItem(BLContext& ctx, const BLPath& path, const AppearanceItem& item, double alpha, const BLBox& box) {
             const SketchPaint& stroke = item.paint;
@@ -1198,7 +1267,9 @@ namespace sketch {
             if (width <= 0.0) {
                 return;
             }
-            if (!options.widths.empty() && setPaintStyle(ctx, stroke, box, false)) {
+            if (options.brush) {
+                paintBrushStroke(ctx, path, item, alpha, box);
+            } else if (!options.widths.empty() && setPaintStyle(ctx, stroke, box, false)) {
                 ctx.set_global_alpha(alpha);
                 ctx.fill_path(widthOutline(path, width * 0.5, options.widths, options.cap));
             } else if (stroke.isGradient() && stroke.gradient().alongStroke && !stroke.gradient().stops.empty()) {
@@ -1413,6 +1484,13 @@ namespace sketch {
 
     void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {
         const AppearanceItem& item = items_[index];
+        if (type_ == SketchObjectType::Image) {
+            // The picture stands where the first fill would be drawn.
+            if (item.kind == AppearanceKind::Fill && index == activeIndexOf(items_, AppearanceKind::Fill, 0)) {
+                drawImage(ctx);
+            }
+            return;
+        }
         if (type_ == SketchObjectType::Symbol) {
             // The artwork stands where the first fill would be drawn; strokes and fills of an instance paint nothing.
             if (item.kind == AppearanceKind::Fill && index == activeIndexOf(items_, AppearanceKind::Fill, 0)) {

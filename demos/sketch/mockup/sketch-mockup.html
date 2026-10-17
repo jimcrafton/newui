@@ -129,7 +129,7 @@
 
 <!-- Menu bar: newui MenuBar (menus.h) -->
 <div class="menubar" data-newui="MenuBar">
-  <span>File</span><span>Edit</span><span>Object</span><span>Arrange</span><span>View</span><span>Help</span>
+  <span>File</span><span>Edit</span><span>Object</span><span>Arrange</span><span>Layer</span><span>View</span><span>Help</span>
 </div>
 
 <!-- Main toolbar: newui Toolbar + ToolbarButton + ToolbarSeparator -->
@@ -178,6 +178,7 @@
     <button class="tb" title="Line (L)"><img src="../Resources/icons/tool-line.svg" alt=""></button>
     <button class="tb" title="Pen (P)"><img src="../Resources/icons/tool-pen.svg" alt=""></button>
     <button class="tb" title="Pencil (N)"><img src="../Resources/icons/tool-pencil.svg" alt=""></button>
+    <button class="tb" title="Paintbrush: drag to draw freehand with the active brush" data-newui="ToolbarButton (paintbrushTool)"><img src="../Resources/icons/tool-paintbrush.svg" alt=""></button>
     <button class="tb" title="Text (T)"><img src="../Resources/icons/tool-text.svg" alt=""></button>
     <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Gradient (G)"><img src="../Resources/icons/tool-gradient.svg" alt=""></button>
@@ -187,6 +188,15 @@
     <button class="tb" title="Knife (K): drag across filled shapes to cut them into pieces"><img src="../Resources/icons/tool-knife.svg" alt=""></button>
     <button class="tb" title="Eraser (Shift+E): drag over shapes and lines to rub them out"><img src="../Resources/icons/tool-eraser.svg" alt=""></button>
     <button class="tb" title="Shape Builder (Shift+M): drag across the pieces of the selected overlapping shapes to join them (Alt-drag erases)"><img src="../Resources/icons/tool-shapebuilder.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Eyedropper: click an object to copy its look onto the selection" data-newui="ToolbarButton (eyedropperTool)"><img src="../Resources/icons/tool-eyedropper.svg" alt=""></button>
+    <button class="tb" title="Magic Wand: click an object to select everything with the same fill" data-newui="ToolbarButton (magicWandTool)"><img src="../Resources/icons/tool-magicwand.svg" alt=""></button>
+    <button class="tb" title="Lasso: drag a loop round objects to select them" data-newui="ToolbarButton (lassoTool)"><img src="../Resources/icons/tool-lasso.svg" alt=""></button>
+    <button class="tb" title="Artboard: drag to make an artboard, click one to select it, drag it or its handles to move / resize it" data-newui="ToolbarButton (artboardTool)"><img src="../Resources/icons/tool-artboard.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Rotate: click to set the center, then drag to turn the selection about it (Shift = 15 degree steps, Alt = turn a copy)" data-newui="ToolbarButton (rotateTool)"><img src="../Resources/icons/tool-rotate.svg" alt=""></button>
+    <button class="tb" title="Scale: click to set the center, then drag to resize the selection about it (Shift = each direction on its own, Alt = scale a copy)" data-newui="ToolbarButton (scaleTool)"><img src="../Resources/icons/tool-scale.svg" alt=""></button>
+    <button class="tb" title="Reflect: click to set a point on the axis, then drag to turn the axis and mirror the selection across it (Shift = 45 degree steps, Alt = mirror a copy)" data-newui="ToolbarButton (reflectTool)"><img src="../Resources/icons/tool-reflect.svg" alt=""></button>
     <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Hand (H)"><img src="../Resources/icons/tool-hand.svg" alt=""></button>
     <button class="tb" title="Zoom (Z)"><img src="../Resources/icons/tool-zoom.svg" alt=""></button>
@@ -350,16 +360,70 @@
       </div></div>
     </section>
 
-    <section class="panel layers" data-newui="LayersPanel (ListView)" style="display:flex;flex-direction:column;flex:1;min-height:0;border-bottom:0">
-      <h3>Layers <span><img src="../Resources/icons/layer-add.svg" width="14" alt=""> <img src="../Resources/icons/layer-delete.svg" width="14" alt=""></span></h3>
-      <div style="overflow:auto;flex:1">
-        <div class="layer"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>Layer 1</span></div>
-        <div class="layer child sel"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb"><i style="width:14px;height:8px;background:#e8452c;border:1px solid #1b3a6b"></i></span>Rounded Rectangle</div>
-        <div class="layer child"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb"><i style="width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#f2b824,#6a4fc7)"></i></span>Ellipse (gradient)</div>
-        <div class="layer child"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"><img src="../Resources/icons/lock.svg" width="14" alt=""></span><span class="thumb"><i style="width:12px;height:8px;background:#6a4fc7"></i></span>Polygon</div>
-        <div class="layer child"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb"></span>Path</div>
-        <div class="layer child"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb">T</span>Text "Sketch demo"</div>
-        <div class="layer"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>Background</span></div>
+    <section class="panel" data-newui="TextPanel (SubView)">
+      <h3>Text <span>Sketch demo</span></h3>
+      <div class="body">
+        <div class="row"><label style="min-width:44px">Font</label><select class="field" style="flex:1" data-newui="DropDownList (textFontCombo)"><option>Segoe UI</option></select></div>
+        <div class="row" data-newui="SubView (textSizeRow; dragging the Size caption changes the number)"><label style="min-width:44px">Size</label><input class="field" value="24" style="width:56px"><button class="tb" title="Bold"><img src="../Resources/icons/text-bold.svg" width="18" alt=""></button><button class="tb" title="Italic"><img src="../Resources/icons/text-italic.svg" width="18" alt=""></button><button class="tb" title="Align left"><img src="../Resources/icons/text-align-left.svg" width="18" alt=""></button><button class="tb" title="Align center"><img src="../Resources/icons/text-align-center.svg" width="18" alt=""></button><button class="tb" title="Align right"><img src="../Resources/icons/text-align-right.svg" width="18" alt=""></button></div>
+        <div class="row" data-newui="SubView (textSpacingRow; the Track and Lead captions scrub too)"><label style="min-width:44px">Track</label><input class="field" value="0" style="width:50px"><label style="min-width:34px">Lead</label><input class="field" value="100" style="width:50px"><span>%</span></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="LibraryPanel (SubView: symbols)">
+      <h3>Symbols</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (symbolCombo)"><option>Badge</option></select>
+        <div class="atb" data-newui="Toolbar (symbol actions)"><button class="tb" title="New symbol from the selection"><img src="../Resources/icons/symbol-new.svg" width="18" alt=""></button><button class="tb" title="Place symbol"><img src="../Resources/icons/symbol-place.svg" width="18" alt=""></button><button class="tb" title="Redefine symbol"><img src="../Resources/icons/symbol-redefine.svg" width="18" alt=""></button><button class="tb" title="Break link"><img src="../Resources/icons/symbol-break.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Badge" style="flex:1"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="LibraryPanel (SubView: patterns)">
+      <h3>Patterns</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (patternCombo)"><option>Dots</option></select>
+        <div class="atb" data-newui="Toolbar (pattern actions)"><button class="tb" title="Make pattern from the selection"><img src="../Resources/icons/pattern-new.svg" width="18" alt=""></button><button class="tb" title="Fill with pattern"><img src="../Resources/icons/pattern-fill.svg" width="18" alt=""></button><button class="tb" title="Stroke with pattern"><img src="../Resources/icons/pattern-stroke.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Dots" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Scale</label><input class="field" value="100" style="width:50px"><span>%</span><label style="min-width:40px">Angle</label><input class="field" value="0" style="width:50px"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="BrushPanel (SubView)">
+      <h3>Brushes</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (brushCombo)"><option>Calligraphic 45</option><option>Flat Chisel</option><option>Dots</option><option>Stars</option><option>Tapered</option></select>
+        <div class="atb" data-newui="Toolbar (brush actions: new calligraphic / art / scatter, apply, remove, presets, delete)"><button class="tb" title="New calligraphic brush"><img src="../Resources/icons/brush-new.svg" width="18" alt=""></button><button class="tb" title="New art brush from the selection"><img src="../Resources/icons/brush-art.svg" width="18" alt=""></button><button class="tb" title="New scatter brush from the selection"><img src="../Resources/icons/brush-scatter.svg" width="18" alt=""></button><button class="tb" title="Apply the brush to the selection"><img src="../Resources/icons/brush-apply.svg" width="18" alt=""></button><button class="tb" title="Back to a plain stroke"><img src="../Resources/icons/brush-remove.svg" width="18" alt=""></button><button class="tb" title="Add brush presets"><img src="../Resources/icons/brush-presets.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Calligraphic 45" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Angle</label><input class="field" value="45" style="width:50px"><label style="min-width:44px">Round</label><input class="field" value="25" style="width:50px"></div>
+        <div class="row"><label style="min-width:44px">Space</label><input class="field" value="" style="width:50px"><label style="min-width:44px">Stray</label><input class="field" value="" style="width:50px"></div>
+        <div class="row"><label style="min-width:44px">Size</label><input class="field" value="" style="width:50px"><label style="min-width:44px">Turn</label><input class="field" value="" style="width:50px"></div>
+        <div class="row"><label style="min-width:70px">Follow path</label><button class="tb" title="Scatter copies turn with the path"><img src="../Resources/icons/brush-follow.svg" width="18" alt=""></button></div>
+      </div>
+    </section>
+
+    <section class="panel layers" data-newui="LayersPanel (LayerTree)" style="display:flex;flex-direction:column;flex:1;min-height:0;border-bottom:0">
+      <h3>Layers <span><img src="../Resources/icons/layer-add.svg" width="14" alt=""> <img src="../Resources/icons/layer-sublayer.svg" width="14" alt=""> <img src="../Resources/icons/layer-delete.svg" width="14" alt=""></span></h3>
+      <div style="overflow:auto;flex:1" data-newui="LayerTree (layers, groups and objects; the mouse wheel scrolls)">
+        <div class="layer sel" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9662; Layer 1</span><span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb"><i style="width:14px;height:8px;background:#e8452c;border:1px solid #1b3a6b"></i></span>&lt;Rounded Rectangle&gt;<span style="margin-left:auto;background:#4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9656;</span><span class="thumb">&#9707;</span>&lt;Group&gt;<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"><img src="../Resources/icons/lock.svg" width="14" alt=""></span><span class="thumb"><i style="width:12px;height:8px;background:#6a4fc7"></i></span>&lt;Polygon&gt;<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb">T</span>Sketch demo<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer" style="border-left:3px solid #FF4F4F"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9656; Background</span><span style="margin-left:auto;border:1px solid #FF4F4F;width:9px;height:9px"></span></div>
+      </div>
+      <div class="body">
+        <div class="row" data-newui="SubView (the active layer, or the one selected object)"><label style="min-width:44px">Name</label><input class="field" value="Layer 1" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Color</label><select class="field" style="flex:1" data-newui="DropDownList (layerColorCombo: Light Blue, Red, Green, Blue, Yellow, Violet, Orange, Dark Green, Magenta)"><option>Light Blue</option><option>Red</option><option>Green</option></select></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="ArtboardPanel (SubView)">
+      <h3>Artboards</h3>
+      <div class="body">
+        <div class="atb"><button class="tb" title="New artboard"><img src="../Resources/icons/layer-add.svg" width="18" alt=""></button><button class="tb" title="Delete artboard"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button><select class="field" style="flex:1" data-newui="DropDownList (artboardCombo)"><option>Artboard 1</option></select></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Artboard 1" style="flex:1"></div>
+        <div class="row"><label style="min-width:14px">X</label><input class="field" value="0" style="width:56px"><label style="min-width:14px">Y</label><input class="field" value="0" style="width:56px"></div>
+        <div class="row"><label style="min-width:14px">W</label><input class="field" value="612" style="width:56px"><label style="min-width:14px">H</label><input class="field" value="792" style="width:56px"></div>
       </div>
     </section>
   </aside>

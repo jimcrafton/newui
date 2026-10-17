@@ -40,6 +40,7 @@
               { type: "MenuItem", text: "Export As Image..." },
               { type: "MenuItem", text: "Export All Artboards..." },
               { type: "MenuItem", text: "Trace Image..." },
+              { type: "MenuItem", text: "Place Image..." },
               { type: "MenuItem", text: "Export As PDF..." },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Document Setup..." },
@@ -103,12 +104,35 @@
               },
               {
                 type: "MenuItem",
+                text: "Text on Path",
+                children: [
+                  { type: "MenuItem", text: "Make Text on Path" },
+                  { type: "MenuItem", text: "Make Text Between Paths" },
+                  { type: "MenuItem", text: "Release Text from Path" }
+                ]
+              },
+              {
+                type: "MenuItem",
                 text: "Pattern",
                 children: [
                   { type: "MenuItem", text: "Make Pattern" },
                   { type: "MenuItem", text: "", separator: true },
                   { type: "MenuItem", text: "Fill with Pattern" },
                   { type: "MenuItem", text: "Stroke with Pattern" }
+                ]
+              },
+              {
+                type: "MenuItem",
+                text: "Brush",
+                children: [
+                  { type: "MenuItem", text: "New Calligraphic Brush" },
+                  { type: "MenuItem", text: "New Art Brush" },
+                  { type: "MenuItem", text: "New Scatter Brush" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Apply Brush" },
+                  { type: "MenuItem", text: "Remove Brush" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Add Brush Presets" }
                 ]
               },
               {
@@ -181,7 +205,47 @@
               { type: "MenuItem", text: "Align Right" },
               { type: "MenuItem", text: "Align Top" },
               { type: "MenuItem", text: "Align Middle" },
-              { type: "MenuItem", text: "Align Bottom" }
+              { type: "MenuItem", text: "Align Bottom" },
+              { type: "MenuItem", text: "", separator: true },
+              {
+                type: "MenuItem",
+                text: "Distribute",
+                children: [
+                  { type: "MenuItem", text: "Left Edges" },
+                  { type: "MenuItem", text: "Horizontal Centers" },
+                  { type: "MenuItem", text: "Right Edges" },
+                  { type: "MenuItem", text: "Top Edges" },
+                  { type: "MenuItem", text: "Vertical Centers" },
+                  { type: "MenuItem", text: "Bottom Edges" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Horizontal Spacing" },
+                  { type: "MenuItem", text: "Vertical Spacing" }
+                ]
+              }
+            ]
+          },
+          {
+            type: "MenuItem",
+            text: "Layer",
+            children: [
+              { type: "MenuItem", text: "New Layer" },
+              { type: "MenuItem", text: "New Sublayer" },
+              { type: "MenuItem", text: "Duplicate Layer" },
+              { type: "MenuItem", text: "Delete Layer" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Bring Layer Forward" },
+              { type: "MenuItem", text: "Send Layer Backward" },
+              { type: "MenuItem", text: "Merge Layer Down" },
+              { type: "MenuItem", text: "Flatten Artwork" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Show All Layers" },
+              { type: "MenuItem", text: "Hide Other Layers" },
+              { type: "MenuItem", text: "Lock Other Layers" },
+              { type: "MenuItem", text: "Unlock All Layers" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Select Objects in Layer" },
+              { type: "MenuItem", text: "Expand All Layers" },
+              { type: "MenuItem", text: "Collapse All Layers" }
             ]
           },
           {
@@ -577,6 +641,15 @@
                   },
                   {
                     type: "ToolbarButton",
+                    name: "paintbrushTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-paintbrush.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
                     name: "textTool",
                     desiredSize: { type: "Size", width: 32, height: 32 },
                     desiredSizeOverride: true,
@@ -699,6 +772,39 @@
                   },
                   {
                     type: "ToolbarButton",
+                    name: "rotateTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-rotate.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "scaleTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-scale.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "reflectTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-reflect.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarSeparator",
+                    horizontal: false,
+                    desiredSize: { type: "Size", width: 28, height: 9 },
+                    desiredSizeOverride: true
+                  },
+                  {
+                    type: "ToolbarButton",
                     name: "handTool",
                     desiredSize: { type: "Size", width: 32, height: 32 },
                     desiredSizeOverride: true,
@@ -758,7 +864,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 2143 },
+            contentSize: { type: "Size", width: 268, height: 2562 },
             childViews: [
               {
                 type: "SubView",
@@ -772,9 +878,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 2143 }
+                      size: { type: "Size", width: 268, height: 2562 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 2143 },
+                    desiredSize: { type: "Size", width: 268, height: 2562 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -1992,7 +2098,7 @@
                         type: "SubView",
                         name: "textPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 124 },
+                        desiredSize: { type: "Size", width: 268, height: 156 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -2043,7 +2149,7 @@
                             type: "SubView",
                             name: "textPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 102 },
+                            desiredSize: { type: "Size", width: 0, height: 134 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -2087,6 +2193,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
+                                    name: "textSizeLabel",
                                     desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Size",
@@ -2150,6 +2257,57 @@
                               },
                               {
                                 type: "SubView",
+                                name: "textPathRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "textPathLabel",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "On path",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "On path", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 34, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Start",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Start", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "textPathStartField",
+                                    desiredSize: { type: "Size", width: 50, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "%",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "%", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textPathFlipButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-flip.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
                                 name: "textSpacingRow",
                                 visible: true,
                                 desiredSize: { type: "Size", width: 0, height: 24 },
@@ -2158,6 +2316,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
+                                    name: "textTrackingLabel",
                                     desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Track",
@@ -2173,6 +2332,7 @@
                                   },
                                   {
                                     type: "Label",
+                                    name: "textLeadingLabel",
                                     desiredSize: { type: "Size", width: 34, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Lead",
@@ -3096,9 +3256,357 @@
                       },
                       {
                         type: "SubView",
+                        name: "brushesPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 246 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "brushesPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "brushesPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "brushesPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Brushes",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Brushes",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushesPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "brushesPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 224 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "brushCombos",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "DropDownList",
+                                    name: "brushCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["(none)"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushActions",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "newCalligraphicBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-new.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "newArtBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-art.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "newScatterBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-scatter.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "applyBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-apply.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "removeBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-remove.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "presetBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-presets.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "deleteBrushButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushNameRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Name",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Name", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushNameField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushNibRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Angle",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Angle", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushAngleField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Round",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Round", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushRoundnessField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushSpacingRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Space",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Space", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushSpacingField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Stray",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Stray", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushScatterField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushVariationRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Size",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Size", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushSizeVariationField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Turn",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Turn", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "brushRotationField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "brushFollowRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Follow path",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Follow path", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "brushFollowButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/brush-follow.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider9Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider9",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "layersPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 260 },
+                        desiredSize: { type: "Size", width: 268, height: 392 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -3149,7 +3657,7 @@
                             type: "SubView",
                             name: "layersPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 238 },
+                            desiredSize: { type: "Size", width: 0, height: 370 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -3190,7 +3698,7 @@
                               {
                                 type: "LayerTree",
                                 name: "layersTree",
-                                desiredSize: { type: "Size", width: 0, height: 160 },
+                                desiredSize: { type: "Size", width: 0, height: 260 },
                                 desiredSizeOverride: true
                               },
                               {
@@ -3218,6 +3726,36 @@
                                     text: "Layer 1"
                                   }
                                 ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "layerColorRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Color",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Color", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "DropDownList",
+                                    name: "layerColorCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["Light Blue"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
                               }
                             ]
                           }
@@ -3225,14 +3763,14 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider9Gap",
+                        name: "panelDivider10Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider9",
+                        name: "panelDivider10",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,

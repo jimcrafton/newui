@@ -169,10 +169,10 @@ namespace sketch {
             return out;
         }
 
-        void addLoop(BLPath& path, const std::vector<BLPoint>& corners) {
+        void addLoop(BLPath& path, const std::vector<BLPoint>& corners, double tolerance) {
             std::vector<BLPoint> smooth = cutCorners(corners);
             smooth.push_back(smooth.front());   // a closed line as an open one that ends where it began
-            std::vector<PenAnchor> anchors = fitCurve(smooth, 0.7);
+            std::vector<PenAnchor> anchors = fitCurve(smooth, tolerance);
             if (anchors.size() < 3) {
                 return;
             }
@@ -214,8 +214,12 @@ namespace sketch {
                 double n = double(factor * factor);
                 std::size_t i = std::size_t(y * w + x);
                 if (a / n >= 0.5) {
+                    const std::uint32_t red = std::uint32_t(r / a + 0.5), green = std::uint32_t(g / a + 0.5), blue = std::uint32_t(b / a + 0.5);
+                    if (options.ignoreWhite && red >= 240u && green >= 240u && blue >= 240u) {
+                        continue;   // background
+                    }
                     opaque[i] = 1;
-                    rgb[i] = (std::uint32_t(r / a + 0.5) << 16) | (std::uint32_t(g / a + 0.5) << 8) | std::uint32_t(b / a + 0.5);
+                    rgb[i] = (red << 16) | (green << 8) | blue;
                 }
             }
         }
@@ -310,7 +314,7 @@ namespace sketch {
             shape.rgb = (std::uint32_t(c.r) << 16) | (std::uint32_t(c.g) << 8) | std::uint32_t(c.b);
             for (const std::vector<BLPoint>& loop : maskOutlines(mask, w, h)) {
                 if (std::fabs(polygonArea(loop)) >= options.minArea) {
-                    addLoop(shape.path, loop);
+                    addLoop(shape.path, loop, options.fitTolerance);
                 }
             }
             if (shape.path.size() > 0) {

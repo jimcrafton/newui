@@ -18,6 +18,8 @@ namespace sketch {
         int colors = 8;            // size of the palette, 2..32
         int maxSize = 400;         // the picture is first shrunk (by whole factors) until neither side is more than this many pixels
         double minArea = 6.0;      // outlines smaller than this many pixels (after shrinking) are dropped as specks
+        double fitTolerance = 0.7; // how far (in pixels) the fitted curves may stray from the outline: less = more points, closer to the picture
+        bool ignoreWhite = false;  // near-white pixels count as background and are left out
     };
 
     // One layer of the result: its color (0xRRGGBB) and its outlines, in pixel units of the (shrunk) picture, y down.

@@ -180,7 +180,7 @@ namespace sketch {
             drag_ = Drag::Draw;
             return SyncReturn::Handled;
         }
-        if (tool_ == SketchTool::Pencil) {
+        if (tool_ == SketchTool::Pencil || tool_ == SketchTool::Paintbrush) {
             pencilPoints_.assign(1, dragStartDoc_);
             drag_ = Drag::Pencil;
             return SyncReturn::Handled;
@@ -242,6 +242,10 @@ namespace sketch {
         }
         if (tool_ == SketchTool::DirectSelect) {
             directMouseDown(pt, keys);
+            return SyncReturn::Handled;
+        }
+        if (isTransformTool()) {
+            beginTransformTool();
             return SyncReturn::Handled;
         }
         if (tool_ != SketchTool::Select) {
@@ -581,6 +585,9 @@ namespace sketch {
             case Drag::Guide:
                 updateGuideDrag(pt);
                 break;
+            case Drag::TransformTool:
+                updateTransformTool(keys);
+                break;
             case Drag::PenHandle:
                 penDrag(dragNowDoc_, (keys & kmAlt) != 0);
                 break;
@@ -741,6 +748,9 @@ namespace sketch {
             case Drag::LiveShape:
                 finishLiveDrag();
                 break;
+            case Drag::TransformTool:
+                finishTransformTool(keys);
+                break;
             case Drag::None:
                 break;
         }
@@ -821,6 +831,7 @@ namespace sketch {
             case SketchTool::DirectSelect: return "direct-select";
             case SketchTool::Pen: return "pen";
             case SketchTool::Pencil: return "pencil";
+            case SketchTool::Paintbrush: return "pencil";
             case SketchTool::Scissors: return "scissors";
             case SketchTool::Knife: return "knife";
             case SketchTool::Eraser: return "eraser";
@@ -1114,7 +1125,11 @@ namespace sketch {
         if (textEditing_) {
             paintTextEditor(ctx);
         }
-        const BLRgba32 accent(0xFF1E6FE0u);
+        // The selection is drawn in the colour of the layer it is in.
+        BLRgba32 accent(0xFF1E6FE0u);
+        if (const Layer* selectedLayer = document_->findLayer(document_->selectionLayer())) {
+            accent = BLRgba32(layerColor(*selectedLayer) | 0xFF000000u);
+        }
         ctx.save();
         ctx.set_stroke_width(1.0);
         ctx.set_stroke_style(accent);
@@ -1141,8 +1156,12 @@ namespace sketch {
                 SelectionFrame own;
                 own.angle = object->frameAngle();
                 own.local = object->frameBounds();
+                if (const Layer* ownLayer = document_->findLayer(object->layer())) {
+                    ctx.set_stroke_style(BLRgba32(layerColor(*ownLayer) | 0xFF000000u));
+                }
                 ctx.stroke_path(frameOutline(own));
             }
+            ctx.set_stroke_style(accent);
         }
 
         // The group frame with its handles.
@@ -1222,6 +1241,9 @@ namespace sketch {
         }
         if (tool_ == SketchTool::Select) {
             paintLiveOverlay(ctx);
+        }
+        if (isTransformTool()) {
+            paintTransformTool(ctx);
         }
 
         // Rubber band for marquee / shape being drawn.

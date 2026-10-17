@@ -119,7 +119,7 @@ namespace sketch {
             return 0;
         }
         BLMatrix2D inverse = BLMatrix2D::make_identity();
-        if (BLMatrix2D::invert(inverse, object->textMatrix()) != BL_SUCCESS) {
+        if (object->textWarp().active() || BLMatrix2D::invert(inverse, object->textMatrix()) != BL_SUCCESS) {   // (a click in warped text puts the caret at the end)
             return textBuffer_.size();
         }
         BLPoint local = inverse.map_point(doc);
@@ -390,8 +390,8 @@ namespace sketch {
         double x = textLineOffset(textBuffer_, line, object->fontName(), size, object->textStyle()) +
                    textAdvance(textBuffer_.substr(start, textCaret_ - start), object->fontName(), size, object->textStyle());
         double baseline = double(line) * lineHeight;
-        BLPoint top = toView(object->textMatrix().map_point(x, baseline - 0.8 * size));
-        BLPoint bottom = toView(object->textMatrix().map_point(x, baseline + 0.25 * size));
+        BLPoint top = toView(object->mapTextPoint(x, baseline - 0.8 * size));
+        BLPoint bottom = toView(object->mapTextPoint(x, baseline + 0.25 * size));
         ctx.set_stroke_style(BLRgba32(0xFF1E6FE0u));
         ctx.set_stroke_width(1.5);
         BLPath caret;

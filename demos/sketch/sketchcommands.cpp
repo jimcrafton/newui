@@ -56,6 +56,7 @@ namespace sketch {
         add("file.documentSetup", [this]() { files_.documentSetup(); });
         add("file.exportImage", [this]() { files_.exportImage(); });
         add("file.traceImage", [this]() { files_.traceImage(); });
+        add("file.placeImage", [this]() { files_.placeImage(); });
         add("file.exportArtboards", [this]() { files_.exportArtboards(); });
         add("file.exit", [this]() {
             if (files_.canClose()) {
@@ -97,6 +98,30 @@ namespace sketch {
         add("symbol.place", [this]() { document_.placeActiveSymbol(); });
         add("symbol.redefine", [this]() { document_.redefineSymbol(document_.activeSymbol()); });
         add("symbol.break", [this]() { document_.breakSymbolLink(); });
+        add("layer.new", [this]() { document_.addLayer(0); });
+        add("layer.newSub", [this]() { document_.addLayer(document_.activeLayer()); });
+        add("layer.duplicate", [this]() { document_.duplicateLayer(document_.activeLayer()); });
+        add("layer.delete", [this]() { document_.deleteLayer(document_.activeLayer()); });
+        add("layer.forward", [this]() { document_.moveLayerStep(document_.activeLayer(), true); });
+        add("layer.backward", [this]() { document_.moveLayerStep(document_.activeLayer(), false); });
+        add("layer.mergeDown", [this]() { document_.mergeLayerDown(document_.activeLayer()); });
+        add("layer.flatten", [this]() { document_.flattenArtwork(); });
+        add("layer.showAll", [this]() { document_.showAllLayers(); });
+        add("layer.hideOthers", [this]() { document_.hideOtherLayers(document_.activeLayer()); });
+        add("layer.lockOthers", [this]() { document_.lockOtherLayers(document_.activeLayer()); });
+        add("layer.unlockAll", [this]() { document_.unlockAllLayers(); });
+        add("layer.selectObjects", [this]() { document_.selectLayerObjects(document_.activeLayer()); });
+        add("layer.expandAll", [this]() { document_.setAllLayersExpanded(true); });
+        add("layer.collapseAll", [this]() { document_.setAllLayersExpanded(false); });
+        add("brush.newCalligraphic", [this]() { document_.makeBrush(BrushKind::Calligraphic, ""); });
+        add("brush.newArt", [this]() { document_.makeBrush(BrushKind::Art, ""); });
+        add("brush.newScatter", [this]() { document_.makeBrush(BrushKind::Scatter, ""); });
+        add("brush.apply", [this]() { document_.applyBrush(document_.activeBrush()); });
+        add("brush.remove", [this]() { document_.applyBrush(0); });
+        add("brush.presets", [this]() { document_.addBrushPresets(); });
+        add("text.onPath", [this]() { document_.makeTextOnPath(); });
+        add("text.betweenPaths", [this]() { document_.makeTextBetweenPaths(); });
+        add("text.release", [this]() { document_.releaseTextWarp(); });
         add("pattern.make", [this]() { document_.makePattern(""); });
         add("pattern.fill", [this]() { document_.applyPattern(document_.activePattern(), false); });
         add("pattern.stroke", [this]() { document_.applyPattern(document_.activePattern(), true); });
@@ -143,6 +168,14 @@ namespace sketch {
         add("arrange.bringForward", [this]() { document_.arrangeSelection(Arrange::BringForward); });
         add("arrange.sendBackward", [this]() { document_.arrangeSelection(Arrange::SendBackward); });
         add("arrange.sendToBack", [this]() { document_.arrangeSelection(Arrange::SendToBack); });
+        add("arrange.distributeLeft", [this]() { document_.distributeSelection(Align::Left); });
+        add("arrange.distributeCenter", [this]() { document_.distributeSelection(Align::Center); });
+        add("arrange.distributeRight", [this]() { document_.distributeSelection(Align::Right); });
+        add("arrange.distributeTop", [this]() { document_.distributeSelection(Align::Top); });
+        add("arrange.distributeMiddle", [this]() { document_.distributeSelection(Align::Middle); });
+        add("arrange.distributeBottom", [this]() { document_.distributeSelection(Align::Bottom); });
+        add("arrange.distributeSpaceH", [this]() { document_.distributeSpacing(true); });
+        add("arrange.distributeSpaceV", [this]() { document_.distributeSpacing(false); });
         add("arrange.alignLeft", [this]() { document_.alignSelection(Align::Left); });
         add("arrange.alignCenter", [this]() { document_.alignSelection(Align::Center); });
         add("arrange.alignRight", [this]() { document_.alignSelection(Align::Right); });

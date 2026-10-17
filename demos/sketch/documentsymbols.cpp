@@ -44,12 +44,27 @@ namespace sketch {
                 }
             }
             def->content->setSymbols(used);
+            std::vector<std::shared_ptr<const BrushDef>> brushesUsed;
+            for (const SketchObject* object : picked) {
+                for (const AppearanceItem& item : object->appearance()) {
+                    const std::shared_ptr<const BrushDef>& brush = item.strokeOptions.brush;
+                    if (brush && std::find(brushesUsed.begin(), brushesUsed.end(), brush) == brushesUsed.end()) {
+                        brushesUsed.push_back(brush);
+                    }
+                }
+            }
+            def->content->setBrushes(brushesUsed);
             // A tile never has no size.
             if (!(box.x1 - box.x0 >= 1.0)) { box.x1 = box.x0 + 1.0; }
             if (!(box.y1 - box.y0 >= 1.0)) { box.y1 = box.y0 + 1.0; }
             def->box = box;
             return def;
         }
+    }
+
+    std::shared_ptr<SymbolDef> SketchDocument::selectionArtwork(std::size_t id, const std::string& name) const {
+        std::vector<const SketchObject*> picked;
+        return buildDefinition(*this, id, name, picked);
     }
 
     std::shared_ptr<const SymbolDef> SketchDocument::findSymbol(std::size_t id) const {

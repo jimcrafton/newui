@@ -1,5 +1,7 @@
 #include "textpanel.h"
 
+#include "numberscrubber.h"
+
 #include <newui/fontmanager.h>
 #include <newui/models.h>
 #include <newui/utils.h>
@@ -40,6 +42,8 @@ namespace sketch {
         size_ = dynamic_cast<newui::TextField*>(root_.findView("textSizeField"));
         tracking_ = dynamic_cast<newui::TextField*>(root_.findView("textTrackingField"));
         leading_ = dynamic_cast<newui::TextField*>(root_.findView("textLeadingField"));
+        pathStart_ = dynamic_cast<newui::TextField*>(root_.findView("textPathStartField"));
+        pathFlip_ = dynamic_cast<newui::ToolbarButton*>(root_.findView("textPathFlipButton"));
         bold_ = dynamic_cast<newui::ToolbarButton*>(root_.findView("textBoldButton"));
         italic_ = dynamic_cast<newui::ToolbarButton*>(root_.findView("textItalicButton"));
         const char* alignNames[3] = {"textAlignLeftButton", "textAlignCenterButton", "textAlignRightButton"};
@@ -109,6 +113,19 @@ namespace sketch {
                 if (on) { style.align = i; }
             });
         }
+        if (pathStart_ != nullptr) {
+            pathStart_->onReturnPressed += [this](newui::TextField&) { applyPathOptions(); return newui::SyncReturn::Handled; };
+            pathStart_->onLostFocus += [this](newui::View&) { applyPathOptions(); return newui::SyncReturn::Handled; };
+        }
+        if (pathFlip_ != nullptr) {
+            pathFlip_->onCheckedChanged += [this](newui::ToolbarButton&) {
+                if (!updating_) { applyPathOptions(); }
+                return newui::SyncReturn::Handled;
+            };
+        }
+        bindScrub("textSizeLabel", Scrubbed::Size, 1.0, 1.0, 1000.0);
+        bindScrub("textTrackingLabel", Scrubbed::Tracking, 1.0, -50.0, 500.0);
+        bindScrub("textLeadingLabel", Scrubbed::Leading, 1.0, 20.0, 1000.0);
         document_.onChanged += [this](SketchDocument&) { refresh(); return newui::SyncReturn::Handled; };
         document_.onSelectionChanged += [this](SketchDocument&) { refresh(); return newui::SyncReturn::Handled; };
         refresh();
@@ -162,7 +179,102 @@ namespace sketch {
                 if (align_[i] != nullptr) { align_[i]->setChecked(style.align == i); }
             }
         }
+        // Text on a path: where it starts and which side it is on.
+        const SketchObject* warped = document_.selectedWarpedText();
+        if (pathStart_ != nullptr) {
+            pathStart_->setEnabled(warped != nullptr && warped->textWarp().kind == TextWarp::Kind::OnPath);
+            pathStart_->setText(warped != nullptr ? numberText(warped->textWarp().start) : std::wstring());
+        }
+        if (pathFlip_ != nullptr) {
+            pathFlip_->setEnabled(warped != nullptr);
+            pathFlip_->setChecked(warped != nullptr && warped->textWarp().flip);
+        }
         updating_ = false;
+    }
+
+    void TextPanel::bindScrub(const char* labelName, Scrubbed which, double unit, double minimum, double maximum) {
+        auto* label = dynamic_cast<newui::Label*>(root_.findView(labelName));
+        if (label == nullptr) {
+            return;
+        }
+        // The value `which` of a text as the number the field shows, and a text with that number set.
+        auto set = [which](const Snap& snap, double value, SketchObject& object) {
+            TextStyle style = snap.style;
+            double size = snap.size;
+            switch (which) {
+                case Scrubbed::Size: size = value; break;
+                case Scrubbed::Tracking: style.tracking = value; break;
+                case Scrubbed::Leading: style.leading = value / 100.0; break;
+            }
+            object.setTextAll(snap.text, snap.font, size, style);
+        };
+        NumberScrubber::Callbacks callbacks;
+        callbacks.begin = [this, which](double& value) {
+            scrubBefore_.clear();
+            scrubActive_ = false;
+            const SketchObject* first = firstText();
+            if (updating_ || first == nullptr) {
+                return false;
+            }
+            value = which == Scrubbed::Size ? first->fontSize() : (which == Scrubbed::Tracking ? first->textStyle().tracking : first->textStyle().leading * 100.0);
+            for (std::size_t id : document_.selection()) {
+                const SketchObject* object = document_.findById(id);
+                if (object != nullptr && object->isText()) {
+                    scrubBefore_.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
+                }
+            }
+            scrubValue_ = value;
+            scrubActive_ = true;
+            return true;
+        };
+        callbacks.change = [this, set](double value) {
+            if (!scrubActive_) {
+                return;
+            }
+            scrubValue_ = value;
+            for (const Snap& snap : scrubBefore_) {
+                if (SketchObject* object = document_.findById(snap.id)) {
+                    set(snap, value, *object);
+                }
+            }
+            document_.touch();
+        };
+        callbacks.end = [this, set, which](bool changed) {
+            if (!scrubActive_) {
+                return;
+            }
+            scrubActive_ = false;
+            if (changed) {
+                // Back to what the drag found, then the final number as one undo step.
+                for (const Snap& snap : scrubBefore_) {
+                    if (SketchObject* object = document_.findById(snap.id)) {
+                        object->setTextAll(snap.text, snap.font, snap.size, snap.style);
+                    }
+                }
+                const double value = scrubValue_;
+                document_.changeSelectionText([value, which](SketchObject& object) {
+                    TextStyle style = object.textStyle();
+                    switch (which) {
+                        case Scrubbed::Size: object.setFontSize(value); return;
+                        case Scrubbed::Tracking: style.tracking = value; break;
+                        case Scrubbed::Leading: style.leading = value / 100.0; break;
+                    }
+                    object.setTextStyle(style);
+                }, which == Scrubbed::Size ? "Text Size" : (which == Scrubbed::Tracking ? "Tracking" : "Leading"));
+            }
+            scrubBefore_.clear();
+            refresh();
+        };
+        NumberScrubber::attach(*label, unit, minimum, maximum, std::move(callbacks));
+    }
+
+    // The Start and Flip controls of text on a path (Flip alone for text between paths).
+    void TextPanel::applyPathOptions() {
+        double start = 0.0;
+        if (!updating_ && document_.canReleaseTextWarp() && pathStart_ != nullptr && pathFlip_ != nullptr && parseNumber(pathStart_->text(), start)) {
+            document_.setTextPathOptions(start, pathFlip_->isChecked());
+        }
+        refresh();
     }
 
     void TextPanel::applyFont() {

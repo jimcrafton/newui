@@ -7,31 +7,52 @@ Vector editor demo (Illustrator-like) built on newui. See [../PLAN.md](../PLAN.m
 
 | Format | Extension | Notes |
 |---|---|---|
-| SVG | `.svg` | sketch's own SVG (with `data-*` attributes that carry what SVG cannot, such as text and effects) reads back exactly; other SVG files open with the common subset |
+| SVG | `.svg` | sketch's own SVG (with `data-*` attributes that carry what SVG cannot - text, effects, symbols, patterns, brushes, artboards, layers) reads back exactly; other SVG files open with the common subset (see *Opening other SVG files*) |
 | Compressed SVG | `.svgz` | gzip of the above, about a tenth of the size |
-| Native binary | `.skb` | the whole document as little-endian binary (several times faster to read than SVG, exact numbers); see `sketchbin.h` for the layout |
+| Native binary | `.skb` | the whole document as little-endian binary, several times faster to read than SVG; outlines are stored as 32-bit float steps (half the size of doubles; version 1 files with doubles still open); see `sketchbin.h` |
 
-Open and save recognise a file by its first bytes, whatever it is called.
+Open and save recognise a file by its first bytes, whatever it is called. File > Export writes PNG, BMP or QOI of the active artboard, or
+of every artboard (File > Export All Artboards).
 
-## Tools
+## Drawing and editing
 
-Select, Direct Select (anchors and handles), Rectangle, Ellipse, Circle, Rounded Rectangle, Polygon, Star (with live on-canvas handles
-for points, sides, inner radius, corner radius), Arc, Line, Pen, Pencil (fitted Bezier curves), Text (typed right on the canvas), Gradient,
-Width, **Scissors** (click a path to cut it), **Knife** (drag across filled shapes to cut them into pieces), **Eraser** (drag to rub out
-shapes and lines), Hand, Zoom.
+- **Tools:** Select, Direct Select (anchors and handles), Rectangle, Ellipse, Circle, Rounded Rectangle, Polygon, Star (with live
+  on-canvas handles for points, sides, inner radius, corner radius), Arc, Line, Pen, Pencil (fitted Bezier curves), **Paintbrush**
+  (the Pencil with the active brush), Text (typed right on the canvas), Gradient, Width (variable-width strokes), Scissors, Knife, Eraser,
+  Shape Builder, Eyedropper, Magic Wand, Lasso, **Artboard**, **Rotate**, **Scale**, **Reflect** (about the transform origin; Alt makes a
+  transformed copy), Hand, Zoom.
+- **Pictures and text on paths:** File > Place Image puts a PNG, JPEG, BMP or QOI on the page (it stays an object: move, scale, turn, shear, opacity, clip it). Object > Text on Path makes text follow a path, or - with two paths - stretches it between them like an envelope.
+- **Object menu:** Pathfinder (Unite, Minus Front, Intersect, Exclude), Path (Join, Reverse, Simplify, Outline Stroke), Clipping Mask
+  (Ctrl+7 / Ctrl+Shift+7), Symbol, Pattern, Brush, Artboards, Transform (Rotate 90, Flip, Transform Again), Lock / Hide, Expand Appearance.
+- **Arrange menu:** stacking order, Align (to the page for one object, to each other for several) and Distribute (edges, centers,
+  equal spacing).
+- **Layer menu:** New / Duplicate / Delete layer, forward / backward, Merge Down, Flatten Artwork, show / hide / lock others,
+  Select Objects in Layer, Expand / Collapse All.
 
-Object > Pathfinder: Unite, Minus Front, Intersect, Exclude (on two or more selected objects).
+## Panels
 
-The Appearance panel stacks fills, strokes and live effects (Drop Shadow, Outer Glow, Inner Shadow, Gaussian Blur, Round Corners, Offset
-Path, Roughen) on each object, and Graphic Styles save and reapply a whole appearance.
+Transform (numbers can be scrubbed: drag a caption), Color (solid, gradient, swatches), Stroke (weight, caps, joins, miter, dashes,
+alignment, width profile), **Text** (font, size, weight, alignment, tracking, leading - captions scrub too), Appearance (stacked fills, strokes and
+live effects: Drop Shadow, Outer Glow, Inner Shadow, Gaussian Blur, Round Corners, Offset Path, Roughen), Graphic Styles, **Symbols**,
+**Patterns**, **Brushes** (calligraphic, art and scatter), **Layers** and **Artboards**.
+
+The Layers panel is a tree of layers, the groups in them and the objects in those: eye, lock, name and a selection square on every row,
+a strip and a swatch in the layer's colour (pick one of nine in the panel), drag a row to move it into or beside another, the wheel
+scrolls long lists.
+
+## Opening other SVG files
+
+Shapes, groups, transforms, gradients (also through `xlink:href`), `<use>`, `<symbol>` and nested `<svg>` viewports (drawn as ordinary
+objects), `clip-path` (becomes a clipping group) and simple filters (a Gaussian blur or a drop shadow become effects). `<image>` elements (data URIs) become picture objects. Complex filters are not read. Image Trace (File > Trace Image...) turns a picture into filled shapes, with a dialog for the
+number of colors, size, speck filter, curve smoothness and whether a white background is left out.
 
 ## How the code is organised (MVC)
 
 | | |
 |---|---|
-| Model | `SketchDocument`, `SketchObject` (artwork, selection, undo history); `pathops` (geometry for cutting and Pathfinder) |
-| Views | `CanvasView`, `StylePanel`, the panels and widgets declared in `Resources/sketch.newui` (generated by `tools/gen_newui.py` from the HTML mockup in `mockup/`) |
-| Controllers | `SketchDocumentController` (File commands), `SketchCommandController` (every other command, by id), `SketchWindowController` (binds the views to them) |
+| Model | `SketchDocument` (+ the `document*.cpp` files by topic: layers, clipping, artboards, symbols / patterns, brushes, cutting, paths, transform), `SketchObject`, `BrushDef`; `pathops` (geometry for cutting and Pathfinder) |
+| Views | `CanvasView` (+ `canvastools.cpp`, `cuttools.cpp`, `artboardtool.cpp`, `transformtools.cpp`, `texttool.cpp`), `LayerTree`, the panels and widgets declared in `Resources/sketch.newui` (generated by `tools/gen_newui.py`; the HTML in `mockup/` is the design it follows) |
+| Controllers | `SketchDocumentController` (File commands), `SketchCommandController` (every other command, by id), `SketchWindowController` (binds the views to them), one controller per panel (`LayersPanel`, `BrushPanel`, `LibraryPanel`, `TextPanel`, ...) |
 | Entry | `main.cpp` only starts things; `sketchchecks.cpp` holds the `--check-tools` self-checks |
 
 Add a command: register it in `SketchCommandController`, then add a row to a binding table in `sketchwindow.cpp`. Add a tool: a palette
@@ -42,6 +63,9 @@ button in `gen_newui.py`, a `SketchTool` value, and one row in the `kTools` tabl
 ```
 sketch.exe [file]            open the window
 sketch.exe --check-tools     drive the window headlessly; prints ok / FAIL lines, exit code = number of failures
-sketch_tests.exe             model tests (documents, objects, files, effects, path operations)
+sketch.exe --check-newdoc    the New Document and Trace Image dialogs, headless
+sketch_tests.exe             model tests (documents, objects, files, effects, path operations, brushes, layers, SVG import)
 sketch_tests.exe --gtest_filter=SketchPerf*     timings of saving and loading large documents (SKETCH_PERF_SHAPES = shape count)
 ```
+
+Regenerate the layout after changing `tools/gen_newui.py`: `python demos/sketch/tools/gen_newui.py`.

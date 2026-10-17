@@ -1,5 +1,7 @@
 #include "sketchbin.h"
 
+#include "imagedata.h"
+
 #include "gzip.h"
 #include "sketchdocument.h"
 
@@ -17,7 +19,9 @@ namespace sketch {
     namespace {
 
         constexpr char kMagic[4] = {'S', 'K', 'B', '1'};
-        constexpr std::uint16_t kVersion = 1;
+        // Version 2 stores the vertices of a path as 32-bit floats, each as the step from the one before (see writePath); version 1 stored
+        // them as pairs of doubles. Both are read.
+        constexpr std::uint16_t kVersion = 2;
         constexpr std::uint16_t kFlagCompressed = 1;
         constexpr std::size_t kHeaderSize = 8;
 
@@ -100,7 +104,7 @@ namespace sketch {
                 writePaint(out, item.paint);
                 if (item.kind == AppearanceKind::Stroke) {
                     out.f64(item.strokeWidth);
-                    out.u8(unsigned(item.strokeOptions.cap));
+                    out.u8(unsigned(item.strokeOptions.cap) | (item.strokeOptions.brush ? 0x80u : 0u));   // bit 7: the stroke has a brush
                     out.u8(unsigned(item.strokeOptions.join));
                     out.f64(item.strokeOptions.miterLimit);
                     out.varint(item.strokeOptions.dashes.size());
@@ -112,6 +116,9 @@ namespace sketch {
                         out.f64(w.t);
                         out.f64(w.left);
                         out.f64(w.right);
+                    }
+                    if (item.strokeOptions.brush) {
+                        out.varint(item.strokeOptions.brush->id);
                     }
                 } else if (item.kind == AppearanceKind::Effect) {
                     out.u8(unsigned(item.effect));
@@ -150,6 +157,30 @@ namespace sketch {
             std::uint64_t size = payload.size();
             body.append(reinterpret_cast<const char*>(&size), 8);
             body.append(payload);
+        }
+
+        // A path: the command bytes, then the vertices as steps of 32-bit floats. Each step is measured from the vertex as the reader
+        // will have it (not as it was), so rounding never builds up along a path; a vertex a path keeps for a Close (it has no
+        // position) is left out. A coordinate that a float holds exactly - the usual case for drawn shapes - comes back exactly.
+        void writePath(ByteWriter& out, const BLPath& path, unsigned version) {
+            BLPathView view = path.view();
+            out.varint(view.size);
+            out.bytes(view.command_data, view.size);
+            if (version < 2) {
+                out.bytes(view.vertex_data, view.size * sizeof(BLPoint));
+                return;
+            }
+            double x = 0.0, y = 0.0;
+            for (std::size_t i = 0; i < view.size; ++i) {
+                if (view.command_data[i] == BL_PATH_CMD_CLOSE) {
+                    continue;
+                }
+                const float dx = float(view.vertex_data[i].x - x), dy = float(view.vertex_data[i].y - y);
+                out.f32(dx);
+                out.f32(dy);
+                x += double(dx);
+                y += double(dy);
+            }
         }
 
         // ---------------------------------------------------------------- reading
@@ -276,6 +307,65 @@ namespace sketch {
             return true;
         }
 
+        // Reads what writePath wrote (version 2) or the version 1 layout of raw doubles. False for a damaged or impossible path.
+        bool readPath(ByteReader& in, unsigned version, BLPath& path) {
+            const std::size_t count = in.count(version >= 2 ? 1 : 1 + sizeof(BLPoint));
+            if (count == 0) {
+                return in.ok();
+            }
+            const char* commands = in.view(count);
+            if (!in.ok() || !validPathCommands(reinterpret_cast<const std::uint8_t*>(commands), count)) {
+                return false;
+            }
+            if (version < 2) {
+                const char* points = in.view(count * sizeof(BLPoint));
+                if (!in.ok()) {
+                    return false;
+                }
+                std::uint8_t* commandOut = nullptr;
+                BLPoint* vertexOut = nullptr;
+                if (path.modify_op(BL_MODIFY_OP_ASSIGN_FIT, count, &commandOut, &vertexOut) != BL_SUCCESS) {
+                    return false;
+                }
+                std::memcpy(commandOut, commands, count);
+                std::memcpy(vertexOut, points, count * sizeof(BLPoint));
+                return true;
+            }
+            double x = 0.0, y = 0.0;
+            auto next = [&]() {
+                x += double(in.f32());
+                y += double(in.f32());
+                return BLPoint(x, y);
+            };
+            for (std::size_t i = 0; i < count && in.ok(); ++i) {
+                switch (std::uint8_t(commands[i])) {
+                    case BL_PATH_CMD_MOVE: path.move_to(next()); break;
+                    case BL_PATH_CMD_ON: path.line_to(next()); break;
+                    case BL_PATH_CMD_CLOSE: path.close(); break;
+                    case BL_PATH_CMD_QUAD: {
+                        BLPoint control = next(), end = next();   // [QUAD, ON]
+                        path.quad_to(control, end);
+                        ++i;
+                        break;
+                    }
+                    case BL_PATH_CMD_CONIC: {
+                        BLPoint control = next(), weight = next(), end = next();   // [CONIC, WEIGHT, ON]: the weight rides in x
+                        path.conic_to(control, end, weight.x);
+                        i += 2;
+                        break;
+                    }
+                    case BL_PATH_CMD_CUBIC: {
+                        BLPoint first = next(), second = next(), end = next();   // [CUBIC, CUBIC, ON]
+                        path.cubic_to(first, second, end);
+                        i += 2;
+                        break;
+                    }
+                    default: return false;
+                }
+            }
+            return in.ok();
+        }
+
         SketchColor readColor(ByteReader& in) {
             ColorSpace space = ColorSpace(in.enumeration(4));
             float c[4];
@@ -344,7 +434,8 @@ namespace sketch {
                 item.paint = readPaint(in);
                 if (item.kind == AppearanceKind::Stroke) {
                     item.strokeWidth = in.f64();
-                    item.strokeOptions.cap = StrokeCap(in.enumeration(3));
+                    const unsigned capByte = in.u8();
+                    item.strokeOptions.cap = (capByte & 0x7Fu) < 3u ? StrokeCap(capByte & 0x7Fu) : StrokeCap::Butt;
                     item.strokeOptions.join = StrokeJoin(in.enumeration(3));
                     item.strokeOptions.miterLimit = in.f64();
                     std::size_t dashes = in.count(8);
@@ -358,6 +449,9 @@ namespace sketch {
                         point.left = in.f64();
                         point.right = in.f64();
                         item.strokeOptions.widths.push_back(point);
+                    }
+                    if ((capByte & 0x80u) != 0u) {
+                        item.strokeOptions.brushRef = std::size_t(in.varint());   // bound to the brush once the library is in
                     }
                 } else if (item.kind == AppearanceKind::Effect) {
                     item.effect = EffectKind(in.enumeration(7));
@@ -388,7 +482,8 @@ namespace sketch {
         return data.size() >= kHeaderSize && std::memcmp(data.data(), kMagic, 4) == 0;
     }
 
-    std::string binaryFromDocument(const SketchDocument& document, bool compress) {
+    std::string binaryFromDocument(const SketchDocument& document, bool compress, unsigned version) {
+        version = version < 2 ? 1u : 2u;
         StringTable strings;
 
         // The appearances, each distinct one once.
@@ -398,6 +493,8 @@ namespace sketch {
         // The groups in use.
         std::set<std::size_t> groupIds;
 
+        std::map<const ImageData*, std::size_t> imageIndex;   // the pictures in use, each saved once
+        std::vector<std::shared_ptr<const ImageData>> images;
         ByteWriter objects;
         objects.varint(document.objectCount());
         for (std::size_t i = 0; i < document.objectCount(); ++i) {
@@ -422,7 +519,8 @@ namespace sketch {
 
             unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 ? 4u : 0u) |
                 (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u) |
-                (object.isText() && !object.textStyle().isDefault() ? 32u : 0u) | (object.isSymbol() && object.symbol() ? 64u : 0u);
+                (object.isText() && !object.textStyle().isDefault() ? 32u : 0u) | (object.isSymbol() && object.symbol() ? 64u : 0u) |
+                (object.isText() && object.textWarp().active() ? 128u : 0u);
             objects.u8(unsigned(object.type()));
             objects.u8(flags);
             objects.varint(strings.add(object.name()));
@@ -458,10 +556,22 @@ namespace sketch {
             if (flags & 64u) {
                 objects.varint(object.symbol()->id);
             }
-            BLPathView view = object.geometry().view();
-            objects.varint(view.size);
-            objects.bytes(view.command_data, view.size);
-            objects.bytes(view.vertex_data, view.size * sizeof(BLPoint));
+            if (object.isImage()) {   // which picture of the IMGS chunk (its position there)
+                auto at = imageIndex.find(object.image().get());
+                if (at == imageIndex.end()) {
+                    at = imageIndex.emplace(object.image().get(), images.size()).first;
+                    images.push_back(object.image());
+                }
+                objects.varint(at->second);
+            }
+            if (flags & 128u) {   // text on a path / between two paths
+                const TextWarp& warp = object.textWarp();
+                objects.u8(unsigned(warp.kind) | (warp.flip ? 0x80u : 0u));
+                objects.f64(warp.start);
+                writePath(objects, warp.first, version);
+                writePath(objects, warp.second, version);
+            }
+            writePath(objects, object.geometry(), version);
         }
 
         ByteWriter page;
@@ -489,8 +599,11 @@ namespace sketch {
         for (const Layer& layer : document.layers()) {
             layerChunk.varint(layer.id);
             layerChunk.varint(layer.parent);
-            layerChunk.u8((layer.visible ? 0u : 1u) | (layer.locked ? 2u : 0u) | (layer.expanded ? 0u : 4u));
+            layerChunk.u8((layer.visible ? 0u : 1u) | (layer.locked ? 2u : 0u) | (layer.expanded ? 0u : 4u) | (layer.color != 0 ? 8u : 0u));
             layerChunk.varint(strings.add(layer.name));
+            if (layer.color != 0) {
+                layerChunk.varint(layer.color);
+            }
         }
         {
             std::vector<std::pair<std::size_t, std::size_t>> runs;
@@ -558,6 +671,30 @@ namespace sketch {
             patternChunk.text(def->content ? binaryFromDocument(*def->content, false) : std::string());
         }
 
+        ByteWriter brushChunk;
+        brushChunk.varint(document.brushes().size());
+        for (const std::shared_ptr<const BrushDef>& def : document.brushes()) {
+            brushChunk.varint(def->id);
+            brushChunk.text(def->name);
+            brushChunk.u8(unsigned(def->kind));
+            for (double value : def->params()) {
+                brushChunk.f64(value);
+            }
+            const bool art = def->hasArt() && def->art && def->art->content;
+            brushChunk.f64(art ? def->art->box.x0 : 0.0);
+            brushChunk.f64(art ? def->art->box.y0 : 0.0);
+            brushChunk.f64(art ? def->art->box.x1 : 1.0);
+            brushChunk.f64(art ? def->art->box.y1 : 1.0);
+            brushChunk.text(art ? binaryFromDocument(*def->art->content, false) : std::string());
+        }
+
+        ByteWriter imageChunk;
+        imageChunk.varint(images.size());
+        for (const std::shared_ptr<const ImageData>& image : images) {
+            imageChunk.text(image ? image->name : std::string());
+            imageChunk.text(image ? image->bytes : std::string());
+        }
+
         ByteWriter clips;
         {
             std::vector<std::size_t> clipIds;
@@ -604,13 +741,15 @@ namespace sketch {
         chunk(body, "CLIP", clips.data());
         chunk(body, "SYMB", symbolChunk.data());
         chunk(body, "PATN", patternChunk.data());
+        chunk(body, "BRSH", brushChunk.data());
+        chunk(body, "IMGS", imageChunk.data());
         chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
         chunk(body, "OBJS", objects.data());
 
         ByteWriter file;
         file.bytes(kMagic, 4);
-        file.u16(kVersion);
+        file.u16(std::uint16_t(version));
         file.u16(compress ? kFlagCompressed : 0u);
         std::string result = file.take();
         result += compress ? gzipCompress(body, 3) : body;
@@ -623,6 +762,7 @@ namespace sketch {
         if (!isBinaryDocument(data)) {
             return false;
         }
+        SketchDocument::Batch batch(document);   // one announcement at the end, not one per object
         ByteReader head(data.data() + 4, 4);
         unsigned version = head.u16();
         unsigned flags = head.u16();
@@ -659,6 +799,9 @@ namespace sketch {
         std::vector<std::unique_ptr<SketchObject>> objects;
         std::vector<std::size_t> symbolRefs;   // the symbol id of each object (0 = not an instance)
         std::vector<std::shared_ptr<const SymbolDef>> symbolLibrary, patternLibrary;
+        std::vector<std::shared_ptr<const BrushDef>> brushLibrary;
+        std::vector<std::shared_ptr<const ImageData>> pictures;   // the IMGS chunk (a picture that cannot be decoded is null)
+        std::vector<std::size_t> imageRefs;                       // the picture of each object (an index into `pictures`)
         bool havePage = false, haveObjects = false;
 
         ByteReader file(body, bodySize);
@@ -719,6 +862,9 @@ namespace sketch {
                     layer.locked = (flags & 2u) != 0;
                     layer.expanded = (flags & 4u) == 0;
                     layerNames.push_back(std::size_t(in.varint()));
+                    if ((flags & 8u) != 0) {
+                        layer.color = std::uint32_t(in.varint()) & 0xFFFFFFu;
+                    }
                     if (layer.id != 0) {
                         layers.push_back(layer);
                     } else {
@@ -795,6 +941,58 @@ namespace sketch {
                 if (!in.ok()) {
                     return false;
                 }
+            } else if (tag == "IMGS") {
+                std::size_t n = in.count(2);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    std::string name = in.text();
+                    std::string bytes = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    pictures.push_back(decodeImage(bytes, name));
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "BRSH") {
+                std::size_t n = in.count(50);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    auto def = std::make_shared<BrushDef>();
+                    def->id = std::size_t(in.varint());
+                    def->name = in.text();
+                    const unsigned kind = in.enumeration(3);
+                    def->kind = BrushKind(kind);
+                    std::vector<double> numbers;
+                    for (int k = 0; k < 7; ++k) {
+                        numbers.push_back(in.f64());
+                    }
+                    double x0 = in.f64(), y0 = in.f64(), x1 = in.f64(), y1 = in.f64();
+                    std::string blob = in.text();
+                    if (!in.ok()) {
+                        return false;
+                    }
+                    def->setParams(numbers);
+                    if (def->hasArt()) {
+                        if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1) || !(x1 > x0) || !(y1 > y0)) {
+                            return false;
+                        }
+                        auto art = std::make_shared<SymbolDef>();
+                        art->id = def->id;
+                        art->name = def->name;
+                        art->box = BLBox(x0, y0, x1, y1);
+                        art->content = std::make_shared<SketchDocument>();
+                        if (!documentFromBinary(blob, *art->content)) {
+                            return false;
+                        }
+                        def->art = art;
+                    }
+                    if (def->id != 0) {
+                        brushLibrary.push_back(def);
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
             } else if (tag == "ABRD") {
                 std::size_t n = in.count(33);
                 artboardActive = std::size_t(in.varint());
@@ -845,7 +1043,7 @@ namespace sketch {
                 std::size_t n = in.count(4);
                 objects.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
-                    unsigned type = in.enumeration(unsigned(SketchObjectType::Symbol) + 1);
+                    unsigned type = in.enumeration(unsigned(SketchObjectType::Image) + 1);
                     unsigned objectFlags = in.u8();
                     std::size_t nameAt = std::size_t(in.varint());
                     std::size_t lookAt = std::size_t(in.varint());
@@ -897,24 +1095,23 @@ namespace sketch {
                     if (objectFlags & 64u) {
                         symbolRef = std::size_t(in.varint());
                     }
-                    std::size_t vertices = in.count(1 + sizeof(BLPoint));
+                    std::size_t imageRef = 0;
+                    if (type == unsigned(SketchObjectType::Image)) {
+                        imageRef = std::size_t(in.varint());
+                    }
+                    TextWarp textWarp;
+                    if (objectFlags & 128u) {
+                        const unsigned kindBits = in.u8();
+                        textWarp.kind = TextWarp::Kind(kindBits & 0x7Fu);
+                        textWarp.flip = (kindBits & 0x80u) != 0;
+                        textWarp.start = in.f64();
+                        if ((kindBits & 0x7Fu) > 2u || !std::isfinite(textWarp.start) || !readPath(in, version, textWarp.first) || !readPath(in, version, textWarp.second)) {
+                            return false;
+                        }
+                    }
                     BLPath path;
-                    if (vertices > 0) {
-                        const char* commands = in.view(vertices);
-                        const char* points = in.view(vertices * sizeof(BLPoint));
-                        if (!in.ok()) {
-                            return false;
-                        }
-                        std::uint8_t* commandOut = nullptr;
-                        BLPoint* vertexOut = nullptr;
-                        if (path.modify_op(BL_MODIFY_OP_ASSIGN_FIT, vertices, &commandOut, &vertexOut) != BL_SUCCESS) {
-                            return false;
-                        }
-                        std::memcpy(commandOut, commands, vertices);
-                        std::memcpy(vertexOut, points, vertices * sizeof(BLPoint));
-                        if (!validPathCommands(commandOut, vertices)) {
-                            return false;
-                        }
+                    if (!readPath(in, version, path)) {
+                        return false;
                     }
                     if (!in.ok()) {
                         return false;
@@ -923,6 +1120,9 @@ namespace sketch {
                     if (SketchObjectType(type) == SketchObjectType::Text) {
                         object->setTextState(words, font, fontSize, matrix);
                         object->setTextStyle(textStyle);
+                        if (textWarp.active()) {
+                            object->setTextWarp(textWarp);
+                        }
                         object->setGeometry(path);   // the outline as saved, whatever the fonts here would make of the words
                     }
                     const Look& look = looks[lookAt];
@@ -937,6 +1137,7 @@ namespace sketch {
                     object->setGroups(objectGroups);
                     objects.push_back(std::move(object));
                     symbolRefs.push_back(symbolRef);
+                    imageRefs.push_back(imageRef);
                 }
                 if (!in.ok()) {
                     return false;
@@ -973,12 +1174,20 @@ namespace sketch {
         document.setSwatches(swatches);
         document.setSymbols(symbolLibrary);
         document.setPatterns(patternLibrary);   // the paints that name a tile are bound to it once the objects are in
+        document.setBrushes(brushLibrary);      // likewise the strokes that name a brush
         document.setLayers(layers);   // empty = the one default layer
         std::size_t runAt = 0, runUsed = 0;
         std::map<std::size_t, std::size_t> groupIds;
         std::size_t objectAt = 0;
         for (std::unique_ptr<SketchObject>& object : objects) {
-            if (object->type() == SketchObjectType::Symbol) {
+            if (object->type() == SketchObjectType::Image) {
+                if (imageRefs[objectAt] < pictures.size() && pictures[imageRefs[objectAt]]) {
+                    object->setImage(pictures[imageRefs[objectAt]]);
+                } else {
+                    object.reset(SketchObject::make(SketchObjectType::Path, object->geometry()));   // its picture is missing: keep the outline
+                }
+            }
+            if (object && object->type() == SketchObjectType::Symbol) {
                 std::shared_ptr<const SymbolDef> def = document.findSymbol(symbolRefs[objectAt]);
                 if (def) {
                     object->setSymbol(def);
@@ -1014,6 +1223,7 @@ namespace sketch {
             document.add(object.release());
         }
         document.bindPatternPaints();
+        document.bindBrushStrokes();
         document.undoStack().clear();
         document.clearSelection();
         return true;

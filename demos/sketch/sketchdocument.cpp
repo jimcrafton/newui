@@ -129,6 +129,9 @@ namespace sketch {
         swatches_ = defaultSwatches();
         symbols_.clear();
         patterns_.clear();
+        brushes_.clear();
+        activeBrush_ = 0;
+        nextBrushId_ = 1;
         nextSymbolId_ = 1;
         undoStack_.clear();
         updateAllViews();
@@ -635,6 +638,7 @@ namespace sketch {
         scratch.setColorMode(colorMode_);
         scratch.setSymbols(symbols_);
         scratch.setPatterns(patterns_);
+        scratch.setBrushes(brushes_);
         for (const std::unique_ptr<SketchObject>& object : objects_) {  // stacking order, so groups stay adjacent
             if (isSelected(object->id())) {
                 scratch.add(object->clone());
@@ -658,6 +662,10 @@ namespace sketch {
             std::vector<AppearanceItem> items = objects.back()->appearance();
             bool rebound = false;
             for (AppearanceItem& item : items) {
+                if (item.strokeOptions.brush) {
+                    item.strokeOptions.brush = importBrush(item.strokeOptions.brush);
+                    rebound = true;
+                }
                 if (item.paint.isPattern() && item.paint.patternDef()) {
                     item.paint = SketchPaint::pattern(importPattern(item.paint.patternDef()), item.paint.patternScale(), item.paint.patternAngle());
                     rebound = true;
@@ -1216,6 +1224,10 @@ namespace sketch {
     }
 
     void SketchDocument::changed() {
+        if (batchDepth_ > 0) {
+            batchPending_ = true;
+            return;
+        }
         syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
         markModified();
         updateAllViews();

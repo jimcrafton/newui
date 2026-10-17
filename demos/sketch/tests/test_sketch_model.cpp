@@ -5,6 +5,7 @@
 #include "shapetools.h"
 #include "pathops.h"
 #include "imagetrace.h"
+#include "imagedata.h"
 #include "sketchsvg.h"
 #include "gzip.h"
 #include "sketchexport.h"
@@ -20,6 +21,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -1001,6 +1003,110 @@ TEST(SketchAlign, ObjectsLineUpOnTheirCombinedBoundsAndUndo) {
     row.doc.setSelection({row.a, row.b, row.c});
     EXPECT_TRUE(row.doc.alignSelection(SketchDocument::AlignMode::Middle));
     EXPECT_NEAR((row.doc.findById(row.b)->geometryBounds().y0 + row.doc.findById(row.b)->geometryBounds().y1) * 0.5, 40.0, 1e-9);
+}
+
+TEST(SketchDistribute, EdgesAndCentersGoEvenlyBetweenTheOutermost) {
+    Row row;
+    row.doc.transformObjects({row.b}, BLMatrix2D::make_translation(-70, 0), "Move");   // b at x = 30
+    row.doc.setSelection({row.a, row.b, row.c});
+    EXPECT_TRUE(row.doc.distributeSelection(SketchDocument::AlignMode::Left));
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().x0, 0.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 100.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.c)->geometryBounds().x0, 200.0, 1e-9);
+    EXPECT_FALSE(row.doc.distributeSelection(SketchDocument::AlignMode::Left));   // already even
+    row.doc.undoStack().undo();
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 30.0, 1e-9);
+    // Centers: a at 20 and c at 230, so b's center goes to 125.
+    EXPECT_TRUE(row.doc.distributeSelection(SketchDocument::AlignMode::Center));
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 115.0, 1e-9);
+    // Vertically the tops are 10, 20 and 0: in order c, a, b - a is already halfway between the other two.
+    EXPECT_FALSE(row.doc.distributeSelection(SketchDocument::AlignMode::Top));
+    row.doc.transformObjects({row.a}, BLMatrix2D::make_translation(0, 4), "Move");   // tops 14, 20, 0: a is no longer halfway
+    EXPECT_TRUE(row.doc.distributeSelection(SketchDocument::AlignMode::Top));
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().y0, 10.0, 1e-9);
+}
+
+TEST(SketchDistribute, NeedsThreeObjects) {
+    Row row;
+    row.doc.setSelection({row.a, row.b});
+    EXPECT_FALSE(row.doc.distributeSelection(SketchDocument::AlignMode::Left));
+    EXPECT_FALSE(row.doc.distributeSpacing(true));
+}
+
+TEST(SketchDistribute, SpacingMakesTheGapsEqual) {
+    Row row;   // widths 40, 20 and 60 across 0 .. 260: the gaps come out at 70
+    row.doc.setSelection({row.a, row.b, row.c});
+    EXPECT_TRUE(row.doc.distributeSpacing(true));
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().x0, 0.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 110.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.c)->geometryBounds().x1, 260.0, 1e-9);
+    EXPECT_FALSE(row.doc.distributeSpacing(true));
+    row.doc.undoStack().undo();
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 100.0, 1e-9);
+    // A given gap: the first stays and the others follow it at that distance.
+    EXPECT_TRUE(row.doc.distributeSpacing(true, 10.0));
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().x0, 50.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.c)->geometryBounds().x0, 80.0, 1e-9);
+    // Down the page: heights 40, 20 and 80, tops 10, 20 and 0 -> in order c, a, b.
+    EXPECT_TRUE(row.doc.distributeSpacing(false, 5.0));
+    EXPECT_NEAR(row.doc.findById(row.c)->geometryBounds().y0, 0.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.a)->geometryBounds().y0, 85.0, 1e-9);
+    EXPECT_NEAR(row.doc.findById(row.b)->geometryBounds().y0, 130.0, 1e-9);
+}
+
+TEST(SketchDistribute, AGroupMovesAsOnePiece) {
+    SketchDocument doc;
+    std::size_t a = doc.add(SketchObject::makeRect(0, 10, 40, 40)).id();
+    std::size_t b = doc.add(SketchObject::makeRect(100, 20, 20, 20)).id();
+    std::size_t c = doc.add(SketchObject::makeRect(200, 0, 60, 80)).id();
+    std::size_t d = doc.add(SketchObject::makeRect(300, 0, 10, 10)).id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    doc.setSelection({a, b, c, d});
+    EXPECT_TRUE(doc.distributeSpacing(true));   // pieces 0..120, 200..260 and 300..310: the gaps are 60
+    EXPECT_NEAR(doc.findById(a)->geometryBounds().x0, 0.0, 1e-9);
+    EXPECT_NEAR(doc.findById(b)->geometryBounds().x0, 100.0, 1e-9);   // the group's members keep their places
+    EXPECT_NEAR(doc.findById(c)->geometryBounds().x0, 180.0, 1e-9);
+    EXPECT_NEAR(doc.findById(d)->geometryBounds().x0, 300.0, 1e-9);
+}
+
+TEST(SketchTransformTools, MatricesPivotAboutTheOrigin) {
+    BLPoint r = SketchDocument::rotationAbout(BLPoint(10, 0), 1.5707963267948966).map_point(BLPoint(20, 0));
+    EXPECT_NEAR(r.x, 10.0, 1e-9);
+    EXPECT_NEAR(r.y, 10.0, 1e-9);
+    BLPoint s = SketchDocument::scalingAbout(BLPoint(10, 10), 2.0, 3.0).map_point(BLPoint(20, 20));
+    EXPECT_NEAR(s.x, 30.0, 1e-9);
+    EXPECT_NEAR(s.y, 40.0, 1e-9);
+    // Across a horizontal line through (10, 10), a vertical one, and the diagonal through the origin.
+    BLPoint h = SketchDocument::reflectionAcross(BLPoint(10, 10), 0.0).map_point(BLPoint(15, 20));
+    EXPECT_NEAR(h.x, 15.0, 1e-9);
+    EXPECT_NEAR(h.y, 0.0, 1e-9);
+    BLPoint v = SketchDocument::reflectionAcross(BLPoint(10, 10), 1.5707963267948966).map_point(BLPoint(15, 20));
+    EXPECT_NEAR(v.x, 5.0, 1e-9);
+    EXPECT_NEAR(v.y, 20.0, 1e-9);
+    BLPoint d = SketchDocument::reflectionAcross(BLPoint(0, 0), 0.7853981633974483).map_point(BLPoint(1, 0));
+    EXPECT_NEAR(d.x, 0.0, 1e-9);
+    EXPECT_NEAR(d.y, 1.0, 1e-9);
+    BLPoint on = SketchDocument::reflectionAcross(BLPoint(10, 10), 0.3).map_point(BLPoint(10, 10));   // the origin stays
+    EXPECT_NEAR(on.x, 10.0, 1e-9);
+    EXPECT_NEAR(on.y, 10.0, 1e-9);
+}
+
+TEST(SketchTransformTools, ATransformedCopyLeavesTheOriginalAndIsOneUndoStep) {
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makeRect(10, 10, 20, 20)).id();
+    doc.setSelection({id});
+    doc.duplicateTransformed(SketchDocument::reflectionAcross(BLPoint(50, 0), 1.5707963267948966), -1.0, 3.14159265358979323846, "Reflect Copy");
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x0, 10.0, 1e-9);   // the original has not moved
+    ASSERT_EQ(doc.selection().size(), 1u);
+    const SketchObject* copy = doc.findById(doc.selection()[0]);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_NE(copy->id(), id);
+    EXPECT_NEAR(copy->geometryBounds().x0, 70.0, 1e-9);   // mirrored across x = 50
+    EXPECT_NEAR(copy->geometryBounds().x1, 90.0, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 1u);
 }
 
 TEST(SketchAlign, OneObjectAlignsToThePage) {
@@ -2895,10 +3001,10 @@ TEST(SketchBinary, ADocumentRoundTripsWithNothingLost) {
         EXPECT_EQ(copy.graphicStyles().size(), 1u);
         EXPECT_EQ(copy.colorMode(), ColorSpace::CMYK);
         EXPECT_FALSE(copy.undoStack().canUndo());
-        // Geometry is bit-exact (the format keeps f64 outlines).
+        // Geometry comes back to within a 32-bit float step (the outlines are stored as float steps).
         BLBox x = doc.object(0).geometryBounds(), y = copy.object(0).geometryBounds();
-        EXPECT_EQ(x.x0, y.x0);
-        EXPECT_EQ(x.y1, y.y1);
+        EXPECT_NEAR(x.x0, y.x0, 1e-4);
+        EXPECT_NEAR(x.y1, y.y1, 1e-4);
     }
 }
 
@@ -4688,4 +4794,947 @@ TEST(SketchSymbols, ASymbolCanHoldAPatternFill) {
     ASSERT_TRUE(doc.applyPattern(pattern, false));
     ASSERT_NE(doc.makeSymbol(""), 0u);
     EXPECT_TRUE(isRed(pixelAt(doc, 20, 20)));
+}
+
+// ---- Brushes ------------------------------------------------------------------------------------------
+
+namespace {
+    std::shared_ptr<BrushDef> calligraphicBrush(double angle, double roundness) {
+        auto brush = std::make_shared<BrushDef>();
+        brush->id = 1;
+        brush->name = "Nib";
+        brush->angle = angle;
+        brush->roundness = roundness;
+        return brush;
+    }
+
+    // A brush whose artwork is one black rectangle of the given size.
+    std::shared_ptr<BrushDef> rectangleBrush(BrushKind kind, double w, double h) {
+        auto art = std::make_shared<SymbolDef>();
+        art->box = BLBox(0, 0, w, h);
+        art->content = std::make_shared<SketchDocument>();
+        SketchObject* rect = SketchObject::makeRect(0, 0, w, h);
+        rect->setFill(SketchPaint::solid(SketchColor::gray(0.0f)));
+        rect->setStroke(SketchPaint::none());
+        art->content->add(rect);
+        auto brush = std::make_shared<BrushDef>();
+        brush->id = 2;
+        brush->name = "Block";
+        brush->kind = kind;
+        brush->art = art;
+        return brush;
+    }
+
+    // A horizontal line from x = 10 to 90 at y = 50, stroked with `brush` at `weight`.
+    std::unique_ptr<SketchObject> brushedLine(const std::shared_ptr<const BrushDef>& brush, double weight) {
+        std::unique_ptr<SketchObject> line(SketchObject::makeLine(10, 50, 90, 50));
+        line->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
+        line->setStrokeWidth(weight);
+        StrokeOptions options;
+        options.brush = brush;
+        line->setStrokeOptions(options);
+        return line;
+    }
+
+    bool inked(const std::vector<std::uint32_t>& pixels, int x, int y) { return (pixels[std::size_t(y) * 100 + std::size_t(x)] >> 24) > 128u; }
+
+    BLBox boxOfPath(const BLPath& path) {
+        BLBox box(0, 0, 0, 0);
+        path.get_bounding_box(&box);
+        return box;
+    }
+}
+
+TEST(SketchBrushes, ANibSweepsOutAnOval) {
+    BLPath line;
+    line.move_to(10, 50);
+    line.line_to(90, 50);
+    // A flat nib 10 across and 1 thick, then the same turned upright.
+    BLBox flat = boxOfPath(calligraphicBrush(0.0, 10.0)->nibOutline(line, 10.0));
+    EXPECT_NEAR(flat.x0, 5.0, 1e-6);
+    EXPECT_NEAR(flat.x1, 95.0, 1e-6);
+    EXPECT_NEAR(flat.y1 - flat.y0, 1.0, 0.05);
+    BLBox upright = boxOfPath(calligraphicBrush(90.0, 10.0)->nibOutline(line, 10.0));
+    EXPECT_NEAR(upright.y1 - upright.y0, 10.0, 1e-6);
+    EXPECT_NEAR(upright.x1 - upright.x0, 81.0, 0.05);
+}
+
+TEST(SketchBrushes, ACalligraphicStrokeIsThickOrThinWithTheDirection) {
+    std::unique_ptr<SketchObject> line = brushedLine(calligraphicBrush(90.0, 10.0), 20.0);   // an upright nib drawing a horizontal line
+    std::vector<std::uint32_t> px = render(*line, 100, 100);
+    EXPECT_TRUE(inked(px, 50, 50));
+    EXPECT_TRUE(inked(px, 50, 58));    // 20 tall at the middle
+    EXPECT_FALSE(inked(px, 50, 65));
+    BLBox box = line->bounds();
+    EXPECT_NEAR(box.y0, 40.0, 1e-6);   // the bounds allow for the nib
+    EXPECT_NEAR(box.y1, 60.0, 1e-6);
+    std::unique_ptr<SketchObject> thin = brushedLine(calligraphicBrush(0.0, 10.0), 20.0);   // a flat nib: the same line comes out thin
+    px = render(*thin, 100, 100);
+    EXPECT_TRUE(inked(px, 50, 50));
+    EXPECT_FALSE(inked(px, 50, 56));
+}
+
+TEST(SketchBrushes, AnArtBrushStretchesItsArtworkAlongThePath) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    std::vector<std::uint32_t> px = render(*brushedLine(brush, 1.0), 100, 100);   // the 100 x 6 block squeezed onto 80 long
+    EXPECT_TRUE(inked(px, 50, 50));
+    EXPECT_TRUE(inked(px, 50, 52));
+    EXPECT_FALSE(inked(px, 50, 56));
+    EXPECT_TRUE(inked(px, 12, 50));
+    EXPECT_FALSE(inked(px, 5, 50));    // it ends where the path ends
+    px = render(*brushedLine(brush, 2.0), 100, 100);   // weight 2: twice as thick
+    EXPECT_TRUE(inked(px, 50, 55));
+    EXPECT_FALSE(inked(px, 50, 58));
+    EXPECT_NEAR(brushedLine(brush, 2.0)->bounds().y1, 56.0, 1e-6);
+}
+
+TEST(SketchBrushes, AnArtBrushBendsWithACurve) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Art, 100, 6);
+    std::unique_ptr<SketchObject> arc(SketchObject::makeLine(10, 90, 90, 90));
+    BLPath path;
+    path.move_to(10, 90);
+    path.quad_to(50, 10, 90, 90);   // up and over: it peaks at y = 50
+    arc->setGeometry(path);
+    arc->setStroke(SketchPaint::solid(SketchColor::gray(0.0f)));
+    arc->setStrokeWidth(1.0);
+    StrokeOptions options;
+    options.brush = brush;
+    arc->setStrokeOptions(options);
+    std::vector<std::uint32_t> px = render(*arc, 100, 100);
+    EXPECT_TRUE(inked(px, 50, 50));
+    EXPECT_FALSE(inked(px, 50, 70));   // a straight block would have been drawn across the middle
+    EXPECT_TRUE(inked(px, 20, 70));    // the start of the curve, still low down
+}
+
+TEST(SketchBrushes, AScatterBrushStandsCopiesAlongThePathAndStaysPut) {
+    std::shared_ptr<BrushDef> brush = rectangleBrush(BrushKind::Scatter, 4, 4);
+    brush->spacing = 250.0;   // 10 apart
+    brush->followPath = false;
+    BLPath path;
+    path.move_to(10, 50);
+    path.line_to(90, 50);
+    std::vector<BLMatrix2D> first = brush->placements(path, 1.0);
+    EXPECT_EQ(first.size(), 9u);
+    std::vector<BLMatrix2D> again = brush->placements(path, 1.0);
+    ASSERT_EQ(again.size(), first.size());
+    for (std::size_t i = 0; i < first.size(); ++i) {
+        EXPECT_DOUBLE_EQ(first[i].m20, again[i].m20);   // the same places every time
+    }
+    std::vector<std::uint32_t> px = render(*brushedLine(brush, 1.0), 100, 100);
+    EXPECT_TRUE(inked(px, 10, 50));    // a copy centred on the start
+    EXPECT_TRUE(inked(px, 20, 50));
+    EXPECT_FALSE(inked(px, 15, 50));   // and gaps between
+    EXPECT_FALSE(inked(px, 50, 60));
+    brush->scatter = 100.0;   // strays up to the artwork height from the path
+    brush->sizeVariation = 50.0;
+    std::vector<BLMatrix2D> strewn = brush->placements(path, 1.0);
+    bool moved = false;
+    for (const BLMatrix2D& m : strewn) {
+        moved = moved || std::fabs(m.m21 - 48.0) > 0.01;   // the centre of a copy that stayed on the line would sit at y = 50 (m21 = 50 - 2)
+    }
+    EXPECT_TRUE(moved);
+}
+
+TEST(SketchBrushes, TheNumbersAreKeptInRange) {
+    BrushDef brush;
+    brush.setParams({1000.0, -4.0, 0.0, 9999.0, 150.0, 400.0, 0.0});
+    EXPECT_DOUBLE_EQ(brush.angle, 180.0);
+    EXPECT_DOUBLE_EQ(brush.roundness, 1.0);
+    EXPECT_DOUBLE_EQ(brush.spacing, 5.0);
+    EXPECT_DOUBLE_EQ(brush.scatter, 500.0);
+    EXPECT_DOUBLE_EQ(brush.sizeVariation, 100.0);
+    EXPECT_DOUBLE_EQ(brush.rotation, 180.0);
+    EXPECT_FALSE(brush.followPath);
+}
+
+TEST(SketchBrushes, TheLibraryMakesAppliesAndEditsBrushesAsUndoSteps) {
+    SketchDocument doc;
+    std::size_t id = doc.add(SketchObject::makeLine(0, 0, 100, 0)).id();
+    doc.setSelection({id});
+    std::size_t brush = doc.makeBrush(BrushKind::Calligraphic, "");
+    ASSERT_NE(brush, 0u);
+    EXPECT_EQ(doc.brushes().size(), 1u);
+    EXPECT_EQ(doc.activeBrush(), brush);
+    EXPECT_TRUE(doc.applyBrush(brush));
+    ASSERT_TRUE(doc.findById(id)->strokeOptions().brush != nullptr);
+    EXPECT_EQ(doc.findById(id)->strokeOptions().brush->id, brush);
+    EXPECT_EQ(doc.brushUseCount(brush), 1u);
+    EXPECT_FALSE(doc.deleteBrush(brush));   // in use
+    EXPECT_FALSE(doc.applyBrush(brush));    // nothing changes
+    BrushDef edited = *doc.findBrush(brush);
+    edited.name = "Chisel";
+    edited.angle = 10.0;
+    EXPECT_TRUE(doc.changeBrush(brush, edited));
+    EXPECT_EQ(doc.findById(id)->strokeOptions().brush->name, "Chisel");   // the stroke follows the edit
+    EXPECT_DOUBLE_EQ(doc.findById(id)->strokeOptions().brush->angle, 10.0);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(id)->strokeOptions().brush->name, "Calligraphic Brush 1");
+    EXPECT_TRUE(doc.applyBrush(0));   // back to the plain stroke
+    EXPECT_TRUE(doc.findById(id)->strokeOptions().brush == nullptr);
+    EXPECT_TRUE(doc.deleteBrush(brush));
+    EXPECT_TRUE(doc.brushes().empty());
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.brushes().size(), 1u);
+}
+
+TEST(SketchBrushes, AnArtBrushTakesTheSelectionAsItsArtwork) {
+    SketchDocument doc;
+    EXPECT_EQ(doc.makeBrush(BrushKind::Art, ""), 0u);   // nothing selected
+    std::size_t id = doc.add(SketchObject::makeRect(0, 0, 60, 10)).id();
+    doc.setSelection({id});
+    std::size_t brush = doc.makeBrush(BrushKind::Art, "Bar");
+    ASSERT_NE(brush, 0u);
+    std::shared_ptr<const BrushDef> def = doc.findBrush(brush);
+    ASSERT_TRUE(def && def->art && def->art->content);
+    EXPECT_EQ(def->art->content->objectCount(), 1u);
+    EXPECT_NEAR(def->art->box.x1 - def->art->box.x0, 60.0, 2.0);   // the box of the artwork (its stroke counts too)
+    EXPECT_EQ(doc.objectCount(), 1u);                              // the selection stays
+}
+
+TEST(SketchBrushes, PresetsAreAddedOnceByName) {
+    SketchDocument doc;
+    EXPECT_EQ(doc.addBrushPresets(), 6u);
+    EXPECT_EQ(doc.brushes().size(), 6u);
+    EXPECT_EQ(doc.addBrushPresets(), 0u);
+    bool art = false, scatter = false, nib = false;
+    for (const std::shared_ptr<const BrushDef>& brush : doc.brushes()) {
+        art = art || (brush->kind == BrushKind::Art && brush->art != nullptr);
+        scatter = scatter || (brush->kind == BrushKind::Scatter && brush->art != nullptr);
+        nib = nib || brush->kind == BrushKind::Calligraphic;
+    }
+    EXPECT_TRUE(art && scatter && nib);
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.brushes().empty());
+}
+
+TEST(SketchBrushes, SurviveSvgBinaryAndClipboardRoundTrips) {
+    SketchDocument doc;
+    std::size_t bar = doc.add(SketchObject::makeRect(0, 0, 60, 10)).id();
+    std::size_t line = doc.add(SketchObject::makeLine(0, 50, 100, 50)).id();
+    doc.setSelection({bar});
+    std::size_t art = doc.makeBrush(BrushKind::Scatter, "Bars");
+    doc.setSelection({line});
+    std::size_t nib = doc.makeBrush(BrushKind::Calligraphic, "Nib");
+    BrushDef edited = *doc.findBrush(nib);
+    edited.angle = 30.0;
+    edited.roundness = 40.0;
+    ASSERT_TRUE(doc.changeBrush(nib, edited));
+    ASSERT_TRUE(doc.applyBrush(nib));
+    ASSERT_NE(art, 0u);
+
+    auto check = [&](const SketchDocument& d, const char* how) {
+        SCOPED_TRACE(how);
+        ASSERT_EQ(d.brushes().size(), 2u);
+        const SketchObject* stroked = nullptr;
+        for (std::size_t i = 0; i < d.objectCount(); ++i) {
+            if (d.object(i).strokeOptions().brush) {
+                stroked = &d.object(i);
+            }
+        }
+        ASSERT_NE(stroked, nullptr);
+        EXPECT_EQ(stroked->strokeOptions().brush->name, "Nib");
+        EXPECT_DOUBLE_EQ(stroked->strokeOptions().brush->angle, 30.0);
+        EXPECT_DOUBLE_EQ(stroked->strokeOptions().brush->roundness, 40.0);
+        std::shared_ptr<const BrushDef> bars;
+        for (const std::shared_ptr<const BrushDef>& brush : d.brushes()) {
+            if (brush->kind == BrushKind::Scatter) {
+                bars = brush;
+            }
+        }
+        ASSERT_TRUE(bars && bars->art && bars->art->content);
+        EXPECT_EQ(bars->name, "Bars");
+        EXPECT_EQ(bars->art->content->objectCount(), 1u);
+        EXPECT_DOUBLE_EQ(bars->spacing, 150.0);
+    };
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    check(fromSvg, "svg");
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBin));
+    check(fromBin, "binary");
+
+    // Copy and paste: the brush comes along, once however often it is pasted.
+    doc.setSelection({line});
+    std::string clip = doc.selectionToSvg();
+    SketchDocument other;
+    ASSERT_TRUE(other.pasteSvg(clip, 5, 5));
+    ASSERT_TRUE(other.pasteSvg(clip, 10, 10));
+    EXPECT_EQ(other.brushes().size(), 1u);
+    EXPECT_EQ(other.brushUseCount(other.brushes().front()->id), 2u);
+}
+
+TEST(SketchBrushes, ABrushedStrokeOfAnArtBrushCanBePartOfBrushArtwork) {
+    // The artwork of a brush that holds brushed strokes must carry those brushes with it, or saving it would name brushes it does not have.
+    SketchDocument doc;
+    std::size_t line = doc.add(SketchObject::makeLine(0, 0, 100, 0)).id();
+    doc.setSelection({line});
+    ASSERT_NE(doc.makeBrush(BrushKind::Calligraphic, ""), 0u);
+    ASSERT_TRUE(doc.applyBrush(doc.activeBrush()));
+    ASSERT_NE(doc.makeBrush(BrushKind::Scatter, "Nested"), 0u);
+    SketchDocument back;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), back));
+    ASSERT_EQ(back.brushes().size(), 2u);
+    for (const std::shared_ptr<const BrushDef>& brush : back.brushes()) {
+        if (brush->kind == BrushKind::Scatter) {
+            ASSERT_TRUE(brush->art && brush->art->content);
+            ASSERT_EQ(brush->art->content->objectCount(), 1u);
+            EXPECT_TRUE(brush->art->content->object(0).strokeOptions().brush != nullptr);
+        }
+    }
+}
+
+// ---- Layers: colour, duplicate, merge, flatten, objects in the tree ------------------------------------
+
+TEST(SketchLayers, ColourIsAutomaticUntilSetAndSurvivesSaving) {
+    SketchDocument doc;
+    const std::size_t first = doc.activeLayer();
+    const std::size_t second = doc.addLayer(0);
+    EXPECT_NE(layerColor(*doc.findLayer(first)), layerColor(*doc.findLayer(second)));   // each layer gets one of the nine in turn
+    EXPECT_EQ(doc.findLayer(first)->color, 0u);
+    EXPECT_TRUE(doc.setLayerColor(second, 0x112233));
+    EXPECT_FALSE(doc.setLayerColor(second, 0x112233));
+    EXPECT_EQ(layerColor(*doc.findLayer(second)), 0x112233u);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findLayer(second)->color, 0u);
+    doc.undoStack().redo();
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_EQ(fromSvg.layers().size(), 2u);
+    EXPECT_EQ(fromSvg.layers()[1].color, 0x112233u);
+    EXPECT_EQ(fromSvg.layers()[0].color, 0u);
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBin));
+    ASSERT_EQ(fromBin.layers().size(), 2u);
+    EXPECT_EQ(fromBin.layers()[1].color, 0x112233u);
+    EXPECT_EQ(fromBin.layers()[0].color, 0u);
+}
+
+TEST(SketchLayers, DuplicateCopiesTheLayerItsSublayersAndObjectsWithGroupsOfTheirOwn) {
+    SketchDocument doc;
+    const std::size_t base = doc.activeLayer();
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    const std::size_t sub = doc.addLayer(base, "Sub");
+    const std::size_t dot = doc.add(SketchObject::makeEllipse(5, 5, 3, 3)).id();
+    ASSERT_EQ(doc.findById(dot)->layer(), sub);
+    const std::size_t copy = doc.duplicateLayer(base);
+    ASSERT_NE(copy, 0u);
+    EXPECT_EQ(doc.layers().size(), 4u);
+    EXPECT_EQ(doc.findLayer(copy)->name, "Layer 1 copy");
+    EXPECT_EQ(doc.activeLayer(), copy);
+    EXPECT_EQ(doc.layerObjectCount(copy, true), 3u);
+    EXPECT_EQ(doc.layerObjectCount(base, true), 3u);
+    EXPECT_EQ(doc.layerChildren(copy).size(), 1u);   // the sublayer came along
+    // The copy's group is not the original's.
+    std::size_t original = doc.findById(a)->groups().front(), copied = 0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        if (doc.object(i).layer() == copy && !doc.object(i).groups().empty()) { copied = doc.object(i).groups().front(); }
+    }
+    EXPECT_NE(copied, 0u);
+    EXPECT_NE(copied, original);
+    EXPECT_EQ(doc.groupMembers(original).size(), 2u);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.layers().size(), 2u);
+    EXPECT_EQ(doc.objectCount(), 3u);
+}
+
+TEST(SketchLayers, MergeFlattenAndTheShowHideEditsAreUndoSteps) {
+    SketchDocument doc;
+    const std::size_t one = doc.activeLayer();
+    doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    const std::size_t two = doc.addLayer(0);
+    doc.add(SketchObject::makeRect(20, 0, 10, 10));
+    const std::size_t three = doc.addLayer(0);
+    doc.add(SketchObject::makeRect(40, 0, 10, 10));
+    EXPECT_FALSE(doc.mergeLayerDown(one));   // nothing behind it
+    EXPECT_TRUE(doc.hideOtherLayers(three));
+    EXPECT_TRUE(!doc.findLayer(one)->visible && !doc.findLayer(two)->visible && doc.findLayer(three)->visible);
+    EXPECT_TRUE(doc.showAllLayers());
+    EXPECT_FALSE(doc.showAllLayers());
+    EXPECT_TRUE(doc.lockOtherLayers(two));
+    EXPECT_TRUE(doc.findLayer(one)->locked && doc.findLayer(three)->locked && !doc.findLayer(two)->locked);
+    EXPECT_TRUE(doc.unlockAllLayers());
+    EXPECT_TRUE(doc.mergeLayerDown(three));
+    EXPECT_EQ(doc.layers().size(), 2u);
+    EXPECT_EQ(doc.layerObjectCount(two, false), 2u);
+    EXPECT_EQ(doc.activeLayer(), two);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.layers().size(), 3u);
+    EXPECT_EQ(doc.layerObjectCount(three, false), 1u);
+    EXPECT_TRUE(doc.flattenArtwork());
+    EXPECT_EQ(doc.layers().size(), 1u);
+    EXPECT_EQ(doc.layerObjectCount(one, false), 3u);
+    EXPECT_FALSE(doc.flattenArtwork());
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.layers().size(), 3u);
+}
+
+TEST(SketchLayers, LayersMoveOneStepAmongTheirSiblings) {
+    SketchDocument doc;
+    const std::size_t one = doc.activeLayer();
+    const std::size_t two = doc.addLayer(0);
+    const std::size_t three = doc.addLayer(0);
+    EXPECT_EQ(doc.layerChildren(0), (std::vector<std::size_t>{one, two, three}));
+    EXPECT_FALSE(doc.moveLayerStep(three, true));
+    EXPECT_TRUE(doc.moveLayerStep(one, true));
+    EXPECT_EQ(doc.layerChildren(0), (std::vector<std::size_t>{two, one, three}));
+    EXPECT_TRUE(doc.moveLayerStep(three, false));
+    EXPECT_EQ(doc.layerChildren(0), (std::vector<std::size_t>{two, three, one}));
+    EXPECT_FALSE(doc.moveLayerStep(two, false));
+}
+
+TEST(SketchLayers, ObjectsMoveBetweenLayersAndNextToOthersAndLeaveTheirGroups) {
+    SketchDocument doc;
+    const std::size_t one = doc.activeLayer();
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    const std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    const std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    const std::size_t two = doc.addLayer(0);
+    auto order = [&]() {
+        std::vector<std::size_t> ids;
+        for (std::size_t i = 0; i < doc.objectCount(); ++i) { ids.push_back(doc.object(i).id()); }
+        return ids;
+    };
+    // Behind `c`: a goes after b ... in front of c and behind nothing: a lands on top of its layer.
+    EXPECT_TRUE(doc.moveObjects({a}, 0, {c}, true));
+    EXPECT_EQ(order(), (std::vector<std::size_t>{b, c, a}));
+    EXPECT_FALSE(doc.moveObjects({a}, 0, {a}, true));   // onto itself
+    EXPECT_TRUE(doc.moveObjects({a}, 0, {b}, false));
+    EXPECT_EQ(order(), (std::vector<std::size_t>{a, b, c}));
+    // Into another layer: on top of it, and the order follows the layers.
+    EXPECT_TRUE(doc.moveObjects({b}, two, {}, false));
+    EXPECT_EQ(doc.findById(b)->layer(), two);
+    EXPECT_EQ(order().back(), b);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(b)->layer(), one);
+    EXPECT_EQ(order(), (std::vector<std::size_t>{a, b, c}));
+    // Taking a member out of its group.
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.groupSelection());
+    EXPECT_FALSE(doc.findById(a)->groups().empty());
+    EXPECT_TRUE(doc.moveObjects({a}, two, {}, false, std::vector<std::size_t>{}, std::numeric_limits<std::size_t>::max()));
+    EXPECT_TRUE(doc.findById(a)->groups().empty());
+    EXPECT_FALSE(doc.findById(b)->groups().empty());
+    doc.undoStack().undo();
+    EXPECT_FALSE(doc.findById(a)->groups().empty());
+    EXPECT_EQ(doc.findById(a)->layer(), one);
+}
+
+TEST(SketchLayers, ObjectsHaveTheirOwnEyeLockAndName) {
+    SketchDocument doc;
+    const std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    doc.setSelection({a});
+    EXPECT_TRUE(doc.setObjectsVisible({a}, false));
+    EXPECT_FALSE(doc.findById(a)->ownVisible());
+    EXPECT_TRUE(doc.selection().empty());   // a hidden object leaves the selection
+    EXPECT_FALSE(doc.setObjectsVisible({a}, false));
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(a)->ownVisible());
+    EXPECT_TRUE(doc.setObjectsLocked({a}, true));
+    EXPECT_TRUE(doc.findById(a)->ownLocked());
+    EXPECT_TRUE(doc.renameObject(a, "Sun"));
+    EXPECT_EQ(doc.findById(a)->name(), "Sun");
+    EXPECT_FALSE(doc.renameObject(a, "Sun"));
+    doc.undoStack().undo();
+    EXPECT_NE(doc.findById(a)->name(), "Sun");
+}
+
+TEST(SketchBinary, OutlinesAreStoredAsFloatStepsInHalfTheSpaceAndOldFilesStillRead) {
+    SketchDocument doc;
+    BLPath wobble;
+    wobble.move_to(10.123456789, 20.987654321);
+    for (int i = 1; i < 200; ++i) {
+        wobble.cubic_to(10.0 + i * 3.1, 20.0 + std::sin(i) * 40.0, 12.0 + i * 3.1, 80.0 + std::cos(i) * 40.0, 14.0 + i * 3.1, 50.0 + std::sin(i * 0.3) * 30.0);
+    }
+    wobble.close();
+    doc.add(SketchObject::makePath(wobble));
+    doc.add(SketchObject::makeRect(0.25, 0.5, 100.0, 50.0));   // values a float holds exactly come back exactly
+    doc.add(SketchObject::makeEllipse(300, 300, 40, 25));
+    std::string v1 = binaryFromDocument(doc, false, 1), v2 = binaryFromDocument(doc, false, 2);
+    EXPECT_LT(v2.size(), v1.size() * 6 / 10) << "the vertices take half";
+    SketchDocument fromV1, fromV2;
+    ASSERT_TRUE(documentFromBinary(v1, fromV1));
+    ASSERT_TRUE(documentFromBinary(v2, fromV2));
+    ASSERT_EQ(fromV1.objectCount(), 3u);
+    ASSERT_EQ(fromV2.objectCount(), 3u);
+    for (std::size_t i = 0; i < 3; ++i) {
+        BLPathView original = doc.object(i).geometry().view(), old = fromV1.object(i).geometry().view(), now = fromV2.object(i).geometry().view();
+        ASSERT_EQ(old.size, original.size);
+        ASSERT_EQ(now.size, original.size);
+        for (std::size_t k = 0; k < original.size; ++k) {
+            ASSERT_EQ(now.command_data[k], original.command_data[k]);
+            if (original.command_data[k] == BL_PATH_CMD_CLOSE) { continue; }
+            EXPECT_EQ(old.vertex_data[k].x, original.vertex_data[k].x) << "version 1 is exact";
+            EXPECT_NEAR(now.vertex_data[k].x, original.vertex_data[k].x, 2e-5);
+            EXPECT_NEAR(now.vertex_data[k].y, original.vertex_data[k].y, 2e-5);
+        }
+    }
+    BLBox box = fromV2.object(1).geometryBounds();   // the rectangle
+    EXPECT_EQ(box.x0, 0.25);
+    EXPECT_EQ(box.y1, 50.5);
+}
+
+// ---- SVG import: <use>, <symbol>, nested <svg>, clip-path, filter ----------------------------------------
+
+namespace {
+    const char* kForeignSvg = R"SVG(<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200" viewBox="0 0 200 200">
+<defs>
+<rect id="box" width="20" height="10" fill="#ff0000"/>
+<symbol id="sym" viewBox="0 0 10 10"><rect width="10" height="10" fill="#00ff00"/></symbol>
+<clipPath id="c"><circle cx="150" cy="50" r="20"/></clipPath>
+<filter id="b"><feGaussianBlur stdDeviation="3"/></filter>
+<filter id="s"><feDropShadow dx="4" dy="5" stdDeviation="2" flood-color="#000000" flood-opacity="0.5"/></filter>
+</defs>
+<use xlink:href="#box" x="10" y="20"/>
+<use xlink:href="#sym" x="100" y="100" width="40" height="20"/>
+<svg x="50" y="150" width="40" height="40" viewBox="0 0 10 10"><rect width="5" height="5" fill="#0000ff"/></svg>
+<rect x="120" y="30" width="60" height="40" fill="#ff00ff" clip-path="url(#c)"/>
+<rect x="10" y="100" width="20" height="20" filter="url(#b)"/>
+<rect x="60" y="100" width="20" height="20" style="filter:url(#s)"/>
+</svg>)SVG";
+
+    const SketchObject* objectAtX(const SketchDocument& doc, double x0) {
+        for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+            if (std::fabs(doc.object(i).geometryBounds().x0 - x0) < 1e-6 && doc.object(i).name() != "Clipping Path") {
+                return &doc.object(i);
+            }
+        }
+        return nullptr;
+    }
+}
+
+TEST(SketchSvgImport, UseSymbolsAndNestedViewportsAreDrawnWhereTheyBelong) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(kForeignSvg, doc));
+    EXPECT_EQ(doc.objectCount(), 7u);   // the shapes, one clip mask
+    const SketchObject* used = objectAtX(doc, 10.0);   // <use> of a rect, moved by x / y
+    ASSERT_NE(used, nullptr);
+    EXPECT_NEAR(used->geometryBounds().y0, 20.0, 1e-6);
+    EXPECT_NEAR(used->geometryBounds().x1, 30.0, 1e-6);
+    const SketchObject* symbol = objectAtX(doc, 110.0);   // a 10 x 10 viewBox in 40 x 20 is scaled by 2 and centred
+    ASSERT_NE(symbol, nullptr);
+    EXPECT_NEAR(symbol->geometryBounds().x1, 130.0, 1e-6);
+    EXPECT_NEAR(symbol->geometryBounds().y0, 100.0, 1e-6);
+    EXPECT_NEAR(symbol->geometryBounds().y1, 120.0, 1e-6);
+    const SketchObject* nested = objectAtX(doc, 50.0);   // a nested <svg> scales its content by 4
+    ASSERT_NE(nested, nullptr);
+    EXPECT_NEAR(nested->geometryBounds().x1, 70.0, 1e-6);
+    EXPECT_NEAR(nested->geometryBounds().y1, 170.0, 1e-6);
+}
+
+TEST(SketchSvgImport, ClipPathBecomesAClippingGroup) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(kForeignSvg, doc));
+    const SketchObject* clipped = objectAtX(doc, 120.0);
+    ASSERT_NE(clipped, nullptr);
+    ASSERT_FALSE(clipped->groups().empty());
+    EXPECT_TRUE(doc.groupProps(clipped->groups().back()).clip);
+    const SketchObject* mask = doc.clipMaskOf(clipped->groups().back());
+    ASSERT_NE(mask, nullptr);
+    EXPECT_NEAR(mask->geometryBounds().x0, 130.0, 1e-6);   // the circle
+    auto isMagenta = [](std::uint32_t argb) { return ((argb >> 16) & 255u) > 200u && ((argb >> 8) & 255u) < 60u && (argb & 255u) > 200u; };
+    EXPECT_TRUE(isMagenta(pixelAt(doc, 150, 50)));    // inside the circle
+    EXPECT_FALSE(isMagenta(pixelAt(doc, 125, 35)));   // in the rectangle but outside the circle
+}
+
+TEST(SketchSvgImport, SimpleFiltersBecomeEffects) {
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(kForeignSvg, doc));
+    auto effectOf = [](const SketchObject* object, EffectKind kind) -> const AppearanceItem* {
+        if (object == nullptr) { return nullptr; }
+        for (const AppearanceItem& item : object->appearance()) {
+            if (item.kind == AppearanceKind::Effect && item.effect == kind) { return &item; }
+        }
+        return nullptr;
+    };
+    const AppearanceItem* blur = nullptr;   // the blurred rectangle is the one at (10, 100); the <use> is at (10, 20)
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        if (std::fabs(doc.object(i).geometryBounds().y0 - 100.0) < 1e-6 && std::fabs(doc.object(i).geometryBounds().x0 - 10.0) < 1e-6) {
+            blur = effectOf(&doc.object(i), EffectKind::GaussianBlur);
+        }
+    }
+    ASSERT_NE(blur, nullptr);
+    EXPECT_NEAR(blur->softness, 3.0, 1e-6);
+    const AppearanceItem* shadow = effectOf(objectAtX(doc, 60.0), EffectKind::DropShadow);
+    ASSERT_NE(shadow, nullptr);
+    EXPECT_NEAR(shadow->offsetX, 4.0, 1e-6);
+    EXPECT_NEAR(shadow->offsetY, 5.0, 1e-6);
+    EXPECT_NEAR(shadow->softness, 2.0, 1e-6);
+    EXPECT_NEAR(shadow->opacity, 0.5, 1e-6);
+}
+
+TEST(SketchSvgImport, AReferenceThatLeadsBackToItselfDoesNotLoopForever) {
+    SketchDocument doc;
+    const char* loop = R"SVG(<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="50" height="50">
+<defs><g id="a"><rect width="5" height="5"/><use xlink:href="#a"/></g></defs><use xlink:href="#a"/></svg>)SVG";
+    ASSERT_TRUE(documentFromSvg(loop, doc));
+    EXPECT_GE(doc.objectCount(), 1u);
+}
+
+TEST(SketchSvgImport, TheBigExampleFileLoadsInReasonableTime) {
+    std::ifstream in("D:/code/newui-demos/examples/peacockspider.svg", std::ios::binary);
+    if (!in) {
+        GTEST_SKIP() << "example file not here";
+    }
+    std::ostringstream text;
+    text << in.rdbuf();
+    auto start = std::chrono::steady_clock::now();
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(text.str(), doc));
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("peacockspider: %zu objects in %.2f s\n", doc.objectCount(), seconds);
+    EXPECT_LT(seconds, 20.0);
+    start = std::chrono::steady_clock::now();
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 0.5, image));
+    std::printf("peacockspider: drawn in %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+}
+
+// ---- Image Trace options -------------------------------------------------------------------------
+
+namespace {
+    // A 60 x 60 white picture with a black disc.
+    std::vector<std::uint32_t> blackDiscOnWhite() {
+        std::vector<std::uint32_t> pixels(60 * 60, 0xFFFFFFFFu);
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 60; ++x) {
+                if (std::hypot(x - 30.0, y - 30.0) < 18.0) { pixels[std::size_t(y * 60 + x)] = 0xFF000000u; }
+            }
+        }
+        return pixels;
+    }
+
+    std::size_t verticesOf(const TraceResult& trace) {
+        std::size_t n = 0;
+        for (const TracedShape& shape : trace.shapes) { n += shape.path.size(); }
+        return n;
+    }
+}
+
+TEST(SketchTrace, TheWhiteBackgroundCanBeLeftOut) {
+    TraceOptions options;
+    options.colors = 2;
+    TraceResult with = traceRgba(blackDiscOnWhite(), 60, 60, options);
+    options.ignoreWhite = true;
+    TraceResult without = traceRgba(blackDiscOnWhite(), 60, 60, options);
+    EXPECT_EQ(with.shapes.size(), 2u);        // the white layer and the black one
+    ASSERT_EQ(without.shapes.size(), 1u);     // only the disc
+    EXPECT_EQ(without.shapes[0].rgb, 0x000000u);
+}
+
+TEST(SketchTrace, ATighterFitFollowsTheOutlineWithMorePoints) {
+    TraceOptions tight, smooth;
+    tight.colors = smooth.colors = 2;
+    tight.ignoreWhite = smooth.ignoreWhite = true;
+    tight.fitTolerance = 0.2;
+    smooth.fitTolerance = 2.0;
+    const std::size_t many = verticesOf(traceRgba(blackDiscOnWhite(), 60, 60, tight));
+    const std::size_t few = verticesOf(traceRgba(blackDiscOnWhite(), 60, 60, smooth));
+    EXPECT_GT(many, 0u);
+    EXPECT_GT(few, 0u);
+    EXPECT_GE(many, few);
+}
+
+// ---- Text on a path / between two paths ------------------------------------------------------------
+
+namespace {
+    // A text and a straight path (0, y) .. (length, y) in a document; returns the text id, selects both.
+    std::size_t textAndLine(SketchDocument& doc, double y, double length, std::size_t& lineId, const char* words = "Hello") {
+        std::size_t text = doc.add(SketchObject::makeText(words, "", 24.0, BLPoint(10, 300))).id();
+        lineId = doc.add(SketchObject::makeLine(0, y, length, y)).id();
+        doc.setSelection({text, lineId});
+        return text;
+    }
+}
+
+TEST(SketchTextPath, TextFollowsAStraightPathAndStartsWhereAsked) {
+    SketchDocument doc;
+    std::size_t line = 0;
+    const std::size_t text = textAndLine(doc, 100, 400, line);
+    EXPECT_TRUE(doc.canMakeTextOnPath());
+    EXPECT_FALSE(doc.canMakeTextBetweenPaths());
+    ASSERT_TRUE(doc.makeTextOnPath());
+    const SketchObject* t = doc.findById(text);
+    ASSERT_TRUE(t->textWarp().kind == TextWarp::Kind::OnPath);
+    BLBox box = t->geometryBounds();
+    EXPECT_NEAR(box.x0, 0.0, 3.0);          // starts at the start of the path
+    EXPECT_GT(box.x1, 40.0);
+    EXPECT_LT(box.y0, 100.0);               // stands on the path ...
+    EXPECT_NEAR(box.y1, 100.0, 8.0);        // ... with only descenders below it
+    EXPECT_EQ(doc.objectCount(), 2u);       // the path itself is still there
+    EXPECT_TRUE(doc.setTextPathOptions(50.0, false));
+    EXPECT_NEAR(doc.findById(text)->geometryBounds().x0, 200.0, 3.0);
+    EXPECT_TRUE(doc.setTextPathOptions(0.0, true));   // the other side: upside down below the path
+    EXPECT_GT(doc.findById(text)->geometryBounds().y0, 99.0);
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    EXPECT_FALSE(doc.findById(text)->textWarp().active());
+    EXPECT_NEAR(doc.findById(text)->geometryBounds().y1, 300.0, 10.0);   // back where it was typed
+}
+
+TEST(SketchTextPath, TextBendsAroundACurve) {
+    SketchDocument doc;
+    std::size_t text = doc.add(SketchObject::makeText("Curved text on an arc", "", 24.0, BLPoint(0, 300))).id();
+    BLPath arc;
+    arc.move_to(0, 200);
+    arc.quad_to(150, 0, 300, 200);   // peaks at y = 100
+    SketchObject* curve = SketchObject::makePath(arc);
+    std::size_t curveId = doc.add(curve).id();
+    doc.setSelection({text, curveId});
+    ASSERT_TRUE(doc.makeTextOnPath());
+    BLBox box = doc.findById(text)->geometryBounds();
+    EXPECT_GT(box.y1 - box.y0, 60.0);   // the text follows the rise and the fall, so it is taller than a line of 24-point text
+    EXPECT_LT(box.y0, 150.0);
+}
+
+TEST(SketchTextPath, TextIsStretchedBetweenTwoPaths) {
+    SketchDocument doc;
+    std::size_t text = doc.add(SketchObject::makeText("Banner", "", 24.0, BLPoint(10, 300))).id();
+    std::size_t bottom = doc.add(SketchObject::makeLine(0, 150, 300, 150)).id();   // added first: the top is found by position, not order
+    std::size_t top = doc.add(SketchObject::makeLine(0, 50, 300, 50)).id();
+    doc.setSelection({text, bottom, top});
+    EXPECT_TRUE(doc.canMakeTextBetweenPaths());
+    ASSERT_TRUE(doc.makeTextBetweenPaths());
+    BLBox box = doc.findById(text)->geometryBounds();
+    EXPECT_NEAR(box.x0, 0.0, 1.0);
+    EXPECT_NEAR(box.x1, 300.0, 1.0);        // the whole length
+    EXPECT_LT(box.y0, 70.0);                // from near the top path ...
+    EXPECT_GT(box.y1, 120.0);               // ... to the baseline, just above the bottom one
+    EXPECT_LT(box.y1, 151.0);
+    // Typing keeps the shape between the paths.
+    doc.findById(text)->setText("Banner day");
+    BLBox again = doc.findById(text)->geometryBounds();
+    EXPECT_NEAR(again.x1, 300.0, 1.0);
+    // Release: plain text again, starting about where the warped text started.
+    doc.setSelection({text});
+    EXPECT_TRUE(doc.canReleaseTextWarp());
+    ASSERT_TRUE(doc.releaseTextWarp());
+    EXPECT_FALSE(doc.findById(text)->textWarp().active());
+    EXPECT_LT(doc.findById(text)->geometryBounds().x1 - doc.findById(text)->geometryBounds().x0, 200.0);
+}
+
+TEST(SketchTextPath, PathsRunningTheOtherWayAreTurned) {
+    SketchDocument doc;
+    std::size_t text = doc.add(SketchObject::makeText("Backwards", "", 24.0, BLPoint(10, 300))).id();
+    std::size_t top = doc.add(SketchObject::makeLine(300, 50, 0, 50)).id();   // right to left
+    std::size_t bottom = doc.add(SketchObject::makeLine(0, 150, 300, 150)).id();
+    doc.setSelection({text, top, bottom});
+    ASSERT_TRUE(doc.makeTextBetweenPaths());
+    const TextWarp& warp = doc.findById(text)->textWarp();
+    auto firstX = [](const BLPath& p) { BLPathView v = p.view(); return v.vertex_data[0].x; };
+    EXPECT_LT(firstX(warp.first), 1.0);
+    EXPECT_LT(firstX(warp.second), 1.0);
+}
+
+TEST(SketchTextPath, TheWarpSurvivesSavingMovingAndCopying) {
+    SketchDocument doc;
+    std::size_t line = 0;
+    const std::size_t text = textAndLine(doc, 100, 400, line);
+    ASSERT_TRUE(doc.makeTextOnPath());
+    ASSERT_TRUE(doc.setTextPathOptions(25.0, false));
+    const BLBox box = doc.findById(text)->geometryBounds();
+    SketchDocument fromSvg, fromBin;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc, true), fromBin));
+    for (const SketchDocument* copy : {&fromSvg, &fromBin}) {
+        const SketchObject* t = nullptr;
+        for (std::size_t i = 0; i < copy->objectCount(); ++i) {
+            if (copy->object(i).isText()) { t = &copy->object(i); }
+        }
+        ASSERT_NE(t, nullptr);
+        EXPECT_TRUE(t->textWarp().kind == TextWarp::Kind::OnPath);
+        EXPECT_NEAR(t->textWarp().start, 25.0, 1e-6);
+        EXPECT_NEAR(t->geometryBounds().x0, box.x0, 1e-3);
+        EXPECT_NEAR(t->geometryBounds().y1, box.y1, 1e-3);
+    }
+    // Moving the text moves what it follows with it.
+    doc.setSelection({text});
+    doc.transformObjects({text}, BLMatrix2D::make_translation(50, 20), "Move");
+    EXPECT_NEAR(doc.findById(text)->geometryBounds().x0, box.x0 + 50.0, 1e-6);
+    doc.findById(text)->setText("Hi");   // typing afterwards: still on the (moved) path
+    EXPECT_NEAR(doc.findById(text)->geometryBounds().x0, box.x0 + 50.0, 3.0);
+    // A copy keeps it.
+    doc.duplicateSelection(0, 0);
+    EXPECT_TRUE(doc.findById(doc.selection().front())->textWarp().active());
+}
+
+// ---- Images ---------------------------------------------------------------------------------------
+
+namespace {
+    // A w x h PNG: red on the left half, blue on the right.
+    std::string twoColorPng(int w, int h) {
+        BLImage image(w, h, BL_FORMAT_PRGB32);
+        BLContext ctx(image);
+        ctx.set_fill_style(BLRgba32(0xFFFF0000u));
+        ctx.fill_rect(BLRect(0, 0, w / 2.0, h));
+        ctx.set_fill_style(BLRgba32(0xFF0000FFu));
+        ctx.fill_rect(BLRect(w / 2.0, 0, w / 2.0, h));
+        ctx.end();
+        BLImageCodec codec;
+        codec.find_by_name("PNG");
+        BLArray<uint8_t> buffer;
+        image.write_to_data(buffer, codec);
+        return std::string(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+    }
+}
+
+TEST(SketchImages, Base64AndDataUrisRoundTrip) {
+    for (std::string text : {std::string(), std::string("a"), std::string("ab"), std::string("abc"), std::string("hello world, \x01\xff\x80 bytes")}) {
+        std::string back;
+        ASSERT_TRUE(base64Decode(base64Encode(text), back));
+        EXPECT_EQ(back, text);
+    }
+    std::string bytes;
+    ASSERT_TRUE(bytesFromDataUri("data:text/plain;base64,aGk=", bytes));
+    EXPECT_EQ(bytes, "hi");
+    ASSERT_TRUE(bytesFromDataUri("data:text/plain,a%20b", bytes));
+    EXPECT_EQ(bytes, "a b");
+    EXPECT_FALSE(bytesFromDataUri("file.png", bytes));
+    std::string png = twoColorPng(8, 4);
+    EXPECT_EQ(imageMimeType(png), "image/png");
+    std::shared_ptr<const ImageData> image = decodeImage(png, "two.png");
+    ASSERT_TRUE(image);
+    EXPECT_EQ(image->width, 8);
+    EXPECT_EQ(image->height, 4);
+    EXPECT_EQ(decodeImage("not a picture", "x"), nullptr);
+}
+
+TEST(SketchImages, APlacedPictureIsDrawnMovedAndHitLikeAnyObject) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    auto image = decodeImage(twoColorPng(40, 20), "two.png");
+    ASSERT_TRUE(image);
+    const std::size_t id = doc.placeImage(image, BLPoint(100, 100));
+    ASSERT_NE(id, 0u);
+    EXPECT_EQ(doc.selection(), (std::vector<std::size_t>{id}));
+    const SketchObject* object = doc.findById(id);
+    EXPECT_TRUE(object->isImage());
+    BLBox box = object->geometryBounds();
+    EXPECT_NEAR(box.x0, 80.0, 1e-6);   // centred, natural size (a point a pixel)
+    EXPECT_NEAR(box.x1, 120.0, 1e-6);
+    auto isRed = [](std::uint32_t p) { return ((p >> 16) & 255u) > 200u && (p & 255u) < 60u; };
+    auto isBlue = [](std::uint32_t p) { return ((p >> 16) & 255u) < 60u && (p & 255u) > 200u; };
+    EXPECT_TRUE(isRed(pixelAt(doc, 85, 100)));
+    EXPECT_TRUE(isBlue(pixelAt(doc, 115, 100)));
+    EXPECT_NE(doc.hitTest(BLPoint(100, 100), 2.0), nullptr);
+    EXPECT_EQ(doc.hitTest(BLPoint(10, 10), 2.0), nullptr);
+    doc.transformObjects({id}, BLMatrix2D::make_translation(30, 0), "Move");   // it moves like any object
+    EXPECT_TRUE(isRed(pixelAt(doc, 115, 100)));
+    BLMatrix2D scale = BLMatrix2D::make_scaling(2.0, 2.0);
+    doc.transformObjects({id}, scale, "Scale");
+    EXPECT_NEAR(doc.findById(id)->geometryBounds().x1 - doc.findById(id)->geometryBounds().x0, 80.0, 1e-6);
+    doc.findById(id)->setOpacity(0.5);   // opacity works
+    const std::uint32_t half = pixelAt(doc, 190, 100);
+    EXPECT_GT(((half >> 8) & 255u), 100u);   // red over white at half strength is pinkish
+    doc.undoStack().undo();
+}
+
+TEST(SketchImages, ABigPictureIsScaledToFitTheArtboard) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    auto image = decodeImage(twoColorPng(800, 400), "big.png");
+    ASSERT_TRUE(image);
+    const std::size_t id = doc.placeImage(image, BLPoint(100, 100));
+    BLBox box = doc.findById(id)->geometryBounds();
+    EXPECT_LE(box.x1 - box.x0, 160.0 + 1e-6);
+    EXPECT_NEAR((box.x1 - box.x0) / (box.y1 - box.y0), 2.0, 1e-6);   // proportions kept
+}
+
+TEST(SketchImages, PicturesSurviveSvgBinaryAndClipboardRoundTrips) {
+    SketchDocument doc;
+    auto image = decodeImage(twoColorPng(40, 20), "two.png");
+    const std::size_t a = doc.placeImage(image, BLPoint(100, 100));
+    const std::size_t b = doc.placeImage(image, BLPoint(300, 100));   // the same picture twice
+    ASSERT_NE(a, 0u);
+    ASSERT_NE(b, 0u);
+    doc.findById(b)->setOpacity(0.5);
+    doc.findById(b)->setName("Second");
+    doc.transformObjects({b}, BLMatrix2D::make_rotation(0.3), "Rotate");
+    const std::string svg = svgFromDocument(doc);
+    EXPECT_NE(svg.find("<image"), std::string::npos);   // a real <image> that other viewers show
+    EXPECT_NE(svg.find("data:image/png;base64,"), std::string::npos);
+    const std::string bin = binaryFromDocument(doc, false);
+    EXPECT_LT(bin.size(), image->bytes.size() * 3 / 2 + 2000) << "the picture is stored once however often it is used";
+    SketchDocument fromSvg, fromBin;
+    ASSERT_TRUE(documentFromSvg(svg, fromSvg));
+    ASSERT_TRUE(documentFromBinary(bin, fromBin));
+    for (const SketchDocument* copy : {&fromSvg, &fromBin}) {
+        ASSERT_EQ(copy->objectCount(), 2u);
+        for (std::size_t i = 0; i < 2; ++i) {
+            ASSERT_TRUE(copy->object(i).isImage());
+            ASSERT_TRUE(copy->object(i).image());
+            EXPECT_EQ(copy->object(i).image()->width, 40);
+        }
+        EXPECT_NEAR(copy->object(0).geometryBounds().x0, doc.object(0).geometryBounds().x0, 1e-3);
+        EXPECT_NEAR(copy->object(1).geometryBounds().y1, doc.object(1).geometryBounds().y1, 1e-3);
+        EXPECT_NEAR(copy->object(1).opacity(), 0.5, 1e-9);
+        EXPECT_EQ(copy->object(1).name(), "Second");
+    }
+    doc.setSelection({a});
+    SketchDocument other;
+    ASSERT_TRUE(other.pasteSvg(doc.selectionToSvg(), 10, 10));
+    ASSERT_EQ(other.objectCount(), 1u);
+    EXPECT_TRUE(other.object(0).isImage());
+}
+
+TEST(SketchImages, ForeignSvgImagesKeepTheirProportionsInTheirBox) {
+    const std::string png = twoColorPng(40, 20);
+    const std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\"><image x=\"10\" y=\"20\" width=\"100\" height=\"100\" href=\"data:image/png;base64," +
+        base64Encode(png) + "\"/><image x=\"0\" y=\"150\" width=\"50\" height=\"50\" preserveAspectRatio=\"none\" href=\"data:image/png;base64," + base64Encode(png) + "\"/></svg>";
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(svg, doc));
+    ASSERT_EQ(doc.objectCount(), 2u);
+    BLBox meet = doc.object(0).geometryBounds();   // 2:1 picture in a square: fitted and centred
+    EXPECT_NEAR(meet.x0, 10.0, 1e-6);
+    EXPECT_NEAR(meet.x1, 110.0, 1e-6);
+    EXPECT_NEAR(meet.y1 - meet.y0, 50.0, 1e-6);
+    EXPECT_NEAR((meet.y0 + meet.y1) * 0.5, 70.0, 1e-6);
+    BLBox stretched = doc.object(1).geometryBounds();
+    EXPECT_NEAR(stretched.y1 - stretched.y0, 50.0, 1e-6);
+}
+
+TEST(SketchImages, APhotoThatCrashedBlend2dLoadsAndABrokenFileJustFails) {
+    EXPECT_EQ(loadImageFile("D:/does/not/exist.jpg"), nullptr);
+    EXPECT_EQ(decodeImage(std::string("\xFF\xD8\xFF\xE0 truncated jpeg"), "bad.jpg"), nullptr);   // no crash, no assertion
+    auto photo = loadImageFile("C:/Users/jim/Downloads/IMG_3476 (1).jpeg");
+    if (!photo) {
+        GTEST_SKIP() << "the sample photo is not here";
+    }
+    EXPECT_GT(photo->width, 1000);
+    double extra = 1.0;
+    const BLImage& thumb = photo->levelFor(0.1, extra);
+    EXPECT_LT(thumb.width(), photo->width / 2);
+    EXPECT_GT(extra, 2.0);
+    SketchDocument doc;
+    EXPECT_NE(doc.placeImage(photo, BLPoint(100, 100)), 0u);
+    std::printf("photo %dx%d, level %d wide (x%.0f)\n", photo->width, photo->height, thumb.width(), extra);
+}
+
+TEST(SketchImages, ThePhotoLoadsAndDrawsInReasonableTime) {
+    auto t0 = std::chrono::steady_clock::now();
+    auto lap = [&t0](const char* what) {
+        auto now = std::chrono::steady_clock::now();
+        std::printf("photo: %s %.2f s\n", what, std::chrono::duration<double>(now - t0).count());
+        t0 = now;
+    };
+    auto photo = loadImageFile("C:/Users/jim/Downloads/IMG_3476 (1).jpeg");
+    if (!photo) {
+        GTEST_SKIP() << "the sample photo is not here";
+    }
+    lap("decode");
+    SketchDocument doc;
+    doc.placeImage(photo, BLPoint(306, 396));
+    lap("place");
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    lap("first draw");
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    lap("second draw");
+    const std::string svg = svgFromDocument(doc);
+    lap("svg");
+    const std::string bin = binaryFromDocument(doc, true);
+    lap("skb");
 }

@@ -17,7 +17,7 @@
 namespace sketch {
 
     // What a left-button drag on the canvas does. The order matches the status bar hints in main.cpp.
-    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Text, Gradient, Width, Scissors, Knife, Eraser, ShapeBuilder, Eyedropper, MagicWand, Lasso, Artboard, Hand, Zoom };
+    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Paintbrush, Text, Gradient, Width, Scissors, Knife, Eraser, ShapeBuilder, Eyedropper, MagicWand, Lasso, Artboard, Rotate, Scale, Reflect, Hand, Zoom };
 
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
@@ -232,7 +232,7 @@ namespace sketch {
         float panStartY_ = 0.0f;
 
         // ---- Tool interaction ----
-        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width, Pencil, PenHandle, DirectEdit, LiveShape, Knife, Erase, ShapeBuild, Lasso, ArtboardNew, ArtboardMove, ArtboardResize, Guide };
+        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width, Pencil, PenHandle, DirectEdit, LiveShape, Knife, Erase, ShapeBuild, Lasso, ArtboardNew, ArtboardMove, ArtboardResize, Guide, TransformTool };
         // Handles 0..7 clockwise from the top-left corner; 8 is the rotate knob above top-center.
         // 9 is the transform-origin marker.
         static constexpr int kRotateHandle = 8;
@@ -340,6 +340,20 @@ namespace sketch {
         SketchDocument::ShapeBuilderModel shapeModel_;
         std::vector<bool> shapeHit_;
         bool shapeErase_ = false;
+
+        // ---- Rotate, Scale and Reflect (transformtools.cpp) ----
+        // All three work about the selection's transform origin (the marker in its frame): a click sets it, a drag from anywhere turns
+        // (Shift = 15 degree steps), scales (uniformly; Shift = each axis on its own) or mirrors (the axis follows the pointer round the
+        // origin; Shift = 45 degree steps) the selection live. Alt when let go leaves the original and makes a transformed copy.
+        bool isTransformTool() const { return tool_ == SketchTool::Rotate || tool_ == SketchTool::Scale || tool_ == SketchTool::Reflect; }
+        void beginTransformTool();
+        void updateTransformTool(std::uint32_t keys);
+        void finishTransformTool(std::uint32_t keys);
+        void paintTransformTool(BLContext& ctx) const;
+        // Puts the selection at `matrix` applied to its state at the press; frame angles become angleScale * angle + angleOffset.
+        void applyTransformTool(const BLMatrix2D& matrix, double angleScale, double angleOffset);
+        double toolAngleScale_ = 1.0;
+        double toolAngleOffset_ = 0.0;
 
         // ---- Direct Select (canvastools.cpp) ----
         // Shows the anchors of the selected objects; a click picks an anchor, a drag moves it (or a handle of the picked

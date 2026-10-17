@@ -1,5 +1,6 @@
 #pragma once
 
+#include "imagetrace.h"
 #include "sketchdocument.h"
 
 #include <newui/controllers.h>
@@ -40,8 +41,10 @@ namespace sketch {
         bool exportArtboards();
         // File > Trace Image: asks for a picture (PNG, BMP or JPEG), traces it into vector shapes (imagetrace.h) and adds them to the page.
         bool traceImage();
+        // File > Place Image: asks for a picture (PNG, JPEG, BMP or QOI) and puts it on the active artboard as an Image object.
+        bool placeImage();
         // The same for a picture that is already chosen (what the dialog leads to; also for tests).
-        bool traceImageFile(const std::string& path);
+        bool traceImageFile(const std::string& path, const TraceOptions& options = TraceOptions());
         // True when it is fine to close the window / leave the app: nothing unsaved, or saved/discarded.
         bool canClose();
 
@@ -80,6 +83,7 @@ namespace sketch {
         void reportError(const std::string& message) override;
 
     private:
+        TraceOptions traceOptions_;   // what the last Trace Image dialog chose
         SketchDocument& document_;
         newui::Frame& frame_;
         std::string untitledName_ = "Untitled";

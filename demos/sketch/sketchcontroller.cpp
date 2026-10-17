@@ -1,5 +1,7 @@
 #include "sketchcontroller.h"
 
+#include "tracedialog.h"
+
 #include "imagetrace.h"
 #include "sketchexport.h"
 
@@ -213,17 +215,52 @@ namespace sketch {
         if (path.empty()) {
             return false;
         }
-        return traceImageFile(path);
-    }
-
-    bool SketchDocumentController::traceImageFile(const std::string& path) {
-        std::vector<std::uint32_t> pixels;
-        int width = 0, height = 0;
-        if (!loadImagePixels(path, pixels, width, height)) {
-            reportError("Could not read the picture " + path);
+        // The options of the last trace are the starting point of the next.
+        const std::size_t slash = path.find_last_of("/" + std::string(1, char(92)));
+        if (!TraceDialog::run(frame_, traceOptions_, slash == std::string::npos ? path : path.substr(slash + 1))) {
             return false;
         }
-        if (document_.addTrace(traceRgba(pixels, width, height)).empty()) {
+        return traceImageFile(path, traceOptions_);
+    }
+
+    bool SketchDocumentController::placeImage() {
+        newui::FileDialogOptions options;
+        options.title = "Place Image";
+        options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp;*.qoi"});
+        options.filters.push_back({"All Files", "*.*"});
+        std::string path;
+        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        std::size_t placed = 0;
+        try {
+            placed = document_.placeImageFile(path);
+        } catch (...) {
+            placed = 0;
+        }
+        if (placed == 0) {
+            reportError("The image can't be loaded: " + path);
+            return false;
+        }
+        onStatus(*this, "Placed " + path);
+        return true;
+    }
+
+    bool SketchDocumentController::traceImageFile(const std::string& path, const TraceOptions& traceOptions) {
+        std::vector<std::uint32_t> pixels;
+        int width = 0, height = 0;
+        bool loaded = false;
+        try {
+            loaded = loadImagePixels(path, pixels, width, height);
+        } catch (...) {
+            loaded = false;
+        }
+        if (!loaded) {
+            reportError("The image can't be loaded: " + path);
+            return false;
+        }
+        if (document_.addTrace(traceRgba(pixels, width, height, traceOptions)).empty()) {
             reportError("Nothing could be traced from " + path);
             return false;
         }

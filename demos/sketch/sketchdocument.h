@@ -1,5 +1,6 @@
 #pragma once
 
+#include "brush.h"
 #include "pathops.h"
 #include "sketchobject.h"
 
@@ -8,6 +9,7 @@
 #include <newui/undostack.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -60,7 +62,13 @@ namespace sketch {
         bool visible = true;
         bool locked = false;
         bool expanded = true;   // shown opened in the Layers panel (view state, not saved)
+        // The layer colour as 0xRRGGBB (0 = automatic: one of nine by the layer id). Its objects show their selection in it and the
+        // panel marks the layer with it.
+        std::uint32_t color = 0;
     };
+    // The colours layers get by default (the nine Illustrator uses), and the colour a layer shows: its own, else one of those.
+    constexpr std::uint32_t kLayerColors[9] = {0x4F80FF, 0xFF4F4F, 0x4FC24F, 0x3355FF, 0xE5C200, 0x9B4FFF, 0xFF8A2B, 0x1F7A1F, 0xE0309B};
+    inline std::uint32_t layerColor(const Layer& layer) { return layer.color != 0 ? layer.color : kLayerColors[(layer.id > 0 ? layer.id - 1 : 0) % 9]; }
 
     // Opacity and blend mode of a whole group, applied to its members drawn together.
     // One artboard: a named rectangle of the canvas that is exported and aligned to on its own. A document always has at least one;
@@ -313,6 +321,67 @@ namespace sketch {
         bool deletePattern(std::size_t patternId);
         std::shared_ptr<const SymbolDef> importPattern(const std::shared_ptr<const SymbolDef>& def);
 
+        // ---- Images (documentimages.cpp) ----
+        // A new Image object showing the picture, centred on `center` (scaled down to fit the active artboard when it is bigger); it becomes the
+        // selection. Returns its id, 0 for no picture. placeImageFile reads the file and puts it in the middle of the active artboard.
+        std::size_t placeImage(const std::shared_ptr<const ImageData>& image, const BLPoint& center);
+        std::size_t placeImageFile(const std::string& path);
+
+        // ---- Text on a path (documenttextpath.cpp) ----
+        // Text can follow a path or be stretched between two (TextWarp). Making it takes COPIES of the paths, so the paths stay where they are
+        // (and stay editable) but do not steer the text any more. One text and one path make text on a path; one text and two paths make text
+        // between paths (the higher one is the top; they are turned to run the same way). The text is what stays selected.
+        bool canMakeTextOnPath() const;
+        bool makeTextOnPath();
+        bool canMakeTextBetweenPaths() const;
+        bool makeTextBetweenPaths();
+        // The selected text is plain text again, where it appears now.
+        bool canReleaseTextWarp() const;
+        bool releaseTextWarp();
+        // Where the selected text on a path starts (percent of the path) and which side it is on; for text between paths `flip` swaps top and bottom.
+        bool setTextPathOptions(double startPercent, bool flip);
+        // The first selected text that has a warp, or null.
+        const SketchObject* selectedWarpedText() const;
+    private:
+        struct TextWarpState {
+            std::size_t id = 0;
+            TextWarp warp;
+            BLMatrix2D matrix = BLMatrix2D::make_identity();
+        };
+        void applyTextWarp(const std::vector<TextWarpState>& before, const std::vector<TextWarpState>& after, const std::string& description);
+    public:
+
+        // ---- Brushes (documentbrushes.cpp): a library of brushes (brush.h) that draw strokes. ----
+        // A brush is applied to the stroke of the selected objects (StrokeOptions::brush); changing, renaming and applying are undo steps.
+        const std::vector<std::shared_ptr<const BrushDef>>& brushes() const { return brushes_; }
+        std::shared_ptr<const BrushDef> findBrush(std::size_t id) const;
+        // The brush the Brushes panel, the Paintbrush and the Object menu use (view state, not an undo step): the one chosen in the panel,
+        // else the one last made, else the first; 0 when there are none.
+        std::size_t activeBrush() const;
+        void setActiveBrush(std::size_t id);
+        // How many objects have a stroke drawn by the brush.
+        std::size_t brushUseCount(std::size_t id) const;
+        // Replaces the library (loading a file); not an undo step. Strokes that only know a brush id are bound to it.
+        void setBrushes(std::vector<std::shared_ptr<const BrushDef>> brushes);
+        void bindBrushStrokes();
+        // A new brush ("Brush N" when `name` is empty) with the default numbers of its kind. A calligraphic brush needs nothing; the
+        // other kinds take the selection (which stays) as their artwork and return 0 when nothing is selected. Returns the id.
+        std::size_t makeBrush(BrushKind kind, const std::string& name);
+        // Adds a few ready-made brushes that are not in the library yet (matched by name); returns how many were added.
+        std::size_t addBrushPresets();
+        // The stroke of every selected object is drawn by the brush (0 = the plain stroke again). An object without a stroke gets one.
+        bool applyBrush(std::size_t id);
+        // The brush as `edited` says (its name and numbers; kind and artwork are kept); strokes using it follow. False when it changes nothing.
+        bool changeBrush(std::size_t id, const BrushDef& edited);
+        // Removes a brush no stroke uses; false when it is used or unknown.
+        bool deleteBrush(std::size_t id);
+        // `def` (from another document) as a member of this library: the entry that already is the same, else a copy under a fresh id.
+        std::shared_ptr<const BrushDef> importBrush(const std::shared_ptr<const BrushDef>& def);
+        // The brush of the first selected object whose stroke has one, else null.
+        std::shared_ptr<const BrushDef> selectedBrush() const;
+        // The selected objects (stacking order) copied into a definition `id` whose box is their bounds; null when nothing is selected.
+        std::shared_ptr<SymbolDef> selectionArtwork(std::size_t id, const std::string& name) const;
+
         // ---- Selection (ids, in selection order; a removed object drops out) ----
         const std::vector<std::size_t>& selection() const { return selection_; }
         bool isSelected(std::size_t id) const;
@@ -367,6 +436,22 @@ namespace sketch {
         std::vector<GeometryState> snapshotSelection() const;
         // Redraw after an edit made directly on an object (drag preview).
         void touch() { changed(); }
+        // While a Batch exists the document does not announce changes (views, panels, layer sorting); when the last one ends it does so
+        // once. A load adds thousands of objects: without it every one of them would redraw and rebuild every panel.
+        class Batch {
+        public:
+            explicit Batch(SketchDocument& document) : document_(document) { ++document_.batchDepth_; }
+            ~Batch() {
+                if (--document_.batchDepth_ == 0 && document_.batchPending_) {
+                    document_.batchPending_ = false;
+                    document_.changed();
+                }
+            }
+            Batch(const Batch&) = delete;
+            Batch& operator=(const Batch&) = delete;
+        private:
+            SketchDocument& document_;
+        };
 
         // ---- Arrange / align / transform / lock / hide: each is one undo step on the selection, and returns
         // false (and records nothing) when it would change nothing ----
@@ -377,6 +462,21 @@ namespace sketch {
         enum class AlignMode { Left, Center, Right, Top, Middle, Bottom };
         // Aligns the selection's objects to the edge/center of their combined bounds - or, for one object, of the page.
         bool alignSelection(AlignMode mode);
+        // Distribute Objects: spreads three or more objects (a group counts as one) so the same edge or center of each is evenly
+        // spaced between the two outermost, which stay where they are.
+        bool distributeSelection(AlignMode mode);
+        // Distribute Spacing: three or more objects (two when `gap` is given) get the same gap between them along one axis. Without
+        // `gap` the two outermost stay and the space between them is shared out; with it the first (leftmost / topmost) stays and the
+        // rest follow at that distance.
+        bool distributeSpacing(bool horizontal, std::optional<double> gap = std::nullopt);
+        // The matrices of the Rotate, Scale and Reflect tools: turn by `radians`, scale by (sx, sy), or mirror across the line
+        // through `origin` at `axisRadians` - all about `origin`.
+        static BLMatrix2D rotationAbout(const BLPoint& origin, double radians);
+        static BLMatrix2D scalingAbout(const BLPoint& origin, double sx, double sy);
+        static BLMatrix2D reflectionAcross(const BLPoint& origin, double axisRadians);
+        // Copies of the selection with `matrix` applied (their frame angles become angleScale * angle + angleOffset); one undo step
+        // that leaves the originals alone, and the copies become the selection.
+        void duplicateTransformed(const BLMatrix2D& matrix, double angleScale, double angleOffset, const std::string& description);
         // Turns / mirrors the selection about the center of its bounds (the frame angles follow).
         bool rotateSelection90(bool clockwise);
         bool flipSelection(bool horizontal);
@@ -501,6 +601,35 @@ namespace sketch {
         // Replaces the whole tree with no undo step (a load, New) and does not mark the document modified. An empty list gives the one
         // default layer. Objects that name a layer the list does not have go to the active layer (the last top-level one).
         void setLayers(std::vector<Layer> layers);
+        // More layer edits, each one undo step and false when nothing happened (documentlayers.cpp).
+        bool setLayerColor(std::size_t id, std::uint32_t rgb);
+        // A copy of the layer with its sublayers and everything in them, just above it; it becomes the active layer. Returns its id.
+        std::size_t duplicateLayer(std::size_t id);
+        // One place toward the front (`front`) or the back among its siblings.
+        bool moveLayerStep(std::size_t id, bool front);
+        bool showAllLayers();
+        bool unlockAllLayers();
+        // Every top-level layer but the one holding `id` is hidden / locked.
+        bool hideOtherLayers(std::size_t id);
+        bool lockOtherLayers(std::size_t id);
+        // Everything in the layer goes into the sibling behind it, its sublayers become that layer's, and the layer is removed.
+        bool mergeLayerDown(std::size_t id);
+        // All the objects go into one layer (the back-most top-level one) and the other layers are removed.
+        bool flattenArtwork();
+        // Opens / closes every layer in the panel (view state, no undo step).
+        void setAllLayersExpanded(bool expanded);
+        // Moves objects (a group is moved whole by the caller) to the top of `layer`, or - when `relativeTo` names objects - next to them,
+        // in front of (`above`) or behind them, in their layer. `groups`, when given, are the groups the moved objects now sit in
+        // (outermost first), followed by what they had from position `keepFrom` of their own chain on (a number past the end keeps
+        // none: the object leaves its groups). One undo step; false when nothing changes.
+        bool moveObjects(const std::vector<std::size_t>& ids, std::size_t layer, const std::vector<std::size_t>& relativeTo, bool above,
+            const std::optional<std::vector<std::size_t>>& groups = std::nullopt, std::size_t keepFrom = 0);
+        // The objects of a group (nested ones too), back to front.
+        std::vector<std::size_t> groupMembers(std::size_t group) const;
+        // The objects' own visible / locked flags (what the eye and the lock of an object row set); a hidden or locked one leaves the selection.
+        bool setObjectsVisible(const std::vector<std::size_t>& ids, bool visible);
+        bool setObjectsLocked(const std::vector<std::size_t>& ids, bool locked);
+        bool renameObject(std::size_t id, const std::string& name);
 
         // ---- Numeric transforms (documenttransform.cpp) ----
         // Moves / resizes the selection so that its bounds become `box` (a side with no length only moves). One undo step ("Move" or "Resize").
@@ -676,6 +805,11 @@ namespace sketch {
         std::vector<std::shared_ptr<const SymbolDef>> patterns_;
         std::size_t activeSymbol_ = 0;
         std::size_t activePattern_ = 0;
+        int batchDepth_ = 0;
+        bool batchPending_ = false;
+        std::vector<std::shared_ptr<const BrushDef>> brushes_;
+        std::size_t activeBrush_ = 0;
+        std::size_t nextBrushId_ = 1;
         std::size_t nextSymbolId_ = 1;
         float ppi_ = 72.0f;
         std::optional<SketchColor> pageBackground_ = SketchColor::rgb(1.0f, 1.0f, 1.0f);
