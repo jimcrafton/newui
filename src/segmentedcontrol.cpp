@@ -84,6 +84,13 @@ Size SegmentedControl::naturalSize() const {
     return Size(width, kHeight);
 }
 
+Rect SegmentedControl::segmentBounds(std::size_t index) const {
+    if (index >= labels_.size()) {
+        return Rect(0, 0, 0, 0);
+    }
+    return Rect(segmentLeft(index), 0, segmentWidth(index), kHeight);
+}
+
 std::optional<std::size_t> SegmentedControl::segmentAt(const Point& localPt) const {
     float left = 0.0f;
     for (std::size_t i = 0; i < labels_.size(); ++i) {

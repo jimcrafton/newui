@@ -728,6 +728,11 @@ namespace newui {
         float pageSize() const { return pageSize_; }
         void setPageSize(float pageSize);
 
+        // The thumb in this ScrollBar's own coordinates (as last laid out); automation and tests
+        // use it to aim a drag.
+        // @reflect ignore=true
+        const Rect& thumbBounds() const { return thumbRect_; }
+
         // How far one arrow click moves value(). Clamped to > 0 - see
         // pageSize()'s own reasoning.
         float lineStep() const { return lineStep_; }
