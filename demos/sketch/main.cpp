@@ -3,6 +3,7 @@
 //   sketch.exe [file]            opens the window (and the file, when one is named)
 //   sketch.exe --check           loads the layout, lays it out, prints the view tree (--depth=N, default 4) and exits
 //   sketch.exe --check-newdoc    runs the New Document dialog's self-checks
+//   sketch.exe --automation <pipe>   serves the window to a GUI test driver (only in a build with SKETCH_GUI_AUTOMATION)
 //   sketch.exe --check-tools     drives the window headlessly and prints ok / FAIL per expectation; the exit code is the
 //                                number of failures
 //
@@ -14,6 +15,9 @@
 //   SketchCommandController   every other command, by id                                       (sketchcommands.h)
 //   SketchWindowController    binds the views to the model and the controllers                 (sketchwindow.h)
 
+#ifdef SKETCH_GUI_AUTOMATION
+#include "newui/automation.h"
+#endif
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/frame.h"
@@ -41,6 +45,7 @@ namespace {
         bool check = false;
         bool checkNewDocument = false;
         bool checkTools = false;
+        std::string automationPipe;
         int checkDepth = 4;
     };
 
@@ -50,6 +55,8 @@ namespace {
             std::string arg = argv[i];
             if (arg == "--check") {
                 options.check = true;
+            } else if (arg == "--automation" && i + 1 < argc) {
+                options.automationPipe = argv[++i];
             } else if (arg == "--check-tools") {
                 options.checkTools = true;
             } else if (arg == "--check-newdoc") {
@@ -125,6 +132,15 @@ int main(int argc, char** argv) {
         return sketch::runToolChecks(window);
     }
     window.start(options.startupPath);
+#ifdef SKETCH_GUI_AUTOMATION
+    if (!options.automationPipe.empty()) {
+        newui::Automation::expose(frame.rootView());
+        newui::Automation::start(options.automationPipe, app.runLoop());
+    }
+#endif
     app.run();
+#ifdef SKETCH_GUI_AUTOMATION
+    newui::Automation::stop();
+#endif
     return 0;
 }

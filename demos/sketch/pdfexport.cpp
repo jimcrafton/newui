@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
-#include <functional>
 #include <map>
 #include <sstream>
 
@@ -43,6 +42,10 @@ namespace sketch {
             BLBox box(0, 0, 0, 0);
             path.get_bounding_box(&box);
             return box;
+        }
+
+        bool intersects(const BLBox& a, const BLBox& b) {
+            return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
         }
 
         class Writer {
@@ -400,7 +403,7 @@ namespace sketch {
             if (item.strokeOptions.brush) {
                 return drawBrush(object, item, index);
             }
-            if (!item.strokeOptions.widths.empty() || item.strokeOptions.decorated()) {   // a variable width, aligned or arrowed stroke: the outline of the stroke, filled
+            if (!item.strokeOptions.widths.empty()) {   // a variable width: the outline of the stroke, filled
                 BLPath outline;
                 return object.strokeOutline(index, outline) ? fillPath(outline, item.paint, item.opacity, item.blendMode) : std::string();
             }
@@ -519,7 +522,9 @@ namespace sketch {
             while (i < end) {
                 const SketchObject& object = document.object(i);
                 if (object.groups().size() <= depth) {
-                    out += drawObject(object);
+                    if (intersects(object.paintBounds(), pageBox_) || true) {
+                        out += drawObject(object);
+                    }
                     ++i;
                     continue;
                 }

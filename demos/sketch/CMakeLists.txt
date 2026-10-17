@@ -63,6 +63,14 @@ add_executable(sketch
 )
 
 target_link_libraries(sketch PRIVATE newui zlib_static windowscodecs ole32)
+
+# GUI automation (see automation.md at the repository root): `sketch.exe --automation <pipe>` lets tests/gui/sketch_gui_tests.py drive the
+# window. Turn it OFF for a build that is shipped - nothing of it is then compiled in.
+option(SKETCH_GUI_AUTOMATION "Build sketch with newui's automation server" ON)
+if(SKETCH_GUI_AUTOMATION)
+    target_link_libraries(sketch PRIVATE newui_automation)
+    target_compile_definitions(sketch PRIVATE SKETCH_GUI_AUTOMATION)
+endif()
 target_include_directories(sketch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # sketch's own reflected classes (CanvasView, GradientBar, SwatchGrid, PagePreview) so sketch.newui can name
