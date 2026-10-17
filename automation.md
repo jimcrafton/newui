@@ -166,7 +166,7 @@ front. The reference driver (`newui_guitest.App`) therefore:
   up with an error after 30 s;
 - remembers the input clock after each of its own injections, and **aborts the test** if the clock moves for any other
   reason (releasing a held mouse button first);
-- is switchable off (`App.user_input_guard = False`, or the environment variable `GUITEST_NO_GUARD=1`) for a VM or build
+- is switchable off (`--no-guard` on the command line, or `App.user_input_guard = False`) for a VM or build
   machine with nobody at it.
 
 Treat "another window covers ...", "could not bring the app to the foreground" and "input from outside" as *the person
@@ -175,19 +175,18 @@ was busy*, not as a bug in the app: rerun when the machine is idle. Make the fir
 
 ### Sample implementation
 
-A complete test with the Python driver (`tools/guitest`). It launches the app, clicks a named view with a real click,
-types, reads the text back, and checks the pixels with a screenshot. Run it with `python -m unittest -v test_myapp`.
+A complete test with the Python driver (`tools/guitest`). It clicks a named view with a real click, types, reads the text
+back, drives a menu and compares screenshots. It does not say which app it tests: the person running it does (next section).
 
 ```python
 import sys
-sys.path.insert(0, r"D:\code
-ewui-demos	ools\guitest")
-from newui_guitest import AppTestCase, differs
+
+sys.path.insert(0, r"D:\code\newui-demos\tools\guitest")
+import newui_guitest
+from newui_guitest import AppTestCase
 
 
-class FilterTests(AppTestCase):
-    exe = r"D:uild\myapp.exe"            # a fresh app per test, killed however the test ends
-
+class FilterTests(AppTestCase):                      # a fresh app per test, killed however the test ends
     def test_typing_fills_the_filter(self):
         self.app.click("filterInput")                       # find -> covered-point check -> SendInput -> wait for idle
         self.app.type("Box")
@@ -203,11 +202,63 @@ class FilterTests(AppTestCase):
     def test_background_work_is_polled_not_slept(self):
         # idle means the UI loop is empty, not that indexing has finished
         self.app.wait_until(lambda: self.app.tree("itemsTree", 10), "the tree to fill")
+
+
+if __name__ == "__main__":
+    sys.exit(newui_guitest.main())                          # parses --exe, --arg, -k, --list ... and runs this file
 ```
 
-The first run of any new app should be read-only: `python -m newui_guitest check D:uild\myapp.exe --view canvas`.
+Run it:
+
+```
+python test_myapp.py --exe D:\build\myapp.exe
+```
+
 `tools/guitest/README.md` has the whole API. A large app subclasses `AppTestCase` once for its own helpers: see
 `demos/sketch/tests/gui/test_sketch_gui.py`.
+
+### Launching the tests
+
+The harness is a command line. Everything you need to control is an option, not an environment variable or an edit to the test.
+Start in the driver's folder (or put `D:\code\newui-demos\tools\guitest` on `PYTHONPATH`):
+
+```
+cd D:\code\newui-demos\tools\guitest
+
+python -m newui_guitest check D:\build\myapp.exe --view canvas        # 1. FIRST: read-only smoke check, sends no input
+python -m newui_guitest test D:\code\myapp\tests\gui --exe D:\build\myapp.exe --list     # 2. list the tests, starts nothing
+python -m newui_guitest test D:\code\myapp\tests\gui\test_myapp.py --exe D:\build\myapp.exe    # 3. run (drives the real mouse!)
+```
+
+A test file can be its own entry point, which is how most people will run it:
+
+```python
+import newui_guitest
+...
+if __name__ == "__main__":
+    sys.exit(newui_guitest.main())
+```
+```
+python D:\code\myapp\tests\gui\test_myapp.py --exe D:\build\myapp.exe -k Typing
+```
+
+`<tests>` is any mix of a test file, a folder (discovers `test*.py`) or a dotted name (`test_myapp.Typing.test_x`); with none it
+discovers in the current folder. A test class may name a default `exe` for when `--exe` is not given.
+
+| Option | Meaning |
+|---|---|
+| `--exe PATH` | the app to test (overrides the test class's `exe`) |
+| `--arg ARG` | an extra command-line argument for the app; repeat for several (`--arg=--demo --arg=--small`) |
+| `--cwd DIR` | working directory of the app |
+| `-k TEXT` | only tests whose name contains TEXT; repeatable |
+| `--list` | print the tests and exit; starts nothing |
+| `-f`, `--failfast` / `-q`, `--quiet` | stop at the first failure / one dot per test |
+| `--no-guard` | do not wait for the person to leave the mouse alone and do not abort on their input (an unattended VM or build machine only) |
+| `--quiet-period S` / `--quiet-timeout S` | how long the mouse and keyboard must be untouched before input is sent (1.5 s) / how long to wait for that (30 s) |
+| `--connect-timeout S` / `--reply-timeout S` | wait for the app's pipe after starting it (20 s) / for one reply (30 s); raise for a slow app |
+
+The exit code is 0 when every test passed, 1 on a failure, 2 when no app was given. `python -m newui_guitest test --help` lists them all.
+Tests that send input need a desktop nobody is using, the app window uncovered and hands off the mouse and keyboard.
 
 ### A driver in another language
 
@@ -436,13 +487,14 @@ The driver is also described in the skill that ships with it (see the next secti
 
 There is no config file. Customizing is writing a few lines of Python, from the least to the most change:
 
-1. **Say where the app is.** Set `exe` (and `args`, extra command-line arguments) on an `AppTestCase` subclass. Take the path
-   from an environment variable so a build machine can override it:
+1. **Say which app.** Normally nothing in the test: the person running it passes `--exe` and `--arg` (see "Launching the tests"),
+   so one test file runs against any build. A test class may name a default for when `--exe` is not given, from a path it can
+   compute (for example relative to the test file) rather than from the environment:
 
    ```python
    class MyCase(AppTestCase):
-       exe = os.environ.get("MYAPP_EXE", r"D:\code\myappuild\Debug\myapp.exe")
-       args = ("--demo-data",)
+       exe = os.path.join(REPO, "build", "Debug", "myapp.exe")      # --exe overrides it
+       args = ("--demo-data",)                                       # --arg adds to it
    ```
 
 2. **Add the app's vocabulary as helpers** on that subclass. This is where "draw a rectangle", "open the settings tab" or
@@ -460,8 +512,9 @@ There is no config file. Customizing is writing a few lines of Python, from the 
        return App(self.exe, ("--open", os.path.join(self.workdir, "test.doc")), cwd=self.workdir)
    ```
 
-4. **Tune the timing and the guard.** `App.CONNECT_TIMEOUT`, `REPLY_TIMEOUT`, `QUIET_PERIOD`, `QUIET_TIMEOUT` are class attributes;
-   a slow app raises the first two. On an unattended machine set `GUITEST_NO_GUARD=1` or `App.user_input_guard = False`.
+4. **Tune the timing and the guard.** From the command line: `--connect-timeout`, `--reply-timeout`, `--quiet-period`,
+   `--quiet-timeout` (a slow app raises the first two) and `--no-guard` for an unattended machine. They set the `App` class attributes
+   `CONNECT_TIMEOUT`, `REPLY_TIMEOUT`, `QUIET_PERIOD`, `QUIET_TIMEOUT` and `user_input_guard`, which a test may also set itself.
 
 5. **Reach more than one window.** Each window the app calls `expose()` on is a root. Pass its name to `screenshot("editorRoot")`
    and name its views as usual. A native dialog is not newui: use `wait_for_dialog`, `type_raw` and `key_raw`.

@@ -1,15 +1,17 @@
-"""GUI tests for sketch: the real window, real mouse and keyboard (SendInput), answers read back over newui's automation pipe
+r"""GUI tests for sketch: the real window, real mouse and keyboard (SendInput), answers read back over newui's automation pipe
 (panel fields) and from screenshots. Driver: tools/guitest (newui_guitest); protocol: automation.md.
 
 These tests move the real mouse and type on the real keyboard. Run them on a desktop nobody is using, with the sketch window
 uncovered, and hands off while they run:
 
-    python -m unittest -v test_sketch_gui                 (all of them)
-    python -m unittest -v test_sketch_gui.Drawing         (one group)
-    python test_sketch_gui.py                             (same as the first)
+    python test_sketch_gui.py                                  (all of them; uses the default sketch.exe below)
+    python test_sketch_gui.py -k Drawing                       (one group, or any name containing the text)
+    python test_sketch_gui.py --exe D:\other\sketch.exe      (a different build)
+    python test_sketch_gui.py --list                           (list the tests, starts nothing)
+    python test_sketch_gui.py --help                           (every option: --arg, --no-guard, timeouts ...)
 
-The exe is build\\demos\\sketch\\Debug\\sketch.exe unless SKETCH_EXE says otherwise. GUITEST_NO_GUARD=1 turns off the
-"wait for the person to stop using the mouse" guard (unattended VM only).
+The same through the harness:  python -m newui_guitest test test_sketch_gui.py --exe <sketch.exe>
+Default exe: build\demos\sketch\Debug\sketch.exe under the repository root.
 """
 import os
 import sys
@@ -21,9 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "tools", "guitest"))
 
-from newui_guitest import AppTestCase, dark, differs      # noqa: E402
+from newui_guitest import AppTestCase, dark, differs, main      # noqa: E402
 
-SKETCH_EXE = os.environ.get("SKETCH_EXE") or os.path.join(REPO, "build", "demos", "sketch", "Debug", "sketch.exe")
+SKETCH_EXE = os.path.join(REPO, "build", "demos", "sketch", "Debug", "sketch.exe")     # the default; --exe overrides it
 
 
 def stroke_blue(p):
@@ -323,4 +325,4 @@ class Files(SketchCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    sys.exit(main())
