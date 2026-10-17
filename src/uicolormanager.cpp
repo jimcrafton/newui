@@ -1,6 +1,10 @@
 #include "newui/uicolormanager.h"
 #include "newui/themedata.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <vssym32.h>
@@ -158,7 +162,51 @@ namespace newui {
 		return instance;
 	}
 
+	namespace {
+		// -1: follow Windows; 0 light; 1 dark.
+		std::atomic<int> g_darkModeOverride{ -1 };
+	}
+
+	namespace {
+		// Per role: 0 = none, else (1 << 32) | 0xRRGGBB.
+		constexpr std::size_t kRoleCount = static_cast<std::size_t>(UIColorRole::LinkHoverText) + 1;
+		std::atomic<std::uint64_t> g_colorOverride[kRoleCount];
+
+		std::uint32_t channel(float v) {
+			return static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+		}
+	}
+
+	void UIColorManager::setColorOverride(UIColorRole role, std::optional<Color> color) {
+		const std::size_t index = static_cast<std::size_t>(role);
+		if (index >= kRoleCount) {
+			return;
+		}
+		g_colorOverride[index].store(color.has_value()
+			? (1ull << 32) | (channel(color->r) << 16) | (channel(color->g) << 8) | channel(color->b)
+			: 0ull);
+	}
+
+	std::optional<Color> UIColorManager::colorOverride(UIColorRole role) {
+		const std::size_t index = static_cast<std::size_t>(role);
+		const std::uint64_t forced = index < kRoleCount ? g_colorOverride[index].load() : 0;
+		if (forced == 0) {
+			return std::nullopt;
+		}
+		return Color(static_cast<std::uint32_t>(forced & 0xFFFFFFu), false);
+	}
+
+	void UIColorManager::setDarkModeOverride(std::optional<bool> dark) {
+		g_darkModeOverride.store(dark.has_value() ? (*dark ? 1 : 0) : -1);
+		// What loads its palette from the mode (Themes/dark.theme or light.theme) follows at once.
+		ThemeData::instance().reloadForCurrentMode();
+	}
+
 	bool UIColorManager::isDarkMode() {
+		const int forced = g_darkModeOverride.load();
+		if (forced >= 0) {
+			return forced == 1;
+		}
 		DWORD value = 1;
 		DWORD size = sizeof(value);
 		LONG status = ::RegGetValueW(
@@ -173,6 +221,11 @@ namespace newui {
 	}
 
 	Color UIColorManager::colorFor(UIColorRole role) {
+		const std::uint64_t forced = g_colorOverride[static_cast<std::size_t>(role)].load();
+		if (forced != 0) {
+			return Color(static_cast<std::uint32_t>(forced & 0xFFFFFFu), false);
+		}
+
 		// ThemeData (themedata.h) is a pre-generated snapshot of a real
 		// Windows install's actual theme (tools/themesgen/themesgen.py) -
 		// consulted first, ahead of every live query below, whenever

@@ -261,7 +261,11 @@ namespace {
 		return highlighted ? highlightedTable : normalTable;
 	}
 
-	void invertLightnessInPlace(RGBQUAD* bits, int width, int height, int strideInPixels, bool highlighted) {
+	// `floor`, when the host has a palette of its own (UIColorManager::setColorOverride): inverting white gives pure
+	// black, which is not what the host's dark panels look like, so the inverted range is remapped to run from `floor`
+	// (instead of black) up to white - a themed control's background then matches the host's.
+	void invertLightnessInPlace(RGBQUAD* bits, int width, int height, int strideInPixels, bool highlighted,
+	                            const std::optional<newui::Color>& floor = std::nullopt) {
 		const std::array<float, 256>& lut = gammaLUT(highlighted);
 
 		for (int y = 0; y < height; ++y) {
@@ -310,7 +314,13 @@ namespace {
 				// same as color/hsl above; re-premultiply by its own
 				// (unchanged) alpha byte before writing back to px.
 				uint8_t straightBytes[4];
-				newui::Color::fromHSL(hsl).toBGRA32(straightBytes);
+				newui::Color inverted = newui::Color::fromHSL(hsl);
+					if (floor.has_value()) {
+						inverted.r = floor->r + inverted.r * (1.0f - floor->r);
+						inverted.g = floor->g + inverted.g * (1.0f - floor->g);
+						inverted.b = floor->b + inverted.b * (1.0f - floor->b);
+					}
+					inverted.toBGRA32(straightBytes);
 				float straightAlpha = float(straightBytes[3]) / 255.0f;
 				px.rgbBlue = uint8_t(std::lround(straightBytes[0] * straightAlpha));
 				px.rgbGreen = uint8_t(std::lround(straightBytes[1] * straightAlpha));
@@ -1167,7 +1177,8 @@ namespace newui {
 			                          // width/height, which are just rect's.
 			if (SUCCEEDED(::GetBufferedPaintBits(paintBuffer, &bits, &rowWidthPixels)) && bits != nullptr) {
 				if (newui::UIColorManager::isDarkMode()) {
-					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted);
+					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted,
+											   newui::UIColorManager::colorOverride(newui::UIColorRole::ControlBackground));
 				}
 
 				// Premultiplied, top-down BGRA - exactly BL_FORMAT_PRGB32,
