@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -245,6 +246,37 @@ namespace newui {
         void setUnsavedChangesHandler(UnsavedChangesHandler handler) { unsavedChangesHandler_ = std::move(handler); }
         void setSavePathProvider(SavePathProvider provider) { savePathProvider_ = std::move(provider); }
 
+        // Returns the path to open, or "" if the user cancelled. Default: the native Open dialog.
+        typedef std::function<std::string()> OpenPathProvider;
+        void setOpenPathProvider(OpenPathProvider provider) { openPathProvider_ = std::move(provider); }
+        // Told when a load/save fails (message is already worded, e.g. "Could not save C:\x.svg").
+        // Default: an error message box.
+        typedef std::function<void(const std::string& message)> ErrorHandler;
+        void setErrorHandler(ErrorHandler handler) { errorHandler_ = std::move(handler); }
+
+        // The UI hooks the commands below go through. Defaults use the handlers set above, else the native
+        // dialogs / message boxes; a derived controller overrides them to supply its own file filters, owner
+        // window and error reporting.
+        virtual UnsavedChangesChoice askUnsavedChanges(Document& document);
+        virtual std::string chooseSavePath(Document& document);  // "" = cancelled
+        virtual std::string chooseOpenPath();                    // "" = cancelled
+        virtual void reportError(const std::string& message);
+
+        // ---- File commands on one Document (single-document apps keep reusing theirs; none of these
+        // touch documents() - they work on a Document that was never addDocument()'d too) ----
+
+        // Save: writes to filePath(), or goes to saveDocumentAs() when the document has none yet.
+        // False on cancel or failure (failures are reported through the error handler).
+        bool saveDocument(Document& document);
+        // Save As: asks for a path (SavePathProvider) and saves there.
+        bool saveDocumentAs(Document& document);
+        // Open: confirmDiscardChanges(), then asks for a path (OpenPathProvider) unless `path` is given and
+        // loads it into the document. False on cancel/failure; on a failed load the document keeps its content.
+        bool openInto(Document& document, const std::string& path = std::string());
+        // New: confirmDiscardChanges(), then clearContent() (the caller empties its own data) and
+        // Document::reset(). False if the user cancelled.
+        bool newInto(Document& document, const std::function<void()>& clearContent);
+
         // True if it's fine to proceed with throwing document's current state away: it isn't
         // modified, or the user chose Discard, or chose Save and the save succeeded. False if the
         // user cancelled, cancelled the Save As picker, or the save failed (the document is left
@@ -316,6 +348,8 @@ namespace newui {
         Document* activeDocument_ = nullptr;
         UnsavedChangesHandler unsavedChangesHandler_;
         SavePathProvider savePathProvider_;
+        OpenPathProvider openPathProvider_;
+        ErrorHandler errorHandler_;
     };
 
     // Owns/recycles Item instances (items.h) for a widget walking a
@@ -732,6 +766,89 @@ namespace newui {
         // See ListController::iconFor()'s own comment - same reasoning,
         // just keyed by (row, col) instead of a flat index.
         virtual std::optional<std::string> iconFor(std::size_t row, std::size_t col) const { return std::nullopt; }
+
+        // Same narrowing as ListController::model()/setModel() - attached Model must be a
+        // TableModel (models.h), checked with dynamic_cast.
+        TableModel* model() {
+            Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            TableModel* asTableModel = dynamic_cast<TableModel*>(base);
+            if (asTableModel == nullptr) {
+                throw std::runtime_error("TableController::model: attached Model is not a TableModel");
+            }
+            return asTableModel;
+        }
+
+        const TableModel* model() const {
+            const Model* base = Controller::model();
+            if (base == nullptr) {
+                return nullptr;
+            }
+            const TableModel* asTableModel = dynamic_cast<const TableModel*>(base);
+            if (asTableModel == nullptr) {
+                throw std::runtime_error("TableController::model: attached Model is not a TableModel");
+            }
+            return asTableModel;
+        }
+
+        void setModel(std::unique_ptr<TableModel> model) {
+            Controller::setModel(std::unique_ptr<Model>(std::move(model)));
+        }
+
+        std::size_t rowCount() const { return model() != nullptr ? model()->rowCount() : 0; }
+        std::size_t columnCount() const { return model() != nullptr ? model()->columnCount() : 0; }
+
+        // Fired whenever model()'s own onChanged fires - same contract as
+        // ListController::onDataChanged.
+        typedef Delegate<TableController> DataChangedDelegate;
+        DataChangedDelegate onDataChanged;
+
+        // Rows are uniform height, so row <-> y is O(1) arithmetic, never a loop: a table is
+        // expected to hold far more rows than a list (see TableView's own comment), and
+        // ListController's O(n) offset scans would not survive a million of them.
+        float rowHeight() const { return rowHeight_; }
+        void setRowHeight(float height) { rowHeight_ = height; }
+
+        // Header strip above the first row (and the matching gutter width to the left of the
+        // first column, where row numbers are painted). 0 hides either.
+        float headerHeight() const { return headerHeight_; }
+        void setHeaderHeight(float height) { headerHeight_ = height; }
+        float rowHeaderWidth() const { return rowHeaderWidth_; }
+        void setRowHeaderWidth(float width) { rowHeaderWidth_ = width; }
+
+        // Width of one column. Columns without an explicit setColumnWidth() use
+        // defaultColumnWidth().
+        float defaultColumnWidth() const { return defaultColumnWidth_; }
+        void setDefaultColumnWidth(float width) { defaultColumnWidth_ = width; }
+        float columnWidth(std::size_t column) const;
+        void setColumnWidth(std::size_t column, float width);
+
+        // Content-space geometry (header/gutter excluded): total scrollable size, the x of a
+        // column's left edge, and the inverse lookups. columnAt()/rowAt() return columnCount()/
+        // rowCount() (one past the end) when the coordinate is outside the table.
+        float totalWidth() const;
+        float totalHeight() const { return float(double(rowCount()) * double(rowHeight_)); }
+        float columnOffset(std::size_t column) const;
+        std::size_t columnAt(float contentX) const;
+        std::size_t rowAt(float contentY) const;
+        float rowOffset(std::size_t row) const { return float(double(row) * double(rowHeight_)); }
+
+    protected:
+        SyncReturn modelChanged(Model& sender) override {
+            onDataChanged(*this);
+            return SyncReturn::Handled;
+        }
+
+    private:
+        float rowHeight_ = 22.0f;
+        float headerHeight_ = 24.0f;
+        float rowHeaderWidth_ = 56.0f;
+        float defaultColumnWidth_ = 100.0f;
+        // Only columns whose width was explicitly set are stored - a sparse map, so a table with
+        // many columns pays for what's customized only.
+        std::map<std::size_t, float> columnWidths_;
     };
 
 } // namespace newui

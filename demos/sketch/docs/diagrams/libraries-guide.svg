@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="430" viewBox="0 0 1000 430" role="img" aria-label="Symbols, patterns and pictures">
+<title>Symbols, patterns and pictures</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Symbols, Patterns and Pictures</text>
+<rect x="20" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Symbols</text>
+<text x="30" y="238" class="s" >New Symbol turns the selection into one instance</text>
+<text x="30" y="251" class="s" >of a library symbol; Place adds more. Redefine</text>
+<text x="30" y="264" class="s" >changes every instance; Break Link frees one.</text>
+<g transform="translate(80 130) rotate(0) scale(1.0)"><path d="M0 -26 L8 -8 L28 -8 L12 4 L18 24 L0 12 L-18 24 L-12 4 L-28 -8 L-8 -8z" fill="#f2b824" stroke="#1b3a6b" stroke-width="2"/><circle r="7" fill="#1e6fe0"/></g>
+<g transform="translate(180 150) rotate(15) scale(1.4)"><path d="M0 -26 L8 -8 L28 -8 L12 4 L18 24 L0 12 L-18 24 L-12 4 L-28 -8 L-8 -8z" fill="#f2b824" stroke="#1b3a6b" stroke-width="2"/><circle r="7" fill="#1e6fe0"/></g>
+<g transform="translate(260 140) rotate(-20) scale(0.8)"><path d="M0 -26 L8 -8 L28 -8 L12 4 L18 24 L0 12 L-18 24 L-12 4 L-28 -8 L-8 -8z" fill="#f2b824" stroke="#1b3a6b" stroke-width="2"/><circle r="7" fill="#1e6fe0"/></g>
+<rect x="345" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="355" y="62" class="t b" >Patterns</text>
+<text x="355" y="238" class="s" >Make Pattern turns the selection into a tile (it stays).</text>
+<text x="355" y="251" class="s" >Fill / Stroke apply it; scale and angle are in the</text>
+<text x="355" y="264" class="s" >Patterns panel. The tile stays sharp when zoomed.</text>
+<defs><pattern id="pt" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(20)"><rect width="26" height="26" fill="#fff4d6"/><circle cx="13" cy="13" r="7" fill="#e8452c"/></pattern></defs>
+<rect x="380" y="95" width="240" height="120" rx="10" fill="url(#pt)" stroke="#1b3a6b" stroke-width="2"/>
+<rect x="670" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="680" y="62" class="t b" >Pictures (File &gt; Place Image)</text>
+<text x="680" y="238" class="s" >PNG, JPEG, BMP, QOI; phone photos come out upright.</text>
+<text x="680" y="251" class="s" >It is an object: move, scale, turn, shear, set opacity,</text>
+<text x="680" y="264" class="s" >blend, clip it, or Trace Image it from the file.</text>
+<defs><linearGradient id="pic" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b5bd7"/><stop offset="1" stop-color="#ffb24d"/></linearGradient></defs>
+<g transform="rotate(-8 820 150)"><rect x="740" y="100" width="160" height="100" fill="url(#pic)" stroke="#fff" stroke-width="5"/><circle cx="790" cy="130" r="9" fill="#fff"/><path d="M740 200 L800 150 L840 180 L870 160 L900 200z" fill="#2f7d4f"/></g>
+<rect x="20" y="290" width="960" height="120" rx="6" class="soft" />
+<text x="34" y="314" class="s" >- The libraries live in the file; copy and paste between files brings a symbol, pattern, brush or picture along once, however often you paste.</text>
+<text x="34" y="336" class="s" >- A symbol instance can be sheared and rotated like any shape, but it is one object: Break Link to Symbol to edit its parts.</text>
+<text x="34" y="358" class="s" >- Delete a symbol, pattern or brush from its panel only when nothing uses it.</text>
+<text x="34" y="380" class="s" >- Large pictures draw from reduced copies when zoomed out, so a 12-megapixel photo stays quick.</text>
+</svg>

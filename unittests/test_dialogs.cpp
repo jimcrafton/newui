@@ -1,5 +1,9 @@
 #include "newui/dialogs.h"
+#include "newui/reflectionio.h"
 #include "newui/subview.h"
+
+#include <json5/json5.hpp>
+#include <json5/json5_input.hpp>
 
 #include <gtest/gtest.h>
 
@@ -93,4 +97,21 @@ TEST(Dialog, ChildTreeSurvivesWindowDestruction) {
     ASSERT_EQ(dialog.rootView().childViews().size(), 1u);
     EXPECT_EQ(dialog.rootView().childViews()[0], child);
     EXPECT_FLOAT_EQ(child->bounds().size().width, 30.0f);  // still live, readable memory
+}
+
+TEST(Dialog, PositionDefaultsToCenteredOnTheRootView) {
+    newui::Dialog dialog;
+    EXPECT_EQ(dialog.position(), newui::DialogPosition::CenterOnRootView);
+    dialog.setPosition(newui::DialogPosition::CenterOnMouse);
+    EXPECT_EQ(dialog.position(), newui::DialogPosition::CenterOnMouse);
+    dialog.setPosition(newui::DialogPosition::CenterOnFocus);
+    EXPECT_EQ(dialog.position(), newui::DialogPosition::CenterOnFocus);
+}
+
+TEST(Dialog, PositionLoadsFromNewuiText) {
+    newui::Dialog dialog;
+    newui::reflection::ObjectReader reader;
+    ASSERT_FALSE(json5::from_string("{ type: \"Dialog\", position: \"CenterOnMouse\" }", reader.doc));
+    reader.read(&dialog);
+    EXPECT_EQ(dialog.position(), newui::DialogPosition::CenterOnMouse);
 }

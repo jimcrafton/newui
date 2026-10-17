@@ -57,6 +57,13 @@ public:
 	CreatedDelegate onCreated;
 	DestroyedDelegate onDestroyed;
 	ClosedDelegate onClosed;
+
+	// Fired on WM_CLOSE (titlebar X, Alt+F4, system menu Close) before anything is torn down. A subscriber
+	// that sets canClose to false vetoes it: the window stays open and onClosed does not fire - the hook for
+	// a "save changes?" prompt. Starts true. Code that calls DestroyWindow directly bypasses it.
+	typedef Delegate<Frame, bool&> ClosingDelegate;
+	ClosingDelegate onClosing;
+
 	SizeChangedDelegate onSizeChanged;
 	PosChangedDelegate onPosChanged;
 

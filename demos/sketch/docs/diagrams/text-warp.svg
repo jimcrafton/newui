@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" role="img" aria-label="Text on a path and text between two paths">
+<title>Text on a path and text between two paths</title>
+<desc>Mappings from the flat text space onto the paths.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >TextWarper: from the flat text onto paths</text>
+<rect x="20" y="44" width="260" height="190" rx="6" class="panel" />
+<text x="150" y="64" class="t b c" >flat text space</text>
+<line x1="50" y1="150" x2="250" y2="150" class="thin" />
+<text x="50" y="150" style="font-size:44px;font-weight:700;fill:#1e6fe0" opacity="0.5">Text</text>
+<line x1="50" y1="150" x2="50" y2="108" class="thin" />
+<text x="54" y="164" class="s" >x runs along the first baseline</text>
+<text x="54" y="178" class="s" >y is down; capitals reach to about -0.78 * size</text>
+<text x="54" y="192" class="s" >frame: x0..x1 (ink), yTop = -0.78 size,</text>
+<text x="54" y="206" class="s" >yBottom = last baseline + 0.22 size</text>
+<rect x="300" y="44" width="320" height="190" rx="6" class="panel" />
+<text x="460" y="64" class="t b c" >OnPath</text>
+<path d="M320 190 L327 184.35 L334 178.73 L341 173.16 L348 167.68 L355 162.31 L362 157.08 L369 152.01 L376 147.13 L383 142.47 L390 138.04 L397 133.88 L404 129.99 L411 126.4 L418 123.14 L425 120.2 L432 117.61 L439 115.39 L446 113.54 L453 112.07 L460 110.98 L467 110.3 L474 110.01 L481 110.12 L488 110.63 L495 111.54 L502 112.84 L509 114.52 L516 116.58 L523 119.01 L530 121.79 L537 124.91 L544 128.36 L551 132.11 L558 136.16 L565 140.47 L572 145.03 L579 149.82 L586 154.8 L593 159.97 L600 165.28" class="line" />
+<line x1="341" y1="173.16" x2="324.89" y2="152.75" class="acc" />
+<circle cx="341" cy="173.16" r="2.4" fill="#222222"/>
+<line x1="390" y1="138.04" x2="376.4" y2="115.89" class="acc" />
+<circle cx="390" cy="138.04" r="2.4" fill="#222222"/>
+<line x1="439" y1="115.39" x2="431.73" y2="90.43" class="acc" />
+<circle cx="439" cy="115.39" r="2.4" fill="#222222"/>
+<line x1="488" y1="110.63" x2="490.62" y2="84.76" class="acc" />
+<circle cx="488" cy="110.63" r="2.4" fill="#222222"/>
+<line x1="537" y1="124.91" x2="548.05" y2="101.37" class="acc" />
+<circle cx="537" cy="124.91" r="2.4" fill="#222222"/>
+<text x="314" y="222" class="s" >p = P(start + x) + N * (-y);  N = (dy, -dx)</text>
+<text x="314" y="84" class="s" >start = start% * length;  flip reverses the path</text>
+<rect x="640" y="44" width="300" height="190" rx="6" class="panel" />
+<text x="790" y="64" class="t b c" >Between</text>
+<path d="M655 100 L664 97.4 L673 94.83 L682 92.32 L691 89.88 L700 87.53 L709 85.32 L718 83.25 L727 81.35 L736 79.63 L745 78.12 L754 76.83 L763 75.77 L772 74.95 L781 74.38 L790 74.07 L799 74.01 L808 74.22 L817 74.68 L826 75.4 L835 76.36 L844 77.56 L853 78.98 L862 80.61 L871 82.44 L880 84.44 L889 86.6 L898 88.89 L907 91.29 L916 93.78 L925 96.33" class="line" />
+<path d="M655 218.51 L664 219.61 L673 220.5 L682 221.2 L691 221.68 L700 221.94 L709 221.99 L718 221.82 L727 221.42 L736 220.82 L745 220 L754 218.99 L763 217.79 L772 216.41 L781 214.86 L790 213.17 L799 211.34 L808 209.4 L817 207.37 L826 205.26 L835 203.1 L844 200.91 L853 198.72 L862 196.53 L871 194.38 L880 192.28 L889 190.26 L898 188.34 L907 186.54 L916 184.87 L925 183.35" class="line" />
+<line x1="655" y1="100" x2="655" y2="218.51" class="thin" />
+<line x1="700" y1="87.53" x2="700" y2="221.94" class="thin" />
+<line x1="745" y1="78.12" x2="745" y2="220" class="thin" />
+<line x1="790" y1="74.07" x2="790" y2="213.17" class="thin" />
+<line x1="835" y1="76.36" x2="835" y2="203.1" class="thin" />
+<line x1="880" y1="84.44" x2="880" y2="192.28" class="thin" />
+<line x1="925" y1="96.33" x2="925" y2="183.35" class="thin" />
+<path d="M655 129.63 L664 127.95 L673 126.25 L682 124.54 L691 122.83 L700 121.14 L709 119.49 L718 117.89 L727 116.37 L736 114.93 L745 113.59 L754 112.37 L763 111.27 L772 110.31 L781 109.5 L790 108.84 L799 108.34 L808 108.01 L817 107.85 L826 107.86 L835 108.04 L844 108.4 L853 108.91 L862 109.59 L871 110.42 L880 111.4 L889 112.51 L898 113.75 L907 115.1 L916 116.55 L925 118.09" class="thin" stroke-dasharray="3 3"/>
+<path d="M655 159.26 L664 158.51 L673 157.67 L682 156.76 L691 155.78 L700 154.74 L709 153.65 L718 152.53 L727 151.39 L736 150.23 L745 149.06 L754 147.91 L763 146.78 L772 145.68 L781 144.62 L790 143.62 L799 142.68 L808 141.81 L817 141.02 L826 140.33 L835 139.73 L844 139.24 L853 138.85 L862 138.57 L871 138.41 L880 138.36 L889 138.43 L898 138.62 L907 138.91 L916 139.32 L925 139.84" class="thin" stroke-dasharray="3 3"/>
+<path d="M655 188.88 L664 189.06 L673 189.09 L682 188.98 L691 188.73 L700 188.34 L709 187.82 L718 187.18 L727 186.41 L736 185.52 L745 184.53 L754 183.45 L763 182.28 L772 181.04 L781 179.74 L790 178.39 L799 177.01 L808 175.61 L817 174.2 L826 172.8 L835 171.42 L844 170.08 L853 168.78 L862 167.55 L871 166.39 L880 165.32 L889 164.35 L898 163.48 L907 162.73 L916 162.1 L925 161.6" class="thin" stroke-dasharray="3 3"/>
+<text x="652" y="215" class="s" >p = lerp(T(u), B(u), v)</text>
+<text x="652" y="228" class="s" >u = (x-x0)/(x1-x0)  v = (y-yTop)/(yBottom-yTop)</text>
+<rect x="20" y="256" width="920" height="190" rx="6" class="soft" />
+<text x="34" y="278" class="t b" >SketchObject::rebuildText()</text>
+<rect x="34" y="292" width="160" height="40" rx="6" class="box" />
+<text x="114" y="316" class="t b c" >textOutline()</text>
+<rect x="214" y="292" width="160" height="40" rx="6" class="box" />
+<text x="294" y="316" class="t b c" >flatten + cut edges</text>
+<line x1="194" y1="312" x2="214" y2="312" class="line" marker-end="url(#arrow)"/>
+<rect x="394" y="292" width="160" height="40" rx="6" class="box" />
+<text x="474" y="316" class="t b c" >TextWarper.map(x, y)</text>
+<line x1="374" y1="312" x2="394" y2="312" class="line" marker-end="url(#arrow)"/>
+<rect x="574" y="292" width="160" height="40" rx="6" class="box" />
+<text x="654" y="316" class="t b c" >x textMatrix_</text>
+<line x1="554" y1="312" x2="574" y2="312" class="line" marker-end="url(#arrow)"/>
+<rect x="754" y="292" width="160" height="40" rx="6" class="box" />
+<text x="834" y="316" class="t b c" >path_</text>
+<line x1="734" y1="312" x2="754" y2="312" class="line" marker-end="url(#arrow)"/>
+<text x="34" y="356" class="s" >- the warp paths are COPIES in the text's own flat space (the space textMatrix_ places on the page): moving, scaling or turning the text moves them</text>
+<text x="34" y="372" class="s" >  with it, and undo of a move (path + textMatrix snapshot) needs nothing more. Making a warp sets textMatrix_ to identity (paths are in page coordinates).</text>
+<text x="34" y="388" class="s" >- Between: both paths are measured by arc length; the higher one is the top; paths are turned to run left to right and the same way.</text>
+<text x="34" y="404" class="s" >- mapTextPoint(x, y) = textMatrix_ * warp(x, y): where the editing caret is drawn. Clicking in warped text puts the caret at the end.</text>
+<text x="34" y="420" class="s" >- Saved as data-text-warp + data-warp-a / data-warp-b (SVG) and object flag 128 (skb).</text>
+</svg>

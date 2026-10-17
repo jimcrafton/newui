@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="430" viewBox="0 0 1000 430" role="img" aria-label="Align and Distribute">
+<title>Align and Distribute</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Arrange &gt; Align and Distribute</text>
+<rect x="20" y="44" width="470" height="175" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Align Left</text>
+<text x="30" y="209" class="s" >to the left edge of the selection (one object: the artboard)</text>
+<rect x="510" y="44" width="470" height="175" rx="6" class="panel" />
+<text x="520" y="62" class="t b" >Align Left - result</text>
+<rect x="50" y="74" width="80" height="30" fill="#e8452c" stroke="#1b3a6b"/>
+<rect x="90" y="119" width="120" height="30" fill="#1e6fe0" stroke="#1b3a6b"/>
+<rect x="150" y="164" width="60" height="30" fill="#f2b824" stroke="#1b3a6b"/>
+<rect x="540" y="74" width="80" height="30" fill="#e8452c" stroke="#1b3a6b"/>
+<rect x="540" y="119" width="120" height="30" fill="#1e6fe0" stroke="#1b3a6b"/>
+<rect x="540" y="164" width="60" height="30" fill="#f2b824" stroke="#1b3a6b"/>
+<rect x="20" y="235" width="470" height="175" rx="6" class="panel" />
+<text x="30" y="253" class="t b" >Distribute Spacing</text>
+<text x="30" y="400" class="s" >equal gaps between objects; the outer two stay put</text>
+<rect x="510" y="235" width="470" height="175" rx="6" class="panel" />
+<text x="520" y="253" class="t b" >Distribute Spacing - result</text>
+<rect x="50" y="305" width="40" height="40" fill="#e8452c" stroke="#1b3a6b"/>
+<rect x="140" y="305" width="70" height="40" fill="#1e6fe0" stroke="#1b3a6b"/>
+<rect x="350" y="305" width="30" height="40" fill="#f2b824" stroke="#1b3a6b"/>
+<rect x="540" y="305" width="40" height="40" fill="#e8452c" stroke="#1b3a6b"/>
+<rect x="675" y="305" width="70" height="40" fill="#1e6fe0" stroke="#1b3a6b"/>
+<rect x="840" y="305" width="30" height="40" fill="#f2b824" stroke="#1b3a6b"/>
+<text x="500" y="422" class="s c" >Align and Distribute treat a group as one object. Align Center / Middle use the selection's center; Distribute needs three or more objects.</text>
+</svg>

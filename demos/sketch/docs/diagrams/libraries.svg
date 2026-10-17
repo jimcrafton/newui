@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440" role="img" aria-label="Symbols, patterns and images: artwork placed by a matrix">
+<title>Symbols, patterns and images: artwork placed by a matrix</title>
+<desc>A quadrilateral outline carries the definition's box; patterns repeat a pixel-exact tile.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Shared artwork</text>
+<rect x="20" y="44" width="450" height="230" rx="6" class="panel" />
+<text x="245" y="64" class="t b c" >Symbol / Image instance = a quad + a matrix</text>
+<rect x="40" y="90" width="110" height="70" rx="0" class="box" />
+<text x="95" y="85" class="s c" >definition box (0,0)-(w,h)</text>
+<circle cx="75" cy="115" r="14" fill="#f2b824"/><path d="M95 150 l25 -35 l22 35z" fill="#1e6fe0"/>
+<line x1="160" y1="125" x2="215" y2="125" class="acc" marker-end="url(#arrowAcc)"/>
+<path d="M240 100 L400 80 L440 170 L270 215 Z" fill="#e8f0fc" stroke="#1e6fe0"/>
+<circle cx="240" cy="100" r="3.2" fill="#d4380d"/>
+<text x="228" y="94" class="s" >v0</text>
+<circle cx="400" cy="80" r="3.2" fill="#d4380d"/>
+<text x="408" y="74" class="s" >v1</text>
+<circle cx="440" cy="170" r="3.2" fill="#d4380d"/>
+<text x="448" y="184" class="s" >v2</text>
+<circle cx="270" cy="215" r="3.2" fill="#d4380d"/>
+<text x="258" y="229" class="s" >v3</text>
+<text x="40" y="245" class="s" >outline = 4 vertices; matrix from v0, v1, v3: a = (v1-v0)/w, c = (v3-v0)/h, e,f = v0</text>
+<text x="40" y="259" class="s" >so move / scale / rotate / SHEAR are just edits of the outline; Image draws pixels,</text>
+<text x="40" y="273" class="s" >Symbol paints its SketchDocument; both appear where the first fill would</text>
+<rect x="490" y="44" width="450" height="230" rx="6" class="panel" />
+<text x="715" y="64" class="t b c" >Pattern paint = tile, scale, angle</text>
+<rect x="520" y="90" width="38" height="38" rx="0" class="box" />
+<circle cx="539" cy="109" r="9" fill="#d4380d"/>
+<rect x="520" y="128" width="38" height="38" rx="0" class="box" />
+<circle cx="539" cy="147" r="9" fill="#d4380d"/>
+<rect x="520" y="166" width="38" height="38" rx="0" class="box" />
+<circle cx="539" cy="185" r="9" fill="#d4380d"/>
+<rect x="558" y="90" width="38" height="38" rx="0" class="box" />
+<circle cx="577" cy="109" r="9" fill="#d4380d"/>
+<rect x="558" y="128" width="38" height="38" rx="0" class="box" />
+<circle cx="577" cy="147" r="9" fill="#d4380d"/>
+<rect x="558" y="166" width="38" height="38" rx="0" class="box" />
+<circle cx="577" cy="185" r="9" fill="#d4380d"/>
+<rect x="596" y="90" width="38" height="38" rx="0" class="box" />
+<circle cx="615" cy="109" r="9" fill="#d4380d"/>
+<rect x="596" y="128" width="38" height="38" rx="0" class="box" />
+<circle cx="615" cy="147" r="9" fill="#d4380d"/>
+<rect x="596" y="166" width="38" height="38" rx="0" class="box" />
+<circle cx="615" cy="185" r="9" fill="#d4380d"/>
+<rect x="634" y="90" width="38" height="38" rx="0" class="box" />
+<circle cx="653" cy="109" r="9" fill="#d4380d"/>
+<rect x="634" y="128" width="38" height="38" rx="0" class="box" />
+<circle cx="653" cy="147" r="9" fill="#d4380d"/>
+<rect x="634" y="166" width="38" height="38" rx="0" class="box" />
+<circle cx="653" cy="185" r="9" fill="#d4380d"/>
+<rect x="672" y="90" width="38" height="38" rx="0" class="box" />
+<circle cx="691" cy="109" r="9" fill="#d4380d"/>
+<rect x="672" y="128" width="38" height="38" rx="0" class="box" />
+<circle cx="691" cy="147" r="9" fill="#d4380d"/>
+<rect x="672" y="166" width="38" height="38" rx="0" class="box" />
+<circle cx="691" cy="185" r="9" fill="#d4380d"/>
+<text x="520" y="218" class="s" >SymbolDef::tile(pw, ph) renders the artwork at the DEVICE</text>
+<text x="520" y="231" class="s" >resolution (cached) -&gt; BLPattern(REPEAT, scale/rotate matrix),</text>
+<text x="520" y="244" class="s" >anchored at the document origin; whole-pixel size = exact period</text>
+<rect x="20" y="290" width="920" height="130" rx="6" class="soft" />
+<text x="34" y="312" class="t b" >Sharing and identity</text>
+<text x="34" y="334" class="s" >- Definitions are immutable: redefine / rename swap in a NEW SymbolDef and rebind the instances (undo swaps back). Objects hold shared_ptr.</text>
+<text x="34" y="351" class="s" >- Copy / paste writes the used definitions into the clipboard SVG; pasteSvg calls importSymbol / importPattern / importBrush, which reuse an identical entry</text>
+<text x="34" y="368" class="s" >  (compared by name, box and the SVG of the content) instead of adding a copy per paste. ImageData is shared by pointer and saved once per file.</text>
+<text x="34" y="385" class="s" >- A definition's content is itself a SketchDocument (nested symbols and brushes inside it are carried along).</text>
+</svg>

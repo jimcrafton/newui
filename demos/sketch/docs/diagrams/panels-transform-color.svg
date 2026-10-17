@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640" role="img" aria-label="Transform and Color panels">
+<title>Transform and Color panels</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Transform and Color</text>
+<rect x="20" y="44" width="300" height="24" rx="0" class="panel" />
+<text x="28" y="60" class="t b" >Transform</text>
+<text x="312" y="60" class="s e" >1 object</text>
+<text x="28" y="90" class="s" >X</text>
+<rect x="46" y="76" width="80" height="20" rx="2" class="field" />
+<text x="51" y="90" class="s" >120</text>
+<text x="140" y="90" class="s" >Y</text>
+<rect x="158" y="76" width="80" height="20" rx="2" class="field" />
+<text x="163" y="90" class="s" >88</text>
+<circle cx="235" cy="86" r="9.5" fill="#d4380d"/><text x="235" y="90" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="28" y="118" class="s" >W</text>
+<rect x="46" y="104" width="80" height="20" rx="2" class="field" />
+<text x="51" y="118" class="s" >140</text>
+<text x="140" y="118" class="s" >H</text>
+<rect x="158" y="104" width="80" height="20" rx="2" class="field" />
+<text x="163" y="118" class="s" >90</text>
+<rect x="248" y="103" width="24" height="24" rx="3" class="box" />
+<g transform="translate(250 105) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></g><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></g>
+<circle cx="285" cy="128" r="9.5" fill="#d4380d"/><text x="285" y="132" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="28" y="146" class="s" >Angle</text>
+<rect x="68" y="132" width="80" height="20" rx="2" class="field" />
+<text x="73" y="146" class="s" >0</text>
+<text x="158" y="146" class="s" >deg</text>
+<circle cx="190" cy="142" r="9.5" fill="#d4380d"/><text x="190" y="146" class="c b" style="fill:#fff;font-size:11px">3</text>
+<rect x="20" y="44" width="300" height="116" fill="none" stroke="#9a9a9a"/>
+<circle cx="30" cy="184" r="9.5" fill="#d4380d"/><text x="30" y="188" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="46" y="188" class="t" >Position of the selection's box (points)</text>
+<circle cx="30" cy="206" r="9.5" fill="#d4380d"/><text x="30" y="210" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="46" y="210" class="t" >Size; the link keeps proportions</text>
+<circle cx="30" cy="228" r="9.5" fill="#d4380d"/><text x="30" y="232" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="46" y="232" class="t" >Rotation of the frame</text>
+<text x="20" y="260" class="s" >Drag a caption (X, W, Angle ...) to scrub:</text>
+<text x="20" y="274" class="s" >1 unit a pixel; Shift 0.1; Ctrl+Shift 0.01.</text>
+<text x="20" y="292" class="s" >Or type a value and press Enter.</text>
+<rect x="340" y="44" width="640" height="24" rx="0" class="panel" />
+<text x="348" y="60" class="t b" >Color</text>
+<text x="972" y="60" class="s e" >Fill  ●   Stroke  ○</text>
+<rect x="348" y="75" width="26" height="26" rx="3" class="box" />
+<g transform="translate(350 77) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16"/><path d="M4 20 20 4" stroke="#ffffff"/></g><rect x="4" y="4" width="16" height="16"/><path d="M4 20 20 4" stroke="#c0392b"/></g>
+<rect x="376" y="75" width="26" height="26" rx="3" class="box" />
+<g transform="translate(378 77) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" fill="#ffffff"/></g><rect x="4" y="4" width="16" height="16" fill="#3a3a3a"/></g>
+<rect x="404" y="75" width="26" height="26" rx="3" class="soft" />
+<g transform="translate(406 77) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" fill="#ffffff"/></g><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#3a3a3a"/></linearGradient></defs><rect x="4" y="4" width="16" height="16" fill="url(#g)"/></g>
+<rect x="432" y="75" width="26" height="26" rx="3" class="box" />
+<g transform="translate(434 77) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" fill="#ffffff"/></g><defs><radialGradient id="g" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#3a3a3a"/></radialGradient></defs><rect x="4" y="4" width="16" height="16" fill="url(#g)"/></g>
+<circle cx="468" cy="90" r="9.5" fill="#d4380d"/><text x="468" y="94" class="c b" style="fill:#fff;font-size:11px">1</text>
+<rect x="348" y="108" width="600" height="24" rx="2" class="box" />
+<defs><linearGradient id="gb"><stop offset="0" stop-color="#f2b824"/><stop offset="0.55" stop-color="#e8452c"/><stop offset="1" stop-color="#6a4fc7"/></linearGradient></defs>
+<rect x="348" y="108" width="600" height="24" fill="url(#gb)"/>
+<path d="M348 132 l-5 9 h10z" fill="#fff" stroke="#222222"/>
+<path d="M678 132 l-5 9 h10z" fill="#fff" stroke="#222222"/>
+<path d="M948 132 l-5 9 h10z" fill="#fff" stroke="#222222"/>
+<circle cx="960" cy="120" r="9.5" fill="#d4380d"/><text x="960" y="124" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="348" y="162" class="s" >Stop</text>
+<rect x="384" y="148" width="56" height="20" rx="2" class="field" />
+<text x="389" y="162" class="s" >55%</text>
+<text x="460" y="162" class="s" >Angle</text>
+<rect x="500" y="148" width="60" height="20" rx="2" class="field" />
+<text x="505" y="162" class="s" >35</text>
+<rect x="576" y="147" width="24" height="24" rx="3" class="box" />
+<g transform="translate(578 149) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M12 5v14M5 12h14"/></g><path d="M12 5v14M5 12h14"/></g>
+<rect x="602" y="147" width="24" height="24" rx="3" class="box" />
+<g transform="translate(604 149) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M6 12h12"/></g><path d="M6 12h12"/></g>
+<rect x="628" y="147" width="24" height="24" rx="3" class="box" />
+<g transform="translate(630 149) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></g><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></g>
+<circle cx="450" cy="158" r="9.5" fill="#d4380d"/><text x="450" y="162" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="348" y="190" class="s" >Type</text>
+<text x="384" y="190" class="s" >Linear</text>
+<text x="470" y="190" class="s" >Spread</text>
+<rect x="520" y="176" width="100" height="20" rx="2" class="field" />
+<text x="525" y="190" class="s" >Pad</text>
+<path d="M606 183 l4 5 l4 -5z" class="line" />
+<text x="640" y="190" class="s" >Apply</text>
+<rect x="684" y="176" width="180" height="20" rx="2" class="field" />
+<text x="689" y="190" class="s" >Across the object</text>
+<path d="M850 183 l4 5 l4 -5z" class="line" />
+<circle cx="560" cy="186" r="9.5" fill="#d4380d"/><text x="560" y="190" class="c b" style="fill:#fff;font-size:11px">4</text>
+<rect x="348" y="208" width="70" height="22" rx="3" class="box" />
+<text x="383" y="223" class="s c" >Gray</text>
+<rect x="418" y="208" width="70" height="22" rx="3" class="soft" />
+<text x="453" y="223" class="s c" >RGB</text>
+<rect x="488" y="208" width="70" height="22" rx="3" class="box" />
+<text x="523" y="223" class="s c" >CMYK</text>
+<rect x="558" y="208" width="70" height="22" rx="3" class="box" />
+<text x="593" y="223" class="s c" >HSB</text>
+<circle cx="646" cy="219" r="9.5" fill="#d4380d"/><text x="646" y="223" class="c b" style="fill:#fff;font-size:11px">5</text>
+<text x="348" y="252" class="s" >R</text>
+<rect x="368" y="242" width="480" height="12" rx="2" class="field" />
+<rect x="786.51" y="239" width="10" height="18" rx="2" class="soft" />
+<rect x="860" y="238" width="56" height="20" rx="2" class="field" />
+<text x="865" y="252" class="s" >232</text>
+<text x="348" y="278" class="s" >G</text>
+<rect x="368" y="268" width="480" height="12" rx="2" class="field" />
+<rect x="492.47" y="265" width="10" height="18" rx="2" class="soft" />
+<rect x="860" y="264" width="56" height="20" rx="2" class="field" />
+<text x="865" y="278" class="s" >69</text>
+<text x="348" y="304" class="s" >B</text>
+<rect x="368" y="294" width="480" height="12" rx="2" class="field" />
+<rect x="447.37" y="291" width="10" height="18" rx="2" class="soft" />
+<rect x="860" y="290" width="56" height="20" rx="2" class="field" />
+<text x="865" y="304" class="s" >44</text>
+<text x="348" y="330" class="s" >A</text>
+<rect x="368" y="320" width="480" height="12" rx="2" class="field" />
+<rect x="548.39" y="317" width="10" height="18" rx="2" class="soft" />
+<rect x="860" y="316" width="56" height="20" rx="2" class="field" />
+<text x="865" y="330" class="s" >100</text>
+<circle cx="620" cy="272" r="9.5" fill="#d4380d"/><text x="620" y="276" class="c b" style="fill:#fff;font-size:11px">6</text>
+<text x="348" y="356" class="s" >Hex</text>
+<rect x="380" y="342" width="100" height="20" rx="2" class="field" />
+<text x="385" y="356" class="s" >#E8452C</text>
+<circle cx="500" cy="352" r="9.5" fill="#d4380d"/><text x="500" y="356" class="c b" style="fill:#fff;font-size:11px">7</text>
+<text x="348" y="384" class="s" >Swatches</text>
+<rect x="420" y="369" width="24" height="24" rx="3" class="box" />
+<g transform="translate(422 371) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M12 5v14M5 12h14"/></g><path d="M12 5v14M5 12h14"/></g>
+<rect x="446" y="369" width="24" height="24" rx="3" class="box" />
+<g transform="translate(448 371) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g>
+<rect x="348" y="398" width="24" height="24" fill="#000000" stroke="#9a9a9a"/>
+<rect x="376" y="398" width="24" height="24" fill="#555555" stroke="#9a9a9a"/>
+<rect x="404" y="398" width="24" height="24" fill="#aaaaaa" stroke="#9a9a9a"/>
+<rect x="432" y="398" width="24" height="24" fill="#ffffff" stroke="#9a9a9a"/>
+<rect x="460" y="398" width="24" height="24" fill="#e8452c" stroke="#9a9a9a"/>
+<rect x="488" y="398" width="24" height="24" fill="#f2b824" stroke="#9a9a9a"/>
+<rect x="516" y="398" width="24" height="24" fill="#2f7d4f" stroke="#9a9a9a"/>
+<rect x="544" y="398" width="24" height="24" fill="#0078d4" stroke="#9a9a9a"/>
+<rect x="572" y="398" width="24" height="24" fill="#6a4fc7" stroke="#9a9a9a"/>
+<rect x="600" y="398" width="24" height="24" fill="#1b3a6b" stroke="#9a9a9a"/>
+<rect x="628" y="398" width="24" height="24" fill="#00aeef" stroke="#9a9a9a"/>
+<rect x="656" y="398" width="24" height="24" fill="#ec008c" stroke="#9a9a9a"/>
+<circle cx="360" cy="410" r="9.5" fill="#d4380d"/><text x="360" y="414" class="c b" style="fill:#fff;font-size:11px">8</text>
+<rect x="340" y="44" width="640" height="382" fill="none" stroke="#9a9a9a"/>
+<circle cx="350" cy="450" r="9.5" fill="#d4380d"/><text x="350" y="454" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="366" y="454" class="t" >What the fill is: none, solid, linear or radial gradient</text>
+<circle cx="350" cy="470" r="9.5" fill="#d4380d"/><text x="350" y="474" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="366" y="474" class="t" >Gradient bar: drag a stop to move it, click the bar to add one, Alt-click a stop to delete it</text>
+<circle cx="350" cy="490" r="9.5" fill="#d4380d"/><text x="350" y="494" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="366" y="494" class="t" >Selected stop's position; angle of the gradient; add, delete, reverse</text>
+<circle cx="350" cy="510" r="9.5" fill="#d4380d"/><text x="350" y="514" class="c b" style="fill:#fff;font-size:11px">4</text>
+<text x="366" y="514" class="t" >Spread past the ends; apply across the object or (for strokes) along the path</text>
+<circle cx="350" cy="530" r="9.5" fill="#d4380d"/><text x="350" y="534" class="c b" style="fill:#fff;font-size:11px">5</text>
+<text x="366" y="534" class="t" >Color model of the sliders (Gray, RGB, CMYK, HSB)</text>
+<circle cx="350" cy="550" r="9.5" fill="#d4380d"/><text x="350" y="554" class="c b" style="fill:#fff;font-size:11px">6</text>
+<text x="366" y="554" class="t" >Sliders and value fields; A = opacity of the color</text>
+<circle cx="350" cy="570" r="9.5" fill="#d4380d"/><text x="350" y="574" class="c b" style="fill:#fff;font-size:11px">7</text>
+<text x="366" y="574" class="t" >Hex color (also none)</text>
+<circle cx="350" cy="590" r="9.5" fill="#d4380d"/><text x="350" y="594" class="c b" style="fill:#fff;font-size:11px">8</text>
+<text x="366" y="594" class="t" >Swatches: click to apply, + saves the current color</text>
+</svg>

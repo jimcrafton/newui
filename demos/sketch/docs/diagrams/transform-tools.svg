@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" role="img" aria-label="Rotate, Scale and Reflect tools">
+<title>Rotate, Scale and Reflect tools</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Rotate, Scale and Reflect</text>
+<rect x="20" y="44" width="320" height="300" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Rotate</text>
+<text x="30" y="308" class="s" >1 select  2 click to set the center (optional)</text>
+<text x="30" y="321" class="s" >3 drag: the angle swept round the center</text>
+<text x="30" y="334" class="s" >Shift = 15 degree steps</text>
+<g transform="translate(290 50) scale(1.45) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.500 12a7.500 7.500 0 1 1-2.200-5.300"/><path d="M19.500 4v4.500H15"/><circle cx="12" cy="12" r="1.500"/></g>
+<rect x="140" y="165" width="80" height="50" fill="#e8452c" opacity="0.3" stroke="#9a9a9a"/>
+<g transform="rotate(35 180 190)"><rect x="140" y="165" width="80" height="50" fill="#e8452c" stroke="#1b3a6b"/></g>
+<circle cx="180" cy="190" r="4" fill="#d4380d"/>
+<path d="M240 190 A60 60 0 0 1 229 224" class="acc" marker-end="url(#arrowAcc)"/>
+<rect x="30" y="280" width="300" height="0.1" rx="0" class="thin" />
+<rect x="350" y="44" width="320" height="300" rx="6" class="panel" />
+<text x="360" y="62" class="t b" >Scale</text>
+<text x="360" y="308" class="s" >click to set the center, then drag away from</text>
+<text x="360" y="321" class="s" >or toward it; uniform by default</text>
+<text x="360" y="334" class="s" >Shift = each direction on its own</text>
+<g transform="translate(620 50) scale(1.45) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="9" height="9"/><path d="M12 12L21 3M15 3h6v6"/></g>
+<rect x="490" y="168" width="70" height="44" fill="#e8452c" opacity="0.3" stroke="#9a9a9a"/>
+<rect x="490" y="168" width="120" height="76" fill="#e8452c" opacity="0.85" stroke="#1b3a6b"/>
+<circle cx="490" cy="168" r="4" fill="#d4380d"/>
+<line x1="560" y1="212" x2="610" y2="244" class="acc" marker-end="url(#arrowAcc)"/>
+<rect x="360" y="280" width="300" height="0.1" rx="0" class="thin" />
+<rect x="680" y="44" width="320" height="300" rx="6" class="panel" />
+<text x="690" y="62" class="t b" >Reflect</text>
+<text x="690" y="308" class="s" >click a point on the mirror line, then drag:</text>
+<text x="690" y="321" class="s" >the axis follows the pointer round that point</text>
+<text x="690" y="334" class="s" >Shift = 45 degree steps</text>
+<g transform="translate(950 50) scale(1.45) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 7L3 17h6z"/><path d="M15 7l6 10h-6z"/></g>
+<path d="M750 230 h60 l-30 -70z" fill="#e8452c" opacity="0.4" stroke="#9a9a9a"/>
+<path d="M930 230 h-60 l30 -70z" fill="#e8452c" stroke="#1b3a6b" transform="translate(0 0)"/>
+<line x1="840" y1="120" x2="840" y2="260" class="acc" stroke-dasharray="5 4"/>
+<circle cx="840" cy="230" r="4" fill="#d4380d"/>
+<rect x="690" y="280" width="300" height="0.1" rx="0" class="thin" />
+<rect x="20" y="360" width="960" height="140" rx="6" class="panel" />
+<text x="30" y="378" class="t b" >All three</text>
+<text x="30" y="464" class="s" >The center is the small circle in the selection frame (also draggable with the Select tool).</text>
+<text x="30" y="477" class="s" >A click without dragging only moves it. Alt held when the button is let go leaves the original and adds a transformed copy.</text>
+<text x="30" y="490" class="s" >Object &gt; Transform has Rotate 90, Flip, Transform Again (Ctrl+Shift+D) to repeat the last move / scale / rotate, and Reset Bounding Box.</text>
+</svg>

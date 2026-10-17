@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" role="img" aria-label="Cutting and combining">
+<title>Cutting and combining</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Knife, Eraser, Shape Builder and Pathfinder</text>
+<rect x="20" y="44" width="310" height="220" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Knife</text>
+<text x="30" y="241" class="s" >drag across filled shapes: every shape the</text>
+<text x="30" y="254" class="s" >stroke crosses (or only the selection) is cut</text>
+<ellipse cx="120" cy="150" rx="70" ry="55" fill="#e8452c" stroke="#1b3a6b"/>
+<path d="M60 70 L190 235" class="acc" stroke-dasharray="6 4"/>
+<ellipse cx="250" cy="150" rx="50" ry="55" fill="#e8452c" stroke="#1b3a6b" opacity="0.4"/>
+<path d="M214 125 A50 55 0 0 1 214 190" fill="none"/>
+<g transform="translate(270 52) scale(1.27) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.6"><path d="M4 20 14.5 5.2 19.2 9 8.2 20.6z" fill="#ffffff"/></g><path d="M4 20 14.5 5.2 19.2 9 8.2 20.6z" fill="#3a3a3a" stroke="none"/><path d="M6 18.2 14.4 7.2" stroke="#ffffff" stroke-width="1.2"/></g>
+<rect x="345" y="44" width="310" height="220" rx="6" class="panel" />
+<text x="355" y="62" class="t b" >Eraser</text>
+<text x="355" y="241" class="s" >drag over shapes and lines to rub them out;</text>
+<text x="355" y="254" class="s" >Up / Down arrows change the size</text>
+<rect x="380" y="100" width="230" height="90" fill="#1e6fe0" stroke="#1b3a6b"/>
+<path d="M470 100 a24 24 0 0 0 48 0z" fill="#f4f4f4"/><circle cx="494" cy="145" r="22" fill="#f4f4f4"/>
+<path d="M440 140 Q494 100 560 170" class="thin" stroke-dasharray="3 3"/>
+<g transform="translate(590 52) scale(1.27) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.6"><path d="M3.8 14.4 12 5.6 18.6 11.6 11.8 18.8H7.2z" fill="#ffffff"/></g><path d="M3.8 14.4 12 5.6 18.6 11.6 11.8 18.8H7.2z" fill="#ffffff"/><path d="M8.4 10.2 15.4 16.4" /><path d="M13 20.4H21"/></g>
+<rect x="670" y="44" width="310" height="220" rx="6" class="panel" />
+<text x="680" y="62" class="t b" >Shape Builder</text>
+<text x="680" y="241" class="s" >select overlapping shapes, drag across the pieces</text>
+<text x="680" y="254" class="s" >to join them; Alt-drag erases them</text>
+<circle cx="770" cy="150" r="52" fill="#e8452c" opacity="0.55" stroke="#1b3a6b"/><circle cx="830" cy="150" r="52" fill="#1e6fe0" opacity="0.55" stroke="#1b3a6b"/>
+<path d="M740 150 L860 150" class="acc" stroke-dasharray="6 4"/>
+<g transform="translate(940 52) scale(1.27) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7.2A6 6 0 0 1 12 16.8 6 6 0 0 1 12 7.2z" fill="#3a3a3a" stroke="none"/></g>
+<rect x="20" y="280" width="960" height="220" rx="6" class="panel" />
+<text x="30" y="298" class="t b" >Object &gt; Pathfinder (two or more selected shapes)</text>
+<text x="30" y="477" class="s" >Unite = one outline of everything; Minus Front = the lowest shape without those above it; Intersect = where all overlap; Exclude = what is in exactly one.</text>
+<text x="30" y="490" class="s" >Curves are cut into short straight pieces first, so the results are polygons. Object &gt; Path: Join, Reverse, Simplify, Outline Stroke.</text>
+<text x="120" y="322" class="t b c" >Unite</text>
+<defs><clipPath id="ca0"><circle cx="100" cy="395" r="40"/></clipPath><mask id="mb0"><rect x="40" y="340" width="200" height="120" fill="#fff"/><circle cx="140" cy="395" r="40" fill="#000"/></mask></defs>
+<circle cx="100" cy="395" r="40" fill="#1e6fe0" stroke="#1b3a6b"/><circle cx="140" cy="395" r="40" fill="#1e6fe0" stroke="#1b3a6b"/>
+<text x="350" y="322" class="t b c" >Minus Front</text>
+<defs><clipPath id="ca1"><circle cx="330" cy="395" r="40"/></clipPath><mask id="mb1"><rect x="270" y="340" width="200" height="120" fill="#fff"/><circle cx="370" cy="395" r="40" fill="#000"/></mask></defs>
+<circle cx="330" cy="395" r="40" fill="#1e6fe0" stroke="#1b3a6b" mask="url(#mb1)"/>
+<text x="580" y="322" class="t b c" >Intersect</text>
+<defs><clipPath id="ca2"><circle cx="560" cy="395" r="40"/></clipPath><mask id="mb2"><rect x="500" y="340" width="200" height="120" fill="#fff"/><circle cx="600" cy="395" r="40" fill="#000"/></mask></defs>
+<circle cx="600" cy="395" r="40" fill="#1e6fe0" stroke="#1b3a6b" clip-path="url(#ca2)"/>
+<text x="810" y="322" class="t b c" >Exclude</text>
+<defs><clipPath id="ca3"><circle cx="790" cy="395" r="40"/></clipPath><mask id="mb3"><rect x="730" y="340" width="200" height="120" fill="#fff"/><circle cx="830" cy="395" r="40" fill="#000"/></mask></defs>
+<path fill-rule="evenodd" fill="#1e6fe0" stroke="#1b3a6b" d="M750 395 a40 40 0 1 0 80 0 a40 40 0 1 0 -80 0 M790 395 a40 40 0 1 0 80 0 a40 40 0 1 0 -80 0"/>
+</svg>

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="300" viewBox="0 0 940 300" role="img" aria-label="Snapping, hit testing and selection">
+<title>Snapping, hit testing and selection</title>
+<desc>How the canvas decides what a point means.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="470" y="26" class="h c" >Snapping and hit testing</text>
+<rect x="20" y="44" width="440" height="230" rx="6" class="panel" />
+<text x="240" y="66" class="t b c" >snapAxis / snapPoint</text>
+<text x="34" y="90" class="s" >candidates (view pixels, within 6 px of the pointer):</text>
+<text x="34" y="105" class="s" >  grid lines (when Snap to Grid is on)</text>
+<text x="34" y="120" class="s" >  ruler guides</text>
+<text x="34" y="135" class="s" >  Smart Guides: left / center / right and top / middle /</text>
+<text x="34" y="150" class="s" >  bottom of every other object (up to 3000 objects)</text>
+<text x="34" y="165" class="s" ></text>
+<text x="34" y="180" class="s" >a moving selection tries its 3 vertical and 3 horizontal</text>
+<text x="34" y="195" class="s" >edges; the nearest catch wins, a magenta line shows it;</text>
+<text x="34" y="210" class="s" >while moving, the selection itself is left out of the list</text>
+<rect x="480" y="44" width="440" height="230" rx="6" class="panel" />
+<text x="700" y="66" class="t b c" >hitTest(point, tolerance)</text>
+<text x="494" y="90" class="s" >SketchDocument: front to back, visible and unlocked objects;</text>
+<text x="494" y="105" class="s" >an object in a clipping group counts only inside its mask.</text>
+<text x="494" y="120" class="s" ></text>
+<text x="494" y="135" class="s" >SketchObject: bounds first (cheap reject), then</text>
+<text x="494" y="150" class="s" >  Symbol / Image: inside the quad</text>
+<text x="494" y="165" class="s" >  filled closed shape: path.hit_test (non-zero)</text>
+<text x="494" y="180" class="s" >  stroke: stroke the outline at width + 2 * tolerance (the</text>
+<text x="494" y="195" class="s" >  stroker the painter uses) and test inside; brushes use reach</text>
+<text x="494" y="210" class="s" >tolerance = 4 screen pixels / zoom</text>
+</svg>

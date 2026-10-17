@@ -633,33 +633,36 @@ namespace newui {
         return !json5::from_string(text, outReader.doc);
     }
 
+    namespace {
+        // Frame and Dialog share this: ObjectReader::read() looks properties up on the *static* type it is
+        // given, so a Dialog must be read as a Dialog or its own properties (position) would be skipped.
+        template <typename FrameT, typename ParseFn, typename AnimFn>
+        bool readFrameFile(FrameT& frame, ParseFn parse, AnimFn animations) {
+            if (frame.getName().empty()) {
+                return false;
+            }
+            reflection::ObjectReader reader;
+            if (!parse(frame.getName(), reader)) {
+                return false;
+            }
+            // Frame::rootView() is a registered "rootView" property, so read()'s normal per-property walk
+            // reaches the file's "rootView" node on its own; reading it a second time would duplicate every child.
+            reader.read(&frame);
+            animations(frame, reader);
+            return true;
+        }
+    }
+
     bool Bundle::loadFrame(Frame& frame) const {
-        if (frame.getName().empty()) {
-            return false;
-        }
-
-        reflection::ObjectReader reader;
-        if (!parseNewuiFile(frame.getName(), reader)) {
-            return false;
-        }
-
-        // Frame::rootView() is a registered "rootView" property (reflection.h's
-        // TypedProperty AssumeCopyable override, see its own comment) - read()'s
-        // normal per-property walk already reaches the file's "rootView" node on
-        // its own now. A second, manual readNested("rootView", ...) call used to
-        // sit here (from when reflectgen unconditionally refused to register a
-        // non-copy-constructible ValueT, RootView included) - removed, since
-        // calling it on top of the now-real property read would read the same
-        // "rootView" node twice into the same already-live tree, duplicating
-        // every child view via its childViews collection's add-only
-        // reconstruction (see ObjectReader::read()'s own comment on that).
-        reader.read(&frame);
-        readAnimations(frame, reader);
-        return true;
+        return readFrameFile(frame,
+            [this](const std::string& name, reflection::ObjectReader& reader) { return parseNewuiFile(name, reader); },
+            [](Frame& f, reflection::ObjectReader& reader) { readAnimations(f, reader); });
     }
 
     bool Bundle::loadDialog(Dialog& dialog) const {
-        return loadFrame(dialog);
+        return readFrameFile(dialog,
+            [this](const std::string& name, reflection::ObjectReader& reader) { return parseNewuiFile(name, reader); },
+            [](Frame& f, reflection::ObjectReader& reader) { readAnimations(f, reader); });
     }
 
     bool Bundle::loadFrameFromFile(Frame& frame, const std::string& absolutePath) const {

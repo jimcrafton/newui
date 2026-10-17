@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-label="How the shapes are made">
+<title>How the shapes are made</title>
+<desc>Each tool produces a BLPath; the shapes are plain Bezier or line paths.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Geometry of the drawing tools</text>
+<text x="30" y="50" class="t b" >Rectangle - makeRect</text>
+<path d="M50 80 h160 v100 h-160 z" class="acc" />
+<rect x="46.8" y="76.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="206.8" y="76.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="206.8" y="176.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="46.8" y="176.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<text x="30" y="210" class="s" >add_rect: move, 3 lines, close</text>
+<text x="30" y="225" class="s" >(4 anchors; a closing line that ends</text>
+<text x="30" y="240" class="s" >on the first point is folded in)</text>
+<text x="340" y="50" class="t b" >Rounded rectangle - add_round_rect</text>
+<path d="M388 80 h104 c15.46 0 28 12.54 28 28 v44 c0 15.46 -12.54 28 -28 28 h-104 c-15.46 0 -28 -12.54 -28 -28 v-44 c0 -15.46 12.54 -28 28 -28 z" class="acc" />
+<text x="530" y="95" class="s" >radius r</text>
+<text x="530" y="110" class="s" >corner = cubic with</text>
+<text x="530" y="124" class="s" >handles r * 0.5523</text>
+<text x="340" y="210" class="s" >live handle (kLiveRadius) recognises the</text>
+<text x="340" y="225" class="s" >shape again from its outline alone:</text>
+<text x="340" y="240" class="s" >analyzeRoundRect(path, frameAngle)</text>
+<text x="650" y="50" class="t b" >Ellipse / circle - add_ellipse</text>
+<ellipse cx="750" cy="130" rx="80" ry="52" class="acc"/>
+<rect x="826.8" y="126.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="746.8" y="178.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="666.8" y="126.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="746.8" y="74.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<line x1="830" y1="130" x2="830" y2="101.28" class="thin" />
+<circle cx="830" cy="101.28" r="2.2" fill="#1e6fe0"/>
+<line x1="750" y1="78" x2="794.18" y2="78" class="thin" />
+<circle cx="794.18" cy="78" r="2.2" fill="#1e6fe0"/>
+<line x1="670" y1="130" x2="670" y2="158.72" class="thin" />
+<circle cx="670" cy="158.72" r="2.2" fill="#1e6fe0"/>
+<line x1="750" y1="182" x2="705.82" y2="182" class="thin" />
+<circle cx="705.82" cy="182" r="2.2" fill="#1e6fe0"/>
+<text x="650" y="210" class="s" >four cubics, handle length = radius * 0.5523</text>
+<text x="650" y="225" class="s" >(the circle tool drags out from the centre)</text>
+<text x="30" y="310" class="t b" >Polygon - regularPolygonPoints</text>
+<path d="M130 328 L183.69 359 L183.69 421 L130 452 L76.31 421 L76.31 359 Z" class="acc" />
+<rect x="126.8" y="324.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="180.49" y="355.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="180.49" y="417.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="126.8" y="448.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="73.11" y="417.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="73.11" y="355.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<circle cx="130" cy="390" r="2.5" class="box" />
+<text x="220" y="350" class="s" >p(i) = center +</text>
+<text x="220" y="365" class="s" >radius * (cos a(i), sin a(i))</text>
+<text x="220" y="380" class="s" >a(i) = first + 2 pi i / n</text>
+<text x="220" y="395" class="s" ></text>
+<text x="220" y="410" class="s" >Up / Down while dragging</text>
+<text x="220" y="425" class="s" >changes n (polygonSides_)</text>
+<text x="30" y="500" class="s" >Shift = first corner points straight up (-pi/2)</text>
+<text x="340" y="310" class="t b" >Star - starPoints</text>
+<path d="M440 324 L456.46 367.35 L502.77 369.6 L466.63 398.65 L478.79 443.4 L440 418 L401.21 443.4 L413.37 398.65 L377.23 369.6 L423.54 367.35 Z" class="acc" />
+<rect x="436.8" y="320.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="453.26" y="364.15" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="499.57" y="366.4" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="463.43" y="395.45" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="475.59" y="440.2" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="436.8" y="414.8" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="398.01" y="440.2" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="410.17" y="395.45" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="374.03" y="366.4" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="420.34" y="364.15" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<text x="530" y="350" class="s" >2n vertices, alternating</text>
+<text x="530" y="365" class="s" >outer radius R and</text>
+<text x="530" y="380" class="s" >inner radius R * ratio</text>
+<text x="530" y="395" class="s" ></text>
+<text x="530" y="410" class="s" >analyzeRegularShape() finds</text>
+<text x="530" y="425" class="s" >n, R, ratio, first angle from</text>
+<text x="530" y="440" class="s" >the outline (live handles)</text>
+<text x="650" y="310" class="t b" >Arc - arcPath</text>
+<rect x="674.43" y="371.02" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="740.46" y="332.9" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<line x1="677.63" y1="374.22" x2="690.18" y2="349.59" class="thin" />
+<circle cx="690.18" cy="349.59" r="2.2" fill="#1e6fe0"/>
+<line x1="743.66" y1="336.1" x2="716.05" y2="334.65" class="thin" />
+<circle cx="716.05" cy="334.65" r="2.2" fill="#1e6fe0"/>
+<rect x="740.46" y="332.9" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="802.15" y="377.71" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<line x1="743.66" y1="336.1" x2="771.27" y2="337.54" class="thin" />
+<circle cx="771.27" cy="337.54" r="2.2" fill="#1e6fe0"/>
+<line x1="805.35" y1="380.91" x2="795.44" y2="355.1" class="thin" />
+<circle cx="795.44" cy="355.1" r="2.2" fill="#1e6fe0"/>
+<rect x="802.15" y="377.71" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<rect x="786.3" y="452.3" width="6.4" height="6.4" fill="#fff" stroke="#1e6fe0" stroke-width="1.4"/>
+<line x1="805.35" y1="380.91" x2="815.26" y2="406.72" class="thin" />
+<circle cx="815.26" cy="406.72" r="2.2" fill="#1e6fe0"/>
+<line x1="789.5" y1="455.5" x2="809.05" y2="435.95" class="thin" />
+<circle cx="809.05" cy="435.95" r="2.2" fill="#1e6fe0"/>
+<path d="M677.63 374.22 C690.18 349.59 716.05 334.65 743.66 336.1 C771.27 337.54 795.44 355.1 805.35 380.91 C815.26 406.72 809.05 435.95 789.5 455.5 " class="acc" />
+<text x="820" y="340" class="s" >cubics of at most a</text>
+<text x="820" y="355" class="s" >quarter turn each:</text>
+<text x="820" y="370" class="s" >k = 4/3 tan(da / 4) * r</text>
+<text x="820" y="385" class="s" ></text>
+<text x="820" y="400" class="s" >start + sweep, clockwise</text>
+<text x="820" y="415" class="s" >on screen (y grows down)</text>
+</svg>
