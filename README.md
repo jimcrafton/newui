@@ -70,6 +70,48 @@ Or run the test binary directly:
 build\unittests\Debug\newui_tests.exe
 ```
 
+## GUI automation (opt-in)
+
+`newui_automation` is a separate library that lets a test driver find named views and read state
+over a named pipe while it drives the app with real `SendInput` input. It is **not** part of
+`newui`: an app has to link it, call `Automation::expose(rootView)` and `Automation::start(pipe,
+runLoop)` itself, ideally behind its own `#ifdef`, so a shipping build has none of it.
+
+Setup in an app:
+
+```cmake
+option(MYAPP_GUI_AUTOMATION "Build with newui's automation server" ON)
+if(MYAPP_GUI_AUTOMATION)
+    target_link_libraries(myapp PRIVATE newui_automation)
+    target_compile_definitions(myapp PRIVATE MYAPP_GUI_AUTOMATION)
+endif()
+```
+
+```cpp
+#ifdef MYAPP_GUI_AUTOMATION
+#include <newui/automation.h>
+#endif
+
+#ifdef MYAPP_GUI_AUTOMATION
+if (!pipeName.empty()) {                       // e.g. from a --automation <pipe> option
+    newui::Automation::expose(frame.rootView());
+    newui::Automation::start(pipeName, app.runLoop());
+}
+#endif
+```
+
+Enable or disable:
+
+- **Off for good:** build with the app's option OFF (the library isn't linked, the code isn't
+  compiled).
+- **Off for a run:** start the app without the pipe option; nothing listens.
+- **On for a run:** start the app with the pipe option (`myapp.exe --automation my_pipe`).
+
+Views are found by name, so name the ones a test needs. The pipe is local-only and restricted to
+the current user. Requests are one JSON object per line (`hello`, `findView`, `focused`, `getText`,
+`screenshot`, `idle`). See [automation.md](automation.md) for the full protocol, security notes and
+limits.
+
 ## Project layout
 
 ```

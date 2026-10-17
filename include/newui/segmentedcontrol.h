@@ -82,6 +82,11 @@ public:
     // measure), not derived from anything.
     Size naturalSize() const;
 
+    // Segment index's own rect in this control's local coordinates (empty if out of range);
+    // automation and tests use it to aim a click.
+    // @reflect ignore=true
+    Rect segmentBounds(std::size_t index) const;
+
     void paint(BLContext& ctx) override;
 
 private:
