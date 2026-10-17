@@ -174,14 +174,14 @@ point, drag its handles to widen, the diamond to slide it, **Alt-click** a point
 ![Stroke, Appearance and Graphic Styles panels](diagrams/panels-stroke-appearance.svg)
 
 **Stroke** panel: weight, miter limit, cap and join styles, dashes (tick *Dashed* and give dash and gap lengths) and the width
-profile (uniform, taper, bulge). *Align* and *Arrows* are in the panel but are not connected yet (section 15).
+profile (uniform, taper, bulge). *Align* puts the stroke of a closed shape centred on the outline, wholly inside it or wholly outside it. *Arrows* put a head (Simple, Filled or Dot) on the start and end of an open path; *Scale* sizes them as a percentage (100% is four stroke weights long). Neither applies to brush strokes.
 
 **Appearance** panel: an object can have several fills, strokes and *effects*, drawn bottom to top as listed (the top row is on
 top). Click a row to edit it; the eye hides it; the arrows reorder; the buttons add a stroke, fill or effect (the **fx** menu), clear,
 duplicate and delete. Each row has its own opacity and blend mode; the last row, **Opacity**, is for the whole object. Effects:
 **Drop Shadow, Outer Glow, Inner Shadow, Gaussian Blur** (these work on pixels and act on everything below them in the list) and
 **Round Corners, Offset Path, Roughen** (these reshape the outline). *Object > Expand Appearance* turns a complex appearance into
-plain objects.
+plain objects (strokes become filled outlines, brush strokes their artwork, shadows and blurs a picture).
 
 **Graphic Styles** save a whole appearance: click **+** to save the selected object's look, click a swatch to apply it.
 
@@ -282,12 +282,77 @@ box; the selection frame of objects in the layer is drawn in it.
 - The **Layer** menu adds: Duplicate, Bring Forward / Send Backward, **Merge Layer Down**, **Flatten Artwork** (everything into one
   layer), Show All, Hide Others, Lock Others, Unlock All, Select Objects in Layer, Expand / Collapse All.
 
-### Clipping masks and artboards
+### Clipping masks
+
+A **clipping mask** hides everything of some artwork that lies outside a shape - the way a window frame shows only part of the view.
+Nothing is deleted: the hidden parts are still there, and releasing the mask brings them back.
+
+**Why use one**
+
+- **Crop a picture or drawing to a shape**: a photo in a circle, a badge or a speech bubble, a pattern inside a button.
+- **Put pictures, stripes or gradients inside letters**: make the text the mask.
+- **Trim what spills over**: a background pattern, a stroke that runs past a card, a drawing that must stay inside an artboard.
+- **Shape a block of artwork without destroying it**: unlike Pathfinder *Intersect*, which really cuts the shapes, a mask can be
+  moved, resized or released later, and the original artwork stays intact.
+
+![Making a clipping mask in four steps](diagrams/mask-steps.svg)
+
+**How to make one**
+
+1. Draw (or place) the artwork that should be cut: shapes, a picture, text, other groups - as many objects as you like.
+2. Draw the shape that should *show through* and bring it to the **top** of the artwork (*Arrange > Bring to Front*, or
+   draw it last). Position it over the part you want to keep.
+3. Select the artwork **and** the shape (drag a box round them, or Shift+click each).
+4. Choose *Object > Clipping Mask > Make* (**Ctrl+7**). The artwork now shows only inside the shape, and the selection becomes one group.
+
+To take it apart again, select the masked group and choose *Object > Clipping Mask > Release* (**Ctrl+Shift+7**): the shape and the
+artwork are separate objects again, exactly as they were.
+
+**Examples**
+
+![Four ways to use a clipping mask](diagrams/mask-examples.svg)
+
+- **A - a picture in a shape.** Place a picture (*File > Place Image*), draw a circle over the part you want, select both, press
+  **Ctrl+7**. To show a different part of the picture afterwards, Ctrl+click the picture inside the group and move it; the circle
+  stays put. Give the circle a stroke *before* masking if you want a frame: since the mask's own stroke is not drawn, copy the circle
+  first (**Ctrl+C**, then **Ctrl+Shift+V** pastes it in place) and use the copy, with no fill and a stroke, as a frame on top.
+- **B - text as a window.** Type the words with the Text tool (a heavy, wide font works best), put them on top of a picture, a
+  gradient or a set of stripes, select both and make the mask. The letters show the artwork through them. To change the words later, release
+  the mask, edit the text, and make the mask again.
+- **C - trimming overflow.** Draw a pattern or a drawing that is larger than the area it is meant for, then draw a rectangle (or
+  any shape) exactly over the area you want to keep and make the mask. The same trick tidies the edge of a design that must stay
+  inside an artboard: use a rectangle the size of the artboard.
+- **D - shaped corners.** Cover a gradient header, a row of swatches or a bar chart with a rounded rectangle and mask: the artwork
+  takes on its corners. To change the corners later, release the mask, adjust the rounded rectangle and make the mask again.
+
+**What to know**
+
+![What a clipping mask keeps and drops](diagrams/mask-rules.svg)
+
+- **The mask is the top object.** Only the object that is on top of the others in the selection is the mask; the rest is cut by it.
+  To mask with *several* shapes, join them into one first (*Object > Pathfinder > Unite*, or Minus Front to cut a hole in one).
+- **The mask needs an area.** A straight line or a single point cannot be a mask. An open path is treated as if closed with a
+  straight line, as it would be when filled.
+- **Its fill, stroke and effects are not drawn.** Only the outline counts, so the mask can have any color. If you want a visible
+  frame, put a copy of the shape on top as a separate object (see example A).
+- **Edges are hard.** A point is either shown or hidden; there is no soft or fading mask. For a fading edge, put a gradient or a
+  blur on the artwork itself.
+- **Holes are respected.** If the mask shape has a hole (a ring from Minus Front, or text with an *O* or *A*), the artwork is cut out there too.
+- **Masks nest.** Select a masked group together with another shape that is on top and make the mask again: both cuts apply, and
+  only the overlap remains. Groups, layers and clipping masks all work together; a mask can sit in any layer.
+- **Working inside a masked group.** Click selects the whole group, which moves, rotates and scales mask and artwork together.
+  **Ctrl+click** picks one object inside (the artwork or the mask shape), and the Layers panel opens the group so you can pick any
+  member by its row: the mask is the top row. Move the artwork under the mask to choose which part shows, or pick the mask shape and
+  reshape it to change the window.
+- **Opacity and blend mode** set on the masked group apply to the cut result as one piece.
+- **Saving and exporting.** *File > Save* keeps the mask. *Export As Image* and *Export As PDF* apply the cut (the PDF keeps it as a
+  real clipping path, so the artwork stays vector). Other programs that open the saved SVG show the artwork uncut with the mask
+  shape on top, because the mask is stored as a sketch-specific marker; export first if you need the cut result elsewhere.
+- **Undo** (**Ctrl+Z**) undoes Make and Release like any other step.
+
+### Artboards
 
 ![Clipping masks and artboards](diagrams/clip-artboards.svg)
-
-**Clipping mask**: put the shape that should show through **on top** of the artwork, select them all, and choose *Object >
-Clipping Mask > Make* (**Ctrl+7**); the artwork shows only inside the top shape. *Release* is **Ctrl+Shift+7**.
 
 **Artboards** are named pages on the canvas. Use the **Artboard** tool: drag to make one, click one to select it, drag it or its
 handles to move or resize it, **Delete** removes it. The **Artboards** panel adds, deletes, names and positions them, and *Object >
@@ -313,6 +378,7 @@ too. **Ctrl+R** shows or hides the rulers, **Ctrl+'** the grid, **Ctrl+;** the g
 | File > Save (Ctrl+S), Save As | `.svg` (readable by other programs; everything sketch needs is kept in extra attributes), `.svgz`, or `.skb` (the native binary format: smaller and several times faster for big drawings). |
 | File > Export As Image | PNG, BMP or QOI of the active artboard. |
 | File > Export All Artboards | One image per artboard. |
+| File > Export As PDF | One PDF page per artboard, artwork kept as vectors (text as outlines). |
 | File > Document Setup | Page size, resolution (ppi), color mode and background of the active artboard. |
 | File > Place Image / Trace Image | Section 10. |
 
@@ -353,8 +419,7 @@ pictures along with the objects.
 
 So that nothing surprises you:
 
-- **Export As PDF** is in the File menu but not implemented. Export images instead.
-- The Stroke panel's **Align** (inside / outside) and **Arrows** controls are not connected.
+- **Export As PDF** keeps the artwork as vectors; shadows, glows and blurs become pictures, and gradients that repeat or reflect are written padded.
 - Pattern brushes (tiles for corners and sides), editing the artwork of a brush, symbol or pattern in place (make a new one with
   the selection instead), and raster effects on a placed picture when saving to SVG are not available.
 - Text on a path copies the path: editing the path later does not move the text (release it and make it again).

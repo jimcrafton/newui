@@ -57,6 +57,7 @@ namespace sketch {
         add("file.exportImage", [this]() { files_.exportImage(); });
         add("file.traceImage", [this]() { files_.traceImage(); });
         add("file.placeImage", [this]() { files_.placeImage(); });
+        add("file.exportPdf", [this]() { files_.exportPdf(); });
         add("file.exportArtboards", [this]() { files_.exportArtboards(); });
         add("file.exit", [this]() {
             if (files_.canClose()) {
@@ -154,6 +155,7 @@ namespace sketch {
         add("path.join", [this]() { document_.joinSelection(); });
         add("path.reverse", [this]() { document_.reverseSelection(); });
         add("path.simplify", [this]() { document_.simplifySelection(); });
+        add("object.expandAppearance", [this]() { document_.expandAppearance(); });
         add("path.outlineStroke", [this]() { document_.outlineStroke(); });
         add("color.rgb", [this]() { document_.convertToColorMode(ColorSpace::RGB); });
         add("color.cmyk", [this]() { document_.convertToColorMode(ColorSpace::CMYK); });

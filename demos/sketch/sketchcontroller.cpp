@@ -1,5 +1,6 @@
 #include "sketchcontroller.h"
 
+#include "pdfexport.h"
 #include "tracedialog.h"
 
 #include "imagetrace.h"
@@ -175,6 +176,26 @@ namespace sketch {
         }
         if (!exportPageImage(document_, path, exportScaleFor(document_))) {
             reportError("Could not export the image to " + path);
+            return false;
+        }
+        onStatus(*this, "Exported " + path);
+        return true;
+    }
+
+    bool SketchDocumentController::exportPdf() {
+        newui::FileDialogOptions options;
+        options.title = "Export As PDF";
+        options.filters.push_back({"PDF Document", "*.pdf"});
+        options.defaultExtension = "pdf";
+        std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
+        options.defaultFileName = stem + ".pdf";
+        std::string path;
+        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        if (!writePdf(document_, path)) {
+            reportError("Could not export the PDF to " + path);
             return false;
         }
         onStatus(*this, "Exported " + path);

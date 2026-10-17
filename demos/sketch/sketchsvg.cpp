@@ -948,7 +948,7 @@ namespace sketch {
             style.props.erase("mix-blend-mode");
             static const char* kKeys[] = {
                 "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
-                "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile", "data-brush",
+                "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile", "data-brush", "data-stroke-align", "data-arrows",
                 "data-fill-color", "data-stroke-color", "data-fill-pattern", "data-stroke-pattern",
             };
             for (const char* key : kKeys) {
@@ -1404,6 +1404,19 @@ namespace sketch {
             }
             if (total > 0.0) {
                 strokeOptions.dashes = values;
+            }
+        }
+        if (const std::string* align = style.get("data-stroke-align")) {
+            strokeOptions.align = *align == "inside" ? StrokeAlign::Inside : (*align == "outside" ? StrokeAlign::Outside : StrokeAlign::Center);
+        }
+        if (const std::string* arrows = style.get("data-arrows")) {
+            std::istringstream in(*arrows);
+            unsigned start = 0, end = 0;
+            double arrowScale = 100.0;
+            if (in >> start >> end >> arrowScale) {
+                strokeOptions.arrowStart = start < 4u ? ArrowStyle(start) : ArrowStyle::None;
+                strokeOptions.arrowEnd = end < 4u ? ArrowStyle(end) : ArrowStyle::None;
+                strokeOptions.arrowScale = std::max(1.0, arrowScale);
             }
         }
         if (const std::string* brush = style.get("data-brush")) {
@@ -2019,6 +2032,12 @@ namespace sketch {
             }
             if (options.brush) {  // other viewers ignore this and show the plain stroke
                 out << " data-brush=\"" << options.brush->id << "\"";
+            }
+            if (options.align != StrokeAlign::Center) {  // other viewers show it centred
+                out << " data-stroke-align=\"" << (options.align == StrokeAlign::Inside ? "inside" : "outside") << "\"";
+            }
+            if (options.arrowStart != ArrowStyle::None || options.arrowEnd != ArrowStyle::None) {
+                out << " data-arrows=\"" << unsigned(options.arrowStart) << " " << unsigned(options.arrowEnd) << " " << num(options.arrowScale) << "\"";
             }
             if (options.miterLimit != 4.0) {  // 4 is SVG's default
                 out << " stroke-miterlimit=\"" << num(options.miterLimit) << "\"";

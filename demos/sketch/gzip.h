@@ -7,6 +7,9 @@ namespace sketch {
     // gzip (RFC 1952) compression of whole byte strings, through the vendored zlib. Used for .svgz files: SVG text is very
     // repetitive, so it shrinks several times over.
 
+    // `data` as a zlib stream (RFC 1950: what a PDF FlateDecode stream holds). gzipDecompress reads it back too.
+    std::string zlibCompress(const std::string& data, int level = 6);
+
     // True when `data` starts with the gzip magic bytes (1F 8B) - how a file is told apart from plain SVG regardless of its name.
     bool isGzip(const std::string& data);
 

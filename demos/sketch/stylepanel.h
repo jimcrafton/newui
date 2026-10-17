@@ -71,6 +71,7 @@ namespace sketch {
         void applyStrokeOptions(const std::function<void(StrokeOptions&)>& change, const char* description);
         void applyDashes();
         void applyMiterLimit();
+        void applyArrowScale();
         void applyOpacity();
         void applyBlendMode(std::size_t index);
 

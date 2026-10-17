@@ -31,6 +31,8 @@ add_executable(sketch
     textwarp.h textwarp.cpp
     documenttextpath.cpp
     documentimages.cpp
+    documentexpand.cpp
+    pdfexport.h pdfexport.cpp
     documentbrushes.cpp
     textpanel.h textpanel.cpp
     numberscrubber.h numberscrubber.cpp
@@ -97,6 +99,8 @@ add_executable(sketch_tests
     imagedata.cpp
     documenttextpath.cpp
     documentimages.cpp
+    documentexpand.cpp
+    pdfexport.cpp
     documentartboards.cpp
     documenttrace.cpp
     imagetrace.cpp

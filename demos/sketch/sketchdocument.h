@@ -661,6 +661,10 @@ namespace sketch {
         // The stroke of each selected object becomes a filled shape of its own (wearing the stroke's paint), above the object's fill, which
         // stays as it was without a stroke. Dashes and a width profile are not part of the outline (a plain stroke of the weight).
         bool outlineStroke();
+        // Object > Expand Appearance: every visible fill and stroke of the selected shapes becomes an object of its own (a stroke as a filled
+        // outline - a brush stroke as its artwork), geometry effects are baked into the outlines, and several results are grouped (the group
+        // takes the object's opacity and blend mode). A shape with a pixel effect (shadow, glow, blur) becomes a picture instead. One undo step.
+        bool expandAppearance();
         // Lock/Hide act on the selection (which is then cleared - a locked or hidden object cannot be selected);
         // Unlock All / Show All act on the whole document.
         bool lockSelection();

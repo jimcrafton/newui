@@ -6,6 +6,8 @@
 #include "pathops.h"
 #include "imagetrace.h"
 #include "imagedata.h"
+#include "pdfexport.h"
+#include "gzip.h"
 #include "sketchsvg.h"
 #include "gzip.h"
 #include "sketchexport.h"
@@ -5737,4 +5739,387 @@ TEST(SketchImages, ThePhotoLoadsAndDrawsInReasonableTime) {
     lap("svg");
     const std::string bin = binaryFromDocument(doc, true);
     lap("skb");
+}
+
+// ---- Expand Appearance -----------------------------------------------------------------------------
+
+TEST(SketchExpand, AFillAndAStrokeBecomeTwoObjectsInAGroup) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 100, 50));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    rect.setStrokeWidth(4.0);
+    doc.setSelection({rect.id()});
+    ASSERT_TRUE(doc.expandAppearance());
+    ASSERT_EQ(doc.objectCount(), 2u);
+    const SketchObject& fill = doc.object(0);
+    const SketchObject& ring = doc.object(1);
+    EXPECT_NEAR(fill.geometryBounds().x0, 10.0, 1e-6);          // the fill keeps the outline
+    EXPECT_FALSE(fill.fill().isNone());
+    EXPECT_TRUE(fill.stroke().isNone());
+    EXPECT_NEAR(ring.geometryBounds().x0, 8.0, 1e-3);           // the stroke is an outline 2 either side
+    EXPECT_NEAR(ring.geometryBounds().x1, 112.0, 1e-3);
+    EXPECT_TRUE(ring.stroke().isNone());
+    EXPECT_FALSE(ring.fill().isNone());                          // wearing the stroke's paint
+    EXPECT_EQ(ring.fill().color().toRgba32().value, SketchColor::fromHex("#0000ff").toRgba32().value);
+    EXPECT_FALSE(fill.groups().empty());
+    EXPECT_EQ(fill.groups(), ring.groups());
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 1u);
+    EXPECT_FALSE(doc.object(0).stroke().isNone());
+}
+
+TEST(SketchExpand, EveryFillAndStrokeIsKeptAndWholeObjectOpacityGoesToTheGroup) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(0, 0, 60, 40));
+    std::vector<AppearanceItem> items = rect.appearance();
+    items.push_back(AppearanceItem::makeFill(SketchPaint::solid(SketchColor::fromHex("#00ff00"))));
+    items.push_back(AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::fromHex("#222222")), 2.0));
+    items[1].strokeWidth = 6.0;
+    rect.setAppearance(items);
+    rect.setOpacity(0.5);
+    doc.setSelection({rect.id()});
+    ASSERT_TRUE(doc.expandAppearance());
+    EXPECT_EQ(doc.objectCount(), 4u);   // two fills, two strokes
+    ASSERT_FALSE(doc.object(0).groups().empty());
+    EXPECT_NEAR(doc.groupProps(doc.object(0).groups().back()).opacity, 0.5, 1e-9);
+    EXPECT_NEAR(doc.object(0).opacity(), 1.0, 1e-9);
+}
+
+TEST(SketchExpand, GeometryEffectsAreBakedIntoTheOutline) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(0, 0, 100, 60));
+    rect.setStroke(SketchPaint::none());
+    std::vector<AppearanceItem> items = rect.appearance();
+    AppearanceItem round = AppearanceItem::makeEffect(EffectKind::RoundCorners);
+    round.radius = 20.0;
+    items.push_back(round);
+    rect.setAppearance(items);
+    doc.setSelection({rect.id()});
+    const std::size_t before = rect.geometry().size();
+    ASSERT_TRUE(doc.expandAppearance());
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_GT(doc.object(0).geometry().size(), before);   // curves where the corners were
+    for (const AppearanceItem& item : doc.object(0).appearance()) {
+        EXPECT_NE(item.kind, AppearanceKind::Effect);
+    }
+    // the corner point itself is no longer on the outline
+    EXPECT_NE(doc.object(0).geometry().hit_test(BLPoint(0.5, 0.5), BL_FILL_RULE_NON_ZERO), BL_HIT_TEST_IN);
+}
+
+TEST(SketchExpand, APixelEffectBecomesAPicture) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    SketchObject& rect = doc.add(SketchObject::makeRect(50, 50, 60, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    std::vector<AppearanceItem> items = rect.appearance();
+    items.push_back(AppearanceItem::makeEffect(EffectKind::DropShadow));
+    rect.setAppearance(items);
+    doc.setSelection({rect.id()});
+    ASSERT_TRUE(doc.expandAppearance());
+    ASSERT_EQ(doc.objectCount(), 1u);
+    ASSERT_TRUE(doc.object(0).isImage());
+    EXPECT_LT(doc.object(0).geometryBounds().x0, 50.0);    // the shadow makes the picture larger than the shape
+    EXPECT_GT(doc.object(0).geometryBounds().x1, 110.0);
+    auto isRed = [](std::uint32_t p) { return ((p >> 16) & 255u) > 200u && ((p >> 8) & 255u) < 60u && (p & 255u) < 60u; };
+    EXPECT_TRUE(isRed(pixelAt(doc, 70, 60)));              // it still looks the same
+}
+
+TEST(SketchExpand, BrushStrokesBecomeTheirArtwork) {
+    SketchDocument doc;
+    SketchObject& line = doc.add(SketchObject::makeLine(10, 50, 190, 50));
+    line.setFill(SketchPaint::none());
+    doc.setSelection({line.id()});
+    ASSERT_NE(doc.makeBrush(BrushKind::Calligraphic, ""), 0u);
+    ASSERT_TRUE(doc.applyBrush(doc.activeBrush()));
+    line.setStrokeWidth(10.0);
+    ASSERT_TRUE(doc.expandAppearance());
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_TRUE(doc.object(0).stroke().isNone());
+    EXPECT_TRUE(doc.object(0).strokeOptions().brush == nullptr);
+    EXPECT_GT(doc.object(0).geometryBounds().y1 - doc.object(0).geometryBounds().y0, 3.0);   // a nib-wide band, not a line
+    // a scatter brush: one object per copy
+    SketchDocument other;
+    SketchObject& dot = other.add(SketchObject::makeEllipse(0, 0, 4, 4));
+    other.setSelection({dot.id()});
+    ASSERT_NE(other.makeBrush(BrushKind::Scatter, ""), 0u);
+    SketchObject& path = other.add(SketchObject::makeLine(0, 100, 200, 100));
+    other.setSelection({path.id()});
+    ASSERT_TRUE(other.applyBrush(other.activeBrush()));
+    path.setStrokeWidth(1.0);
+    const std::size_t before = other.objectCount();
+    ASSERT_TRUE(other.expandAppearance());
+    EXPECT_GT(other.objectCount(), before + 3);
+}
+
+TEST(SketchExpand, NothingToExpandForTextSymbolsAndEmptySelections) {
+    SketchDocument doc;
+    EXPECT_FALSE(doc.expandAppearance());
+    SketchObject& text = doc.add(SketchObject::makeText("Hi", "", 24.0, BLPoint(10, 40)));
+    doc.setSelection({text.id()});
+    EXPECT_FALSE(doc.expandAppearance());
+}
+
+// ---- PDF export -------------------------------------------------------------------------------------
+
+namespace {
+    // The text of every content stream of the PDF (inflated), in file order, and the whole file as is.
+    struct PdfView {
+        std::string file;
+        std::vector<std::string> streams;
+        int pages = 0;
+        bool structureOk = false;
+    };
+
+    PdfView inspectPdf(const std::string& pdf) {
+        PdfView view;
+        view.file = pdf;
+        if (pdf.compare(0, 8, "%PDF-1.4") != 0 || pdf.find("%%EOF") == std::string::npos) {
+            return view;
+        }
+        // startxref -> the xref table -> every offset must be the start of "N 0 obj"
+        const std::size_t sx = pdf.rfind("startxref");
+        const std::size_t xref = std::size_t(std::strtoull(pdf.c_str() + sx + 9, nullptr, 10));
+        if (pdf.compare(xref, 4, "xref") != 0) {
+            return view;
+        }
+        std::size_t count = std::size_t(std::strtoull(pdf.c_str() + xref + 7, nullptr, 10));   // "xref\n0 N"
+        std::size_t entry = pdf.find('\n', pdf.find('\n', xref) + 1) + 1;                      // after "0 N"
+        bool ok = true;
+        for (std::size_t i = 0; i < count; ++i, entry += 20) {
+            if (i == 0) { continue; }   // the free entry
+            const std::size_t offset = std::size_t(std::strtoull(pdf.c_str() + entry, nullptr, 10));
+            const std::string expect = std::to_string(i) + " 0 obj";
+            ok = ok && pdf.compare(offset, expect.size(), expect) == 0;
+        }
+        view.structureOk = ok;
+        for (std::size_t at = 0; (at = pdf.find("/Type /Page ", at)) != std::string::npos; at += 12) { ++view.pages; }
+        // every stream, flate-decoded when it says so
+        for (std::size_t at = 0; (at = pdf.find("stream\n", at)) != std::string::npos;) {
+            if (at >= 3 && pdf.compare(at - 3, 3, "end") == 0) { at += 7; continue; }
+            const std::size_t begin = at + 7, end = pdf.find("\nendstream", begin);
+            const std::size_t dict = pdf.rfind("<<", at);
+            const bool flate = pdf.find("/FlateDecode", dict) < at;
+            std::string data = pdf.substr(begin, end - begin), text;
+            if (flate && gzipDecompress(data, text)) { data = text; }
+            view.streams.push_back(data);
+            at = end + 10;
+        }
+        return view;
+    }
+
+    bool anyStreamHas(const PdfView& v, const std::string& needle) {
+        for (const std::string& s : v.streams) {
+            if (s.find(needle) != std::string::npos) { return true; }
+        }
+        return false;
+    }
+}
+
+TEST(SketchPdf, ADocumentBecomesAWellFormedFileWithAPagePerArtboard) {
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    Artboard second;
+    second.name = "Two";
+    second.x = 300;
+    second.width = 50;
+    second.height = 50;
+    doc.addArtboard(second);
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    rect.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    rect.setStroke(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    rect.setStrokeWidth(3.0);
+    PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    EXPECT_TRUE(pdf.structureOk);
+    EXPECT_EQ(pdf.pages, 2);
+    EXPECT_NE(pdf.file.find("/MediaBox [0 0 200 100]"), std::string::npos);
+    EXPECT_NE(pdf.file.find("/MediaBox [0 0 50 50]"), std::string::npos);
+    EXPECT_TRUE(anyStreamHas(pdf, "1 0 0 rg"));      // the fill color
+    EXPECT_TRUE(anyStreamHas(pdf, "0 0 1 RG"));      // the stroke color
+    EXPECT_TRUE(anyStreamHas(pdf, "3 w"));           // its weight
+    EXPECT_TRUE(anyStreamHas(pdf, "10 10 m"));       // the outline
+    EXPECT_TRUE(anyStreamHas(pdf, "1 0 0 -1 0 100 cm"));   // the y flip of the first page (document y runs down)
+    const std::string path = (std::filesystem::temp_directory_path() / "sketch_test.pdf").string();
+    EXPECT_TRUE(writePdf(doc, path));
+    EXPECT_GT(std::filesystem::file_size(path), 200u);
+    std::filesystem::remove(path);
+}
+
+TEST(SketchPdf, GradientsDashesCmykOpacityAndClippingStayVector) {
+    SketchDocument doc;
+    doc.setPageSize(200, 200);
+    SketchObject& a = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    SketchGradient g = SketchGradient::fromColor(SketchColor::fromHex("#ff0000"));
+    GradientStop middle;
+    middle.offset = 0.5;
+    middle.color = SketchColor::fromHex("#00ff00");
+    g.stops.push_back(middle);
+    g.sortStops();
+    a.setFill(SketchPaint::linear(g));
+    SketchObject& b = doc.add(SketchObject::makeLine(10, 100, 190, 100));
+    b.setStroke(SketchPaint::solid(SketchColor::cmyk(0.1f, 0.2f, 0.3f, 0.4f, 1.0f)));
+    StrokeOptions dashed;
+    dashed.dashes = {6.0, 3.0};
+    dashed.cap = StrokeCap::Round;
+    b.setStrokeOptions(dashed);
+    b.setStrokeWidth(5.0);
+    SketchObject& c = doc.add(SketchObject::makeEllipse(150, 150, 30, 30));
+    c.setOpacity(0.4);
+    c.setBlendMode(BlendMode::Multiply);
+    SketchObject& d = doc.add(SketchObject::makeRect(20, 130, 60, 60));
+    SketchObject& mask = doc.add(SketchObject::makeEllipse(50, 160, 25, 25));
+    doc.setSelection({d.id(), mask.id()});
+    ASSERT_TRUE(doc.makeClippingMask());
+    PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    EXPECT_TRUE(pdf.structureOk);
+    EXPECT_NE(pdf.file.find("/ShadingType 2"), std::string::npos);                 // the gradient is a shading
+    EXPECT_NE(pdf.file.find("/FunctionType 3"), std::string::npos);                // three stops: stitched
+    EXPECT_TRUE(anyStreamHas(pdf, "/Pattern cs"));
+    EXPECT_TRUE(anyStreamHas(pdf, "[6 3 ] 0 d"));                                   // the dashes
+    EXPECT_TRUE(anyStreamHas(pdf, "1 J"));                                          // round caps
+    EXPECT_TRUE(anyStreamHas(pdf, "0.1 0.2 0.3 0.4 K"));                            // CMYK stays CMYK
+    EXPECT_NE(pdf.file.find("/BM /Multiply"), std::string::npos);                   // blend mode
+    EXPECT_NE(pdf.file.find("/ca 0.4"), std::string::npos);                         // opacity
+    EXPECT_NE(pdf.file.find("/Subtype /Form"), std::string::npos);                  // in a transparency group
+    EXPECT_TRUE(anyStreamHas(pdf, "W n"));                                          // the clipping mask
+}
+
+TEST(SketchPdf, PicturesPatternsSymbolsAndPixelEffectsAreEmbedded) {
+    SketchDocument doc;
+    doc.setPageSize(300, 300);
+    doc.placeImage(decodeImage(twoColorPng(20, 10), "p.png"), BLPoint(60, 40));
+    SketchObject& tile = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    tile.setFill(SketchPaint::solid(SketchColor::fromHex("#00aa00")));
+    doc.setSelection({tile.id()});
+    ASSERT_NE(doc.makePattern(""), 0u);
+    SketchObject& filled = doc.add(SketchObject::makeRect(100, 100, 80, 60));
+    doc.setSelection({filled.id()});
+    ASSERT_TRUE(doc.applyPattern(doc.activePattern(), false));
+    SketchObject& star = doc.add(SketchObject::makeRect(200, 20, 30, 30));
+    doc.setSelection({star.id()});
+    ASSERT_NE(doc.makeSymbol(""), 0u);
+    SketchObject& shadowed = doc.add(SketchObject::makeRect(200, 200, 40, 40));
+    std::vector<AppearanceItem> items = shadowed.appearance();
+    items.push_back(AppearanceItem::makeEffect(EffectKind::DropShadow));
+    shadowed.setAppearance(items);
+    PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    EXPECT_TRUE(pdf.structureOk);
+    EXPECT_NE(pdf.file.find("/Subtype /Image"), std::string::npos);
+    EXPECT_NE(pdf.file.find("/PatternType 1"), std::string::npos);                  // the tile
+    EXPECT_NE(pdf.file.find("/SMask"), std::string::npos);                          // the shadow picture has transparency
+    EXPECT_TRUE(anyStreamHas(pdf, " Do"));
+}
+
+TEST(SketchPdf, BrushStrokesAndTextAreWrittenAsOutlines) {
+    SketchDocument doc;
+    doc.setPageSize(300, 200);
+    SketchObject& line = doc.add(SketchObject::makeLine(10, 50, 250, 50));
+    doc.setSelection({line.id()});
+    ASSERT_NE(doc.makeBrush(BrushKind::Calligraphic, ""), 0u);
+    ASSERT_TRUE(doc.applyBrush(doc.activeBrush()));
+    line.setStrokeWidth(12.0);
+    doc.add(SketchObject::makeText("PDF", "", 40.0, BLPoint(20, 150)));
+    PdfView pdf = inspectPdf(pdfFromDocument(doc));
+    EXPECT_TRUE(pdf.structureOk);
+    EXPECT_FALSE(anyStreamHas(pdf, " Tf"));    // no fonts: the letters are paths
+    EXPECT_GT(pdf.streams.front().size(), 400u);
+    EXPECT_TRUE(anyStreamHas(pdf, " c\n"));    // curves in the glyph outlines
+}
+
+TEST(SketchPdf, TheShowcaseExportsWithoutTrouble) {
+    std::ifstream in("D:/code/newui-demos/demos/sketch/docs/examples/showcase.svg", std::ios::binary);
+    if (!in) {
+        GTEST_SKIP() << "the showcase file is not here";
+    }
+    std::ostringstream text;
+    text << in.rdbuf();
+    SketchDocument doc;
+    ASSERT_TRUE(documentFromSvg(text.str(), doc));
+    const std::string pdf = pdfFromDocument(doc);
+    EXPECT_GT(pdf.size(), 2000u);
+    if (const char* out = std::getenv("SKETCH_PDF_OUT")) {
+        std::ofstream file(out, std::ios::binary);
+        file.write(pdf.data(), std::streamsize(pdf.size()));
+    }
+}
+
+// ---- Stroke align and arrows ------------------------------------------------------------------------
+
+namespace {
+    BLBox strokeBounds(const SketchObject& object) {
+        BLPath outline;
+        BLBox box(0, 0, 0, 0);
+        for (std::size_t i = 0; i < object.appearance().size(); ++i) {
+            if (object.appearance()[i].kind == AppearanceKind::Stroke && object.strokeOutline(i, outline)) {
+                outline.get_bounding_box(&box);
+            }
+        }
+        return box;
+    }
+}
+
+TEST(SketchStrokeDecor, InsideAndOutsideKeepOneSideOfAClosedOutline) {
+    SketchDocument doc;
+    SketchObject& rect = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    rect.setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    rect.setStrokeWidth(10.0);
+    StrokeOptions options;
+    options.align = StrokeAlign::Inside;
+    rect.setStrokeOptions(options);
+    BLBox inside = strokeBounds(rect);
+    EXPECT_NEAR(inside.x0, 10.0, 0.1);
+    EXPECT_NEAR(inside.x1, 90.0, 0.1);
+    options.align = StrokeAlign::Outside;
+    rect.setStrokeOptions(options);
+    BLBox outside = strokeBounds(rect);
+    EXPECT_NEAR(outside.x0, 0.0, 0.1);
+    EXPECT_NEAR(outside.x1, 100.0, 0.1);
+    EXPECT_NEAR(rect.bounds().x0, 0.0, 0.1);   // the object's bounds take the outside half in
+}
+
+TEST(SketchStrokeDecor, ArrowheadsGrowTheEndsOfAnOpenPath) {
+    SketchDocument doc;
+    SketchObject& line = doc.add(SketchObject::makeLine(10, 50, 110, 50));
+    line.setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    line.setStrokeWidth(2.0);
+    StrokeOptions options;
+    options.arrowEnd = ArrowStyle::Filled;
+    line.setStrokeOptions(options);
+    BLBox box = strokeBounds(line);
+    EXPECT_NEAR(box.x1, 110.0, 0.1);              // the tip is on the end
+    EXPECT_NEAR(box.y1 - box.y0, 9.6, 0.2);       // a head 8 long and 0.6 * 8 either side
+    options.arrowEnd = ArrowStyle::Dot;
+    options.arrowScale = 200.0;
+    line.setStrokeOptions(options);
+    EXPECT_GT(strokeBounds(line).y1 - strokeBounds(line).y0, 10.0);
+    options.arrowStart = ArrowStyle::Simple;
+    line.setStrokeOptions(options);
+    EXPECT_LT(strokeBounds(line).x0, 10.0 + 0.1);
+}
+
+TEST(SketchStrokeDecor, AlignAndArrowsSurviveSavingAndOpening) {
+    SketchDocument doc;
+    SketchObject& a = doc.add(SketchObject::makeRect(10, 10, 80, 40));
+    a.setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    StrokeOptions options;
+    options.align = StrokeAlign::Outside;
+    a.setStrokeOptions(options);
+    SketchObject& b = doc.add(SketchObject::makeLine(10, 100, 110, 100));
+    b.setStroke(SketchPaint::solid(SketchColor::fromHex("#000000")));
+    StrokeOptions arrows;
+    arrows.arrowStart = ArrowStyle::Dot;
+    arrows.arrowEnd = ArrowStyle::Simple;
+    arrows.arrowScale = 150.0;
+    b.setStrokeOptions(arrows);
+    SketchDocument viaSvg, viaBin;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), viaSvg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), viaBin));
+    for (const SketchDocument* loaded : {&viaSvg, &viaBin}) {
+        ASSERT_EQ(loaded->objectCount(), 2u);
+        EXPECT_EQ(loaded->object(0).strokeOptions().align, StrokeAlign::Outside);
+        EXPECT_EQ(loaded->object(1).strokeOptions().arrowStart, ArrowStyle::Dot);
+        EXPECT_EQ(loaded->object(1).strokeOptions().arrowEnd, ArrowStyle::Simple);
+        EXPECT_DOUBLE_EQ(loaded->object(1).strokeOptions().arrowScale, 150.0);
+    }
+    EXPECT_EQ(pdfFromDocument(doc).compare(0, 8, "%PDF-1.4"), 0);
 }
