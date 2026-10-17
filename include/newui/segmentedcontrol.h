@@ -44,7 +44,14 @@ public:
     // and selectedIndex() resets to 0. An empty list just leaves this
     // control with nothing to paint/hit-test (never a crash).
     void setSegments(std::vector<std::string> labels);
+    // Registered as a collection (add/remove) so a .newui file's "segments": [...] list is actually read -
+    // a plain vector property is skipped by the reader. Put "segments" before "selectedIndex" in the file.
+    // @reflect collection add=addSegment remove=removeSegment
     const std::vector<std::string>& segments() const { return labels_; }
+    // Appends one enabled segment (the selection is left alone).
+    void addSegment(const std::string& label);
+    // Removes the first segment with this label; the selection moves back by one when an earlier segment goes.
+    void removeSegment(const std::string& label);
 
     std::size_t selectedIndex() const { return selectedIndex_; }
 

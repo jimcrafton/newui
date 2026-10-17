@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sketch - New Document dialog mockup</title>
+<style>
+  /* Reference mockup for the New Document dialog (demos/sketch). Same native-Windows look as
+     sketch-mockup.html; press N or tick the box to overlay the newui control each region becomes. */
+  :root {
+    --face: #f0f0f0; --face-2: #e6e6e6; --edge: #adadad; --edge-soft: #d4d4d4;
+    --text: #1a1a1a; --text-dim: #6b6b6b; --accent: #0078d4; --accent-soft: #cce4f7; --page: #ffffff;
+    --font: "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --face: #2b2b2b; --face-2: #353535; --edge: #5a5a5a; --edge-soft: #444; --text: #f0f0f0;
+            --text-dim: #a0a0a0; --accent: #4cc2ff; --accent-soft: #1e3a52; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #6e6e6e; font: 12px/1.3 var(--font); color: var(--text); }
+  button, select, input { font: inherit; color: inherit; }
+
+  .dialog { width: 780px; background: var(--face); border: 1px solid var(--edge); box-shadow: 0 8px 28px rgba(0,0,0,.4); display: flex; flex-direction: column; }
+  .titlebar { padding: 7px 10px; background: var(--face-2); border-bottom: 1px solid var(--edge-soft); font-weight: 600; }
+  .content { display: grid; grid-template-columns: 270px 1fr; gap: 14px; padding: 12px; }
+
+  /* ---------- left: presets ---------- */
+  .presets { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .modes { display: flex; border: 1px solid var(--edge); border-radius: 3px; overflow: hidden; }
+  .modes button { flex: 1; border: 0; background: var(--face); padding: 5px 0; border-right: 1px solid var(--edge-soft); cursor: default; }
+  .modes button:last-child { border-right: 0; }
+  .modes button.on { background: var(--accent); color: #fff; }
+  .list { border: 1px solid var(--edge); background: var(--page); color: #111; height: 340px; overflow: auto; }
+  .row { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center; padding: 4px 8px; border-bottom: 1px solid #efefef; cursor: default; }
+  .row:hover { background: #eef5fc; }
+  .row.sel { background: var(--accent); color: #fff; }
+  .row .thumb { width: 34px; height: 34px; display: grid; place-items: center; }
+  .row .thumb i { display: block; background: #fff; border: 1px solid #555; box-shadow: 1px 1px 0 rgba(0,0,0,.25); }
+  .row .size { font-size: 11px; opacity: .75; white-space: nowrap; }
+  .row b { font-weight: 600; display: block; }
+  .row small { opacity: .7; font-size: 10px; }
+
+  /* ---------- right: preview + settings ---------- */
+  .right { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .previewbox { height: 190px; background: #7a7a7a; border: 1px solid var(--edge); display: grid; place-items: center; position: relative; }
+  #page { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.45); position: relative; }
+  #page::after { content: ""; position: absolute; inset: 0; background-image: linear-gradient(#eee 1px, transparent 1px), linear-gradient(90deg, #eee 1px, transparent 1px); background-size: 12px 12px; }
+  .dim { position: absolute; font-size: 10px; color: #fff; background: rgba(0,0,0,.55); padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+  #dimW { bottom: 5px; left: 50%; transform: translateX(-50%); }
+  #dimH { right: 6px; top: 50%; transform: translateY(-50%); }
+  .grid { display: grid; grid-template-columns: 88px 1fr 1fr; gap: 8px 8px; align-items: center; }
+  .grid label { color: var(--text-dim); }
+  .field { height: 24px; padding: 0 6px; border: 1px solid var(--edge); background: var(--page); color: #111; border-radius: 2px; width: 100%; }
+  .span2 { grid-column: span 2; }
+  .row2 { display: flex; gap: 6px; align-items: center; }
+  .tb { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; padding: 0; cursor: default; }
+  .tb:hover { background: var(--face-2); border-color: var(--edge-soft); }
+  .tb.on { background: var(--accent-soft); border-color: var(--accent); }
+  .tb img { width: 20px; height: 20px; }
+  @media (prefers-color-scheme: dark) { .tb img { filter: invert(1) brightness(.9); } }
+  .summary { padding: 7px 9px; background: var(--face-2); border: 1px solid var(--edge-soft); border-radius: 3px; color: var(--text-dim); line-height: 1.5; }
+  .summary b { color: var(--text); font-weight: 600; }
+  .note { color: var(--text-dim); font-size: 11px; }
+
+  .footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--edge-soft); }
+  .btn { min-width: 84px; height: 26px; border: 1px solid var(--edge); background: var(--face-2); border-radius: 3px; cursor: default; }
+  .btn.default { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+  body.map [data-newui] { outline: 1px dashed #d4380d; outline-offset: -1px; position: relative; }
+  body.map [data-newui]::before { content: attr(data-newui); position: absolute; left: 2px; top: 1px; z-index: 50; font: 600 9px/1 var(--font); color: #fff; background: #d4380d; padding: 1px 3px; border-radius: 2px; pointer-events: none; white-space: nowrap; }
+  .maptoggle { position: fixed; right: 12px; bottom: 12px; background: var(--face); border: 1px solid var(--edge); padding: 4px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="dialog" data-newui="Frame (dialog) / RootView">
+  <div class="titlebar">New Document</div>
+
+  <div class="content">
+    <!-- Left column: starting shapes -->
+    <section class="presets" data-newui="SubView (vertical FlexLayout)">
+      <div class="modes" id="cats" data-newui="SegmentedControl (category)"><button class="on" data-cat="Print">Print</button><button data-cat="Web">Web</button><button data-cat="Mobile">Mobile</button><button data-cat="Art">Art</button></div>
+      <div class="list" id="list" data-newui="ListView (presets; custom thumbnail items)"></div>
+      <div class="note">Pick a starting shape, then adjust anything on the right.</div>
+    </section>
+
+    <!-- Right column: preview and settings -->
+    <section class="right" data-newui="SubView (vertical FlexLayout)">
+      <div class="previewbox" data-newui="PagePreview (custom SubView)">
+        <div id="page"></div>
+        <span class="dim" id="dimW"></span><span class="dim" id="dimH"></span>
+      </div>
+
+      <div class="grid" data-newui="SubView (rows of Label + control)">
+        <label>Name</label><input class="field span2" id="name" value="Untitled-1" data-newui="TextField">
+
+        <label>Width</label><input class="field" id="w" value="8.5" data-newui="TextField"><select class="field" id="unit" data-newui="DropDownList (units)" rowspan="2">
+          <option value="pt">Points</option><option value="px">Pixels</option><option value="mm">Millimeters</option>
+          <option value="cm">Centimeters</option><option value="in" selected>Inches</option><option value="pc">Picas</option></select>
+        <label>Height</label><input class="field" id="h" value="11" data-newui="TextField">
+        <div class="row2"><button class="tb" id="link" title="Keep proportions" data-newui="ToolbarButton (toggle)"><img src="../Resources/icons/link-aspect.svg" alt=""></button></div>
+
+        <label>Orientation</label>
+        <div class="row2 span2" data-newui="Toolbar (orientation)">
+          <button class="tb on" id="portrait" title="Portrait" data-newui="ToolbarButton (toggle)"><img src="../Resources/icons/orientation-portrait.svg" alt=""></button>
+          <button class="tb" id="landscape" title="Landscape" data-newui="ToolbarButton (toggle)"><img src="../Resources/icons/orientation-landscape.svg" alt=""></button>
+        </div>
+
+        <label>Color mode</label>
+        <div class="modes span2" id="mode" data-newui="SegmentedControl (RGB / CMYK)"><button class="on" data-m="RGB">RGB</button><button data-m="CMYK">CMYK</button></div>
+
+        <label>Resolution</label>
+        <input class="field" id="ppi" value="300" data-newui="TextField"><select class="field" id="ppiPreset" data-newui="DropDownList (ppi presets)">
+          <option>72 ppi (screen)</option><option>96 ppi (Windows)</option><option>150 ppi (draft)</option><option selected>300 ppi (print)</option><option>600 ppi (fine print)</option></select>
+
+        <label>Background</label>
+        <select class="field span2" id="bg" data-newui="DropDownList (background)"><option>White</option><option>Transparent</option><option>Current fill color</option></select>
+      </div>
+
+      <div class="summary" id="summary" data-newui="Label (word-wrapped, multi-line)"></div>
+    </section>
+  </div>
+
+  <div class="footer" data-newui="SubView (horizontal FlexLayout, right aligned)">
+    <button class="btn default" data-newui="Button (default)">Create</button>
+    <button class="btn" data-newui="Button">Cancel</button>
+  </div>
+</div>
+
+<label class="maptoggle"><input type="checkbox" id="map"> Show newui control mapping</label>
+
+<script>
+  // Static page sizes in points (1 pt = 1/72 in). px preset sizes are given in pixels @ their ppi.
+  const PT = { pt: 1, pc: 12, in: 72, mm: 72 / 25.4, cm: 72 / 2.54 };
+  const P = [
+    // cat, name, w, h, unit, ppi, mode
+    ['Print', 'Letter', 8.5, 11, 'in', 300, 'CMYK'], ['Print', 'Legal', 8.5, 14, 'in', 300, 'CMYK'],
+    ['Print', 'Tabloid', 11, 17, 'in', 300, 'CMYK'], ['Print', 'A3', 297, 420, 'mm', 300, 'CMYK'],
+    ['Print', 'A4', 210, 297, 'mm', 300, 'CMYK'], ['Print', 'A5', 148, 210, 'mm', 300, 'CMYK'],
+    ['Print', 'B5', 176, 250, 'mm', 300, 'CMYK'], ['Print', 'Business card', 3.5, 2, 'in', 300, 'CMYK'],
+    ['Print', 'Poster 18 x 24', 18, 24, 'in', 150, 'CMYK'], ['Print', 'Postcard', 6, 4, 'in', 300, 'CMYK'],
+    ['Web', 'Full HD', 1920, 1080, 'px', 72, 'RGB'], ['Web', 'HD', 1280, 720, 'px', 72, 'RGB'],
+    ['Web', 'Desktop 1440', 1440, 900, 'px', 72, 'RGB'], ['Web', 'Tablet landscape', 1024, 768, 'px', 72, 'RGB'],
+    ['Web', 'Social square', 1080, 1080, 'px', 72, 'RGB'], ['Web', 'Banner', 728, 90, 'px', 72, 'RGB'],
+    ['Mobile', 'Phone (1179 x 2556)', 1179, 2556, 'px', 72, 'RGB'], ['Mobile', 'Phone (1080 x 2400)', 1080, 2400, 'px', 72, 'RGB'],
+    ['Mobile', 'Tablet (2048 x 2732)', 2048, 2732, 'px', 72, 'RGB'], ['Mobile', 'App icon', 1024, 1024, 'px', 72, 'RGB'],
+    ['Art', 'Square 1000', 1000, 1000, 'px', 72, 'RGB'], ['Art', 'Square 12 in', 12, 12, 'in', 300, 'RGB'],
+    ['Art', 'Illustration 8 x 10', 8, 10, 'in', 300, 'RGB'], ['Art', 'Custom', 800, 600, 'px', 72, 'RGB'],
+  ];
+  const $ = id => document.getElementById(id);
+  let cat = 'Print', sel = 0, mode = 'CMYK', landscape = false;
+
+  const ppi = () => Math.max(1, parseFloat($('ppi').value) || 72);
+  const toPt = (v, u) => u === 'px' ? v * 72 / ppi() : v * PT[u];
+  const fromPt = (pt, u) => u === 'px' ? pt * ppi() / 72 : pt / PT[u];
+  const fmt = n => (Math.round(n * 100) / 100).toString();
+
+  function buildList() {
+    $('list').innerHTML = '';
+    P.forEach((p, i) => {
+      if (p[0] !== cat) return;
+      const [, name, w, h, u] = p;
+      const k = 28 / Math.max(w * (u === 'px' ? 1 : 1) * 1, h);
+      const ar = w / h, tw = ar >= 1 ? 30 : 30 * ar, th = ar >= 1 ? 30 / ar : 30;
+      const row = document.createElement('div');
+      row.className = 'row' + (i === sel ? ' sel' : '');
+      row.innerHTML = `<div class="thumb"><i style="width:${Math.max(6, tw)}px;height:${Math.max(6, th)}px"></i></div>
+        <div><b>${name}</b><small>${p[6]} &middot; ${p[5]} ppi</small></div><div class="size">${w} &times; ${h} ${u}</div>`;
+      row.onclick = () => { sel = i; load(P[i]); buildList(); };
+      $('list').appendChild(row);
+    });
+  }
+
+  function load(p) {
+    $('name').value = 'Untitled-1';
+    $('unit').value = p[4]; $('w').value = p[2]; $('h').value = p[3];
+    $('ppi').value = p[5]; setMode(p[6]); landscape = p[2] > p[3];
+    syncOrientation(); captureRatio(); update();
+  }
+
+  function setMode(m) {
+    mode = m;
+    [...$('mode').children].forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  }
+  function syncOrientation() {
+    $('portrait').classList.toggle('on', !landscape);
+    $('landscape').classList.toggle('on', landscape);
+  }
+
+  function update() {
+    const u = $('unit').value, w = parseFloat($('w').value) || 1, h = parseFloat($('h').value) || 1;
+    const wpt = toPt(w, u), hpt = toPt(h, u);
+    const s = Math.min(150 / hpt, 240 / wpt), pw = Math.max(8, wpt * s), ph = Math.max(8, hpt * s);
+    $('page').style.width = pw + 'px'; $('page').style.height = ph + 'px';
+    $('dimW').textContent = `${fmt(w)} ${u}`; $('dimH').textContent = `${fmt(h)} ${u}`;
+    const pxW = Math.round(wpt * ppi() / 72), pxH = Math.round(hpt * ppi() / 72);
+    $('summary').innerHTML =
+      `<b>${fmt(wpt)} &times; ${fmt(hpt)} pt</b> &nbsp;=&nbsp; ${fmt(fromPt(wpt, 'in'))} &times; ${fmt(fromPt(hpt, 'in'))} in &nbsp;=&nbsp; ${fmt(fromPt(wpt, 'mm'))} &times; ${fmt(fromPt(hpt, 'mm'))} mm<br>` +
+      `<b>${pxW.toLocaleString()} &times; ${pxH.toLocaleString()} px</b> at ${fmt(ppi())} ppi &middot; ${mode} &middot; ${landscape ? 'Landscape' : 'Portrait'}` +
+      (mode === 'CMYK' ? '<br>CMYK documents keep real CMYK values through SVG and PDF export.' : '');
+  }
+
+  // Unit change converts the numbers in place so the physical size stays the same.
+  let lastUnit = $('unit').value;
+  $('unit').onchange = () => {
+    const nu = $('unit').value;
+    $('w').value = fmt(fromPt(toPt(parseFloat($('w').value) || 1, lastUnit), nu));
+    $('h').value = fmt(fromPt(toPt(parseFloat($('h').value) || 1, lastUnit), nu));
+    lastUnit = nu; update();
+  };
+  const rotate = toLandscape => {
+    const w = parseFloat($('w').value) || 1, h = parseFloat($('h').value) || 1;
+    if ((toLandscape && w < h) || (!toLandscape && w > h)) { $('w').value = fmt(h); $('h').value = fmt(w); }
+    landscape = toLandscape; syncOrientation(); captureRatio(); update();
+  };
+  $('portrait').onclick = () => rotate(false);
+  $('landscape').onclick = () => rotate(true);
+  // Keep proportions: while the link toggle is on, editing one side scales the other by the ratio
+  // captured when the toggle was switched on (or when a preset/orientation last set the size).
+  let ratio = 1;
+  const captureRatio = () => { ratio = (parseFloat($('w').value) || 1) / (parseFloat($('h').value) || 1); };
+  const linked = () => $('link').classList.contains('on');
+  ['w', 'h', 'ppi'].forEach(id => $(id).oninput = () => {
+    if (linked() && id === 'w') $('h').value = fmt((parseFloat($('w').value) || 0) / ratio);
+    if (linked() && id === 'h') $('w').value = fmt((parseFloat($('h').value) || 0) * ratio);
+    if (id !== 'ppi') landscape = (parseFloat($('w').value) || 0) > (parseFloat($('h').value) || 0);
+    syncOrientation(); update();
+  });
+  $('ppiPreset').onchange = () => { $('ppi').value = parseInt($('ppiPreset').value); update(); };
+  [...$('mode').children].forEach(b => b.onclick = () => { setMode(b.dataset.m); update(); });
+  [...$('cats').children].forEach(b => b.onclick = () => {
+    cat = b.dataset.cat; [...$('cats').children].forEach(x => x.classList.toggle('on', x === b));
+    sel = P.findIndex(p => p[0] === cat); load(P[sel]); buildList();
+  });
+  $('link').onclick = () => { $('link').classList.toggle('on'); captureRatio(); };
+
+  const box = $('map');
+  box.onchange = () => document.body.classList.toggle('map', box.checked);
+  addEventListener('keydown', e => { if (e.key.toLowerCase() === 'n' && e.target === document.body) { box.checked = !box.checked; box.onchange(); } });
+
+  load(P[0]); buildList();
+</script>
+</body>
+</html>

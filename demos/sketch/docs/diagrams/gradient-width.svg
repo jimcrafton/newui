@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="430" viewBox="0 0 1000 430" role="img" aria-label="Gradient and Width tools">
+<title>Gradient and Width tools</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Gradient tool and Width tool</text>
+<rect x="20" y="44" width="470" height="370" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Gradient tool</text>
+<text x="30" y="378" class="s" >drag across the object to lay a gradient axis (Shift = 45 degrees)</text>
+<text x="30" y="391" class="s" >drag the circle / square ends or the diamond stops; click the axis to add a stop;</text>
+<text x="30" y="404" class="s" >Alt-click a stop to delete it. With the Color panel on Stroke, it edits the stroke.</text>
+<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="90" y1="120" x2="400" y2="270"><stop offset="0" stop-color="#f2b824"/><stop offset=".55" stop-color="#e8452c"/><stop offset="1" stop-color="#6a4fc7"/></linearGradient></defs>
+<rect x="70" y="90" width="370" height="200" rx="14" fill="url(#gg)" stroke="#1b3a6b" stroke-width="2"/>
+<line x1="90" y1="120" x2="400" y2="270" class="acc" />
+<circle cx="90" cy="120" r="6" class="box" />
+<rect x="394" y="264" width="12" height="12" rx="0" class="box" />
+<path d="M260.5 194.5 l7 8 l-7 8 l-7 -8z" fill="#fff" stroke="#222222" stroke-width="1.6"/>
+<rect x="510" y="44" width="470" height="370" rx="6" class="panel" />
+<text x="520" y="62" class="t b" >Width tool</text>
+<text x="520" y="378" class="s" >drag a path to add a width point; drag its handles to widen the</text>
+<text x="520" y="391" class="s" >stroke, the diamond to slide it; Alt-click a point to delete it.</text>
+<text x="520" y="404" class="s" >Stroke panel &gt; Profile: uniform, taper, bulge presets.</text>
+<path d="M538.12 217.66 L544.43 211.51 L550.76 205.39 L557.11 199.32 L563.49 193.34 L569.91 187.48 L576.37 181.76 L582.9 176.22 L589.48 170.88 L596.15 165.78 L602.9 160.94 L609.75 156.39 L616.7 152.15 L623.77 148.27 L630.97 144.75 L638.29 141.65 L645.74 138.97 L653.32 136.76 L661.01 135.04 L668.8 133.83 L676.67 133.14 L684.59 132.99 L692.53 133.38 L700.47 134.3 L708.39 135.75 L716.26 137.69 L724.06 140.11 L731.78 142.98 L739.41 146.27 L746.95 149.95 L754.39 153.98 L761.73 158.35 L768.98 163 L776.13 167.91 L783.19 173.06 L790.17 178.4 L797.06 183.9 L803.88 189.53 L810.62 195.25 L817.29 201.04 L823.89 206.86 L830.43 212.68 L836.91 218.46 L843.34 224.18 L849.71 229.8 L856.03 235.3 L862.31 240.64 L868.55 245.79 L874.76 250.75 L880.94 255.47 L887.1 259.93 L893.25 264.13 L899.39 268.03 L905.55 271.63 L911.72 274.91 L917.93 277.85 L924.19 280.43 L930.51 282.66 L936.92 284.5 L943.41 285.95 L950.09 287 L949.91 293 L942.93 293.61 L935.75 293.77 L928.49 293.47 L921.14 292.71 L913.73 291.5 L906.28 289.83 L898.78 287.74 L891.27 285.23 L883.75 282.33 L876.23 279.06 L868.72 275.46 L861.24 271.54 L853.78 267.36 L846.35 262.92 L838.97 258.28 L831.62 253.46 L824.33 248.5 L817.09 243.44 L809.9 238.31 L802.77 233.14 L795.71 227.97 L788.71 222.85 L781.79 217.79 L774.94 212.84 L768.16 208.03 L761.47 203.38 L754.87 198.94 L748.36 194.71 L741.94 190.73 L735.61 187.02 L729.38 183.6 L723.25 180.47 L717.22 177.65 L711.27 175.15 L705.41 172.97 L699.61 171.11 L693.86 169.56 L688.14 168.34 L682.41 167.44 L676.67 166.86 L670.87 166.6 L664.99 166.68 L659.01 167.1 L652.92 167.88 L646.71 169.01 L640.36 170.51 L633.89 172.36 L627.3 174.58 L620.59 177.16 L613.77 180.07 L606.85 183.3 L599.85 186.83 L592.77 190.63 L585.63 194.68 L578.42 198.95 L571.18 203.4 L563.89 207.99 L556.57 212.71 L549.23 217.5 L541.88 222.34 Z" fill="#1b3a6b"/>
+<line x1="754.39" y1="153.98" x2="735.61" y2="187.02" class="acc" />
+<circle cx="754.39" cy="153.98" r="4.5" class="box" />
+<circle cx="735.61" cy="187.02" r="4.5" class="box" />
+<path d="M745 164.5 l6 6 l-6 6 l-6 -6z" fill="#fff" stroke="#222222" stroke-width="1.6"/>
+</svg>

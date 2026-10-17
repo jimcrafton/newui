@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sketch - live shape handles</title>
+<style>
+  /* Mockup: the extra on-canvas handles of a selected Star, Polygon and Rounded Rectangle (Select tool). They sit next to the
+     usual selection frame and resize / rotate handles. Blue = the live-shape handles; each one says what it edits. */
+  :root { --page: #fff; --pasteboard: #7a7a7a; --accent: #1e6fe0; --text: #1a1a1a; --dim: #666; --edge: #bbb; --font: "Segoe UI", system-ui, sans-serif; }
+  @media (prefers-color-scheme: dark) { :root { --text: #eee; --dim: #aaa; } body { background: #222; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; font: 13px/1.4 var(--font); color: var(--text); }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; color: var(--dim); max-width: 900px; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; }
+  figure { margin: 0; width: 330px; }
+  .stage { background: var(--pasteboard); padding: 14px; }
+  .stage svg { display: block; background: var(--page); width: 100%; height: 270px; }
+  figcaption { margin-top: 8px; }
+  figcaption b { display: block; }
+  ul { margin: 6px 0 0; padding-left: 18px; color: var(--dim); }
+  .legend { margin-top: 18px; max-width: 900px; color: var(--dim); }
+  .legend code { color: var(--text); }
+  .frame { fill: none; stroke: var(--accent); stroke-width: 1; }
+  .hsq { fill: #fff; stroke: var(--accent); }
+  .live { fill: var(--accent); stroke: #fff; stroke-width: 1.5; }
+  .guide { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; fill: none; }
+  .tip { font: 11px var(--font); fill: #fff; }
+  .tipbg { fill: #1a1a1a; opacity: .88; }
+</style>
+</head>
+<body>
+<h1>Live shape handles</h1>
+<p class="lead">A single selected Star, Polygon or Rounded Rectangle (drawn with the shape tools, or loaded from a file - the shape is recognised from its outline) shows extra handles with the Select tool. Dragging one changes the shape itself, as one undo step; the ordinary frame handles still move, resize and rotate it. Resizing a shape unevenly stops it being regular, and the extra handles then go away until it is regular again.</p>
+
+<div class="row">
+  <figure>
+    <div class="stage">
+      <svg viewBox="0 0 300 270" data-newui="CanvasView overlay (live shape handles of a Star)">
+        <path d="M150 38 L170 98 L233 98 L182 135 L202 196 L150 159 L98 196 L118 135 L67 98 L130 98 Z" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5"/>
+        <rect class="frame" x="67" y="38" width="166" height="158"/>
+        <g class="hsq"><rect x="63" y="34" width="7" height="7"/><rect x="146" y="34" width="7" height="7"/><rect x="229" y="34" width="7" height="7"/><rect x="63" y="113" width="7" height="7"/><rect x="229" y="113" width="7" height="7"/><rect x="63" y="192" width="7" height="7"/><rect x="146" y="192" width="7" height="7"/><rect x="229" y="192" width="7" height="7"/></g>
+        <!-- the inner-radius handle: on an inner corner, drag toward / away from the center -->
+        <line class="guide" x1="150" y1="119" x2="170" y2="98"/>
+        <circle class="live" cx="170" cy="98" r="5"/>
+        <!-- the points handle: a diamond just under the center, drag left / right -->
+        <path class="live" d="M150 126 l6 6 -6 6 -6 -6z"/>
+        <path d="M137 150 h-7 m3 -3 l-3 3 3 3 M163 150 h7 m-3 -3 l3 3 -3 3" stroke="var(--accent)" fill="none" stroke-width="1.2"/>
+        <g transform="translate(176 90)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">inner 50%</text></g>
+        <g transform="translate(118 168)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">5 points</text></g>
+      </svg>
+    </div>
+    <figcaption><b>Star</b>
+      <ul><li><b style="display:inline">Round handle on an inner corner</b> - how far the points reach out: drag toward the center for long thin points, away for short stubby ones (the inner radius as a fraction of the outer, 5% to 95%).</li>
+      <li><b style="display:inline">Diamond near the center</b> - how many points: drag left for fewer, right for more (one point per 14 px, 3 to 40).</li></ul></figcaption>
+  </figure>
+
+  <figure>
+    <div class="stage">
+      <svg viewBox="0 0 300 270" data-newui="CanvasView overlay (live shape handles of a Polygon)">
+        <path d="M150 38 L226 93 L197 182 L103 182 L74 93 Z" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5"/>
+        <rect class="frame" x="74" y="38" width="152" height="144"/>
+        <g class="hsq"><rect x="70" y="34" width="7" height="7"/><rect x="146" y="34" width="7" height="7"/><rect x="222" y="34" width="7" height="7"/><rect x="70" y="106" width="7" height="7"/><rect x="222" y="106" width="7" height="7"/><rect x="70" y="178" width="7" height="7"/><rect x="146" y="178" width="7" height="7"/><rect x="222" y="178" width="7" height="7"/></g>
+        <path class="live" d="M150 100 l6 6 -6 6 -6 -6z"/>
+        <path d="M137 106 h-7 m3 -3 l-3 3 3 3 M163 106 h7 m-3 -3 l3 3 -3 3" stroke="var(--accent)" fill="none" stroke-width="1.2"/>
+        <g transform="translate(118 142)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">5 sides</text></g>
+      </svg>
+    </div>
+    <figcaption><b>Polygon</b>
+      <ul><li><b style="display:inline">Diamond near the center</b> - how many sides: drag left for fewer, right for more (3 to 60).</li></ul></figcaption>
+  </figure>
+
+  <figure>
+    <div class="stage">
+      <svg viewBox="0 0 300 270" data-newui="CanvasView overlay (live shape handles of a Rounded Rectangle)">
+        <rect x="50" y="60" width="200" height="130" rx="34" fill="#d9e6ff" stroke="#2f5fb3" stroke-width="1.5"/>
+        <rect class="frame" x="50" y="60" width="200" height="130"/>
+        <g class="hsq"><rect x="46" y="56" width="7" height="7"/><rect x="146" y="56" width="7" height="7"/><rect x="246" y="56" width="7" height="7"/><rect x="46" y="121" width="7" height="7"/><rect x="246" y="121" width="7" height="7"/><rect x="46" y="186" width="7" height="7"/><rect x="146" y="186" width="7" height="7"/><rect x="246" y="186" width="7" height="7"/></g>
+        <!-- the corner handle: inside the top-left corner, on the diagonal; drag toward the center for rounder -->
+        <line class="guide" x1="50" y1="60" x2="98" y2="108"/>
+        <circle class="live" cx="98" cy="108" r="5"/>
+        <g transform="translate(106 104)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">corner 34</text></g>
+      </svg>
+    </div>
+    <figcaption><b>Rounded Rectangle</b>
+      <ul><li><b style="display:inline">Round handle inside the top-left corner</b> - the size of the corner arc: drag along the diagonal toward the center for rounder corners, back toward the corner for sharper ones (0 up to half the shorter side). All four corners follow.</li></ul></figcaption>
+  </figure>
+
+  <figure>
+    <div class="stage">
+      <svg viewBox="0 0 300 270" data-newui="CanvasView overlay (live shape handles of an Arc)">
+        <path d="M232 135 A82 82 0 0 1 91 193" fill="none" stroke="#2f5fb3" stroke-width="1.5"/>
+        <line class="guide" x1="150" y1="135" x2="232" y2="135"/>
+        <line class="guide" x1="150" y1="135" x2="91" y2="193"/>
+        <circle class="live" cx="232" cy="135" r="5"/>
+        <circle class="live" cx="91" cy="193" r="5"/>
+        <circle cx="150" cy="135" r="2" fill="var(--accent)"/>
+        <g transform="translate(240 126)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">start 0 deg</text></g>
+        <g transform="translate(30 215)"><rect class="tipbg" x="0" y="-13" width="76" height="17" rx="3"/><text class="tip" x="6" y="0">sweep 135 deg</text></g>
+      </svg>
+    </div>
+    <figcaption><b>Arc</b> (Arc tool: drag out from the center; Circle tool: the same, a whole circle)
+      <ul><li><b style="display:inline">Round handle on each end</b> - drag it around the center to turn that end: the start handle moves the start and keeps the end where it is, the end handle changes the sweep. The sweep can go up to a full turn; the Up / Down arrows while drawing change the starting sweep by 15 degrees.</li></ul></figcaption>
+  </figure>
+</div>
+
+<div class="legend">
+  <p><b>Details</b></p>
+  <ul>
+    <li>The cursor over a live handle is the <code>move</code> cursor; while dragging, a small label shows the value (as drawn above).</li>
+    <li>Handles only show when exactly one such shape is selected and it is not locked. Shift-click or a marquee that selects several shapes hides them.</li>
+    <li>Each change is one undo step ("Change Star Points", "Change Inner Radius", "Change Polygon Sides", "Change Corner Radius").</li>
+    <li>Nothing extra is stored in the file: the shape is recognised from its outline when it is selected, so files from before this change and other programs' regular polygons / stars work too.</li>
+  </ul>
+</div>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="470" viewBox="0 0 1000 470" role="img" aria-label="Clipping masks and artboards">
+<title>Clipping masks and artboards</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Clipping Masks and Artboards</text>
+<rect x="20" y="44" width="470" height="230" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Clipping mask</text>
+<text x="30" y="238" class="s" >put the shape that should show through on TOP, select it with</text>
+<text x="30" y="251" class="s" >the artwork, Object &gt; Clipping Mask &gt; Make (Ctrl+7).</text>
+<text x="30" y="264" class="s" >Release: Ctrl+Shift+7. The mask's own fill and stroke are not drawn.</text>
+<defs><clipPath id="cm"><circle cx="150" cy="150" r="58"/></clipPath></defs>
+<g clip-path="url(#cm)">
+<rect x="80" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="94" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="108" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="122" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="136" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="150" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="164" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="178" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="192" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="206" y="90" width="14" height="120" fill="#e8452c"/>
+</g>
+<circle cx="150" cy="150" r="58" class="thin" stroke-dasharray="4 3"/>
+<line x1="240" y1="150" x2="300" y2="150" class="acc" marker-end="url(#arrowAcc)"/>
+<g clip-path="url(#cm2)"><defs><clipPath id="cm2"><circle cx="390" cy="150" r="58"/></clipPath></defs>
+<rect x="320" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="334" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="348" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="362" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="376" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="390" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="404" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="418" y="90" width="14" height="120" fill="#e8452c"/>
+<rect x="432" y="90" width="14" height="120" fill="#1e6fe0"/>
+<rect x="446" y="90" width="14" height="120" fill="#e8452c"/>
+</g>
+<rect x="510" y="44" width="470" height="230" rx="6" class="panel" />
+<text x="520" y="62" class="t b" >Artboards</text>
+<text x="520" y="238" class="s" >Artboard tool: drag to make one, click to select it, drag it or its</text>
+<text x="520" y="251" class="s" >handles to move / resize; Delete removes it. The Artboards panel (and</text>
+<text x="520" y="264" class="s" >Object &gt; Artboards) switch, add, delete and fit them.</text>
+<rect x="540" y="100" width="120" height="150" fill="#fff" stroke="#9a9a9a" stroke-width="1"/>
+<text x="540" y="94" class="s" >Artboard 1</text>
+<rect x="700" y="100" width="200" height="120" fill="#fff" stroke="#1e6fe0" stroke-width="2.5"/>
+<text x="700" y="94" class="s" >Artboard 2</text>
+<circle cx="600" cy="170" r="26" fill="#e8452c"/><rect x="740" y="130" width="110" height="60" fill="#1e6fe0"/>
+<rect x="20" y="290" width="960" height="160" rx="6" class="soft" />
+<text x="34" y="314" class="s" >- The active artboard (blue outline) is "the page": Align with one object centers it on the page, Image Trace places the result on it, File &gt; Export As Image writes it.</text>
+<text x="34" y="336" class="s" >- File &gt; Export All Artboards writes one image per artboard (name_1_Artboard-1.png ...).</text>
+<text x="34" y="358" class="s" >- File &gt; Document Setup changes the size, resolution, color mode and background of the active artboard.</text>
+<text x="34" y="380" class="s" >- Clicking inside an artboard with the Artboard tool makes it the active one; View &gt; Fit Page fits all the artboards; Object &gt; Artboards &gt; Fit Artboard in Window fits the active one.</text>
+<text x="34" y="402" class="s" >- A clipping mask needs two or more objects (the top one is the mask) and a mask with some area.</text>
+</svg>

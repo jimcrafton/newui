@@ -243,6 +243,39 @@ namespace newui {
         std::vector<TreeRow> rows_;
     };
 
+    // A Model that's two-dimensional, addressed by (row, column) - the shape TableController/
+    // TableItem/TableView (controllers.h/items.h/controls.h) are built around, same "a
+    // TableController would be associated with TableModel type data" idea as ListController/
+    // ListModel.
+    //
+    // value()/setValue()'s key is a std::pair<std::size_t, std::size_t> (row, column) - exactly
+    // what TableItem::paint() passes (items.cpp) - and the value a std::string (that's the only
+    // shape TableItem paints today). valueAt()/setValueAt() box that key for a caller, same
+    // convenience ListModel's own pair gives. size() is rowCount(): a table's "how many
+    // addressable items" is its row count, so ItemController::itemCount() keeps meaning rows.
+    //
+    // Nothing here requires the data to actually be stored: a concrete subclass may compute a
+    // cell on demand (a million-row table does not need a million allocated strings) - TableView
+    // only ever asks about the rows/columns currently on screen.
+    class TableModel : public Model {
+    public:
+        virtual std::size_t rowCount() const { return 0; }
+        virtual std::size_t columnCount() const { return 0; }
+
+        // Header text for a column ("" by default - TableView then paints a spreadsheet-style
+        // A, B, C... label instead).
+        virtual std::string columnTitle(std::size_t column) const { return std::string(); }
+
+        std::size_t size() const override { return rowCount(); }
+
+        std::any valueAt(std::size_t row, std::size_t column) {
+            return value(std::make_pair(row, column));
+        }
+        void setValueAt(std::size_t row, std::size_t column, const std::any& newValue) {
+            setValue(newValue, std::make_pair(row, column));
+        }
+    };
+
     // A Model that represents one open file - a text document, an image,
     // anything with real load/save semantics and a dirty flag. Adds
     // exactly what plain Model doesn't have: filePath()/isModified(), and
@@ -283,6 +316,11 @@ namespace newui {
         // readFromFile() - a document populating its own fields while
         // loading isn't "modified", it's just now equal to what's on disk.
         void markModified();
+
+        // The opposite of markModified(): the content is back to what is on disk (e.g. the user undid every
+        // change made since the last save), so isModified() becomes false, firing onModifiedChanged() if it
+        // was true. The caller is responsible for knowing that is really so.
+        void markUnmodified();
 
         // Loads via readFromFile(path); on success (only), adopts path as
         // filePath() and clears isModified(). Returns readFromFile()'s

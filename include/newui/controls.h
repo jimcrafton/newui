@@ -1227,6 +1227,10 @@ namespace newui {
         const std::string& icon() const { return icon_; }
         void setIcon(const std::string& resourceName);
 
+        // Icon edge length in pixels; defaults to kIconSize. Smaller values suit dense toolbars.
+        float iconSize() const { return iconSize_; }
+        void setIconSize(float size);
+
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
 
@@ -1251,6 +1255,7 @@ namespace newui {
         std::string text_;
         BLVar textColor_;
         std::string icon_;
+        float iconSize_ = kIconSize;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
@@ -1299,6 +1304,66 @@ namespace newui {
 
         Orientation orientation() const;
         void setOrientation(Orientation orientation);
+    };
+
+    // One cell of a StatusBar (below) - native status-bar pane chrome (ThemedStatusPaneStyle's
+    // STATUS/SP_PANE divider) with a single line of left-aligned text drawn on top, same "own
+    // text on top of native chrome" shape as ToolbarButton. Not interactive; a StatusBar creates
+    // and owns these, so application code normally talks to StatusBar::setPaneText() instead of
+    // holding a StatusPane itself.
+    // @reflect category=menutoolbar
+    class StatusPane : public SubView {
+    public:
+        static constexpr float kTextPadding = 6.0f;
+
+        // Declared (not implicit) so reflectgen registers it - a design reload builds one through it.
+        StatusPane();
+        virtual ~StatusPane() {}
+
+        const std::string& text() const { return text_; }
+        void setText(const std::string& text);
+
+        void setTextColor(BLRgba32 color);
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        std::string text_;
+        BLVar textColor_;
+    };
+
+    // A horizontal strip of StatusPanes along the bottom of a window - FlexLayout-based, same
+    // shape as Toolbar (a plain container of real child Views), plus a small pane-oriented API
+    // so a caller can write setPaneText(1, "Ln 3, Col 7") without ever touching a StatusPane.
+    //
+    // A pane is either fixed-width (addPane(text, width) with width > 0) or flexible (width 0:
+    // shares leftover space equally with every other flexible pane, FlexLayoutParams weight 1).
+    // Panes are the bar's own childViews() - nothing here tracks them separately - so a bar
+    // saved to and reloaded from a .newui file comes back with its panes intact.
+    // @reflect category=menutoolbar
+    class StatusBar : public SubView {
+    public:
+        static constexpr float kDefaultHeight = 22.0f;
+
+        StatusBar();
+        virtual ~StatusBar() {}
+
+        // Returns the new pane's index.
+        std::size_t addPane(const std::string& text = std::string(), float width = 0.0f);
+
+        // Not a reflected property - childViews() already is, and carries the panes.
+        // @reflect ignore=true
+        std::size_t paneCount() const { return childViews().size(); }
+
+        // Both throw std::runtime_error for an index past paneCount().
+        const std::string& paneText(std::size_t index) const;
+        void setPaneText(std::size_t index, const std::string& text);
+
+        // width > 0 pins the pane to that width; 0 makes it flexible again.
+        void setPaneWidth(std::size_t index, float width);
+
+    private:
+        StatusPane& paneAt(std::size_t index) const;
     };
 
     // The shared "how a text-editing Control behaves" logic behind both
@@ -2636,6 +2701,157 @@ namespace newui {
 
         // Captured from style() at construction (TreeView::TreeView()) -
         // see handleGotFocus()/handleLostFocus() above.
+        ThemedEditStyle* editStyle_ = nullptr;
+    };
+
+    // A rectangular block of cells, both corners inclusive - what TableView::selectedRange()
+    // reports (normalized, so firstRow <= lastRow and firstColumn <= lastColumn).
+    struct CellRange {
+        std::size_t firstRow = 0;
+        std::size_t firstColumn = 0;
+        std::size_t lastRow = 0;
+        std::size_t lastColumn = 0;
+
+        bool contains(std::size_t row, std::size_t column) const {
+            return row >= firstRow && row <= lastRow && column >= firstColumn && column <= lastColumn;
+        }
+        std::size_t rowCount() const { return lastRow - firstRow + 1; }
+        std::size_t columnCount() const { return lastColumn - firstColumn + 1; }
+    };
+
+    // The (row, column) counterpart to ListView - a spreadsheet-style grid driven by a
+    // TableModel/TableController/TableItem (models.h/controllers.h/items.h), meant to be hosted
+    // in a ScrollView exactly like ListView (it answers onQueryContentSize, so the ScrollView
+    // pins it to the viewport and supplies the scrollbars).
+    //
+    // Virtualized in both directions: paint() asks the controller for a TableItem only for the
+    // cells currently on screen, so a TableModel with a million rows costs the same to show as
+    // one with fifty. Row <-> y is O(1) arithmetic (uniform row height, see TableController),
+    // never a scan.
+    //
+    // Chrome painted by the view itself, pinned while the cells scroll underneath: a column
+    // header strip (TableModel::columnTitle(), or spreadsheet-style A, B, ... AA when empty) and
+    // a row-number gutter. Dragging the right edge of a column header resizes that column
+    // (TableController::setColumnWidth()).
+    //
+    // Selection is one active cell plus a rectangular range that extends from an anchor, as in a
+    // spreadsheet: click selects a cell, shift+click/shift+arrow extends the range, drag
+    // selects a range, a click on a column/row header selects the whole column/row, Ctrl+A
+    // selects everything. Arrows, Tab/Shift+Tab, Home/End, Ctrl+Home/End and PgUp/PgDn move
+    // the active cell (Ctrl+arrow jumps to the edge of the table).
+    //
+    // Scroll offsets are floats (the ScrollView protocol), exact only up to about 16.7 million
+    // pixels - with the default 22px row that is ~760,000 rows; past that the scroll position
+    // snaps to a couple of pixels, which TableView absorbs by deriving the first visible row from
+    // the offset rather than accumulating it. Not editable itself: an application edits through
+    // the model (TableModel::setValueAt()) and reacts to onSelectionChanged.
+    // @reflect category=basic
+    class TableView : public Control {
+    public:
+        TableView();
+        virtual ~TableView();
+
+        TableController& controller() { return *controller_; }
+        const TableController& controller() const { return *controller_; }
+
+        void setController(std::shared_ptr<TableController> controller);
+        std::shared_ptr<TableController> sharedController() const { return controller_; }
+
+        TableModel* model() const { return controller_->model(); }
+
+        // The controller owns the model from here on - same contract as ListView::setModel().
+        void setModel(std::unique_ptr<TableModel> model);
+
+        // Selection is transient UI state, not document data - none of these is a reflected
+        // property (activeRow()/activeColumn() would also throw with no active cell, which a
+        // reflection write must never do).
+        // @reflect ignore=true
+        bool hasActiveCell() const { return activeRow_.has_value(); }
+        // Both throw std::runtime_error when there is no active cell - check hasActiveCell().
+        // @reflect ignore=true
+        std::size_t activeRow() const;
+        // @reflect ignore=true
+        std::size_t activeColumn() const;
+
+        // The normalized selected block, or nullopt when nothing is selected.
+        std::optional<CellRange> selectedRange() const;
+        bool isCellSelected(std::size_t row, std::size_t column) const;
+
+        // Makes (row, column) the active cell and resets the selection to just it - or, with
+        // extend true, keeps the anchor and extends the range to it. Out-of-range cells clamp.
+        // Scrolls the cell into view and fires onSelectionChanged.
+        void setActiveCell(std::size_t row, std::size_t column, bool extend = false);
+        void selectAll();
+        void clearSelection();
+
+        // Whether the header strip / row-number gutter are painted at all - see
+        // TableController::headerHeight()/rowHeaderWidth(), which they are sized by.
+        bool headersVisible() const { return headersVisible_; }
+        void setHeadersVisible(bool value);
+
+        typedef Delegate<TableView> SelectionChangedDelegate;
+        // Fired whenever the active cell or the selected range actually changes.
+        SelectionChangedDelegate onSelectionChanged;
+
+        typedef Delegate<TableView, std::size_t, std::uint32_t> ColumnHeaderClickedDelegate;
+        // Fired after a click on a column header has selected that column, with the column's index and the
+        // keyboard modifiers (KeyboardMasks: kmShift, kmCtrl, kmAlt) held at the click. A resize drag on a header
+        // edge is not a click. An application can sort by the column, for instance - selection has already moved.
+        ColumnHeaderClickedDelegate onColumnHeaderClicked;
+
+        typedef Delegate<TableView, std::size_t> ColumnResizedDelegate;
+        // Fired after a header drag changed a column's width, with that column's index.
+        ColumnResizedDelegate onColumnResized;
+
+        void paint(BLContext& ctx) override;
+
+    private:
+        // Where a mouse position lands - the cell area, a header (column/row), the select-all
+        // corner, a column border (resize grip), or outside everything.
+        enum class HitKind { None, Cell, ColumnHeader, RowHeader, Corner, ColumnBorder };
+        struct Hit {
+            HitKind kind = HitKind::None;
+            std::size_t row = 0;
+            std::size_t column = 0;
+        };
+
+        Hit hitTest(const Point& pt) const;
+
+        SyncReturn handleMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseMove(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleMouseUp(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+        SyncReturn handleQueryContentSize(View& sender, Size& outSize);
+        SyncReturn handleScrollOffsetChanged(View& sender, const Point& offset);
+        SyncReturn handleDataChanged(TableController& sender);
+
+        void selectColumn(std::size_t column, bool extend);
+        void selectRow(std::size_t row, bool extend);
+        void requestCellVisible(std::size_t row, std::size_t column);
+        void moveActiveCell(std::size_t row, std::size_t column, bool extend);
+        float gutterWidth() const;
+        float headerHeight() const;
+
+        std::shared_ptr<TableController> controller_;
+        Connection dataChangedConnection_;  // to controller_->onDataChanged; removed on swap/destroy
+        Point scrollOffset_;
+
+        std::optional<std::size_t> activeRow_;
+        std::size_t activeColumn_ = 0;
+        std::size_t anchorRow_ = 0;
+        std::size_t anchorColumn_ = 0;
+        // Set by a whole-column/whole-row header click - the range then spans the full table in
+        // the other dimension, whatever the anchor says.
+        bool columnSelection_ = false;
+        bool rowSelection_ = false;
+
+        bool headersVisible_ = true;
+        bool selecting_ = false;                       // a mouse-drag range selection is in progress
+        std::optional<std::size_t> resizingColumn_;    // a column-border drag is in progress
+        float resizeStartX_ = 0.0f;
+        float resizeStartWidth_ = 0.0f;
+        bool overColumnBorder_ = false;                // the resize cursor is currently showing
+
         ThemedEditStyle* editStyle_ = nullptr;
     };
 

@@ -189,6 +189,10 @@ namespace newui {
         setModifiedFlag(true);
     }
 
+    void Document::markUnmodified() {
+        setModifiedFlag(false);
+    }
+
     bool Document::load(const std::string& path) {
         loading_ = true;
         bool ok = readFromFile(path);

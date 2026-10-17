@@ -26,6 +26,16 @@ namespace newui {
         Ignore,
     };
 
+    // Where a dialog opens. The default centers it on the window it belongs to; the others are for
+    // dialogs that are about something specific (the control you were working in, or where you just
+    // clicked). Always kept inside the monitor's work area. Applies to message boxes and to Dialog
+    // windows; the native file pickers (IFileDialog) place themselves and ignore it.
+    enum class DialogPosition {
+        CenterOnRootView,  // the owner window's center (default)
+        CenterOnFocus,     // the focused view in the owner window (the owner's center when nothing is focused)
+        CenterOnMouse,     // the mouse cursor
+    };
+
     // ------------------------------------------------------------------
     // Simple message-box dialogs - a native, always-modal ::MessageBoxA()
     // with a title, body text, a button set and an icon.
@@ -107,6 +117,7 @@ namespace newui {
     // initialize().
     // ------------------------------------------------------------------
 
+    // @reflect category=dialogs
     class Dialog : public Frame {
     public:
         Dialog();
@@ -127,7 +138,14 @@ namespace newui {
 
         static DialogResult showMessageBox(HWND owner, const std::string& text, const std::string& title,
                                             MessageBoxButtons buttons = MessageBoxButtons::Ok,
-                                            MessageBoxIcon icon = MessageBoxIcon::None);
+                                            MessageBoxIcon icon = MessageBoxIcon::None,
+                                            DialogPosition position = DialogPosition::CenterOnRootView);
+
+        // Where this dialog opens (showModal()'s owner is the reference; a dialog shown with show() has
+        // no owner and keeps its own bounds). Set before showModal().
+        // Settable from a dialog's .newui file as "position": "CenterOnRootView" | "CenterOnFocus" | "CenterOnMouse".
+        DialogPosition position() const { return position_; }
+        void setPosition(DialogPosition position) { position_ = position; }
 
         // ------------------------------------------------------------------
         // Native Common Item Dialog (IFileDialog) pickers - static, not
@@ -216,6 +234,7 @@ namespace newui {
 
         DialogResult result_ = DialogResult::None;
         bool closed_ = false;
+        DialogPosition position_ = DialogPosition::CenterOnRootView;
 		HWND modalOwner_ = nullptr;  // only valid during showModal() - the owner window disabled for the duration
     };
 

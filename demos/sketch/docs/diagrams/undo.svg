@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" role="img" aria-label="Undo and redo">
+<title>Undo and redo</title>
+<desc>Every edit is an UndoableAction with do and undo closures; patterns used to make them.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Undo (newui::UndoStack of {description, doIt, undoIt})</text>
+<rect x="20" y="44" width="270" height="210" rx="6" class="panel" />
+<text x="155" y="64" class="t b c" >UndoStack</text>
+<rect x="40" y="80" width="230" height="32" rx="5" class="box" />
+<text x="54" y="101" class="t" >Move</text>
+<rect x="40" y="120" width="230" height="32" rx="5" class="box" />
+<text x="54" y="141" class="t" >Draw Rectangle</text>
+<rect x="40" y="160" width="230" height="32" rx="5" class="box" />
+<text x="54" y="181" class="t" >Fill Color</text>
+<rect x="40" y="200" width="230" height="32" rx="5" class="box" />
+<text x="54" y="221" class="t" >Make Symbol</text>
+<text x="155" y="245" class="s c" >push(action): runs doIt() at once, clears redo</text>
+<line x1="300" y1="150" x2="350" y2="150" class="acc" marker-end="url(#arrowAcc)"/>
+<rect x="350" y="44" width="590" height="210" rx="6" class="soft" />
+<text x="364" y="66" class="t b" >Patterns used for the closures</text>
+<text x="364" y="90" class="t b" >snapshot before / after</text>
+<text x="364" y="103" class="s" >geometry drags: commitGeometry(before, ...) takes the outlines as they are now as `after`;</text>
+<text x="364" y="115" class="s" >undo puts `before` back (GeometryState + FrameState). Style edits: StyleState (appearance items).</text>
+<text x="364" y="130" class="t b" >apply(state) lambda</text>
+<text x="364" y="143" class="s" >most edits build apply(states) and push {do: apply(after), undo: apply(before)}</text>
+<text x="364" y="155" class="s" >(text changes, flags, layer snapshots, brush swaps, artboards).</text>
+<text x="364" y="170" class="t b" >slots for objects</text>
+<text x="364" y="183" class="s" >add / delete / replace share objects through std::shared_ptr&lt;Slot&gt;: do attaches,</text>
+<text x="364" y="195" class="s" >undo detaches (detach() records the stacking index so redo puts it back where it was).</text>
+<text x="364" y="210" class="t b" >library changes</text>
+<text x="364" y="223" class="s" >symbols_ / patterns_ / brushes_ are replaced wholesale by before / after vectors.</text>
+<text x="364" y="235" class="s" >(Known gap: undoing Make Symbol removes the instance, not the definition.)</text>
+<rect x="20" y="276" width="920" height="170" rx="6" class="panel" />
+<text x="34" y="298" class="t b" >Rules that keep it sound</text>
+<text x="34" y="320" class="s" >- Object ids are stable for the life of the document (nextId_), so closures refer to ids, never pointers; findById() on every apply.</text>
+<text x="34" y="337" class="s" >- Selection and the active layer/artboard are views of the document: not undo steps. Edits that remove objects fix the selection (dropUnselectable).</text>
+<text x="34" y="354" class="s" >- Live editing (drags, scrubbing, previews) changes objects WITHOUT pushing; the one step is pushed when the gesture ends (or nothing, if cancelled with Esc).</text>
+<text x="34" y="371" class="s" >- A load or New clears the stack. batch edits inside a Batch announce changes once (documentFromSvg / documentFromBinary).</text>
+<text x="34" y="388" class="s" >- Each edit ends in changed(): syncLayers(), markModified(), updateAllViews(), onChanged -&gt; panels refresh.</text>
+</svg>

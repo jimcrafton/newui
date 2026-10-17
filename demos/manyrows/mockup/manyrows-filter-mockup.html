@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>manyrows - filter strip mockup</title>
+<style>
+  /* Mockup for the FILTER STRIP of demos/manyrows (full app only): Data > Filter... (Ctrl+L) shows a strip under the
+     formula bar; Add appends a rule, rules are ANDed. Same look as manyrows-mockup.html otherwise.
+     Reference mockup for demos/manyrows. Native-Windows look to match newui's themed controls.
+     Every region carries a data-newui attribute naming the control it maps to; press "N" or use
+     the checkbox at the bottom to overlay those names. Cell typography here is what CellItem paints:
+     numbers right-aligned, dates centered, status as colored dot + text, rating colored by value. */
+  :root {
+    --face: #f0f0f0; --face-2: #e6e6e6; --edge: #adadad; --edge-soft: #d4d4d4;
+    --text: #1a1a1a; --text-dim: #6b6b6b; --accent: #0078d4; --accent-soft: #cce4f7;
+    --cell: #ffffff; --grid: #e1e1e1; --head: #f3f3f3; --range: #dcebf9;
+    --pending: #b7791f; --shipped: #2b6cb0; --delivered: #2f855a; --returned: #c05621; --cancelled: #c53030;
+    --font: "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --face: #2b2b2b; --face-2: #353535; --edge: #5a5a5a; --edge-soft: #444;
+      --text: #f0f0f0; --text-dim: #a0a0a0; --accent: #4cc2ff; --accent-soft: #1e3a52;
+      --cell: #1f1f1f; --grid: #3a3a3a; --head: #2f2f2f; --range: #1e3a52;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--face); color: var(--text); font: 12px/1.3 var(--font); display: flex; flex-direction: column; overflow: hidden; }
+  button, input { font: inherit; color: inherit; }
+
+  /* ---------- menu bar ---------- */
+  .menubar { display: flex; gap: 2px; padding: 2px 4px; border-bottom: 1px solid var(--edge-soft); }
+  .menubar span { padding: 3px 9px; border-radius: 3px; cursor: default; }
+  .menubar span:hover { background: var(--accent-soft); }
+
+  /* ---------- toolbar ---------- */
+  .toolbar { display: flex; align-items: center; gap: 2px; padding: 3px 6px; border-bottom: 1px solid var(--edge-soft); min-height: 32px; }
+  .tb { min-width: 28px; height: 26px; padding: 0 6px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: default; }
+  .tb:hover { background: var(--face-2); border-color: var(--edge-soft); }
+  .tb.on { background: var(--accent-soft); border-color: var(--accent); }
+  .tb[disabled] { opacity: .35; }
+  .sep { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--edge-soft); }
+
+  /* ---------- formula bar ---------- */
+  .formulabar { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--edge-soft); }
+  .namebox { width: 92px; height: 24px; padding: 0 6px; border: 1px solid var(--edge); background: var(--cell); color: var(--text); border-radius: 2px; }
+  .fx { color: var(--text-dim); font-style: italic; width: 20px; text-align: center; }
+  .formula { flex: 1; height: 24px; padding: 0 6px; border: 1px solid var(--edge); background: var(--cell); color: var(--text); border-radius: 2px; }
+
+  /* ---------- table ---------- */
+  .tablewrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 17px; grid-template-rows: 1fr 17px; background: var(--cell); }
+  .grid { overflow: hidden; position: relative; border-bottom: 1px solid var(--edge-soft); }
+  table { border-collapse: collapse; table-layout: fixed; width: max-content; }
+  th, td { height: 22px; padding: 0 8px; border-right: 1px solid var(--grid); border-bottom: 1px solid var(--grid); white-space: nowrap; overflow: hidden; background: var(--cell); }
+  th { height: 24px; background: var(--head); font-weight: 600; text-align: center; border-color: var(--edge-soft); position: sticky; top: 0; z-index: 2; }
+  th.corner { position: sticky; left: 0; z-index: 3; }
+  th.sel { background: var(--range); }
+  td.rn { position: sticky; left: 0; z-index: 1; width: 56px; background: var(--head); text-align: center; color: var(--text-dim); border-color: var(--edge-soft); padding: 0 4px; }
+  td.rn.sel { background: var(--range); }
+  td.num { text-align: right; }
+  td.date { text-align: center; }
+  td.id { color: #808080; }
+  td.range { background: var(--range); }
+  td.active { background: var(--cell); outline: 2px solid var(--accent); outline-offset: -2px; position: relative; z-index: 1; }
+  td.st .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+  .Pending { color: var(--pending); } .Pending .dot { background: var(--pending); }
+  .Shipped { color: var(--shipped); } .Shipped .dot { background: var(--shipped); }
+  .Delivered { color: var(--delivered); } .Delivered .dot { background: var(--delivered); }
+  .Returned { color: var(--returned); } .Returned .dot { background: var(--returned); }
+  .Cancelled { color: var(--cancelled); } .Cancelled .dot { background: var(--cancelled); }
+  .lo { color: var(--cancelled); } .mid { color: var(--pending); } .hi { color: var(--delivered); }
+  td.range.st, td.range.rate { color: inherit; }
+
+  /* scroll bars (ScrollView's own) */
+  .vbar, .hbar { background: var(--face); position: relative; }
+  .vbar { border-left: 1px solid var(--edge-soft); }
+  .vbar i { position: absolute; left: 2px; right: 2px; top: 38%; height: 14px; background: var(--edge); border-radius: 2px; }
+  .hbar i { position: absolute; top: 2px; bottom: 2px; left: 0; width: 55%; background: var(--edge); border-radius: 2px; }
+  .vbar::after { content: "thumb stays >= 14 px: 1M rows x 22 px = 22M px"; position: absolute; right: 22px; top: 36%; font-size: 10px; color: var(--text-dim); white-space: nowrap; display: none; }
+
+  /* ---------- status bar ---------- */
+  .statusbar { display: flex; border-top: 1px solid var(--edge-soft); height: 22px; }
+  .statusbar span { padding: 3px 10px; border-left: 1px solid var(--edge-soft); white-space: nowrap; }
+  .statusbar span:first-child { border-left: 0; flex: 1; }
+  .statusbar .ms { width: 230px; font-variant-numeric: tabular-nums; }
+  .statusbar .ms b { font-weight: 600; }
+
+
+  /* ---------- filter strip (new) ---------- */
+  .filterstrip { border-bottom: 1px solid var(--edge-soft); background: var(--face-2); padding: 4px 6px; display: flex; flex-direction: column; gap: 4px; }
+  .filterstrip .row { display: flex; align-items: center; gap: 6px; }
+  .filterstrip .lbl { color: var(--text-dim); }
+  .combo { height: 24px; padding: 0 22px 0 8px; border: 1px solid var(--edge); background: var(--cell); border-radius: 2px; display: inline-flex; align-items: center; position: relative; min-width: 110px; }
+  .combo::after { content: "\25BE"; position: absolute; right: 7px; color: var(--text-dim); }
+  .field { height: 24px; width: 160px; padding: 0 6px; border: 1px solid var(--edge); background: var(--cell); color: var(--text); border-radius: 2px; }
+  .btn { height: 24px; padding: 0 14px; border: 1px solid var(--edge); background: var(--face); border-radius: 3px; }
+  .btn.primary { border-color: var(--accent); }
+  .summary { flex: 1; color: var(--text); }
+  .summary b { color: var(--accent); font-weight: 600; }
+  /* open Data menu */
+  .dropmenu { position: absolute; left: 150px; top: 25px; min-width: 250px; background: var(--cell); border: 1px solid var(--edge); box-shadow: 2px 3px 8px rgba(0,0,0,.25); padding: 3px 0; z-index: 40; }
+  .dropmenu div { display: flex; justify-content: space-between; gap: 30px; padding: 4px 22px 4px 26px; }
+  .dropmenu em { font-style: normal; color: var(--text-dim); }
+  .dropmenu div.hot { background: var(--accent-soft); }
+  .dropmenu hr { border: 0; border-top: 1px solid var(--edge-soft); margin: 3px 0; }
+  .dropmenu .new { box-shadow: inset 3px 0 0 var(--accent); }
+  .menubar span.open { background: var(--accent-soft); }
+
+  /* ---------- annotation overlay (press N) ---------- */
+  .legend { position: fixed; right: 8px; bottom: 28px; background: var(--face); border: 1px solid var(--edge); border-radius: 4px; padding: 6px 10px; font-size: 11px; z-index: 60; }
+  .legend label { cursor: pointer; }
+  body.map [data-newui] { outline: 1px dashed #d4380d; outline-offset: -1px; position: relative; }
+  body.map [data-newui]::before { content: attr(data-newui); position: absolute; left: 2px; top: 1px; z-index: 50; font: 600 9px/1 var(--font); color: #fff; background: #d4380d; padding: 1px 3px; border-radius: 2px; pointer-events: none; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div class="menubar" data-newui="MenuBar">
+  <span>File</span><span>Edit</span><span>View</span><span class="open">Data</span><span>Help</span>
+</div>
+
+<div class="dropmenu" data-newui="MenuItem (Data) children">
+  <div><span>Sort Ascending</span><em>Alt+Up</em></div>
+  <div><span>Sort Descending</span><em>Alt+Down</em></div>
+  <div><span>Clear Sort</span><em></em></div>
+  <hr>
+  <div class="new hot"><span>Filter...</span><em>Ctrl+L</em></div>
+  <div><span>Filter by Selected Value</span><em>Ctrl+Shift+F</em></div>
+  <div><span>Clear Filters</span><em></em></div>
+</div>
+
+<div class="toolbar" data-newui="Toolbar (main)">
+  <button class="tb" title="Undo (Ctrl+Z)" disabled>&#x21B6;</button>
+  <button class="tb" title="Redo (Ctrl+Y)" disabled>&#x21B7;</button>
+  <div class="sep"></div>
+  <button class="tb" title="Copy (Ctrl+C)">&#x2398;</button>
+  <button class="tb" title="Paste (Ctrl+V)">&#x1F4CB;</button>
+  <button class="tb" title="Fill down (Ctrl+D)">&#x2193;</button>
+  <div class="sep"></div>
+  <button class="tb" title="Sort ascending">A&#x2193;</button>
+  <button class="tb" title="Sort descending">Z&#x2193;</button>
+  <button class="tb on" title="Filter">&#x25BD;</button>
+  <div class="sep"></div>
+  <button class="tb" title="Go to row (Ctrl+G)">Go to</button>
+</div>
+
+<div class="formulabar" data-newui="SubView (formula bar, horizontal FlexLayout)">
+  <input class="namebox" value="C4" data-newui="TextField (name box)" readonly>
+  <span class="fx">fx</span>
+  <input class="formula" value="Hardware" data-newui="TextField (cell editor)" readonly>
+</div>
+
+<div class="filterstrip" data-newui="SubView (filterStrip, vertical FlexLayout; hidden until Data > Filter...)">
+  <div class="row" data-newui="SubView (horizontal FlexLayout)">
+    <span class="lbl" data-newui="Label">Show rows where</span>
+    <span class="combo" data-newui="DropDownList (filterColumn: the table's columns)">Region</span>
+    <span class="combo" style="min-width:140px" data-newui="DropDownList (filterOp: =, &lt;&gt;, contains, does not contain, &gt;, &gt;=, &lt;, &lt;=, is blank, is not blank)">=</span>
+    <input class="field" value="North" data-newui="TextField (filterValue; disabled for is blank / is not blank)">
+    <button class="btn primary" data-newui="Button (filterAdd) - Enter in the value field does the same">Add</button>
+    <button class="btn" data-newui="Button (filterRemoveLast)">Remove last</button>
+    <button class="btn" data-newui="Button (filterClear)">Clear all</button>
+    <span style="flex:1"></span>
+    <button class="btn" title="Close the strip (the filter stays)" data-newui="Button (filterClose)">Close</button>
+  </div>
+  <div class="row" data-newui="Label (filterSummary: SpreadsheetController::viewSummary())">
+    <span class="summary"><b>Region = North</b> and <b>Qty &gt; 50</b> &nbsp;-&nbsp; 19,845 of 19,845 of 1,000,000 rows</span>
+  </div>
+</div>
+
+<div class="tablewrap" data-newui="ScrollView">
+  <div class="grid" data-newui="TimedTableView (items: CellItem)">
+    <table>
+      <colgroup>
+        <col style="width:56px"><col style="width:90px"><col style="width:110px"><col style="width:110px"><col style="width:120px">
+        <col style="width:80px"><col style="width:100px"><col style="width:110px"><col style="width:110px"><col style="width:90px"><col style="width:120px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="corner"></th><th>Order</th><th>Item</th><th class="sel">Category</th><th class="sel">Region</th><th>Status</th><th>Qty &#x25BC;</th><th>Price</th><th>Total</th><th>Date</th><th>Rating</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="vbar" data-newui="ScrollBar (vertical)"><i></i></div>
+  <div class="hbar" data-newui="ScrollBar (horizontal)"><i></i></div>
+  <div></div>
+</div>
+
+<div class="statusbar" data-newui="StatusBar">
+  <span data-newui="StatusPane (message)">Filtered: Region = North and Qty &gt; 50 - 19,845 of 1,000,000 rows (0.08 s)</span>
+  <span class="ms" data-newui="StatusPane (paint)">paint <b>1.8</b> / 2.1 / 6.4 ms</span>
+  <span style="width:170px" data-newui="StatusPane (visible rows)">rows 1-10</span>
+  <span style="width:190px" data-newui="StatusPane (selection)">C4:D6  (6 cells)</span>
+  <span style="width:130px" data-newui="StatusPane (total)">1,000,000 rows</span>
+</div>
+
+<div class="legend"><label><input type="checkbox" id="map"> show newui names (N)</label></div>
+
+<script>
+  // Sample rows that exercise every typographic case (order, item, category, region, status, qty, price, total, date, rating).
+  const data = [
+    [412031, "Bearing",  "Hardware",   "North", "Delivered", 100, 11.00, 1100.00, "2025-05-18", 4.9],
+    [90177,  "Washer",   "Fasteners",  "North", "Shipped",    99,  0.95,   94.05, "2024-02-27", 2.8],
+    [655320, "Gasket",   "Electrical", "North", "Pending",    99,  7.25,  717.75, "2021-07-29", 4.1],
+    [31404,  "Hinge",    "Fasteners",  "North", "Delivered",  98,  2.15,  210.70, "2020-12-25", 3.4],
+    [778002, "Sprocket", "Hardware",   "North", "Returned",   97, 18.40, 1784.80, "2022-03-14", 1.9],
+    [204415, "Coupling", "Safety",     "North", "Shipped",    97, 64.30, 6237.10, "2021-10-11", 4.4],
+    [12987,  "Piston",   "Hardware",   "North", "Cancelled",  96, 129.00, 12384.00, "2023-06-30", 2.4],
+    [903300, "Valve",    "Plumbing",   "North", "Delivered",  95, 482.10, 45799.50, "2023-01-09", 4.7],
+    [551208, "Flange",   "Plumbing",   "North", "Pending",    93, 249.99, 23249.07, "2024-11-02", 3.2],
+    [66021,  "Rotor",    "Tools",      "North", "Shipped",    92, 305.50, 28106.00, "2022-09-03", 3.8],
+  ];
+  const f2 = n => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rowsEl = document.getElementById("rows");
+  // Selected range is C4:D6 (columns Category..Region = index 2..3 of the data, rows 3..5), active cell C4.
+  data.forEach((r, i) => {
+    const inRange = i >= 3 && i <= 5;
+    const cls = (c, base) => [base, inRange && (c === 2 || c === 3) ? "range" : "", i === 3 && c === 2 ? "active" : ""].join(" ").trim();
+    const rate = r[9] < 2.5 ? "lo" : r[9] < 3.8 ? "mid" : "hi";
+    rowsEl.insertAdjacentHTML("beforeend",
+      `<tr><td class="rn${inRange ? " sel" : ""}">${r[0]}</td>` +
+      `<td class="${cls(-1, "num id")}">${r[0]}</td>` +
+      `<td class="${cls(1, "")}">${r[1]}</td>` +
+      `<td class="${cls(2, "")}">${r[2]}</td>` +
+      `<td class="${cls(3, "")}">${r[3]}</td>` +
+      `<td class="${cls(4, "st " + r[4])}"><span class="dot"></span>${r[4]}</td>` +
+      `<td class="${cls(5, "num")}">${r[5]}</td>` +
+      `<td class="${cls(6, "num")}">${f2(r[6])}</td>` +
+      `<td class="${cls(7, "num")}">${f2(r[7])}</td>` +
+      `<td class="${cls(8, "date")}">${r[8]}</td>` +
+      `<td class="${cls(9, "num rate " + rate)}">${r[9].toFixed(1)}</td></tr>`);
+  });
+  const box = document.getElementById("map");
+  box.addEventListener("change", () => document.body.classList.toggle("map", box.checked));
+  addEventListener("keydown", e => { if (e.key.toLowerCase() === "n" && e.target === document.body) { box.checked = !box.checked; box.dispatchEvent(new Event("change")); } });
+</script>
+</body>
+</html>

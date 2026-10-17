@@ -498,6 +498,7 @@ TEST(DocumentController, ConfirmDiscardChangesFailedSaveDoesNotAllowProceeding) 
     doc.load("C:/docs/a.txt");
     doc.markModified();
     doc.nextSaveShouldFail = true;
+    controller.setErrorHandler([](const std::string&) {});  // the default would pop a message box
     controller.setUnsavedChangesHandler([](Document&) { return UnsavedChangesChoice::Save; });
 
     EXPECT_FALSE(controller.confirmDiscardChanges(doc));
@@ -519,4 +520,97 @@ TEST(DocumentController, CloseDocumentWithPromptClosesOnlyWhenAllowed) {
     EXPECT_TRUE(controller.closeDocumentWithPrompt(doc));
     EXPECT_TRUE(controller.documents().empty());
     EXPECT_EQ(g_fakeDocumentDestructorCount, 1);
+}
+
+// ---- File commands (saveDocument / saveDocumentAs / openInto / newInto) -------------------------
+
+namespace {
+// A controller whose pickers and error reporting are canned, so the commands run without any UI.
+class ScriptedController : public DocumentController {
+public:
+    std::string savePath;
+    std::string openPath;
+    std::vector<std::string> errors;
+    UnsavedChangesChoice choice = UnsavedChangesChoice::Cancel;
+
+protected:
+    UnsavedChangesChoice askUnsavedChanges(Document&) override { return choice; }
+    std::string chooseSavePath(Document&) override { return savePath; }
+    std::string chooseOpenPath() override { return openPath; }
+    void reportError(const std::string& message) override { errors.push_back(message); }
+};
+}  // namespace
+
+TEST(DocumentController, SaveGoesToSaveAsWhenThereIsNoPath) {
+    ScriptedController controller;
+    FakeDocument doc;
+    controller.savePath = "a.txt";
+    EXPECT_TRUE(controller.saveDocument(doc));
+    EXPECT_EQ(doc.filePath(), "a.txt");
+    EXPECT_EQ(doc.writeToFileCallCount, 1);
+
+    controller.savePath.clear();  // a second Save must not ask again
+    EXPECT_TRUE(controller.saveDocument(doc));
+    EXPECT_EQ(doc.writeToFileCallCount, 2);
+}
+
+TEST(DocumentController, SaveAsCancelledOrFailedReturnsFalse) {
+    ScriptedController controller;
+    FakeDocument doc;
+    EXPECT_FALSE(controller.saveDocumentAs(doc));  // picker cancelled
+    EXPECT_EQ(doc.writeToFileCallCount, 0);
+    EXPECT_TRUE(controller.errors.empty());
+
+    controller.savePath = "b.txt";
+    doc.nextSaveShouldFail = true;
+    EXPECT_FALSE(controller.saveDocumentAs(doc));
+    ASSERT_EQ(controller.errors.size(), 1u);
+    EXPECT_NE(controller.errors[0].find("b.txt"), std::string::npos);
+}
+
+TEST(DocumentController, OpenIntoAsksFirstThenLoads) {
+    ScriptedController controller;
+    FakeDocument doc;
+    doc.markModified();
+    controller.choice = UnsavedChangesChoice::Cancel;
+    controller.openPath = "c.txt";
+    EXPECT_FALSE(controller.openInto(doc));
+    EXPECT_EQ(doc.readFromFileCallCount, 0);
+
+    controller.choice = UnsavedChangesChoice::Discard;
+    EXPECT_TRUE(controller.openInto(doc));
+    EXPECT_EQ(doc.content, "loaded:c.txt");
+    EXPECT_FALSE(doc.isModified());
+
+    EXPECT_TRUE(controller.openInto(doc, "d.txt"));  // explicit path skips the picker
+    EXPECT_EQ(doc.content, "loaded:d.txt");
+
+    controller.openPath.clear();
+    EXPECT_FALSE(controller.openInto(doc));  // picker cancelled
+}
+
+TEST(DocumentController, OpenIntoReportsALoadFailure) {
+    ScriptedController controller;
+    FakeDocument doc;
+    doc.nextLoadShouldFail = true;
+    EXPECT_FALSE(controller.openInto(doc, "bad.txt"));
+    ASSERT_EQ(controller.errors.size(), 1u);
+    EXPECT_NE(controller.errors[0].find("bad.txt"), std::string::npos);
+}
+
+TEST(DocumentController, NewIntoClearsAndResetsOnlyWhenAllowed) {
+    ScriptedController controller;
+    FakeDocument doc;
+    doc.markModified();
+    int cleared = 0;
+    controller.choice = UnsavedChangesChoice::Cancel;
+    EXPECT_FALSE(controller.newInto(doc, [&] { ++cleared; }));
+    EXPECT_EQ(cleared, 0);
+    EXPECT_TRUE(doc.isModified());
+
+    controller.choice = UnsavedChangesChoice::Discard;
+    EXPECT_TRUE(controller.newInto(doc, [&] { ++cleared; }));
+    EXPECT_EQ(cleared, 1);
+    EXPECT_FALSE(doc.isModified());
+    EXPECT_FALSE(doc.hasFilePath());
 }

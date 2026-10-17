@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img" aria-label="Drawing shapes">
+<title>Drawing shapes</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Drawing shapes: drag on the canvas</text>
+<rect x="20" y="44" width="320" height="240" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Rectangle / Ellipse</text>
+<text x="30" y="261" class="s" >drag from corner to corner</text>
+<text x="30" y="274" class="s" >Shift = square / circle</text>
+<rect x="85" y="109" width="130" height="80" fill="#e8452c" stroke="#1b3a6b" stroke-width="2"/>
+<ellipse cx="240" cy="179" rx="45" ry="30" fill="#1e6fe0" opacity="0.85"/>
+<line x1="85" y1="109" x2="215" y2="189" class="acc" marker-end="url(#arrowAcc)"/>
+<path d="M215 189 l0 15 l4 -4 l3 7 l3 -1.5 l-3 -7 l5.5 0z" fill="#222" stroke="#fff" stroke-width="1"/>
+<rect x="350" y="44" width="320" height="240" rx="6" class="panel" />
+<text x="360" y="62" class="t b" >Circle</text>
+<text x="360" y="274" class="s" >drag out from the center</text>
+<circle cx="510" cy="149" r="55" fill="#1e6fe0" stroke="#1b3a6b" stroke-width="2"/>
+<line x1="510" y1="149" x2="565" y2="149" class="acc" marker-end="url(#arrowAcc)"/>
+<circle cx="510" cy="149" r="3" fill="#222222"/>
+<path d="M565 149 l0 15 l4 -4 l3 7 l3 -1.5 l-3 -7 l5.5 0z" fill="#222" stroke="#fff" stroke-width="1"/>
+<rect x="680" y="44" width="320" height="240" rx="6" class="panel" />
+<text x="690" y="62" class="t b" >Rounded rectangle</text>
+<text x="690" y="261" class="s" >Up / Down arrows while dragging</text>
+<text x="690" y="274" class="s" >change the corner radius</text>
+<rect x="770" y="104" width="140" height="90" rx="24" fill="#e8452c" stroke="#1b3a6b" stroke-width="2"/>
+<path d="M794 104 l0 -12 M770 128 l12 0" class="acc"/>
+<rect x="20" y="299" width="320" height="240" rx="6" class="panel" />
+<text x="30" y="317" class="t b" >Polygon</text>
+<text x="30" y="516" class="s" >drag from the center</text>
+<text x="30" y="529" class="s" >Up / Down = number of sides, Shift = upright</text>
+<path d="M180 344 L231.96 374 L231.96 434 L180 464 L128.04 434 L128.04 374 Z" fill="#6a4fc7" stroke="#1b3a6b" stroke-width="2"/>
+<line x1="180" y1="404" x2="180" y2="344" class="acc" marker-end="url(#arrowAcc)"/>
+<circle cx="180" cy="404" r="3" fill="#222222"/>
+<rect x="350" y="299" width="320" height="240" rx="6" class="panel" />
+<text x="360" y="317" class="t b" >Star</text>
+<text x="360" y="516" class="s" >drag from the center</text>
+<text x="360" y="529" class="s" >Up / Down = number of points</text>
+<path d="M510 340 L526.46 381.35 L570.87 384.22 L536.63 412.65 L547.62 455.78 L510 432 L472.38 455.78 L483.37 412.65 L449.13 384.22 L493.54 381.35 Z" fill="#f2b824" stroke="#1b3a6b" stroke-width="2"/>
+<line x1="510" y1="404" x2="510" y2="340" class="acc" marker-end="url(#arrowAcc)"/>
+<circle cx="510" cy="404" r="3" fill="#222222"/>
+<rect x="680" y="299" width="320" height="240" rx="6" class="panel" />
+<text x="690" y="317" class="t b" >Arc</text>
+<text x="690" y="516" class="s" >drag out from the center</text>
+<text x="690" y="529" class="s" >Up / Down = sweep; handles on its ends</text>
+<path d="M789.84 367.56 A62 62 0 1 1 890.16 440.44" fill="none" stroke="#1b3a6b" stroke-width="3"/>
+<circle cx="789.84" cy="367.56" r="5" class="box" />
+<circle cx="890.16" cy="440.44" r="5" class="box" />
+<circle cx="840" cy="404" r="3" fill="#222222"/>
+<line x1="840" y1="404" x2="789.84" y2="367.56" class="thin" />
+<text x="500" y="556" class="s c" >Hold Shift while drawing a line for 45 degree steps. New shapes take the colors of the fill and stroke wells.</text>
+</svg>

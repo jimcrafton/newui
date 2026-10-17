@@ -1,0 +1,477 @@
+// manyrows - the whole window: menu bar, a formula bar over the table, the table and a status bar.
+{
+  meta: { author: "", date: "2026-10-15", copyright: "", version: "0.1.0.0" },
+  type: "Frame",
+  title: "manyrows",
+  name: "manyrows",
+  bounds: {
+    type: "Rect",
+    pos: { type: "Point", x: 60, y: 60 },
+    size: { type: "Size", width: 1180, height: 760 }
+  },
+  rootView: {
+    type: "RootView",
+    name: "rootview",
+    visible: true,
+    layout: { type: "FlexLayout", orientation: "Vertical" },
+    bounds: {
+      type: "Rect",
+      pos: { type: "Point", x: 0, y: 0 },
+      size: { type: "Size", width: 1180, height: 760 }
+    },
+    childViews: [
+      {
+        type: "MenuBar",
+        name: "menuBar",
+        desiredSize: { type: "Size", width: 0, height: 24 },
+        desiredSizeOverride: true,
+        menus: [
+          {
+            type: "MenuItem",
+            text: "File",
+            children: [
+              { type: "MenuItem", text: "New", shortcutText: "Ctrl+N" },
+              { type: "MenuItem", text: "Open...", shortcutText: "Ctrl+O" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Save", shortcutText: "Ctrl+S" },
+              { type: "MenuItem", text: "Save As...", shortcutText: "Ctrl+Shift+S" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Sample Data (1M rows)" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Exit", shortcutText: "Alt+F4" }
+            ]
+          },
+          {
+            type: "MenuItem",
+            text: "Edit",
+            children: [
+              { type: "MenuItem", text: "Undo", shortcutText: "Ctrl+Z" },
+              { type: "MenuItem", text: "Redo", shortcutText: "Ctrl+Y" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Cut", shortcutText: "Ctrl+X" },
+              { type: "MenuItem", text: "Copy", shortcutText: "Ctrl+C" },
+              { type: "MenuItem", text: "Paste", shortcutText: "Ctrl+V" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Fill Down", shortcutText: "Ctrl+D" },
+              { type: "MenuItem", text: "Fill Right", shortcutText: "Ctrl+R" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Edit Cell", shortcutText: "F2" },
+              { type: "MenuItem", text: "Clear Cells", shortcutText: "Del" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Select All", shortcutText: "Ctrl+A" }
+            ]
+          },
+          {
+            type: "MenuItem",
+            text: "View",
+            children: [
+              { type: "MenuItem", text: "Show Headers", checked: true },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Reset Render Stats" }
+            ]
+          },
+          {
+            type: "MenuItem",
+            text: "Data",
+            children: [
+              { type: "MenuItem", text: "Sort Ascending", shortcutText: "Alt+Up" },
+              { type: "MenuItem", text: "Sort Descending", shortcutText: "Alt+Down" },
+              { type: "MenuItem", text: "Clear Sort" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "Filter...", shortcutText: "Ctrl+L" },
+              { type: "MenuItem", text: "Filter by Selected Value", shortcutText: "Ctrl+Shift+F" },
+              { type: "MenuItem", text: "Clear Filters" }
+            ]
+          },
+          {
+            type: "MenuItem",
+            text: "Help",
+            children: [
+              { type: "MenuItem", text: "Keyboard Shortcuts" },
+              { type: "MenuItem", text: "", separator: true },
+              { type: "MenuItem", text: "About manyrows" }
+            ]
+          }
+        ]
+      },
+      {
+        // The main toolbar (mockup/manyrows-mockup.html): icon buttons like the sketch demo's. Every button repeats a menu
+        // command; the lite app has none.
+        type: "SubView",
+        name: "toolbar",
+        visible: true,
+        desiredSize: { type: "Size", width: 0, height: 34 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 3, padding: 3 },
+        childViews: [
+          {
+            type: "ToolbarButton",
+            name: "tbUndo",
+            icon: "icons/undo.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbRedo",
+            icon: "icons/redo.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbCopy",
+            icon: "icons/copy.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbPaste",
+            icon: "icons/paste.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbFillDown",
+            icon: "icons/fill-down.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbSortAsc",
+            text: "A-Z",
+            icon: "icons/sort-asc.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 62, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbSortDesc",
+            text: "Z-A",
+            icon: "icons/sort-desc.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 62, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbFilter",
+            icon: "icons/filter.svg",
+            iconSize: 17,
+            desiredSize: { type: "Size", width: 28, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "SubView",
+            desiredSize: { type: "Size", width: 8, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "ToolbarButton",
+            name: "tbGoTo",
+            text: "Go to",
+            desiredSize: { type: "Size", width: 58, height: 28 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      },
+      {
+        type: "SubView",
+        name: "formulaBar",
+        visible: true,
+        desiredSize: { type: "Size", width: 0, height: 32 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 6, padding: 4 },
+        childViews: [
+          {
+            type: "TextField",
+            name: "nameBox",
+            desiredSize: { type: "Size", width: 92, height: 24 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "Label",
+            desiredSize: { type: "Size", width: 22, height: 20 },
+            desiredSizeOverride: true,
+            text: "fx",
+            textAlignment: "Center",
+            style: { type: "LabelStyle", text: "fx", textAlignment: "Center" },
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "TextField",
+            name: "formulaField",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          }
+        ]
+      },
+      {
+        // Data > Filter... : build a filter rule by rule. Hidden until asked for; Close hides it, Clear all removes the filter.
+        type: "SubView",
+        name: "filterStrip",
+        visible: false,
+        desiredSize: { type: "Size", width: 0, height: 62 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4, padding: 4 },
+        childViews: [
+          {
+            type: "SubView",
+            name: "filterRuleRow",
+            desiredSize: { type: "Size", width: 0, height: 26 },
+            desiredSizeOverride: true,
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 6 },
+            layoutParams: { type: "FlexLayoutParams", weight: 0 },
+            childViews: [
+              {
+                type: "Label",
+                text: "Show rows where",
+                style: { type: "LabelStyle", text: "Show rows where", textAlignment: "Left" },
+                desiredSize: { type: "Size", width: 110, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "DropDownList",
+                name: "filterColumn",
+                desiredSize: { type: "Size", width: 160, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 },
+                model: { type: "StringListModel", items: ["Column"] },
+                selectedIndex: 0
+              },
+              {
+                type: "DropDownList",
+                name: "filterOp",
+                desiredSize: { type: "Size", width: 150, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 },
+                model: { type: "StringListModel", items: ["="] },
+                selectedIndex: 0
+              },
+              {
+                type: "TextField",
+                name: "filterValue",
+                desiredSize: { type: "Size", width: 170, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterAdd",
+                text: "Add",
+                desiredSize: { type: "Size", width: 70, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterRemoveLast",
+                text: "Remove last",
+                desiredSize: { type: "Size", width: 100, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "Button",
+                name: "filterClear",
+                text: "Clear all",
+                desiredSize: { type: "Size", width: 80, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              },
+              {
+                type: "SubView",
+                layoutParams: { type: "FlexLayoutParams", weight: 1 }
+              },
+              {
+                type: "Button",
+                name: "filterClose",
+                text: "Close",
+                desiredSize: { type: "Size", width: 70, height: 24 },
+                desiredSizeOverride: true,
+                layoutParams: { type: "FlexLayoutParams", weight: 0 }
+              }
+            ]
+          },
+          {
+            type: "Label",
+            name: "filterSummary",
+            text: "No filter",
+            style: { type: "LabelStyle", text: "No filter", textAlignment: "Left" },
+            desiredSize: { type: "Size", width: 0, height: 20 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      },
+      {
+        type: "ScrollView",
+        name: "tableScroll",
+        layoutParams: { type: "FlexLayoutParams", weight: 1 },
+        childViews: [
+          {
+            type: "SubView",
+            name: "tableViewport",
+            visible: true,
+            childViews: [
+              {
+                type: "TimedTableView",
+                name: "table",
+                rowHeight: 22
+              }
+            ]
+          }
+        ]
+      },
+      {
+        // Shown only while a file loads: what is loading, a progress bar and a Cancel button.
+        type: "SubView",
+        name: "loadStrip",
+        visible: false,
+        desiredSize: { type: "Size", width: 0, height: 32 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 8, padding: 4 },
+        childViews: [
+          {
+            type: "Label",
+            name: "loadLabel",
+            text: "Loading...",
+            style: { type: "LabelStyle", text: "Loading...", textAlignment: "Left" },
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "Progress",
+            name: "loadProgress",
+            desiredSize: { type: "Size", width: 320, height: 18 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "Button",
+            name: "loadCancel",
+            text: "Cancel",
+            desiredSize: { type: "Size", width: 80, height: 24 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      },
+      {
+        // Shown instead of loadStrip when the file being opened has several sheets: pick one.
+        type: "SubView",
+        name: "sheetStrip",
+        visible: false,
+        desiredSize: { type: "Size", width: 0, height: 32 },
+        desiredSizeOverride: true,
+        layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 8, padding: 4 },
+        childViews: [
+          {
+            type: "Label",
+            name: "sheetLabel",
+            text: "This workbook has several sheets - open:",
+            style: { type: "LabelStyle", text: "This workbook has several sheets - open:", textAlignment: "Left" },
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "DropDownList",
+            name: "sheetCombo",
+            desiredSize: { type: "Size", width: 240, height: 24 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 },
+            model: { type: "StringListModel", items: ["Sheet1"] },
+            selectedIndex: 0
+          },
+          {
+            type: "Button",
+            name: "sheetOpen",
+            text: "Open",
+            desiredSize: { type: "Size", width: 80, height: 24 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "Button",
+            name: "sheetCancel",
+            text: "Cancel",
+            desiredSize: { type: "Size", width: 80, height: 24 },
+            desiredSizeOverride: true,
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      },
+      {
+        type: "StatusBar",
+        name: "statusBar",
+        desiredSize: { type: "Size", width: 0, height: 22 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "StatusPane",
+            text: "Ready",
+            layoutParams: { type: "FlexLayoutParams", weight: 1 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 190, height: 0 },
+            desiredSizeOverride: true,
+            text: "paint - ms",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 170, height: 0 },
+            desiredSizeOverride: true,
+            text: "rows -",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 190, height: 0 },
+            desiredSizeOverride: true,
+            text: "no selection",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          },
+          {
+            type: "StatusPane",
+            desiredSize: { type: "Size", width: 130, height: 0 },
+            desiredSizeOverride: true,
+            text: "1,000,000 rows",
+            layoutParams: { type: "FlexLayoutParams", weight: 0 }
+          }
+        ]
+      }
+    ]
+  }
+}

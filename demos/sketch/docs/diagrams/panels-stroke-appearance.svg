@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="600" viewBox="0 0 1300 600" role="img" aria-label="Stroke, Appearance and Graphic Styles panels">
+<title>Stroke, Appearance and Graphic Styles panels</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="650" y="24" class="h c" >Stroke, Appearance, Graphic Styles</text>
+<rect x="20" y="44" width="330" height="24" rx="0" class="panel" />
+<text x="28" y="60" class="t b" >Stroke</text>
+<text x="342" y="60" class="s e" >Stroke 1</text>
+<text x="28" y="90" class="s" >Weight</text>
+<rect x="76" y="76" width="64" height="20" rx="2" class="field" />
+<text x="81" y="90" class="s" >4 pt</text>
+<text x="156" y="90" class="s" >Miter</text>
+<rect x="196" y="76" width="48" height="20" rx="2" class="field" />
+<text x="201" y="90" class="s" >10</text>
+<circle cx="250" cy="86" r="9.5" fill="#d4380d"/><text x="250" y="90" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="28" y="120" class="s" >Cap</text>
+<rect x="56" y="105" width="26" height="26" rx="3" class="soft" />
+<g transform="translate(58 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 12h12" stroke-width="9" stroke-linecap="butt"/></g><path d="M5 12h12" stroke-width="7" stroke-linecap="butt"/></g>
+<rect x="84" y="105" width="26" height="26" rx="3" class="box" />
+<g transform="translate(86 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M7 12h10" stroke-width="9" stroke-linecap="round"/></g><path d="M7 12h10" stroke-width="7" stroke-linecap="round"/></g>
+<rect x="112" y="105" width="26" height="26" rx="3" class="box" />
+<g transform="translate(114 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M6 12h10" stroke-width="9" stroke-linecap="square"/></g><path d="M6 12h10" stroke-width="7" stroke-linecap="square"/></g>
+<text x="150" y="120" class="s" >Join</text>
+<rect x="180" y="105" width="26" height="26" rx="3" class="soft" />
+<g transform="translate(182 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 19V8h11" stroke-width="6" stroke-linejoin="miter" stroke-linecap="butt"/></g><path d="M5 19V8h11" stroke-width="4" stroke-linejoin="miter" stroke-linecap="butt"/></g>
+<rect x="208" y="105" width="26" height="26" rx="3" class="box" />
+<g transform="translate(210 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 19V8h11" stroke-width="6" stroke-linejoin="round" stroke-linecap="butt"/></g><path d="M5 19V8h11" stroke-width="4" stroke-linejoin="round" stroke-linecap="butt"/></g>
+<rect x="236" y="105" width="26" height="26" rx="3" class="box" />
+<g transform="translate(238 107) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 19V8h11" stroke-width="6" stroke-linejoin="bevel" stroke-linecap="butt"/></g><path d="M5 19V8h11" stroke-width="4" stroke-linejoin="bevel" stroke-linecap="butt"/></g>
+<circle cx="270" cy="118" r="9.5" fill="#d4380d"/><text x="270" y="122" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="28" y="152" class="s" >Align</text>
+<rect x="64" y="137" width="26" height="26" rx="3" class="soft" />
+<g transform="translate(66 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="6" y="6" width="12" height="12" stroke-width="3"/><rect x="4" y="4" width="16" height="16" stroke-width="5"/></g><rect x="6" y="6" width="12" height="12" stroke-dasharray="1 2" stroke-width="1"/><rect x="4" y="4" width="16" height="16" stroke-width="3" stroke-opacity="0.5"/></g>
+<rect x="92" y="137" width="26" height="26" rx="3" class="box" />
+<g transform="translate(94 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" stroke-width="3"/><rect x="5" y="5" width="14" height="14" stroke-width="5"/></g><rect x="4" y="4" width="16" height="16" stroke-width="1"/><rect x="5" y="5" width="14" height="14" stroke-width="3" stroke-opacity="0.5"/></g>
+<rect x="120" y="137" width="26" height="26" rx="3" class="box" />
+<g transform="translate(122 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="6" y="6" width="12" height="12" stroke-width="3"/><rect x="4" y="4" width="16" height="16" stroke-width="5"/></g><rect x="6" y="6" width="12" height="12" stroke-width="1"/><rect x="4" y="4" width="16" height="16" stroke-width="3" stroke-opacity="0.5"/></g>
+<text x="154" y="152" class="s" >Profile</text>
+<rect x="200" y="137" width="26" height="26" rx="3" class="soft" />
+<g transform="translate(202 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M3 9h18v6H3z"/></g><path d="M3 9h18v6H3z"/></g>
+<rect x="228" y="137" width="26" height="26" rx="3" class="box" />
+<g transform="translate(230 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M3 9c6 0 12 2 18 3-6 1-12 3-18 3z"/></g><path d="M3 9c6 0 12 2 18 3-6 1-12 3-18 3z"/></g>
+<rect x="256" y="137" width="26" height="26" rx="3" class="box" />
+<g transform="translate(258 139) scale(1) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M3 12c4-6 14-6 18 0-4 6-14 6-18 0z"/></g><path d="M3 12c4-6 14-6 18 0-4 6-14 6-18 0z"/></g>
+<circle cx="300" cy="150" r="9.5" fill="#d4380d"/><text x="300" y="154" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="28" y="184" class="s" >Dashed</text>
+<rect x="76" y="173" width="14" height="14" rx="2" class="box" />
+<rect x="100" y="170" width="40" height="20" rx="2" class="field" />
+<text x="105" y="184" class="s" >12</text>
+<rect x="144" y="170" width="40" height="20" rx="2" class="field" />
+<text x="149" y="184" class="s" >6</text>
+<rect x="188" y="170" width="40" height="20" rx="2" class="field" />
+<text x="193" y="184" class="s" ></text>
+<rect x="232" y="170" width="40" height="20" rx="2" class="field" />
+<text x="237" y="184" class="s" ></text>
+<circle cx="290" cy="180" r="9.5" fill="#d4380d"/><text x="290" y="184" class="c b" style="fill:#fff;font-size:11px">4</text>
+<text x="28" y="212" class="s" >Arrows</text>
+<rect x="72" y="198" width="60" height="20" rx="2" class="field" />
+<text x="77" y="212" class="s" >None</text>
+<path d="M118 205 l4 5 l4 -5z" class="line" />
+<rect x="138" y="198" width="60" height="20" rx="2" class="field" />
+<text x="143" y="212" class="s" >Filled</text>
+<path d="M184 205 l4 5 l4 -5z" class="line" />
+<text x="210" y="212" class="s" >Scale</text>
+<rect x="244" y="198" width="50" height="20" rx="2" class="field" />
+<text x="249" y="212" class="s" >100%</text>
+<circle cx="300" cy="208" r="9.5" fill="#d4380d"/><text x="300" y="212" class="c b" style="fill:#fff;font-size:11px">5</text>
+<rect x="20" y="44" width="330" height="182" fill="none" stroke="#9a9a9a"/>
+<rect x="20" y="246" width="330" height="24" rx="0" class="panel" />
+<text x="28" y="262" class="t b" >Graphic Styles</text>
+<rect x="28" y="277" width="24" height="24" rx="3" class="box" />
+<g transform="translate(30 279) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></g><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></g>
+<rect x="54" y="277" width="24" height="24" rx="3" class="box" />
+<g transform="translate(56 279) scale(0.91) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g>
+<rect x="28" y="308" width="40" height="30" rx="3" fill="#ffffff" stroke="#9a9a9a"/>
+<rect x="78" y="308" width="40" height="30" rx="3" fill="#e8452c" stroke="#9a9a9a"/>
+<rect x="128" y="308" width="40" height="30" rx="3" fill="#0078d4" stroke="#9a9a9a"/>
+<rect x="178" y="308" width="40" height="30" rx="3" fill="#00aeef" stroke="#9a9a9a"/>
+<rect x="228" y="308" width="40" height="30" rx="3" fill="#ffffff" stroke="#9a9a9a"/>
+<rect x="278" y="308" width="40" height="30" rx="3" fill="#6a4fc7" stroke="#9a9a9a"/>
+<circle cx="330" cy="323" r="9.5" fill="#d4380d"/><text x="330" y="327" class="c b" style="fill:#fff;font-size:11px">6</text>
+<rect x="20" y="246" width="330" height="102" fill="none" stroke="#9a9a9a"/>
+<rect x="380" y="44" width="340" height="24" rx="0" class="panel" />
+<text x="388" y="60" class="t b" >Appearance</text>
+<text x="712" y="60" class="s e" >Path: Rounded Rectangle</text>
+<rect x="388" y="76" width="324" height="26" rx="3" class="box" />
+<g transform="translate(392 81) scale(0.73) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<text x="416" y="93" class="s b" >Stroke</text>
+<text x="490" y="93" class="s" >4 pt   100%</text>
+<rect x="680" y="82" width="22" height="14" fill="none" stroke="#1b3a6b" stroke-width="3"/>
+<rect x="388" y="106" width="324" height="26" rx="3" class="box" />
+<g transform="translate(392 111) scale(0.73) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<text x="416" y="123" class="s b" >Fill</text>
+<text x="490" y="123" class="s" >Gradient   100%</text>
+<rect x="680" y="112" width="22" height="14" fill="#e8452c" stroke="#333"/>
+<rect x="388" y="136" width="324" height="26" rx="3" class="box" />
+<g transform="translate(392 141) scale(0.73) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<text x="416" y="153" class="s b" >Fill</text>
+<text x="490" y="153" class="s" >Solid   30%  Multiply</text>
+<rect x="680" y="142" width="22" height="14" fill="#0078d4" stroke="#333"/>
+<rect x="388" y="166" width="324" height="26" rx="3" class="soft" />
+<g transform="translate(392 171) scale(0.73) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<text x="416" y="183" class="s b" >Drop Shadow</text>
+<text x="490" y="183" class="s" >Multiply, 75%, x 4 y 4, blur 6</text>
+<rect x="388" y="196" width="324" height="26" rx="3" class="box" />
+<g transform="translate(392 201) scale(0.73) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<text x="416" y="213" class="s b" >Opacity</text>
+<text x="490" y="213" class="s" >75%  Multiply</text>
+<circle cx="705" cy="91" r="9.5" fill="#d4380d"/><text x="705" y="95" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="388" y="246" class="s" >Opacity</text>
+<rect x="444" y="236" width="180" height="12" rx="2" class="field" />
+<rect x="579" y="233" width="10" height="18" rx="2" class="soft" />
+<rect x="636" y="232" width="60" height="20" rx="2" class="field" />
+<text x="641" y="246" class="s" >75%</text>
+<circle cx="705" cy="242" r="9.5" fill="#d4380d"/><text x="705" y="246" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="388" y="274" class="s" >Blend</text>
+<rect x="436" y="260" width="250" height="20" rx="2" class="field" />
+<text x="441" y="274" class="s" >Multiply</text>
+<path d="M672 267 l4 5 l4 -5z" class="line" />
+<text x="388" y="302" class="s" >X</text>
+<rect x="406" y="288" width="50" height="20" rx="2" class="field" />
+<text x="411" y="302" class="s" >4</text>
+<text x="470" y="302" class="s" >Y</text>
+<rect x="486" y="288" width="50" height="20" rx="2" class="field" />
+<text x="491" y="302" class="s" >4</text>
+<text x="550" y="302" class="s" >Blur</text>
+<rect x="584" y="288" width="50" height="20" rx="2" class="field" />
+<text x="589" y="302" class="s" >6</text>
+<circle cx="705" cy="298" r="9.5" fill="#d4380d"/><text x="705" y="302" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="388" y="330" class="s" >Color</text>
+<rect x="436" y="319" width="22" height="14" rx="0" class="box" />
+<rect x="466" y="316" width="90" height="20" rx="2" class="field" />
+<text x="471" y="330" class="s" >#000000</text>
+<rect x="388" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(390 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" stroke-width="5"/><path d="M12 9v6M9 12h6"/></g><rect x="4" y="4" width="16" height="16" stroke-width="3"/><path d="M12 9v6M9 12h6"/></g>
+<rect x="418" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(420 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16" fill="#ffffff"/><path d="M12 8v8M8 12h8" stroke="#ffffff"/></g><rect x="4" y="4" width="16" height="16" fill="#3a3a3a"/><path d="M12 8v8M8 12h8" stroke="#ffffff"/></g>
+<rect x="448" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(450 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M4 6h7M4 12h5M4 6v12"/><path d="M14 18l6-12M14 6l6 12"/></g><path d="M4 6h7M4 12h5M4 6v12"/><path d="M14 18l6-12M14 6l6 12"/></g>
+<rect x="478" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(480 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
+<rect x="508" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(510 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M6 15l6-6 6 6"/></g><path d="M6 15l6-6 6 6"/></g>
+<rect x="538" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(540 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M6 9l6 6 6-6"/></g><path d="M6 9l6 6 6-6"/></g>
+<rect x="568" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(570 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="16" height="16"/><path d="M4 4 20 20"/></g><rect x="4" y="4" width="16" height="16"/><path d="M4 4 20 20"/></g>
+<rect x="598" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(600 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><rect x="4" y="4" width="10" height="10"/><rect x="10" y="10" width="10" height="10"/></g><rect x="4" y="4" width="10" height="10"/><rect x="10" y="10" width="10" height="10"/></g>
+<rect x="628" y="343" width="28" height="28" rx="3" class="box" />
+<g transform="translate(630 345) scale(1.09) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.5"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></g>
+<circle cx="705" cy="358" r="9.5" fill="#d4380d"/><text x="705" y="362" class="c b" style="fill:#fff;font-size:11px">4</text>
+<rect x="380" y="44" width="340" height="334" fill="none" stroke="#9a9a9a"/>
+<circle cx="750" cy="60" r="9.5" fill="#d4380d"/><text x="750" y="64" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="766" y="64" class="t" >Weight and miter limit</text>
+<circle cx="750" cy="94" r="9.5" fill="#d4380d"/><text x="750" y="98" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="766" y="98" class="t" >Caps and joins</text>
+<circle cx="750" cy="128" r="9.5" fill="#d4380d"/><text x="750" y="132" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="766" y="132" class="t" >Align: where the stroke sits (not connected yet). Profile: uniform, taper or bulge width</text>
+<circle cx="750" cy="162" r="9.5" fill="#d4380d"/><text x="750" y="166" class="c b" style="fill:#fff;font-size:11px">4</text>
+<text x="766" y="166" class="t" >Dashes (dash, gap, dash, gap)</text>
+<circle cx="750" cy="196" r="9.5" fill="#d4380d"/><text x="750" y="200" class="c b" style="fill:#fff;font-size:11px">5</text>
+<text x="766" y="200" class="t" >Arrowheads (not connected yet)</text>
+<circle cx="750" cy="230" r="9.5" fill="#d4380d"/><text x="750" y="234" class="c b" style="fill:#fff;font-size:11px">6</text>
+<text x="766" y="234" class="t" >Graphic Styles: click to apply, + saves the selected look</text>
+<circle cx="390" cy="402" r="9.5" fill="#d4380d"/><text x="390" y="406" class="c b" style="fill:#fff;font-size:11px">1</text>
+<text x="406" y="406" class="t" >Appearance list, bottom to top: click a row to edit it; eye hides it; drag to reorder with the arrows</text>
+<circle cx="390" cy="424" r="9.5" fill="#d4380d"/><text x="390" y="428" class="c b" style="fill:#fff;font-size:11px">2</text>
+<text x="406" y="428" class="t" >Opacity and blend mode of the row (or of the whole object on the last row)</text>
+<circle cx="390" cy="446" r="9.5" fill="#d4380d"/><text x="390" y="450" class="c b" style="fill:#fff;font-size:11px">3</text>
+<text x="406" y="450" class="t" >Options of the chosen effect (shadow, glow, blur, round corners, offset, roughen)</text>
+<circle cx="390" cy="468" r="9.5" fill="#d4380d"/><text x="390" y="472" class="c b" style="fill:#fff;font-size:11px">4</text>
+<text x="406" y="472" class="t" >Add stroke, add fill, add effect (fx menu), show / hide, move up / down, clear, duplicate, delete</text>
+</svg>

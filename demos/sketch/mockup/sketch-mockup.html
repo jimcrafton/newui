@@ -1,0 +1,450 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sketch - UI mockup</title>
+<style>
+  /* Reference mockup for demos/sketch. Native-Windows look to match newui's themed controls.
+     Every region carries a data-newui attribute naming the control it maps to; press "N" or use
+     the checkbox at the bottom to overlay those names. */
+  :root {
+    --face: #f0f0f0; --face-2: #e6e6e6; --edge: #adadad; --edge-soft: #d4d4d4;
+    --text: #1a1a1a; --text-dim: #6b6b6b; --accent: #0078d4; --accent-soft: #cce4f7;
+    --canvas-bg: #7a7a7a; --page: #ffffff; --grid: #e7e7e7;
+    --font: "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --face: #2b2b2b; --face-2: #353535; --edge: #5a5a5a; --edge-soft: #444;
+      --text: #f0f0f0; --text-dim: #a0a0a0; --accent: #4cc2ff; --accent-soft: #1e3a52;
+      --canvas-bg: #1c1c1c; --page: #ffffff; --grid: #e7e7e7;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--face); color: var(--text); font: 12px/1.3 var(--font); display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; }
+
+  /* ---------- menu bar ---------- */
+  .menubar { display: flex; gap: 2px; padding: 2px 4px; border-bottom: 1px solid var(--edge-soft); background: var(--face); }
+  .menubar span { padding: 3px 9px; border-radius: 3px; cursor: default; }
+  .menubar span:hover { background: var(--accent-soft); }
+
+  /* ---------- toolbars ---------- */
+  .toolbar { display: flex; align-items: center; gap: 2px; padding: 3px 6px; background: var(--face); border-bottom: 1px solid var(--edge-soft); min-height: 34px; }
+  .tb { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: default; padding: 0; }
+  .tb:hover { background: var(--face-2); border-color: var(--edge-soft); }
+  .tb.on { background: var(--accent-soft); border-color: var(--accent); }
+  .tb[disabled] { opacity: .35; }
+  .tb img { width: 20px; height: 20px; }
+  @media (prefers-color-scheme: dark) { .tb img, .layer img { filter: invert(1) brightness(.9); } }
+  .sep { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--edge-soft); }
+  .tb-label { color: var(--text-dim); margin: 0 4px 0 6px; }
+  .field { height: 24px; padding: 0 6px; border: 1px solid var(--edge); background: var(--page); color: #111; border-radius: 2px; font: inherit; }
+  .spacer { flex: 1; }
+
+  /* ---------- workspace ---------- */
+  .workspace { flex: 1; display: grid; grid-template-columns: 40px 1fr 284px; min-height: 0; }
+  .toolpalette { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border-right: 1px solid var(--edge-soft); background: var(--face); }
+  .toolpalette .well { margin-top: auto; position: relative; width: 30px; height: 30px; margin-bottom: 4px; }
+  .well i { position: absolute; width: 18px; height: 18px; border: 1px solid #333; }
+  .well .fill { left: 0; top: 0; background: #e8452c; }
+  .well .stroke { right: 0; bottom: 0; background: var(--face); border: 4px solid #1b3a6b; }
+
+  /* canvas with rulers */
+  .canvaswrap { position: relative; display: grid; grid-template-columns: 20px 1fr; grid-template-rows: 20px 1fr; min-width: 0; min-height: 0; }
+  .ruler { background: var(--face); color: var(--text-dim); font-size: 9px; position: relative; overflow: hidden; }
+  .ruler.h { grid-column: 2; border-bottom: 1px solid var(--edge); }
+  .ruler.v { grid-row: 2; border-right: 1px solid var(--edge); }
+  .ruler.corner { grid-row: 1; grid-column: 1; border-right: 1px solid var(--edge); border-bottom: 1px solid var(--edge); }
+  .ruler.h b, .ruler.v b { position: absolute; font-weight: 400; }
+  .ruler.h b { top: 3px; padding-left: 3px; border-left: 1px solid var(--edge); height: 100%; }
+  .ruler.v b { left: 0; padding-top: 2px; border-top: 1px solid var(--edge); width: 100%; writing-mode: vertical-rl; transform: rotate(180deg); text-align: end; }
+  .viewport { grid-row: 2; grid-column: 2; background: var(--canvas-bg); position: relative; overflow: hidden; }
+  .viewport svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hint { position: absolute; left: 10px; bottom: 8px; background: rgba(0,0,0,.65); color: #fff; padding: 3px 8px; border-radius: 3px; font-size: 11px; }
+
+  /* ---------- right panels ---------- */
+  .sidebar { border-left: 1px solid var(--edge-soft); background: var(--face); display: flex; flex-direction: column; min-height: 0; }
+  .panel { border-bottom: 1px solid var(--edge-soft); }
+  .panel > h3 { margin: 0; padding: 4px 8px; font-size: 11px; font-weight: 600; background: var(--face-2); border-bottom: 1px solid var(--edge-soft); display: flex; justify-content: space-between; }
+  .panel .body { padding: 8px; display: grid; gap: 7px; }
+  .modes { display: flex; border: 1px solid var(--edge); border-radius: 3px; overflow: hidden; }
+  .modes button { flex: 1; border: 0; background: var(--face); padding: 4px 0; border-right: 1px solid var(--edge-soft); cursor: default; }
+  .modes button:last-child { border-right: 0; }
+  .modes button.on { background: var(--accent); color: #fff; }
+  .slider { display: grid; grid-template-columns: 14px 1fr 44px; gap: 6px; align-items: center; }
+  .slider .track { height: 10px; border: 1px solid var(--edge); border-radius: 2px; position: relative; }
+  .slider .track::after { content: ""; position: absolute; top: -4px; left: var(--v); width: 6px; height: 16px; margin-left: -3px; background: var(--face); border: 1px solid #444; border-radius: 2px; }
+  .slider .field { width: 44px; text-align: right; padding: 0 4px; }
+  .row { display: flex; align-items: center; gap: 6px; }
+  .row label { color: var(--text-dim); min-width: 52px; }
+  .swatches { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+  .swatches i { aspect-ratio: 1; border: 1px solid rgba(0,0,0,.35); }
+  .grad { display: grid; gap: 6px; padding: 6px; border: 1px solid var(--edge-soft); border-radius: 3px; background: var(--face-2); }
+  .gbar { position: relative; height: 18px; margin: 4px 6px 12px; border: 1px solid var(--edge); background: linear-gradient(90deg,#f2b824 0%,#e8452c 55%,#6a4fc7 100%); }
+  .gbar .stop { position: absolute; bottom: -10px; width: 10px; height: 10px; margin-left: -5px; border: 1px solid #333; border-radius: 1px; }
+  .gbar .stop.sel { outline: 2px solid var(--accent); }
+  .hint2 { color: var(--text-dim); font-size: 11px; }
+  .layers { flex: 1; min-height: 120px; overflow: auto; }
+  .layer { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--edge-soft); }
+  .layer.sel { background: var(--accent-soft); }
+  .layer .eye, .layer .lock { width: 14px; text-align: center; color: var(--text-dim); }
+  .layer .thumb { width: 22px; height: 16px; border: 1px solid var(--edge); background: var(--page); display: grid; place-items: center; }
+  .layer.child { padding-left: 30px; }
+
+  /* ---------- status bar ---------- */
+  .statusbar { display: flex; border-top: 1px solid var(--edge); background: var(--face); height: 22px; }
+  .statusbar div { padding: 3px 8px; border-right: 1px solid var(--edge-soft); white-space: nowrap; }
+  .statusbar .flex { flex: 1; }
+
+  .assets { position: fixed; left: 52px; bottom: 28px; z-index: 90; background: var(--face); border: 1px solid var(--edge); border-radius: 4px; padding: 4px 8px; box-shadow: 0 2px 8px rgba(0,0,0,.25); max-width: 70vw; }
+  .gal { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0; }
+  .gal figure { margin: 0; text-align: center; font-size: 10px; color: var(--text-dim); }
+  .cur { position: relative; width: 32px; height: 32px; background: #7a7a7a; margin: 0 auto 2px; }
+  .cur i { position: absolute; width: 3px; height: 3px; margin: -1px 0 0 -1px; background: #f00; }
+  .stack { border-bottom: 1px solid var(--edge-soft); background: var(--page); color: #111; }
+  .arow { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid #ececec; }
+  .arow.sel { background: var(--accent-soft); color: var(--text); }
+  .arow b { font-weight: 600; min-width: 74px; }
+  .arow .dim { color: var(--text-dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+  .arow .sw { width: 22px; height: 14px; border: 1px solid #333; }
+  .arow .sw.stroke { background: transparent; border-width: 4px; }
+  .arow .grip { width: 12px; opacity: .6; cursor: grab; }
+  .arow.fxrow { padding-left: 20px; font-style: italic; }
+  .arow.base { background: var(--face-2); color: var(--text); }
+  .atb { display: flex; align-items: center; gap: 2px; padding: 3px 6px; }
+  .fxmenu { margin: 0 8px 8px; padding: 4px 6px; border: 1px dashed var(--edge); border-radius: 3px; color: var(--text-dim); font-size: 10px; }
+  .gs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+  .gs i { aspect-ratio: 1; border-radius: 2px; }
+  .sidebar { overflow-y: auto; }
+  /* ---------- newui mapping overlay ---------- */
+  body.map [data-newui] { outline: 1px dashed #d4380d; outline-offset: -1px; position: relative; }
+  body.map [data-newui]::before { content: attr(data-newui); position: absolute; left: 2px; top: 1px; z-index: 50; font: 600 9px/1 var(--font); color: #fff; background: #d4380d; padding: 1px 3px; border-radius: 2px; pointer-events: none; white-space: nowrap; }
+  .maptoggle { position: fixed; right: 12px; bottom: 30px; z-index: 100; background: var(--face); border: 1px solid var(--edge); padding: 4px 8px; border-radius: 4px; display: flex; gap: 6px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+</style>
+</head>
+<body>
+
+<!-- Menu bar: newui MenuBar (menus.h) -->
+<div class="menubar" data-newui="MenuBar">
+  <span>File</span><span>Edit</span><span>Object</span><span>Arrange</span><span>Layer</span><span>View</span><span>Help</span>
+</div>
+
+<!-- Main toolbar: newui Toolbar + ToolbarButton + ToolbarSeparator -->
+<div class="toolbar" data-newui="Toolbar (main)">
+  <button class="tb" title="New (Ctrl+N)"><img src="../Resources/icons/new.svg" alt=""></button>
+  <button class="tb" title="Open (Ctrl+O)"><img src="../Resources/icons/open.svg" alt=""></button>
+  <button class="tb" title="Save (Ctrl+S)"><img src="../Resources/icons/save.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb" title="Undo (Ctrl+Z)"><img src="../Resources/icons/undo.svg" alt=""></button>
+  <button class="tb" title="Redo (Ctrl+Y)" disabled><img src="../Resources/icons/redo.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb" title="Cut (Ctrl+X)"><img src="../Resources/icons/cut.svg" alt=""></button>
+  <button class="tb" title="Copy (Ctrl+C)"><img src="../Resources/icons/copy.svg" alt=""></button>
+  <button class="tb" title="Paste (Ctrl+V)"><img src="../Resources/icons/paste.svg" alt=""></button>
+  <button class="tb" title="Delete (Del)"><img src="../Resources/icons/delete.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb" title="Group (Ctrl+G)"><img src="../Resources/icons/group.svg" alt=""></button>
+  <button class="tb" title="Ungroup (Ctrl+Shift+G)"><img src="../Resources/icons/ungroup.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb" title="Bring to front"><img src="../Resources/icons/bring-to-front.svg" alt=""></button>
+  <button class="tb" title="Send to back"><img src="../Resources/icons/send-to-back.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb" title="Align left"><img src="../Resources/icons/align-left.svg" alt=""></button>
+  <button class="tb" title="Align center"><img src="../Resources/icons/align-center.svg" alt=""></button>
+  <button class="tb" title="Align right"><img src="../Resources/icons/align-right.svg" alt=""></button>
+  <div class="sep"></div>
+  <button class="tb on" title="Snap to grid"><img src="../Resources/icons/snap-to-grid.svg" alt=""></button>
+  <div class="spacer"></div>
+  <span class="tb-label">Zoom</span>
+  <select class="field" data-newui="DropDownList"><option>100%</option><option>50%</option><option>200%</option><option>Fit page</option></select>
+</div>
+
+<div class="workspace">
+  <!-- Tool palette: newui Toolbar (vertical) of checkable ToolbarButtons -->
+  <div class="toolpalette" data-newui="Toolbar (vertical tools)">
+    <button class="tb on" title="Select (V)"><img src="../Resources/icons/tool-select.svg" alt=""></button>
+    <button class="tb" title="Direct select (A)"><img src="../Resources/icons/tool-direct-select.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Rectangle (R)"><img src="../Resources/icons/tool-rectangle.svg" alt=""></button>
+    <button class="tb" title="Ellipse (E)"><img src="../Resources/icons/tool-ellipse.svg" alt=""></button>
+    <button class="tb" title="Circle: drag out from the center" data-newui="ToolbarButton (circleTool)"><img src="../Resources/icons/tool-circle.svg" alt=""></button>
+    <button class="tb" title="Rounded rectangle: drag out; Up / Down arrows change the corner radius while dragging" data-newui="ToolbarButton (roundRectTool)"><img src="../Resources/icons/tool-roundrect.svg" alt=""></button>
+    <button class="tb" title="Polygon: drag from the center; Up / Down arrows change the number of sides while dragging" data-newui="ToolbarButton (polygonTool)"><img src="../Resources/icons/tool-polygon.svg" alt=""></button>
+    <button class="tb" title="Star: drag from the center; Up / Down arrows change the number of points while dragging" data-newui="ToolbarButton (starTool)"><img src="../Resources/icons/tool-star.svg" alt=""></button>
+    <button class="tb" title="Arc: drag out from the center (the first point of the arc is where you start); Up / Down arrows change the sweep; handles on its two ends change the angles" data-newui="ToolbarButton (arcTool)"><img src="../Resources/icons/tool-arc.svg" alt=""></button>
+    <button class="tb" title="Line (L)"><img src="../Resources/icons/tool-line.svg" alt=""></button>
+    <button class="tb" title="Pen (P)"><img src="../Resources/icons/tool-pen.svg" alt=""></button>
+    <button class="tb" title="Pencil (N)"><img src="../Resources/icons/tool-pencil.svg" alt=""></button>
+    <button class="tb" title="Paintbrush: drag to draw freehand with the active brush" data-newui="ToolbarButton (paintbrushTool)"><img src="../Resources/icons/tool-paintbrush.svg" alt=""></button>
+    <button class="tb" title="Text (T)"><img src="../Resources/icons/tool-text.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Gradient (G)"><img src="../Resources/icons/tool-gradient.svg" alt=""></button>
+    <button class="tb" title="Width (Shift+W)"><img src="../Resources/icons/tool-width.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Scissors (C): click a path to cut it there"><img src="../Resources/icons/tool-scissors.svg" alt=""></button>
+    <button class="tb" title="Knife (K): drag across filled shapes to cut them into pieces"><img src="../Resources/icons/tool-knife.svg" alt=""></button>
+    <button class="tb" title="Eraser (Shift+E): drag over shapes and lines to rub them out"><img src="../Resources/icons/tool-eraser.svg" alt=""></button>
+    <button class="tb" title="Shape Builder (Shift+M): drag across the pieces of the selected overlapping shapes to join them (Alt-drag erases)"><img src="../Resources/icons/tool-shapebuilder.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Eyedropper: click an object to copy its look onto the selection" data-newui="ToolbarButton (eyedropperTool)"><img src="../Resources/icons/tool-eyedropper.svg" alt=""></button>
+    <button class="tb" title="Magic Wand: click an object to select everything with the same fill" data-newui="ToolbarButton (magicWandTool)"><img src="../Resources/icons/tool-magicwand.svg" alt=""></button>
+    <button class="tb" title="Lasso: drag a loop round objects to select them" data-newui="ToolbarButton (lassoTool)"><img src="../Resources/icons/tool-lasso.svg" alt=""></button>
+    <button class="tb" title="Artboard: drag to make an artboard, click one to select it, drag it or its handles to move / resize it" data-newui="ToolbarButton (artboardTool)"><img src="../Resources/icons/tool-artboard.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Rotate: click to set the center, then drag to turn the selection about it (Shift = 15 degree steps, Alt = turn a copy)" data-newui="ToolbarButton (rotateTool)"><img src="../Resources/icons/tool-rotate.svg" alt=""></button>
+    <button class="tb" title="Scale: click to set the center, then drag to resize the selection about it (Shift = each direction on its own, Alt = scale a copy)" data-newui="ToolbarButton (scaleTool)"><img src="../Resources/icons/tool-scale.svg" alt=""></button>
+    <button class="tb" title="Reflect: click to set a point on the axis, then drag to turn the axis and mirror the selection across it (Shift = 45 degree steps, Alt = mirror a copy)" data-newui="ToolbarButton (reflectTool)"><img src="../Resources/icons/tool-reflect.svg" alt=""></button>
+    <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
+    <button class="tb" title="Hand (H)"><img src="../Resources/icons/tool-hand.svg" alt=""></button>
+    <button class="tb" title="Zoom (Z)"><img src="../Resources/icons/tool-zoom.svg" alt=""></button>
+    <div class="well" title="Fill / stroke"><i class="stroke"></i><i class="fill"></i></div>
+  </div>
+
+  <!-- Canvas: custom CanvasView (SubView) with rulers -->
+  <div class="canvaswrap">
+    <div class="ruler corner"></div>
+    <div class="ruler h" data-newui="Ruler (CanvasView child)"><b style="left:20px">0</b><b style="left:120px">100</b><b style="left:220px">200</b><b style="left:320px">300</b><b style="left:420px">400</b><b style="left:520px">500</b><b style="left:620px">600</b><b style="left:720px">700</b></div>
+    <div class="ruler v"><b style="top:20px">0</b><b style="top:120px">100</b><b style="top:220px">200</b><b style="top:320px">300</b><b style="top:420px">400</b></div>
+    <div class="viewport" data-newui="CanvasView (custom SubView)">
+      <svg viewBox="0 0 800 520" preserveAspectRatio="xMidYMid slice" aria-label="Drawing canvas with a sample illustration and a selected rectangle">
+        <defs><filter id="shadow" x="-20%" y="-20%" width="150%" height="170%"><feDropShadow dx="4" dy="4" stdDeviation="3" flood-color="#000" flood-opacity=".75"/></filter><linearGradient id="sun" gradientUnits="userSpaceOnUse" x1="120" y1="110" x2="240" y2="230"><stop offset="0" stop-color="#f2b824"/><stop offset=".55" stop-color="#e8452c"/><stop offset="1" stop-color="#6a4fc7"/></linearGradient><radialGradient id="glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#00aeef" stop-opacity="0"/></radialGradient><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#e7e7e7" stroke-width="1"/></pattern></defs>
+        <!-- page -->
+        <rect x="20" y="20" width="700" height="460" fill="#fff" stroke="#000" stroke-opacity=".35"/>
+        <rect x="20" y="20" width="700" height="460" fill="url(#g)"/>
+        <!-- artwork -->
+        <circle cx="180" cy="170" r="70" fill="url(#sun)" stroke="#8a5a00" stroke-width="3"/>
+        <ellipse cx="560" cy="360" rx="70" ry="45" fill="url(#glow)"/>
+        <!-- gradient axis handles for the selected gradient object -->
+        <g stroke="#0078d4" stroke-width="1" stroke-dasharray="4 3" fill="#fff"><line x1="120" y1="110" x2="240" y2="230"/><circle cx="120" cy="110" r="2.5"/><rect x="237.5" y="227.5" width="5" height="5"/></g>
+        <!-- stop diamonds on the axis (interior stops, in their own color; the selected one has a heavy outline) -->
+        <g stroke="#0078d4" stroke-width="1"><path d="M180 164.5 L185.5 170 L180 175.5 L174.5 170 Z" fill="#e8452c" stroke="#000" stroke-width="2"/></g>
+        <path d="M330 300 Q 410 120 510 250 T 680 220" fill="none" stroke="#2f7d4f" stroke-width="6" stroke-linecap="round"/>
+        <polygon points="120,420 200,330 280,420" fill="#6a4fc7" fill-opacity=".85"/>
+        <rect x="130" y="130" width="130" height="90" fill="#0078d4" opacity=".5"/>
+        <line x1="60" y1="460" x2="330" y2="460" stroke="#333" stroke-width="2"/>
+        <text x="420" y="420" font-family="Segoe UI, sans-serif" font-size="30" fill="#1b3a6b">Sketch demo</text>
+        <!-- selected rounded rect with handles -->
+        <g opacity=".75" filter="url(#shadow)"><rect x="360" y="60" width="220" height="110" rx="14" fill="url(#sun)" gradientTransform=""/><rect x="360" y="60" width="220" height="110" rx="14" fill="#0078d4" fill-opacity=".3" style="mix-blend-mode:multiply"/><rect x="360" y="60" width="220" height="110" rx="14" fill="none" stroke="#1b3a6b" stroke-width="4"/></g>
+        <g fill="#fff" stroke="#0078d4" stroke-width="0.75">
+          <rect x="360" y="60" width="220" height="110" fill="none" stroke-dasharray="4 3"/>
+          <rect x="357.5" y="57.5" width="5" height="5"/><rect x="472.5" y="57.5" width="5" height="5"/><rect x="577.5" y="57.5" width="5" height="5"/>
+          <rect x="357.5" y="112.5" width="5" height="5"/><rect x="577.5" y="112.5" width="5" height="5"/>
+          <rect x="357.5" y="167.5" width="5" height="5"/><rect x="472.5" y="167.5" width="5" height="5"/><rect x="577.5" y="167.5" width="5" height="5"/>
+          <circle cx="475" cy="36" r="3"/><path d="M475 39V57.5" fill="none"/>
+        </g>
+        <!-- pen tool path nodes -->
+        <g stroke="#0078d4" fill="#fff" stroke-width="0.75">
+          <path d="M520 330 L 560 360 M 560 360 L 620 340" fill="none"/>
+          <rect x="517.25" y="327.25" width="4.5" height="4.5"/><rect x="558.25" y="358.25" width="4.5" height="4.5" fill="#0078d4"/><circle cx="620" cy="340" r="2"/>
+        </g>
+        <!-- marquee -->
+        <rect x="70" y="260" width="130" height="80" fill="#0078d4" fill-opacity=".12" stroke="#0078d4" stroke-width="0.75" stroke-dasharray="4 3"/>
+      </svg>
+      <div class="hint">Drag handles to resize &middot; top handle rotates &middot; Shift keeps aspect &middot; Alt from center</div>
+    </div>
+  </div>
+
+  <!-- Right dock: ScrollView? no - plain vertical FlexLayout of panels -->
+  <aside class="sidebar" data-newui="ScrollView (sidebar)">
+    <section class="panel" data-newui="TransformPanel (SubView)">
+      <h3>Transform <span>1 object</span></h3>
+      <div class="body">
+        <div class="row" data-newui="HBox (transformPosRow)"><label style="min-width:auto">X</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformXField)">
+          <label style="min-width:auto">Y</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformYField)"></div>
+        <div class="row" data-newui="HBox (transformSizeRow)"><label style="min-width:auto">W</label><input class="field" value="200" style="width:70px" data-newui="TextField (transformWField)">
+          <label style="min-width:auto">H</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformHField)">
+          <button class="tb" title="Keep proportions" data-newui="ToolbarButton (linkAspectButton)"><img src="../Resources/icons/link-aspect.svg" width="16" alt=""></button></div>
+        <div class="row" data-newui="HBox (transformAngleRow)"><label style="min-width:44px">Angle</label><input class="field" value="0" style="width:70px" data-newui="TextField (transformAngleField)"><label style="min-width:auto">deg</label></div>
+      </div>
+    </section>
+    <section class="panel" data-newui="ColorPanel (SubView)">
+      <h3>Color <span>Fill &#9679; &nbsp; Stroke &#9675;</span></h3>
+      <div class="body">
+        <div class="modes" data-newui="SegmentedControl (fill type)">
+          <button title="None"><img src="../Resources/icons/fill-none.svg" width="16" alt=""></button>
+          <button title="Solid"><img src="../Resources/icons/fill-solid.svg" width="16" alt=""></button>
+          <button class="on" title="Linear gradient"><img src="../Resources/icons/fill-linear.svg" width="16" alt=""></button>
+          <button title="Radial gradient"><img src="../Resources/icons/fill-radial.svg" width="16" alt=""></button>
+        </div>
+        <div data-newui="GradientEditor (custom SubView)" class="grad">
+          <div class="gbar"><i class="stop" style="left:0%;background:#f2b824" title="Stop 1"></i><i class="stop sel" style="left:55%;background:#e8452c"></i><i class="stop" style="left:100%;background:#6a4fc7"></i></div>
+          <div class="row"><label style="min-width:34px">Stop</label><input class="field" value="55%" style="width:48px"><label style="min-width:auto">Angle</label><input class="field" value="35&deg;" style="width:52px">
+            <button class="tb" title="Add stop"><img src="../Resources/icons/stop-add.svg" alt=""></button>
+            <button class="tb" title="Delete stop"><img src="../Resources/icons/stop-delete.svg" alt=""></button>
+            <button class="tb" title="Reverse"><img src="../Resources/icons/gradient-reverse.svg" alt=""></button></div>
+          <div class="row"><label style="min-width:34px">Type</label><span>Linear</span><label style="min-width:auto;margin-left:10px">Spread</label><select class="field"><option>Pad</option><option>Repeat</option><option>Reflect</option></select></div>
+          <div class="row" title="Strokes only: run the colors along the stroke's length instead of across the object"><label style="min-width:34px">Apply</label><select class="field"><option>Across the object</option><option>Along the stroke</option></select></div>
+          <div class="hint2">Drag the dashed handles on the canvas to move the gradient start/end; the small diamond reshapes or tilts it</div>
+        </div>
+        <div class="modes" data-newui="SegmentedControl (color mode of the edited color; follows it, click converts it)"><button>Gray</button><button>RGB</button><button class="on">CMYK</button><button>HSB</button></div>
+        <!-- Five rows: comp0..comp3 + alpha. RGB hides the 4th, Gray shows only K, HSB hides the 4th. Ranges: RGB 0-255, CMYK/Gray %, HSB 0-360/%/% -->
+        <div class="slider"><span style="color:#00a3d9">C</span><div class="track" style="--v:0%;background:linear-gradient(90deg,#fff,#00aeef)"></div><input class="field" value="0"></div>
+        <div class="slider"><span style="color:#d6247d">M</span><div class="track" style="--v:70%;background:linear-gradient(90deg,#fff,#ec008c)"></div><input class="field" value="70"></div>
+        <div class="slider"><span style="color:#c9a800">Y</span><div class="track" style="--v:85%;background:linear-gradient(90deg,#fff,#fff200)"></div><input class="field" value="85"></div>
+        <div class="slider"><span style="color:var(--text-dim)">K</span><div class="track" style="--v:5%;background:linear-gradient(90deg,#fff,#000)"></div><input class="field" value="5"></div>
+        <div class="slider"><span style="color:var(--text-dim)">A</span><div class="track" style="--v:100%;background:linear-gradient(90deg,transparent,#e8452c),repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/8px 8px"></div><input class="field" value="100%"></div>
+        <div class="row"><label>Hex</label><input class="field" value="#E8452C" style="width:84px"></div>
+        <div class="swatches" data-newui="Swatch row (custom)">
+          <i style="background:#000"></i><i style="background:#555"></i><i style="background:#aaa"></i><i style="background:#fff"></i><i style="background:#e8452c"></i><i style="background:#f2b824"></i><i style="background:#2f7d4f"></i><i style="background:#0078d4"></i><i style="background:#6a4fc7"></i><i style="background:#1b3a6b"></i><i style="background:#00aeef"></i><i style="background:#ec008c"></i>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="StrokePanel (SubView)">
+      <h3>Stroke <span>selected: Stroke 1</span></h3>
+      <div class="body">
+        <div class="row"><label>Weight</label><input class="field" value="4 pt" style="width:60px"><label style="min-width:auto;margin-left:6px">Miter</label><input class="field" value="10" style="width:44px"></div>
+        <div class="row"><label>Cap</label>
+          <div class="modes" style="width:96px"><button class="on" title="Butt"><img src="../Resources/icons/cap-butt.svg" width="16" alt=""></button><button title="Round"><img src="../Resources/icons/cap-round.svg" width="16" alt=""></button><button title="Square"><img src="../Resources/icons/cap-square.svg" width="16" alt=""></button></div>
+          <label style="min-width:auto;margin-left:6px">Join</label>
+          <div class="modes" style="width:96px"><button class="on" title="Miter"><img src="../Resources/icons/join-miter.svg" width="16" alt=""></button><button title="Round"><img src="../Resources/icons/join-round.svg" width="16" alt=""></button><button title="Bevel"><img src="../Resources/icons/join-bevel.svg" width="16" alt=""></button></div></div>
+        <div class="row"><label>Align</label>
+          <div class="modes" style="width:96px" data-newui="SegmentedControl (align stroke)"><button class="on" title="Center"><img src="../Resources/icons/align-stroke-center.svg" width="16" alt=""></button><button title="Inside"><img src="../Resources/icons/align-stroke-inside.svg" width="16" alt=""></button><button title="Outside"><img src="../Resources/icons/align-stroke-outside.svg" width="16" alt=""></button></div>
+          <label style="min-width:auto;margin-left:6px">Profile</label>
+          <div class="modes" style="width:96px"><button class="on" title="Uniform"><img src="../Resources/icons/profile-uniform.svg" width="16" alt=""></button><button title="Taper"><img src="../Resources/icons/profile-taper.svg" width="16" alt=""></button><button title="Bulge"><img src="../Resources/icons/profile-bulge.svg" width="16" alt=""></button></div></div>
+        <div class="row"><label><input type="checkbox" checked> Dashed</label><input class="field" value="12" style="width:40px" title="dash"><input class="field" value="6" style="width:40px" title="gap"><input class="field" value="" style="width:40px" title="dash 2"><input class="field" value="" style="width:40px" title="gap 2"></div>
+        <div class="row"><label>Arrows</label>
+          <select class="field" style="width:62px"><option>None</option><option>Simple</option><option>Filled</option><option>Dot</option></select>
+          <select class="field" style="width:62px"><option>Filled</option><option>None</option><option>Simple</option><option>Dot</option></select>
+          <label style="min-width:auto">Scale</label><input class="field" value="100%" style="width:48px"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="AppearancePanel (SubView)">
+      <h3>Appearance <span>Path: Rounded Rectangle</span></h3>
+      <div class="stack" data-newui="ListView (attribute stack)">
+        <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Stroke</b><span class="sw stroke" style="border-color:#1b3a6b"></span><span class="dim">4 pt &nbsp; 100%</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
+        <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Fill</b><span class="sw" style="background:linear-gradient(90deg,#f2b824,#e8452c,#6a4fc7)"></span><span class="dim">Gradient &nbsp; 100%</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
+        <div class="arow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Fill</b><span class="sw" style="background:#0078d4"></span><span class="dim">Solid &nbsp; 30% &middot; Multiply</span><span class="fxb"><img src="../Resources/icons/fx.svg" width="14" alt=""></span></div>
+        <div class="arow fxrow sel"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Drop Shadow</b><span class="dim">Multiply, 75%, x 4 y 4, blur 6</span></div>
+        <div class="arow fxrow"><span class="grip"><img src="../Resources/icons/drag-handle.svg" width="12" alt=""></span><img src="../Resources/icons/eye.svg" width="14" alt=""><b>Round Corners</b><span class="dim">14 pt</span></div>
+        <div class="arow base"><span class="grip"></span><span style="width:14px"></span><b>Opacity</b><span class="dim">75% &middot; Multiply</span></div>
+      </div>
+      <div class="body" data-newui="SubView (selected item options)">
+        <div class="slider" style="grid-template-columns:62px 1fr 44px"><span style="color:var(--text-dim)">Opacity</span><div class="track" style="--v:75%;background:linear-gradient(90deg,transparent,#555),repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/8px 8px"></div><input class="field" value="75%"></div>
+        <div class="row"><label style="min-width:62px">Blend</label><select class="field" data-newui="DropDownList (blend mode)" style="flex:1"><option>Normal</option><option selected>Multiply</option><option>Screen</option><option>Overlay</option><option>Darken</option><option>Lighten</option><option>Color Dodge</option><option>Color Burn</option><option>Hard Light</option><option>Soft Light</option><option>Difference</option><option>Exclusion</option></select></div>
+        <div class="row" data-newui="SubView (effectRow: X / Y / Blur - shown only while an effect row is chosen; Blur reads Radius for Round Corners and Offset for Offset Path, Size for Roughen; Gaussian Blur, Round Corners and Offset Path show only that one field; Outer Glow shows Blur + Color; Inner Shadow shows everything Drop Shadow does; Roughen shows Size plus X / Y relabelled Detail / Seed)">
+          <label style="min-width:auto">X</label><input class="field" value="4" style="width:46px" data-newui="TextField (effectXField)">
+          <label style="min-width:auto">Y</label><input class="field" value="4" style="width:46px" data-newui="TextField (effectYField)">
+          <label style="min-width:auto" data-newui="Label (effectSizeLabel)">Blur</label><input class="field" value="6" style="width:46px" data-newui="TextField (effectSizeField)"></div>
+        <div class="row" data-newui="SubView (effectColorRow: shadow / glow tint)"><label style="min-width:62px">Color</label><span class="sw" style="width:22px;height:14px;border:1px solid #333;background:#000"></span><input class="field" value="#000000" style="width:84px" data-newui="TextField (effectColorField)"></div>
+      </div>
+      <div class="atb" data-newui="Toolbar (appearance actions)">
+        <button class="tb" title="Add new stroke"><img src="../Resources/icons/new-stroke.svg" width="18" alt=""></button>
+        <button class="tb" title="Add new fill"><img src="../Resources/icons/new-fill.svg" width="18" alt=""></button>
+        <button class="tb" title="Add new effect"><img src="../Resources/icons/fx.svg" width="18" alt=""></button>
+        <div class="sep"></div>
+        <button class="tb" title="Show / hide the selected item"><img src="../Resources/icons/eye.svg" width="18" alt=""></button>
+        <button class="tb" title="Move item up"><img src="../Resources/icons/item-up.svg" width="18" alt=""></button>
+        <button class="tb" title="Move item down"><img src="../Resources/icons/item-down.svg" width="18" alt=""></button>
+        <div class="sep"></div>
+        <button class="tb" title="Clear appearance"><img src="../Resources/icons/clear-appearance.svg" width="18" alt=""></button>
+        <button class="tb" title="Duplicate selected item"><img src="../Resources/icons/duplicate-item.svg" width="18" alt=""></button>
+        <button class="tb" title="Delete selected item"><img src="../Resources/icons/delete.svg" width="18" alt=""></button>
+      </div>
+      <div class="fxmenu" data-newui="ContextMenu (effects, opened by the fx button at the cursor)"><b>Add Effect</b> &nbsp;Drop Shadow &middot; Outer Glow &middot; Gaussian Blur &middot; Round Corners &middot; Inner Shadow &middot; Offset Path &middot; Roughen &nbsp;<i>(Inner Shadow: x / y / blur / color like Drop Shadow, cast inside the shape. Offset Path: one field, Offset, negative shrinks. Roughen: Size, with X / Y relabelled Detail / Seed)</i></div>
+    </section>
+
+    <section class="panel" data-newui="GraphicStylesPanel (SubView)">
+      <h3>Graphic Styles <span><img src="../Resources/icons/graphic-style-new.svg" width="14" alt=""></span></h3>
+      <div class="body"><div class="gs" data-newui="Swatch grid (custom)">
+        <i style="background:#fff;border:1px solid #333" title="Default"></i>
+        <i style="background:linear-gradient(135deg,#f2b824,#e8452c);box-shadow:3px 3px 4px rgba(0,0,0,.5)" title="Sunset + shadow"></i>
+        <i style="background:#0078d4;outline:3px solid #1b3a6b;outline-offset:-3px" title="Blue card"></i>
+        <i style="background:radial-gradient(#fff,#00aeef);border-radius:50%" title="Glow"></i>
+        <i style="background:#fff;border:3px dashed #c0392b" title="Dashed red"></i>
+        <i style="background:#6a4fc7;opacity:.55" title="Ghost"></i>
+      </div></div>
+    </section>
+
+    <section class="panel" data-newui="TextPanel (SubView)">
+      <h3>Text <span>Sketch demo</span></h3>
+      <div class="body">
+        <div class="row"><label style="min-width:44px">Font</label><select class="field" style="flex:1" data-newui="DropDownList (textFontCombo)"><option>Segoe UI</option></select></div>
+        <div class="row" data-newui="SubView (textSizeRow; dragging the Size caption changes the number)"><label style="min-width:44px">Size</label><input class="field" value="24" style="width:56px"><button class="tb" title="Bold"><img src="../Resources/icons/text-bold.svg" width="18" alt=""></button><button class="tb" title="Italic"><img src="../Resources/icons/text-italic.svg" width="18" alt=""></button><button class="tb" title="Align left"><img src="../Resources/icons/text-align-left.svg" width="18" alt=""></button><button class="tb" title="Align center"><img src="../Resources/icons/text-align-center.svg" width="18" alt=""></button><button class="tb" title="Align right"><img src="../Resources/icons/text-align-right.svg" width="18" alt=""></button></div>
+        <div class="row" data-newui="SubView (textSpacingRow; the Track and Lead captions scrub too)"><label style="min-width:44px">Track</label><input class="field" value="0" style="width:50px"><label style="min-width:34px">Lead</label><input class="field" value="100" style="width:50px"><span>%</span></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="LibraryPanel (SubView: symbols)">
+      <h3>Symbols</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (symbolCombo)"><option>Badge</option></select>
+        <div class="atb" data-newui="Toolbar (symbol actions)"><button class="tb" title="New symbol from the selection"><img src="../Resources/icons/symbol-new.svg" width="18" alt=""></button><button class="tb" title="Place symbol"><img src="../Resources/icons/symbol-place.svg" width="18" alt=""></button><button class="tb" title="Redefine symbol"><img src="../Resources/icons/symbol-redefine.svg" width="18" alt=""></button><button class="tb" title="Break link"><img src="../Resources/icons/symbol-break.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Badge" style="flex:1"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="LibraryPanel (SubView: patterns)">
+      <h3>Patterns</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (patternCombo)"><option>Dots</option></select>
+        <div class="atb" data-newui="Toolbar (pattern actions)"><button class="tb" title="Make pattern from the selection"><img src="../Resources/icons/pattern-new.svg" width="18" alt=""></button><button class="tb" title="Fill with pattern"><img src="../Resources/icons/pattern-fill.svg" width="18" alt=""></button><button class="tb" title="Stroke with pattern"><img src="../Resources/icons/pattern-stroke.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Dots" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Scale</label><input class="field" value="100" style="width:50px"><span>%</span><label style="min-width:40px">Angle</label><input class="field" value="0" style="width:50px"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="BrushPanel (SubView)">
+      <h3>Brushes</h3>
+      <div class="body">
+        <select class="field" data-newui="DropDownList (brushCombo)"><option>Calligraphic 45</option><option>Flat Chisel</option><option>Dots</option><option>Stars</option><option>Tapered</option></select>
+        <div class="atb" data-newui="Toolbar (brush actions: new calligraphic / art / scatter, apply, remove, presets, delete)"><button class="tb" title="New calligraphic brush"><img src="../Resources/icons/brush-new.svg" width="18" alt=""></button><button class="tb" title="New art brush from the selection"><img src="../Resources/icons/brush-art.svg" width="18" alt=""></button><button class="tb" title="New scatter brush from the selection"><img src="../Resources/icons/brush-scatter.svg" width="18" alt=""></button><button class="tb" title="Apply the brush to the selection"><img src="../Resources/icons/brush-apply.svg" width="18" alt=""></button><button class="tb" title="Back to a plain stroke"><img src="../Resources/icons/brush-remove.svg" width="18" alt=""></button><button class="tb" title="Add brush presets"><img src="../Resources/icons/brush-presets.svg" width="18" alt=""></button><button class="tb" title="Delete"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Calligraphic 45" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Angle</label><input class="field" value="45" style="width:50px"><label style="min-width:44px">Round</label><input class="field" value="25" style="width:50px"></div>
+        <div class="row"><label style="min-width:44px">Space</label><input class="field" value="" style="width:50px"><label style="min-width:44px">Stray</label><input class="field" value="" style="width:50px"></div>
+        <div class="row"><label style="min-width:44px">Size</label><input class="field" value="" style="width:50px"><label style="min-width:44px">Turn</label><input class="field" value="" style="width:50px"></div>
+        <div class="row"><label style="min-width:70px">Follow path</label><button class="tb" title="Scatter copies turn with the path"><img src="../Resources/icons/brush-follow.svg" width="18" alt=""></button></div>
+      </div>
+    </section>
+
+    <section class="panel layers" data-newui="LayersPanel (LayerTree)" style="display:flex;flex-direction:column;flex:1;min-height:0;border-bottom:0">
+      <h3>Layers <span><img src="../Resources/icons/layer-add.svg" width="14" alt=""> <img src="../Resources/icons/layer-sublayer.svg" width="14" alt=""> <img src="../Resources/icons/layer-delete.svg" width="14" alt=""></span></h3>
+      <div style="overflow:auto;flex:1" data-newui="LayerTree (layers, groups and objects; the mouse wheel scrolls)">
+        <div class="layer sel" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9662; Layer 1</span><span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb"><i style="width:14px;height:8px;background:#e8452c;border:1px solid #1b3a6b"></i></span>&lt;Rounded Rectangle&gt;<span style="margin-left:auto;background:#4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9656;</span><span class="thumb">&#9707;</span>&lt;Group&gt;<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"><img src="../Resources/icons/lock.svg" width="14" alt=""></span><span class="thumb"><i style="width:12px;height:8px;background:#6a4fc7"></i></span>&lt;Polygon&gt;<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer child" style="border-left:3px solid #4F80FF"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span class="thumb">T</span>Sketch demo<span style="margin-left:auto;border:1px solid #4F80FF;width:9px;height:9px"></span></div>
+        <div class="layer" style="border-left:3px solid #FF4F4F"><span class="eye"><img src="../Resources/icons/eye.svg" width="14" alt=""></span><span class="lock"></span><span>&#9656; Background</span><span style="margin-left:auto;border:1px solid #FF4F4F;width:9px;height:9px"></span></div>
+      </div>
+      <div class="body">
+        <div class="row" data-newui="SubView (the active layer, or the one selected object)"><label style="min-width:44px">Name</label><input class="field" value="Layer 1" style="flex:1"></div>
+        <div class="row"><label style="min-width:44px">Color</label><select class="field" style="flex:1" data-newui="DropDownList (layerColorCombo: Light Blue, Red, Green, Blue, Yellow, Violet, Orange, Dark Green, Magenta)"><option>Light Blue</option><option>Red</option><option>Green</option></select></div>
+      </div>
+    </section>
+
+    <section class="panel" data-newui="ArtboardPanel (SubView)">
+      <h3>Artboards</h3>
+      <div class="body">
+        <div class="atb"><button class="tb" title="New artboard"><img src="../Resources/icons/layer-add.svg" width="18" alt=""></button><button class="tb" title="Delete artboard"><img src="../Resources/icons/layer-delete.svg" width="18" alt=""></button><select class="field" style="flex:1" data-newui="DropDownList (artboardCombo)"><option>Artboard 1</option></select></div>
+        <div class="row"><label style="min-width:44px">Name</label><input class="field" value="Artboard 1" style="flex:1"></div>
+        <div class="row"><label style="min-width:14px">X</label><input class="field" value="0" style="width:56px"><label style="min-width:14px">Y</label><input class="field" value="0" style="width:56px"></div>
+        <div class="row"><label style="min-width:14px">W</label><input class="field" value="612" style="width:56px"><label style="min-width:14px">H</label><input class="field" value="792" style="width:56px"></div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<!-- Status bar: the new newui StatusBar with StatusPanes -->
+<div class="statusbar" data-newui="StatusBar">
+  <div class="flex" data-newui="StatusPane (flex)">Rounded Rectangle selected &mdash; drag to move, handles to resize</div>
+  <div style="width:130px" data-newui="StatusPane (130)">x 360.0  y 60.0 pt</div>
+  <div style="width:110px" data-newui="StatusPane (110)">W 220  H 110</div>
+  <div style="width:90px" data-newui="StatusPane (90) - document color mode: RGB or CMYK">CMYK doc</div>
+  <div style="width:70px;border-right:0" data-newui="StatusPane (70)">100%</div>
+</div>
+
+<details class="assets" open><summary>Cursors (SVG, 32x32) - red dot = hotspot</summary><div class="gal"><figure><div class="cur"><img src="../Resources/cursors/select.svg" alt=""><i style="left:7px;top:3px"></i></div><figcaption>select<br>7,3</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/direct-select.svg" alt=""><i style="left:7px;top:3px"></i></div><figcaption>direct-select<br>7,3</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/crosshair.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>crosshair<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/pen.svg" alt=""><i style="left:6px;top:27px"></i></div><figcaption>pen<br>6,27</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/pencil.svg" alt=""><i style="left:5px;top:27px"></i></div><figcaption>pencil<br>5,27</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/text.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>text<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/hand.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>hand<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/hand-grab.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>hand-grab<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/zoom-in.svg" alt=""><i style="left:13px;top:13px"></i></div><figcaption>zoom-in<br>13,13</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/zoom-out.svg" alt=""><i style="left:13px;top:13px"></i></div><figcaption>zoom-out<br>13,13</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/move.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>move<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/resize-ns.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>resize-ns<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/resize-we.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>resize-we<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/resize-nwse.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>resize-nwse<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/resize-nesw.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>resize-nesw<br>16,16</figcaption></figure><figure><div class="cur"><img src="../Resources/cursors/rotate.svg" alt=""><i style="left:16px;top:16px"></i></div><figcaption>rotate<br>16,16</figcaption></figure></div></details>
+<label class="maptoggle"><input type="checkbox" id="map"> Show newui control mapping</label>
+<script>
+  const box = document.getElementById('map');
+  box.addEventListener('change', () => document.body.classList.toggle('map', box.checked));
+  addEventListener('keydown', e => { if (e.key.toLowerCase() === 'n' && e.target === document.body) { box.checked = !box.checked; box.dispatchEvent(new Event('change')); } });
+</script>
+</body>
+</html>
+

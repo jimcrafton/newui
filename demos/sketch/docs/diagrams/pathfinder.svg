@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-label="Pathfinder, knife and Shape Builder: shapes as polygons">
+<title>Pathfinder, knife and Shape Builder: shapes as polygons</title>
+<desc>Shapes are flattened to polygon loops, combined with the non-zero rule, and turned back into paths.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Boolean operations work on flattened polygons (pathops.cpp)</text>
+<rect x="20" y="46" width="135" height="60" rx="6" class="box" />
+<text x="87.5" y="73" class="t b c" >BLPath</text>
+<text x="87.5" y="88" class="s c" >curves</text>
+<rect x="175" y="46" width="135" height="60" rx="6" class="box" />
+<text x="242.5" y="73" class="t b c" >flattenToLoops</text>
+<text x="242.5" y="88" class="s c" >tolerance 0.05</text>
+<line x1="155" y1="76" x2="175" y2="76" class="line" marker-end="url(#arrow)"/>
+<rect x="330" y="46" width="135" height="60" rx="6" class="box" />
+<text x="397.5" y="73" class="t b c" >Loops a, b</text>
+<text x="397.5" y="88" class="s c" >polygons, non-zero</text>
+<line x1="310" y1="76" x2="330" y2="76" class="line" marker-end="url(#arrow)"/>
+<rect x="485" y="46" width="135" height="60" rx="6" class="soft" />
+<text x="552.5" y="67" class="t b c" >combineLoops</text>
+<text x="552.5" y="82" class="s c" >Union / Intersect /</text>
+<text x="552.5" y="94" class="s c" >Subtract / Exclude</text>
+<line x1="465" y1="76" x2="485" y2="76" class="line" marker-end="url(#arrow)"/>
+<rect x="640" y="46" width="135" height="60" rx="6" class="box" />
+<text x="707.5" y="73" class="t b c" >splitIntoRegions</text>
+<text x="707.5" y="88" class="s c" >outer loop + its holes</text>
+<line x1="620" y1="76" x2="640" y2="76" class="line" marker-end="url(#arrow)"/>
+<rect x="795" y="46" width="135" height="60" rx="6" class="box" />
+<text x="862.5" y="73" class="t b c" >loopsToPath</text>
+<text x="862.5" y="88" class="s c" >one subpath per loop</text>
+<line x1="775" y1="76" x2="795" y2="76" class="line" marker-end="url(#arrow)"/>
+<text x="120" y="150" class="t b c" >Union</text>
+<defs><clipPath id="clipA0"><circle cx="95" cy="215" r="48"/></clipPath><mask id="maskB0"><rect x="20" y="150" width="200" height="140" fill="#fff"/><circle cx="145" cy="215" r="48" fill="#000"/></mask></defs>
+<circle cx="95" cy="215" r="48" fill="#e8f0fc" stroke="#1e6fe0"/><circle cx="145" cy="215" r="48" fill="#e8f0fc" stroke="#1e6fe0"/>
+<path d="M0 0" fill="none"/>
+<text x="350" y="150" class="t b c" >Intersect</text>
+<defs><clipPath id="clipA1"><circle cx="325" cy="215" r="48"/></clipPath><mask id="maskB1"><rect x="250" y="150" width="200" height="140" fill="#fff"/><circle cx="375" cy="215" r="48" fill="#000"/></mask></defs>
+<circle cx="325" cy="215" r="48" fill="none" stroke="#9a9a9a" stroke-dasharray="4 3"/><circle cx="375" cy="215" r="48" fill="none" stroke="#9a9a9a" stroke-dasharray="4 3"/>
+<circle cx="375" cy="215" r="48" fill="#1e6fe0" stroke="#1e6fe0" clip-path="url(#clipA1)"/>
+<text x="580" y="150" class="t b c" >Subtract (a - b)</text>
+<defs><clipPath id="clipA2"><circle cx="555" cy="215" r="48"/></clipPath><mask id="maskB2"><rect x="480" y="150" width="200" height="140" fill="#fff"/><circle cx="605" cy="215" r="48" fill="#000"/></mask></defs>
+<circle cx="605" cy="215" r="48" fill="none" stroke="#9a9a9a" stroke-dasharray="4 3"/>
+<circle cx="555" cy="215" r="48" fill="#1e6fe0" stroke="#1e6fe0" mask="url(#maskB2)"/>
+<text x="810" y="150" class="t b c" >Exclude</text>
+<defs><clipPath id="clipA3"><circle cx="785" cy="215" r="48"/></clipPath><mask id="maskB3"><rect x="710" y="150" width="200" height="140" fill="#fff"/><circle cx="835" cy="215" r="48" fill="#000"/></mask></defs>
+<path fill-rule="evenodd" fill="#1e6fe0" stroke="#1e6fe0" d="M737 215 a48 48 0 1 0 96 0 a48 48 0 1 0 -96 0 M787 215 a48 48 0 1 0 96 0 a48 48 0 1 0 -96 0"/>
+<rect x="20" y="300" width="920" height="100" rx="6" class="panel" />
+<text x="34" y="322" class="t" >Results follow one convention: outer outlines have positive signedArea, holes negative - so a result can be filled non-zero.</text>
+<text x="34" y="345" class="s" >Knife: cutAlongLine(region, line) divides a shape along a stroke carried straight on past its ends -&gt; pieces on each side.</text>
+<text x="34" y="361" class="s" >Eraser: strokeToLoops(pointer path, width) subtracted from shapes; lines use clipLineOutside.</text>
+<text x="34" y="377" class="s" >Shape Builder: arrangeCells(shapes) cuts the plane into cells; dragging over cells unites them (Alt: erases them).</text>
+</svg>

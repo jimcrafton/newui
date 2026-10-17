@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="660" viewBox="0 0 980 660" role="img" aria-label="The two file formats">
+<title>The two file formats</title>
+<desc>SVG with data attributes, and the .skb chunked binary format.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="490" y="26" class="h c" >File formats</text>
+<rect x="20" y="44" width="460" height="600" rx="6" class="panel" />
+<text x="250" y="66" class="t b c" >sketch SVG (.svg, .svgz = gzip)</text>
+<text x="34" y="92" class="m" >&lt;svg width viewBox data-ppi data-color-mode</text>
+<text x="34" y="111" class="m" >     data-page-background data-artboards</text>
+<text x="34" y="130" class="m" >     data-active-artboard data-guides</text>
+<text x="34" y="149" class="m" >     data-layers data-swatches&gt;</text>
+<text x="34" y="168" class="m" >  &lt;defs&gt;</text>
+<text x="34" y="187" class="m" >    gradients  &lt;linearGradient&gt;/&lt;radialGradient&gt;</text>
+<text x="34" y="206" class="m" >    &lt;svg data-sketch-symbol="1" data-box=...&gt;</text>
+<text x="34" y="225" class="m" >       (a whole nested document)</text>
+<text x="34" y="244" class="m" >    &lt;svg data-sketch-pattern="2" ...&gt;</text>
+<text x="34" y="263" class="m" >    &lt;svg data-sketch-brush="3" data-brush-kind</text>
+<text x="34" y="282" class="m" >         data-brush-params="angle,round,..."/&gt;</text>
+<text x="34" y="301" class="m" >  &lt;/defs&gt;</text>
+<text x="34" y="320" class="m" >  &lt;rect id="pageBackground..."/&gt;  (one per artboard)</text>
+<text x="34" y="339" class="m" >  &lt;g&gt; group (opacity, blend, data-clip) ...</text>
+<text x="34" y="358" class="m" >    &lt;path d=... data-type="Rect|Path|Text|..."</text>
+<text x="34" y="377" class="m" >       fill stroke stroke-width ... data-name</text>
+<text x="34" y="396" class="m" >       data-layer data-locked data-frame-angle</text>
+<text x="34" y="415" class="m" >       data-text data-font-size data-text-matrix</text>
+<text x="34" y="434" class="m" >       data-text-warp data-warp-a data-warp-b</text>
+<text x="34" y="453" class="m" >       data-symbol data-brush data-fill-pattern/&gt;</text>
+<text x="34" y="472" class="m" >    &lt;image transform=matrix(..) href=data:.../&gt;</text>
+<text x="34" y="491" class="m" >    &lt;g data-sketch="appearance"&gt;  one &lt;path&gt; per</text>
+<text x="34" y="510" class="m" >       fill / stroke / effect item</text>
+<text x="34" y="529" class="m" >  &lt;/g&gt;</text>
+<text x="34" y="548" class="m" >  &lt;g data-sketch="graphic-styles"&gt; ... &lt;/g&gt;</text>
+<text x="34" y="567" class="m" >&lt;/svg&gt;</text>
+<text x="34" y="596" class="s" >Other viewers show shapes, gradients, groups, images and text outlines;</text>
+<text x="34" y="609" class="s" >what only sketch understands rides in data-* attributes. On open, &lt;use&gt;,</text>
+<text x="34" y="622" class="s" >&lt;symbol&gt;, nested &lt;svg&gt;, clip-path, simple filters and &lt;image&gt; are expanded.</text>
+<rect x="500" y="44" width="460" height="600" rx="6" class="panel" />
+<text x="730" y="66" class="t b c" >sketch binary (.skb), little-endian</text>
+<rect x="520" y="82" width="420" height="40" rx="4" class="soft" />
+<text x="530" y="106" class="m" >"SKB1"   version u16 (2)   flags u16 (bit 0: body gzipped)</text>
+<rect x="520" y="132" width="420" height="22" rx="3" class="box" />
+<text x="530" y="147" class="m" >PAGE</text>
+<text x="630" y="147" class="s" >size, ppi, color mode, background</text>
+<rect x="520" y="158" width="420" height="22" rx="3" class="box" />
+<text x="530" y="173" class="m" >GUID</text>
+<text x="630" y="173" class="s" >guides</text>
+<rect x="520" y="184" width="420" height="22" rx="3" class="box" />
+<text x="530" y="199" class="m" >LAYR</text>
+<text x="630" y="199" class="s" >layers (+ colour) and per-layer runs</text>
+<rect x="520" y="210" width="420" height="22" rx="3" class="box" />
+<text x="530" y="225" class="m" >SWCH</text>
+<text x="630" y="225" class="s" >swatches</text>
+<rect x="520" y="236" width="420" height="22" rx="3" class="box" />
+<text x="530" y="251" class="m" >STRS</text>
+<text x="630" y="251" class="s" >every distinct string once</text>
+<rect x="520" y="262" width="420" height="22" rx="3" class="box" />
+<text x="530" y="277" class="m" >STYL</text>
+<text x="630" y="277" class="s" >distinct appearances, shared by objects</text>
+<rect x="520" y="288" width="420" height="22" rx="3" class="box" />
+<text x="530" y="303" class="m" >GRPS / CLIP</text>
+<text x="630" y="303" class="s" >group props, clipping group ids</text>
+<rect x="520" y="314" width="420" height="22" rx="3" class="box" />
+<text x="530" y="329" class="m" >SYMB / PATN</text>
+<text x="630" y="329" class="s" >symbol and pattern libraries (nested .skb)</text>
+<rect x="520" y="340" width="420" height="22" rx="3" class="box" />
+<text x="530" y="355" class="m" >BRSH</text>
+<text x="630" y="355" class="s" >brushes (+ nested artwork)</text>
+<rect x="520" y="366" width="420" height="22" rx="3" class="box" />
+<text x="530" y="381" class="m" >IMGS</text>
+<text x="630" y="381" class="s" >each picture's file bytes, once</text>
+<rect x="520" y="392" width="420" height="22" rx="3" class="box" />
+<text x="530" y="407" class="m" >ABRD</text>
+<text x="630" y="407" class="s" >artboards</text>
+<rect x="520" y="418" width="420" height="22" rx="3" class="box" />
+<text x="530" y="433" class="m" >GSTY</text>
+<text x="630" y="433" class="s" >graphic styles</text>
+<rect x="520" y="444" width="420" height="22" rx="3" class="box" />
+<text x="530" y="459" class="m" >OBJS</text>
+<text x="630" y="459" class="s" >objects in stacking order</text>
+<text x="520" y="484" class="s" >chunk = tag (4 ASCII) + length u64 + bytes; unknown tags are skipped</text>
+<text x="520" y="506" class="t b" >one object in OBJS</text>
+<text x="520" y="524" class="s" >type u8, flags u8 (visible, locked, angle, groups, text, style,</text>
+<text x="520" y="538" class="s" >symbol, warp), name (string index), look index (STYL)</text>
+<text x="520" y="552" class="s" >[frame angle] [groups] [text state] [style] [symbol id | picture index]</text>
+<text x="520" y="566" class="s" >[warp] then the outline:</text>
+<text x="520" y="586" class="s" >version 2 outline = count, one command byte each, then for every</text>
+<text x="520" y="600" class="s" >vertex (not Close) dx, dy as f32 from the previous DECODED vertex</text>
+<text x="520" y="614" class="s" >-&gt; half the size; no drift; exactly representable values are exact</text>
+</svg>

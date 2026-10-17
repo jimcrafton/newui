@@ -16,7 +16,9 @@ namespace {
     // even in premultiplied space here because every pixel in the mask
     // starts out the exact same flat color at varying alpha (see
     // paintEffect()), so there's no premultiplied-color-fringing hazard a
-    // multi-color image could have.
+    // multi-color image could have. (Blurring each channel of a *premultiplied*
+    // image independently is also the correct way to blur a multi-color one -
+    // see shapes::boxBlur3(), which a caller can use on any PRGB32 image.)
     void boxBlurLine(uint8_t* first, int count, intptr_t elementStride, int radius) {
         if (radius <= 0 || count <= 0) {
             return;
@@ -62,16 +64,6 @@ namespace {
         for (int x = 0; x < width; ++x) {
             boxBlurLine(pixels + intptr_t(x) * 4, height, stride, radius);
         }
-    }
-
-    void boxBlur3(uint8_t* pixels, int width, int height, intptr_t stride, float softness) {
-        int radius = int(std::lround(softness));
-        if (radius <= 0) {
-            return;
-        }
-        boxBlurPass(pixels, width, height, stride, radius);
-        boxBlurPass(pixels, width, height, stride, radius);
-        boxBlurPass(pixels, width, height, stride, radius);
     }
 
     bool rectsIntersect(const newui::Rect& a, const newui::Rect& b) {
@@ -230,6 +222,16 @@ namespace {
 }
 
 namespace newui::shapes {
+
+    void boxBlur3(uint8_t* pixels, int width, int height, intptr_t stride, float softness) {
+        int radius = int(std::lround(softness));
+        if (radius <= 0) {
+            return;
+        }
+        boxBlurPass(pixels, width, height, stride, radius);
+        boxBlurPass(pixels, width, height, stride, radius);
+        boxBlurPass(pixels, width, height, stride, radius);
+    }
 
     Rect Shape::boundsWithEffects() const {
         Rect bounds = localBounds();

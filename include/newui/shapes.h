@@ -48,6 +48,12 @@ namespace newui::shapes {
     // themselves actually use.
     constexpr float kBlurPadFactor = 3.0f;
 
+    // Blurs a PRGB32 (premultiplied BGRA) pixel buffer in place - width x height pixels, `stride` bytes per row - with
+    // three box-blur passes of radius lround(softness) pixels (about a Gaussian of standard deviation `softness`). Edge
+    // pixels are repeated, so leave kBlurPadFactor x softness of transparent margin around whatever should blur away.
+    // Public so other code (a vector editor's drop shadows and Gaussian blur) can reuse what Shape's glow/drop shadow use.
+    void boxBlur3(uint8_t* pixels, int width, int height, intptr_t stride, float softness);
+
     // Scale, then rotate (about pivot), then translate - applied to ctx
     // in that order via applyTo(), which composes onto whatever transform
     // ctx already has (its "parent space") rather than replacing it.
