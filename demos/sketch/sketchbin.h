@@ -17,7 +17,8 @@ namespace sketch {
     //            blend), GSTY (the Graphic Styles panel), OBJS (the objects, in stacking order: type, flags, name, style index,
     //            groups, frame angle, text state, then the outline as one byte per path command and two f64 per vertex).
     //   A chunk with an unknown tag is skipped, so newer files stay readable where they only add chunks.
-    // Numbers are exact (f64 outlines, f32 color components): a document survives a save and load unchanged.
+    // Numbers: version 2 stores outlines as float32 steps (see writePath in sketchbin.cpp), so geometry comes back to within float
+    // precision (exactly, for values a float holds); colors are f32, other numbers f64.
 
     // True when `data` starts like a .skb file.
     bool isBinaryDocument(const std::string& data);

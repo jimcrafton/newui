@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-label="How brushes work">
+<title>How brushes work</title>
+<desc>Calligraphic nib sweep, art brush bending, scatter placement.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Brushes (brush.cpp)</text>
+<rect x="20" y="44" width="300" height="260" rx="6" class="panel" />
+<text x="170" y="64" class="t b c" >Calligraphic</text>
+<ellipse cx="40" cy="150" rx="15" ry="4" transform="rotate(-45 40 150)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="51.82" cy="160.14" rx="15" ry="4" transform="rotate(-45 51.82 160.14)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="51.82" cy="160.14" rx="15" ry="4" transform="rotate(-45 51.82 160.14)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="63.64" cy="169.46" rx="15" ry="4" transform="rotate(-45 63.64 169.46)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="63.64" cy="169.46" rx="15" ry="4" transform="rotate(-45 63.64 169.46)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="75.45" cy="177.21" rx="15" ry="4" transform="rotate(-45 75.45 177.21)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="75.45" cy="177.21" rx="15" ry="4" transform="rotate(-45 75.45 177.21)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="87.27" cy="182.75" rx="15" ry="4" transform="rotate(-45 87.27 182.75)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="87.27" cy="182.75" rx="15" ry="4" transform="rotate(-45 87.27 182.75)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="99.09" cy="185.63" rx="15" ry="4" transform="rotate(-45 99.09 185.63)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="99.09" cy="185.63" rx="15" ry="4" transform="rotate(-45 99.09 185.63)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="110.91" cy="185.63" rx="15" ry="4" transform="rotate(-45 110.91 185.63)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="110.91" cy="185.63" rx="15" ry="4" transform="rotate(-45 110.91 185.63)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="122.73" cy="182.75" rx="15" ry="4" transform="rotate(-45 122.73 182.75)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="122.73" cy="182.75" rx="15" ry="4" transform="rotate(-45 122.73 182.75)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="134.55" cy="177.21" rx="15" ry="4" transform="rotate(-45 134.55 177.21)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="134.55" cy="177.21" rx="15" ry="4" transform="rotate(-45 134.55 177.21)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="146.36" cy="169.46" rx="15" ry="4" transform="rotate(-45 146.36 169.46)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="146.36" cy="169.46" rx="15" ry="4" transform="rotate(-45 146.36 169.46)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="158.18" cy="160.14" rx="15" ry="4" transform="rotate(-45 158.18 160.14)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="158.18" cy="160.14" rx="15" ry="4" transform="rotate(-45 158.18 160.14)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="170" cy="150" rx="15" ry="4" transform="rotate(-45 170 150)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="170" cy="150" rx="15" ry="4" transform="rotate(-45 170 150)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="181.82" cy="139.86" rx="15" ry="4" transform="rotate(-45 181.82 139.86)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="181.82" cy="139.86" rx="15" ry="4" transform="rotate(-45 181.82 139.86)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="193.64" cy="130.54" rx="15" ry="4" transform="rotate(-45 193.64 130.54)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="193.64" cy="130.54" rx="15" ry="4" transform="rotate(-45 193.64 130.54)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="205.45" cy="122.79" rx="15" ry="4" transform="rotate(-45 205.45 122.79)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="205.45" cy="122.79" rx="15" ry="4" transform="rotate(-45 205.45 122.79)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="217.27" cy="117.25" rx="15" ry="4" transform="rotate(-45 217.27 117.25)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="217.27" cy="117.25" rx="15" ry="4" transform="rotate(-45 217.27 117.25)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="229.09" cy="114.37" rx="15" ry="4" transform="rotate(-45 229.09 114.37)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="229.09" cy="114.37" rx="15" ry="4" transform="rotate(-45 229.09 114.37)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="240.91" cy="114.37" rx="15" ry="4" transform="rotate(-45 240.91 114.37)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="240.91" cy="114.37" rx="15" ry="4" transform="rotate(-45 240.91 114.37)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="252.73" cy="117.25" rx="15" ry="4" transform="rotate(-45 252.73 117.25)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="252.73" cy="117.25" rx="15" ry="4" transform="rotate(-45 252.73 117.25)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="264.55" cy="122.79" rx="15" ry="4" transform="rotate(-45 264.55 122.79)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="264.55" cy="122.79" rx="15" ry="4" transform="rotate(-45 264.55 122.79)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="276.36" cy="130.54" rx="15" ry="4" transform="rotate(-45 276.36 130.54)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="276.36" cy="130.54" rx="15" ry="4" transform="rotate(-45 276.36 130.54)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="288.18" cy="139.86" rx="15" ry="4" transform="rotate(-45 288.18 139.86)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="288.18" cy="139.86" rx="15" ry="4" transform="rotate(-45 288.18 139.86)" fill="#1e6fe0" opacity="0.12"/>
+<ellipse cx="300" cy="150" rx="15" ry="4" transform="rotate(-45 300 150)" fill="#1e6fe0" opacity="0.12"/>
+<path d="M40 150 L51.82 160.14 L63.64 169.46 L75.45 177.21 L87.27 182.75 L99.09 185.63 L110.91 185.63 L122.73 182.75 L134.55 177.21 L146.36 169.46 L158.18 160.14 L170 150 L181.82 139.86 L193.64 130.54 L205.45 122.79 L217.27 117.25 L229.09 114.37 L240.91 114.37 L252.73 117.25 L264.55 122.79 L276.36 130.54 L288.18 139.86 L300 150" class="thin" stroke-dasharray="3 3"/>
+<ellipse cx="170" cy="150" rx="15" ry="4" transform="rotate(-45 170 150)" fill="none" stroke="#d4380d" stroke-width="1.5"/>
+<text x="30" y="232" class="s" >nib = 16-gon ellipse: major = stroke weight / 2,</text>
+<text x="30" y="245" class="s" >minor = major * roundness, turned by -angle</text>
+<text x="30" y="258" class="s" >each path segment: convex hull of the nib at</text>
+<text x="30" y="271" class="s" >both ends (monotone chain, one winding);</text>
+<text x="30" y="284" class="s" >all hulls filled non-zero = their union</text>
+<rect x="330" y="44" width="300" height="260" rx="6" class="panel" />
+<text x="480" y="64" class="t b c" >Art (bend along the path)</text>
+<rect x="350" y="86" width="120" height="26" fill="#f2b824" opacity="0.5" stroke="#9a9a9a"/>
+<text x="410" y="103" class="s c" >artwork box</text>
+<line x1="480" y1="99" x2="520" y2="99" class="acc" marker-end="url(#arrowAcc)"/>
+<path d="M357.32 160.49 L363.76 165.45 L370.09 170.21 L376.29 174.63 L382.35 178.62 L388.24 182.09 L393.95 184.96 L399.46 187.18 L404.78 188.76 L409.94 189.69 L415 190 L420.06 189.69 L425.22 188.76 L430.54 187.18 L436.05 184.96 L441.76 182.09 L447.65 178.62 L453.71 174.63 L459.91 170.21 L466.24 165.45 L472.68 160.49 L479.24 155.44 L485.91 150.43 L492.71 145.58 L499.65 141.01 L506.76 136.83 L514.05 133.18 L521.54 130.16 L529.22 127.89 L537.06 126.48 L545 126 L552.94 126.48 L560.78 127.89 L568.46 130.16 L575.95 133.18 L583.24 136.83 L590.35 141.01 L597.29 145.58 L604.09 150.43 L610.76 155.44 L617.32 160.49 L602.68 179.51 L596.24 174.55 L589.91 169.79 L583.71 165.37 L577.65 161.38 L571.76 157.91 L566.05 155.04 L560.54 152.82 L555.22 151.24 L550.06 150.31 L545 150 L539.94 150.31 L534.78 151.24 L529.46 152.82 L523.95 155.04 L518.24 157.91 L512.35 161.38 L506.29 165.37 L500.09 169.79 L493.76 174.55 L487.32 179.51 L480.76 184.56 L474.09 189.57 L467.29 194.42 L460.35 198.99 L453.24 203.17 L445.95 206.82 L438.46 209.84 L430.78 212.11 L422.94 213.52 L415 214 L407.06 213.52 L399.22 212.11 L391.54 209.84 L384.05 206.82 L376.76 203.17 L369.65 198.99 L362.71 194.42 L355.91 189.57 L349.24 184.56 L342.68 179.51 Z" fill="#f2b824" opacity="0.5" stroke="#9a9a9a"/>
+<path d="M350 170 L356.5 175.01 L363 179.89 L369.5 184.53 L376 188.81 L382.5 192.63 L389 195.89 L395.5 198.51 L402 200.43 L408.5 201.61 L415 202 L421.5 201.61 L428 200.43 L434.5 198.51 L441 195.89 L447.5 192.63 L454 188.81 L460.5 184.53 L467 179.89 L473.5 175.01 L480 170 L486.5 164.99 L493 160.11 L499.5 155.47 L506 151.19 L512.5 147.37 L519 144.11 L525.5 141.49 L532 139.57 L538.5 138.39 L545 138 L551.5 138.39 L558 139.57 L564.5 141.49 L571 144.11 L577.5 147.37 L584 151.19 L590.5 155.47 L597 160.11 L603.5 164.99 L610 170" class="thin" stroke-dasharray="3 3"/>
+<text x="340" y="232" class="s" >u = (x - box.x0) / width  -&gt;  arc length s = u * L</text>
+<text x="340" y="245" class="s" >point = P(s) + N(s) * (centre y - y) * weight</text>
+<text x="340" y="258" class="s" >outlines are flattened and long edges cut so</text>
+<text x="340" y="271" class="s" >they bend; weight 1 = the artwork's own size</text>
+<text x="340" y="284" class="s" >(bendAlong, per subpath)</text>
+<rect x="640" y="44" width="300" height="260" rx="6" class="panel" />
+<text x="790" y="64" class="t b c" >Scatter</text>
+<path d="M660 150 L664.33 153.76 L668.67 157.48 L673 161.12 L677.33 164.64 L681.67 168 L686 171.16 L690.33 174.09 L694.67 176.75 L699 179.12 L703.33 181.18 L707.67 182.89 L712 184.24 L716.33 185.21 L720.67 185.8 L725 186 L729.33 185.8 L733.67 185.21 L738 184.24 L742.33 182.89 L746.67 181.18 L751 179.12 L755.33 176.75 L759.67 174.09 L764 171.16 L768.33 168 L772.67 164.64 L777 161.12 L781.33 157.48 L785.67 153.76 L790 150 L794.33 146.24 L798.67 142.52 L803 138.88 L807.33 135.36 L811.67 132 L816 128.84 L820.33 125.91 L824.67 123.25 L829 120.88 L833.33 118.82 L837.67 117.11 L842 115.76 L846.33 114.79 L850.67 114.2 L855 114 L859.33 114.2 L863.67 114.79 L868 115.76 L872.33 117.11 L876.67 118.82 L881 120.88 L885.33 123.25 L889.67 125.91 L894 128.84 L898.33 132 L902.67 135.36 L907 138.88 L911.33 142.52 L915.67 146.24 L920 150" class="thin" stroke-dasharray="3 3"/>
+<circle cx="651.35" cy="159.97" r="5" fill="#1e6fe0"/>
+<circle cx="693.59" cy="160.36" r="6" fill="#1e6fe0"/>
+<circle cx="714.85" cy="173.61" r="7" fill="#1e6fe0"/>
+<circle cx="735.72" cy="175.74" r="8" fill="#1e6fe0"/>
+<circle cx="760.21" cy="165.76" r="9" fill="#1e6fe0"/>
+<circle cx="787.12" cy="146.68" r="5" fill="#1e6fe0"/>
+<circle cx="814.74" cy="127.04" r="6" fill="#1e6fe0"/>
+<circle cx="842" cy="115.76" r="7" fill="#1e6fe0"/>
+<circle cx="867.43" cy="117.89" r="8" fill="#1e6fe0"/>
+<circle cx="891.47" cy="132.44" r="9" fill="#1e6fe0"/>
+<circle cx="915.67" cy="154.98" r="5" fill="#1e6fe0"/>
+<text x="650" y="232" class="s" >copies every  width * weight * spacing%  of arc</text>
+<text x="650" y="245" class="s" >length; each: translate to the artwork centre,</text>
+<text x="650" y="258" class="s" >scale (size variation), turn (follow the path +</text>
+<text x="650" y="271" class="s" >random turn), move across the path (stray)</text>
+<text x="650" y="284" class="s" >random values: a hash of the copy index</text>
+<rect x="20" y="320" width="920" height="60" rx="6" class="soft" />
+<text x="34" y="343" class="s" >A BrushDef is immutable and shared (shared_ptr in StrokeOptions); editing a brush swaps in a new one and rebinds every stroke and graphic style.</text>
+<text x="34" y="360" class="s" >bounds() and hitTest() use BrushDef::reach(weight); the artwork parts are built once from the definition's SketchDocument (parts()).</text>
+</svg>

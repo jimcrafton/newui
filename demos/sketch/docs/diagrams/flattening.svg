@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-label="Flattening curves into line segments">
+<title>Flattening curves into line segments</title>
+<desc>Curves are sampled into polylines for measuring, dashing, brushes, text warps and boolean operations.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Flattening</text>
+<path d="M30 190 C110 40 250 40 330 190" class="line" />
+<circle cx="30" cy="190" r="2.5" fill="#1e6fe0"/>
+<circle cx="110" cy="40" r="2.5" fill="#1e6fe0"/>
+<circle cx="250" cy="40" r="2.5" fill="#1e6fe0"/>
+<circle cx="330" cy="190" r="2.5" fill="#1e6fe0"/>
+<line x1="30" y1="190" x2="110" y2="40" class="thin" />
+<line x1="250" y1="40" x2="330" y2="190" class="thin" />
+<line x1="110" y1="40" x2="250" y2="40" class="thin" />
+<path d="M30 190 L51.18 155.62 L74.44 127.5 L99.38 105.62 L125.56 90 L152.57 80.62 L180 77.5 L207.43 80.62 L234.44 90 L260.62 105.62 L285.56 127.5 L308.82 155.62 L330 190" class="acc" transform="translate(0 0)"/>
+<circle cx="30" cy="190" r="2.6" fill="#d4380d"/>
+<circle cx="51.18" cy="155.62" r="2.6" fill="#d4380d"/>
+<circle cx="74.44" cy="127.5" r="2.6" fill="#d4380d"/>
+<circle cx="99.38" cy="105.62" r="2.6" fill="#d4380d"/>
+<circle cx="125.56" cy="90" r="2.6" fill="#d4380d"/>
+<circle cx="152.57" cy="80.62" r="2.6" fill="#d4380d"/>
+<circle cx="180" cy="77.5" r="2.6" fill="#d4380d"/>
+<circle cx="207.43" cy="80.62" r="2.6" fill="#d4380d"/>
+<circle cx="234.44" cy="90" r="2.6" fill="#d4380d"/>
+<circle cx="260.62" cy="105.62" r="2.6" fill="#d4380d"/>
+<circle cx="285.56" cy="127.5" r="2.6" fill="#d4380d"/>
+<circle cx="308.82" cy="155.62" r="2.6" fill="#d4380d"/>
+<circle cx="330" cy="190" r="2.6" fill="#d4380d"/>
+<text x="30" y="232" class="s" >control polygon length L = |p0p1| + |p1p2| + |p2p3|</text>
+<text x="30" y="247" class="s" >steps = clamp(L / 3, 8, 96)   (flattenPath, pathflatten.cpp)</text>
+<text x="30" y="262" class="s" >t = k / steps; B(t) by the Bernstein form</text>
+<rect x="380" y="50" width="560" height="150" rx="6" class="panel" />
+<text x="394" y="72" class="t b" >Who flattens, and how fine</text>
+<text x="394" y="94" class="t b" >flattenPath / measurePath</text>
+<text x="580" y="94" class="s" >3 units per piece (8..96 pieces per curve)</text>
+<text x="580" y="105" class="s" >dashes, brush outlines, text warp, path length</text>
+<text x="394" y="119" class="t b" >flattenToLoops (pathops)</text>
+<text x="580" y="119" class="s" >tolerance 0.05 pt from the curve</text>
+<text x="580" y="130" class="s" >Pathfinder, knife, eraser, Shape Builder</text>
+<text x="394" y="144" class="t b" >TextWarper::apply</text>
+<text x="580" y="144" class="s" >also cuts long straight edges into</text>
+<text x="580" y="155" class="s" >pieces of about line-height / 18</text>
+<text x="394" y="169" class="t b" >BrushDef::bendAlong</text>
+<text x="580" y="169" class="s" >edges cut to artwork width / 150</text>
+<text x="580" y="180" class="s" >art brush: artwork follows the stroke</text>
+<text x="30" y="305" class="t b" >Measured path (MeasuredPath: points + running length at each point)</text>
+<path d="M30 345 L86 330.9 L142 327.47 L198 337.31 L254 352.97 L310 362.6 L366 358.91 L422 344.7 L478 330.71 L534 327.54 L590 337.58" class="line" />
+<circle cx="30" cy="345" r="2.4" fill="#666666"/>
+<circle cx="86" cy="330.9" r="2.4" fill="#666666"/>
+<circle cx="142" cy="327.47" r="2.4" fill="#666666"/>
+<circle cx="198" cy="337.31" r="2.4" fill="#666666"/>
+<circle cx="254" cy="352.97" r="2.4" fill="#666666"/>
+<circle cx="310" cy="362.6" r="2.4" fill="#666666"/>
+<circle cx="366" cy="358.91" r="2.4" fill="#666666"/>
+<circle cx="422" cy="344.7" r="2.4" fill="#666666"/>
+<circle cx="478" cy="330.71" r="2.4" fill="#666666"/>
+<circle cx="534" cy="327.54" r="2.4" fill="#666666"/>
+<circle cx="590" cy="337.58" r="2.4" fill="#666666"/>
+<line x1="30" y1="372" x2="590" y2="372" class="acc" marker-end="url(#arrowAcc)"/>
+<text x="300" y="388" class="s c" >s = running length   -&gt;   sampleMeasured(s) = point + unit tangent of the segment (upper_bound on `at`)</text>
+<text x="640" y="318" class="s" >beyond the ends the position is clamped,</text>
+<text x="640" y="332" class="s" >or (text on a path) carried straight on</text>
+<text x="640" y="346" class="s" >along the first / last segment</text>
+</svg>

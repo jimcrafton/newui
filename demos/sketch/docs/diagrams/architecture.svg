@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="600" viewBox="0 0 940 600" role="img" aria-label="Architecture of sketch (MVC)">
+<title>Architecture of sketch (MVC)</title>
+<desc>Views send input to controllers, controllers edit the model through undoable commands, the model notifies the views.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="470" y="28" class="h c" >sketch - model / view / controller</text>
+<rect x="25" y="50" width="230" height="440" rx="8" class="panel" />
+<text x="140" y="76" class="h c" >VIEWS</text>
+<text x="140" y="92" class="s c" >what is drawn</text>
+<rect x="37" y="108" width="206" height="40" rx="6" class="box" />
+<text x="140" y="133" class="t c" >CanvasView</text>
+<rect x="37" y="160" width="206" height="40" rx="6" class="box" />
+<text x="140" y="185" class="t c" >LayerTree</text>
+<rect x="37" y="212" width="206" height="40" rx="6" class="box" />
+<text x="140" y="237" class="t c" >StylePanel</text>
+<rect x="37" y="264" width="206" height="40" rx="6" class="box" />
+<text x="140" y="289" class="t c" >TransformPanel / TextPanel</text>
+<rect x="37" y="316" width="206" height="40" rx="6" class="box" />
+<text x="140" y="341" class="t c" >BrushPanel / LibraryPanel</text>
+<rect x="37" y="368" width="206" height="40" rx="6" class="box" />
+<text x="140" y="393" class="t c" >ArtboardPanel / LayersPanel</text>
+<rect x="37" y="420" width="206" height="40" rx="6" class="box" />
+<text x="140" y="445" class="t c" >dialogs (New Document, Trace)</text>
+<rect x="355" y="50" width="230" height="440" rx="8" class="panel" />
+<text x="470" y="76" class="h c" >CONTROLLERS</text>
+<text x="470" y="92" class="s c" >what is done with input</text>
+<rect x="367" y="108" width="206" height="40" rx="6" class="box" />
+<text x="470" y="133" class="t c" >SketchWindowController</text>
+<rect x="367" y="160" width="206" height="40" rx="6" class="box" />
+<text x="470" y="185" class="t c" >SketchCommandController (by id)</text>
+<rect x="367" y="212" width="206" height="40" rx="6" class="box" />
+<text x="470" y="237" class="t c" >SketchDocumentController (File)</text>
+<rect x="367" y="264" width="206" height="40" rx="6" class="box" />
+<text x="470" y="289" class="t c" >one controller per panel</text>
+<rect x="367" y="316" width="206" height="40" rx="6" class="box" />
+<text x="470" y="341" class="t c" >CanvasView tool code</text>
+<rect x="367" y="368" width="206" height="40" rx="6" class="box" />
+<text x="470" y="393" class="t c" >(transformtools, cuttools, ...)</text>
+<rect x="685" y="50" width="230" height="440" rx="8" class="panel" />
+<text x="800" y="76" class="h c" >MODEL</text>
+<text x="800" y="92" class="s c" >what the document is</text>
+<rect x="697" y="108" width="206" height="40" rx="6" class="box" />
+<text x="800" y="133" class="t c" >SketchDocument</text>
+<rect x="697" y="160" width="206" height="40" rx="6" class="box" />
+<text x="800" y="185" class="t c" >SketchObject (outline + appearance)</text>
+<rect x="697" y="212" width="206" height="40" rx="6" class="box" />
+<text x="800" y="237" class="t c" >SymbolDef / BrushDef / ImageData</text>
+<rect x="697" y="264" width="206" height="40" rx="6" class="box" />
+<text x="800" y="289" class="t c" >Layer, Artboard, Guide, GraphicStyle</text>
+<rect x="697" y="316" width="206" height="40" rx="6" class="box" />
+<text x="800" y="341" class="t c" >UndoStack (newui)</text>
+<rect x="697" y="368" width="206" height="40" rx="6" class="box" />
+<text x="800" y="393" class="t c" >pure geometry: pathops, shapetools,</text>
+<rect x="697" y="420" width="206" height="40" rx="6" class="box" />
+<text x="800" y="445" class="t c" >pathflatten, brush, textwarp</text>
+<line x1="255" y1="150" x2="355" y2="150" class="line" marker-end="url(#arrow)"/>
+<text x="305" y="140" class="s c" >mouse, keys</text>
+<line x1="585" y1="190" x2="685" y2="190" class="acc" marker-end="url(#arrowAcc)"/>
+<text x="635" y="180" class="s c" >edit + undo step</text>
+<path d="M800 490 L800 530 L140 530 L140 492" class="acc dash" marker-end="url(#arrowAcc)"/>
+<text x="470" y="524" class="t c" >onChanged / onSelectionChanged / updateAllViews  -&gt;  refresh()</text>
+<text x="470" y="568" class="s c" >Controllers never draw; views never edit the document: a view reports what happened, a controller turns it into a command.</text>
+<text x="470" y="584" class="s c" >Panels are controllers that also watch the document: every edit (and every selection change) calls their refresh().</text>
+</svg>

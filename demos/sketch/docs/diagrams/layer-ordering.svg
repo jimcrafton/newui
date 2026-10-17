@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="400" viewBox="0 0 940 400" role="img" aria-label="Layers and stacking order">
+<title>Layers and stacking order</title>
+<desc>The layer tree is flattened post-order; the object list is stable-sorted by that rank.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="470" y="26" class="h c" >Layer tree  -&gt;  rank  -&gt;  order of objects_</text>
+<rect x="30" y="50" width="250" height="300" rx="8" class="panel" />
+<text x="155" y="72" class="t b c" >layers_ (tree)</text>
+<text x="46" y="100" class="t" >Layer 1   (back)</text>
+<text x="46" y="128" class="t" >Layer 2   (front)</text>
+<text x="46" y="156" class="t" >   Sublayer 2a (back)</text>
+<text x="46" y="184" class="t" >   Sublayer 2b (front)</text>
+<text x="46" y="230" class="s" >rank = post-order: a layer's sublayers</text>
+<text x="46" y="244" class="s" >come first (behind), then the layer itself</text>
+<text x="46" y="268" class="m" >Layer 1 = 0   2a = 1   2b = 2   Layer 2 = 3</text>
+<line x1="285" y1="200" x2="345" y2="200" class="acc" marker-end="url(#arrowAcc)"/>
+<text x="315" y="190" class="s c" >syncLayers()</text>
+<rect x="350" y="50" width="280" height="300" rx="8" class="soft" />
+<text x="490" y="72" class="t b c" >objects_ after every change</text>
+<rect x="366" y="90" width="248" height="32" rx="5" class="box" />
+<text x="380" y="110" class="t" >rect  (Layer 1)</text>
+<text x="604" y="110" class="s e" >rank 0</text>
+<rect x="366" y="130" width="248" height="32" rx="5" class="box" />
+<text x="380" y="150" class="t" >path  (Layer 1)</text>
+<text x="604" y="150" class="s e" >rank 0</text>
+<rect x="366" y="170" width="248" height="32" rx="5" class="box" />
+<text x="380" y="190" class="t" >star  (2a)</text>
+<text x="604" y="190" class="s e" >rank 1</text>
+<rect x="366" y="210" width="248" height="32" rx="5" class="box" />
+<text x="380" y="230" class="t" >text  (2b)</text>
+<text x="604" y="230" class="s e" >rank 2</text>
+<rect x="366" y="250" width="248" height="32" rx="5" class="box" />
+<text x="380" y="270" class="t" >circle (Layer 2)</text>
+<text x="604" y="270" class="s e" >rank 3</text>
+<rect x="366" y="290" width="248" height="32" rx="5" class="box" />
+<text x="380" y="310" class="t" >image (Layer 2)</text>
+<text x="604" y="310" class="s e" >rank 3</text>
+<line x1="660" y1="200" x2="720" y2="200" class="acc" marker-end="url(#arrowAcc)"/>
+<rect x="725" y="50" width="190" height="300" rx="8" class="box" />
+<text x="820" y="72" class="t b c" >consequences</text>
+<text x="738" y="96" class="s" >stable sort: order inside</text>
+<text x="738" y="112" class="s" >a layer is kept</text>
+<text x="738" y="128" class="s" ></text>
+<text x="738" y="144" class="s" >Arrange (Bring Forward ...)</text>
+<text x="738" y="160" class="s" >works inside the layer</text>
+<text x="738" y="176" class="s" ></text>
+<text x="738" y="192" class="s" >hide / lock a layer -&gt;</text>
+<text x="738" y="208" class="s" >setLayerState on every</text>
+<text x="738" y="224" class="s" >object in it (and below)</text>
+<text x="738" y="240" class="s" ></text>
+<text x="738" y="256" class="s" >files store the flat order</text>
+<text x="738" y="272" class="s" >+ run lengths per layer</text>
+<text x="470" y="385" class="s c" >The Layers panel lists the same tree the other way up (front first), with each layer's own objects above its sublayers.</text>
+</svg>

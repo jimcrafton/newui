@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="520" viewBox="0 0 1000 520" role="img" aria-label="Pen and Pencil">
+<title>Pen and Pencil</title>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="500" y="24" class="h c" >Pen, Pencil and Direct Select</text>
+<rect x="20" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="30" y="62" class="t b" >Pen: click for corners</text>
+<text x="30" y="238" class="s" >click, click, click ... a corner point each</text>
+<text x="30" y="251" class="s" >click the first point to close; Enter or</text>
+<text x="30" y="264" class="s" >double-click ends; Backspace removes the last</text>
+<path d="M60 200 L130 100 L200 190 L270 110" class="acc" />
+<rect x="56.5" y="196.5" width="7" height="7" rx="0" class="box" />
+<rect x="126.5" y="96.5" width="7" height="7" rx="0" class="box" />
+<rect x="196.5" y="186.5" width="7" height="7" rx="0" class="box" />
+<rect x="266.5" y="106.5" width="7" height="7" rx="0" class="box" />
+<path d="M280 120 l0 15 l4 -4 l3 7 l3 -1.5 l-3 -7 l5.5 0z" fill="#222" stroke="#fff" stroke-width="1"/>
+<rect x="345" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="355" y="62" class="t b" >Pen: click and drag for smooth points</text>
+<text x="355" y="251" class="s" >drag pulls the handles out of the new point;</text>
+<text x="355" y="264" class="s" >Alt-drag breaks the handle pair apart</text>
+<path d="M390 190 C420 110 460 100 500 120 S570 220 600 190" class="acc" />
+<rect x="386.5" y="186.5" width="7" height="7" rx="0" class="box" />
+<rect x="496.5" y="116.5" width="7" height="7" rx="0" class="box" />
+<rect x="596.5" y="186.5" width="7" height="7" rx="0" class="box" />
+<line x1="500" y1="120" x2="540" y2="108" class="thin" />
+<circle cx="540" cy="108" r="2.6" fill="#1e6fe0"/>
+<line x1="500" y1="120" x2="460" y2="132" class="thin" />
+<circle cx="460" cy="132" r="2.6" fill="#1e6fe0"/>
+<path d="M545 104 l0 15 l4 -4 l3 7 l3 -1.5 l-3 -7 l5.5 0z" fill="#222" stroke="#fff" stroke-width="1"/>
+<circle cx="545" cy="104" r="7" class="thin" stroke="#d4380d"/>
+<rect x="670" y="44" width="310" height="230" rx="6" class="panel" />
+<text x="680" y="62" class="t b" >Pencil / Paintbrush: draw freehand</text>
+<text x="680" y="251" class="s" >the stroke is smoothed and fitted with as few</text>
+<text x="680" y="264" class="s" >curves as keep it close; sharp corners stay sharp</text>
+<path d="M700 187.9 L704.17 184.53 L708.33 177.35 L712.5 173.51 L716.67 168.1 L720.83 158.19 L725 152.55 L729.17 154.14 L733.33 144.79 L737.5 140.16 L741.67 142.15 L745.83 134.21 L750 133.79 L754.17 127.96 L758.33 126.75 L762.5 120.78 L766.67 123.04 L770.83 123.77 L775 120.36 L779.17 121.94 L783.33 121.69 L787.5 117.63 L791.67 124.46 L795.83 124.87 L800 124.76 L804.17 125.24 L808.33 134.99 L812.5 135.32 L816.67 141.13 L820.83 146.61 L825 149.82 L829.17 156.29 L833.33 157.15 L837.5 165.69 L841.67 168.32 L845.83 177.87 L850 183.15 L854.17 182.7 L858.33 188.84 L862.5 195.31 L866.67 207.06 L870.83 208.5 L875 215.57 L879.17 218.33 L883.33 225.15 L887.5 229.1 L891.67 233.46 L895.83 239.66 L900 243.65 L904.17 249.83 L908.33 251.29 L912.5 256.08 L916.67 257.88 L920.83 260.89 L925 259.8 L929.17 256.72 L933.33 262.81 L937.5 263.67 L941.67 262.73 L945.83 259.1 L950 258.84" class="thin" stroke="#aaa"/>
+<path d="M700 190 C740 80 790 80 820 150 S900 240 950 190" class="acc" />
+<rect x="20" y="290" width="480" height="210" rx="6" class="panel" />
+<text x="30" y="308" class="t b" >Direct Select: edit the points</text>
+<text x="30" y="464" class="s" >click an object to show its anchors; drag an anchor or a handle</text>
+<text x="30" y="477" class="s" >Alt-drag a corner point to pull curve handles out of it</text>
+<text x="30" y="490" class="s" >Delete removes the picked anchor</text>
+<path d="M60 440 C100 330 180 330 220 400 S330 470 450 380" class="acc" />
+<rect x="56.5" y="436.5" width="7" height="7" rx="0" class="box" />
+<rect x="216.5" y="396.5" width="7" height="7" rx="0" class="box" />
+<rect x="446.5" y="376.5" width="7" height="7" rx="0" class="box" />
+<line x1="60" y1="440" x2="100" y2="330" class="thin" />
+<circle cx="100" cy="330" r="2.6" fill="#1e6fe0"/>
+<line x1="220" y1="400" x2="180" y2="340" class="thin" />
+<circle cx="180" cy="340" r="2.6" fill="#1e6fe0"/>
+<line x1="220" y1="400" x2="260" y2="450" class="thin" />
+<circle cx="260" cy="450" r="2.6" fill="#1e6fe0"/>
+<line x1="450" y1="380" x2="330" y2="470" class="thin" />
+<circle cx="330" cy="470" r="2.6" fill="#1e6fe0"/>
+<rect x="216" y="396" width="8" height="8" rx="0" class="soft" />
+<rect x="515" y="290" width="465" height="210" rx="6" class="panel" />
+<text x="525" y="308" class="t b" >Scissors</text>
+<text x="525" y="477" class="s" >Scissors: click a path to cut it there - a closed path</text>
+<text x="525" y="490" class="s" >becomes open, an open path divides in two.</text>
+<path d="M560 430 C620 340 700 340 760 430" class="acc" />
+<path d="M800 430 C860 340 940 340 960 430" class="acc" />
+<path d="M772 380 l12 12 M784 380 l-12 12" stroke="#d4380d" stroke-width="2.4"/>
+<g transform="translate(770 345) scale(1.27) translate(-1 -1)" fill="none" stroke="#3a3a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="3.6"><path d="M8.6 15.6 17.6 3.6"/><path d="M15.4 15.6 6.4 3.6"/><circle cx="7" cy="18.4" r="2.6"/><circle cx="17" cy="18.4" r="2.6"/></g><path d="M8.6 15.6 17.6 3.6"/><path d="M15.4 15.6 6.4 3.6"/><circle cx="7" cy="18.4" r="2.6"/><circle cx="17" cy="18.4" r="2.6"/></g>
+</svg>

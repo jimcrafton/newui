@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" role="img" aria-label="The ways a stroke is drawn">
+<title>The ways a stroke is drawn</title>
+<desc>Plain, dashed, width profile, gradient along the path, brush.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="480" y="26" class="h c" >Stroke rendering (paintStrokeItem)</text>
+<rect x="20" y="44" width="175" height="250" rx="6" class="panel" />
+<text x="107" y="64" class="t b c" >plain</text>
+<path d="M34 150 L36.94 154.76 L39.88 159.45 L42.82 163.99 L45.76 168.31 L48.7 172.34 L51.64 176.01 L54.58 179.28 L57.52 182.08 L60.46 184.38 L63.4 186.14 L66.34 187.33 L69.28 187.93 L72.22 187.93 L75.16 187.33 L78.1 186.14 L81.04 184.38 L83.98 182.08 L86.92 179.28 L89.86 176.01 L92.8 172.34 L95.74 168.31 L98.68 163.99 L101.62 159.45 L104.56 154.76 L107.5 150 L110.44 145.24 L113.38 140.55 L116.32 136.01 L119.26 131.69 L122.2 127.66 L125.14 123.99 L128.08 120.72 L131.02 117.92 L133.96 115.62 L136.9 113.86 L139.84 112.67 L142.78 112.07 L145.72 112.07 L148.66 112.67 L151.6 113.86 L154.54 115.62 L157.48 117.92 L160.42 120.72 L163.36 123.99 L166.3 127.66 L169.24 131.69 L172.18 136.01 L175.12 140.55 L178.06 145.24 L181 150" fill="none" stroke="#1e6fe0" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="30" y="232" class="s" >Blend2D stroker:</text>
+<text x="30" y="245" class="s" >cap, join, miter limit</text>
+<rect x="205" y="44" width="175" height="250" rx="6" class="panel" />
+<text x="292" y="64" class="t b c" >dashes</text>
+<path d="M219 150 L221.94 154.76 L224.88 159.45 L227.82 163.99 L230.76 168.31 L233.7 172.34 L236.64 176.01 L239.58 179.28 L242.52 182.08 L245.46 184.38 L248.4 186.14 L251.34 187.33 L254.28 187.93 L257.22 187.93 L260.16 187.33 L263.1 186.14 L266.04 184.38 L268.98 182.08 L271.92 179.28 L274.86 176.01 L277.8 172.34 L280.74 168.31 L283.68 163.99 L286.62 159.45 L289.56 154.76 L292.5 150 L295.44 145.24 L298.38 140.55 L301.32 136.01 L304.26 131.69 L307.2 127.66 L310.14 123.99 L313.08 120.72 L316.02 117.92 L318.96 115.62 L321.9 113.86 L324.84 112.67 L327.78 112.07 L330.72 112.07 L333.66 112.67 L336.6 113.86 L339.54 115.62 L342.48 117.92 L345.42 120.72 L348.36 123.99 L351.3 127.66 L354.24 131.69 L357.18 136.01 L360.12 140.55 L363.06 145.24 L366 150" fill="none" stroke="#1e6fe0" stroke-width="7" stroke-dasharray="14 9"/>
+<text x="215" y="232" class="s" >dashedPath(): flatten, cut by</text>
+<text x="215" y="245" class="s" >the pattern; caps on every dash</text>
+<rect x="390" y="44" width="175" height="250" rx="6" class="panel" />
+<text x="477" y="64" class="t b c" >width profile</text>
+<path d="M406.55 148.42 L410.23 152.71 L413.89 156.89 L417.5 160.88 L421.06 164.57 L424.52 167.89 L427.86 170.74 L431.02 173.05 L433.91 174.73 L436.42 175.74 L438.43 176.1 L439.8 175.92 L440.55 175.41 L440.88 174.79 L441.16 174.13 L441.69 173.33 L442.63 172.18 L443.97 170.55 L445.67 168.38 L447.64 165.66 L449.83 162.44 L452.2 158.77 L454.72 154.72 L457.38 150.37 L460.15 145.8 L463.03 141.07 L466.03 136.27 L469.14 131.47 L472.36 126.75 L475.72 122.16 L479.23 117.77 L482.92 113.64 L486.83 109.82 L491.01 106.39 L495.55 103.42 L500.49 101.05 L505.84 99.48 L511.44 98.94 L516.99 99.56 L522.12 101.26 L526.63 103.82 L530.5 106.97 L533.87 110.56 L536.86 114.49 L539.58 118.72 L542.12 123.22 L544.54 127.96 L546.86 132.9 L549.13 137.99 L551.35 143.19 L553.55 148.42 L544.19 154.2 L541.35 149.41 L538.54 144.74 L535.77 140.27 L533.03 136.07 L530.34 132.21 L527.71 128.77 L525.18 125.8 L522.76 123.35 L520.51 121.46 L518.47 120.12 L516.66 119.28 L515.03 118.84 L513.46 118.74 L511.76 118.99 L509.81 119.67 L507.59 120.88 L505.15 122.67 L502.53 125.03 L499.8 127.93 L496.97 131.3 L494.08 135.09 L491.15 139.22 L488.19 143.61 L485.19 148.2 L482.18 152.89 L479.14 157.62 L476.09 162.3 L473.01 166.86 L469.91 171.24 L466.78 175.37 L463.6 179.18 L460.37 182.62 L457.06 185.63 L453.65 188.17 L450.11 190.16 L446.44 191.54 L442.66 192.2 L438.85 192.1 L435.15 191.25 L431.61 189.72 L428.25 187.59 L425.03 184.95 L421.92 181.85 L418.89 178.34 L415.92 174.46 L412.98 170.26 L410.07 165.81 L407.18 161.17 L404.31 156.4 L401.45 151.58 Z" fill="#1e6fe0" opacity="0.85"/>
+<path d="M404 150 L406.94 154.76 L409.88 159.45 L412.82 163.99 L415.76 168.31 L418.7 172.34 L421.64 176.01 L424.58 179.28 L427.52 182.08 L430.46 184.38 L433.4 186.14 L436.34 187.33 L439.28 187.93 L442.22 187.93 L445.16 187.33 L448.1 186.14 L451.04 184.38 L453.98 182.08 L456.92 179.28 L459.86 176.01 L462.8 172.34 L465.74 168.31 L468.68 163.99 L471.62 159.45 L474.56 154.76 L477.5 150 L480.44 145.24 L483.38 140.55 L486.32 136.01 L489.26 131.69 L492.2 127.66 L495.14 123.99 L498.08 120.72 L501.02 117.92 L503.96 115.62 L506.9 113.86 L509.84 112.67 L512.78 112.07 L515.72 112.07 L518.66 112.67 L521.6 113.86 L524.54 115.62 L527.48 117.92 L530.42 120.72 L533.36 123.99 L536.3 127.66 L539.24 131.69 L542.18 136.01 L545.12 140.55 L548.06 145.24 L551 150" class="thin" stroke-dasharray="3 3"/>
+<text x="400" y="232" class="s" >widthOutline(): offset by averaged</text>
+<text x="400" y="245" class="s" >vertex normals, filled outline</text>
+<rect x="575" y="44" width="175" height="250" rx="6" class="panel" />
+<text x="662" y="64" class="t b c" >gradient along</text>
+<line x1="589" y1="150" x2="591.94" y2="154.76" stroke="#1e6fe0" stroke-width="9" stroke-linecap="butt"/>
+<line x1="591.94" y1="154.76" x2="594.88" y2="159.45" stroke="#226edc" stroke-width="9" stroke-linecap="butt"/>
+<line x1="594.88" y1="159.45" x2="597.82" y2="163.99" stroke="#266dd8" stroke-width="9" stroke-linecap="butt"/>
+<line x1="597.82" y1="163.99" x2="600.76" y2="168.31" stroke="#2a6cd5" stroke-width="9" stroke-linecap="butt"/>
+<line x1="600.76" y1="168.31" x2="603.7" y2="172.34" stroke="#2e6bd1" stroke-width="9" stroke-linecap="butt"/>
+<line x1="603.7" y1="172.34" x2="606.64" y2="176.01" stroke="#326bce" stroke-width="9" stroke-linecap="butt"/>
+<line x1="606.64" y1="176.01" x2="609.58" y2="179.28" stroke="#366aca" stroke-width="9" stroke-linecap="butt"/>
+<line x1="609.58" y1="179.28" x2="612.52" y2="182.08" stroke="#3a69c6" stroke-width="9" stroke-linecap="butt"/>
+<line x1="612.52" y1="182.08" x2="615.46" y2="184.38" stroke="#3e68c3" stroke-width="9" stroke-linecap="butt"/>
+<line x1="615.46" y1="184.38" x2="618.4" y2="186.14" stroke="#4267bf" stroke-width="9" stroke-linecap="butt"/>
+<line x1="618.4" y1="186.14" x2="621.34" y2="187.33" stroke="#4667bc" stroke-width="9" stroke-linecap="butt"/>
+<line x1="621.34" y1="187.33" x2="624.28" y2="187.93" stroke="#4a66b8" stroke-width="9" stroke-linecap="butt"/>
+<line x1="624.28" y1="187.93" x2="627.22" y2="187.93" stroke="#4e65b4" stroke-width="9" stroke-linecap="butt"/>
+<line x1="627.22" y1="187.93" x2="630.16" y2="187.33" stroke="#5264b1" stroke-width="9" stroke-linecap="butt"/>
+<line x1="630.16" y1="187.33" x2="633.1" y2="186.14" stroke="#5663ad" stroke-width="9" stroke-linecap="butt"/>
+<line x1="633.1" y1="186.14" x2="636.04" y2="184.38" stroke="#5a63aa" stroke-width="9" stroke-linecap="butt"/>
+<line x1="636.04" y1="184.38" x2="638.98" y2="182.08" stroke="#5e62a6" stroke-width="9" stroke-linecap="butt"/>
+<line x1="638.98" y1="182.08" x2="641.92" y2="179.28" stroke="#6261a2" stroke-width="9" stroke-linecap="butt"/>
+<line x1="641.92" y1="179.28" x2="644.86" y2="176.01" stroke="#66609f" stroke-width="9" stroke-linecap="butt"/>
+<line x1="644.86" y1="176.01" x2="647.8" y2="172.34" stroke="#6a5f9b" stroke-width="9" stroke-linecap="butt"/>
+<line x1="647.8" y1="172.34" x2="650.74" y2="168.31" stroke="#6e5f98" stroke-width="9" stroke-linecap="butt"/>
+<line x1="650.74" y1="168.31" x2="653.68" y2="163.99" stroke="#725e94" stroke-width="9" stroke-linecap="butt"/>
+<line x1="653.68" y1="163.99" x2="656.62" y2="159.45" stroke="#765d90" stroke-width="9" stroke-linecap="butt"/>
+<line x1="656.62" y1="159.45" x2="659.56" y2="154.76" stroke="#7a5c8d" stroke-width="9" stroke-linecap="butt"/>
+<line x1="659.56" y1="154.76" x2="662.5" y2="150" stroke="#7e5b89" stroke-width="9" stroke-linecap="butt"/>
+<line x1="662.5" y1="150" x2="665.44" y2="145.24" stroke="#825b86" stroke-width="9" stroke-linecap="butt"/>
+<line x1="665.44" y1="145.24" x2="668.38" y2="140.55" stroke="#865a82" stroke-width="9" stroke-linecap="butt"/>
+<line x1="668.38" y1="140.55" x2="671.32" y2="136.01" stroke="#8a597e" stroke-width="9" stroke-linecap="butt"/>
+<line x1="671.32" y1="136.01" x2="674.26" y2="131.69" stroke="#8e587b" stroke-width="9" stroke-linecap="butt"/>
+<line x1="674.26" y1="131.69" x2="677.2" y2="127.66" stroke="#925777" stroke-width="9" stroke-linecap="butt"/>
+<line x1="677.2" y1="127.66" x2="680.14" y2="123.99" stroke="#965774" stroke-width="9" stroke-linecap="butt"/>
+<line x1="680.14" y1="123.99" x2="683.08" y2="120.72" stroke="#9a5670" stroke-width="9" stroke-linecap="butt"/>
+<line x1="683.08" y1="120.72" x2="686.02" y2="117.92" stroke="#9e556c" stroke-width="9" stroke-linecap="butt"/>
+<line x1="686.02" y1="117.92" x2="688.96" y2="115.62" stroke="#a25469" stroke-width="9" stroke-linecap="butt"/>
+<line x1="688.96" y1="115.62" x2="691.9" y2="113.86" stroke="#a65365" stroke-width="9" stroke-linecap="butt"/>
+<line x1="691.9" y1="113.86" x2="694.84" y2="112.67" stroke="#aa5362" stroke-width="9" stroke-linecap="butt"/>
+<line x1="694.84" y1="112.67" x2="697.78" y2="112.07" stroke="#ae525e" stroke-width="9" stroke-linecap="butt"/>
+<line x1="697.78" y1="112.07" x2="700.72" y2="112.07" stroke="#b2515a" stroke-width="9" stroke-linecap="butt"/>
+<line x1="700.72" y1="112.07" x2="703.66" y2="112.67" stroke="#b65057" stroke-width="9" stroke-linecap="butt"/>
+<line x1="703.66" y1="112.67" x2="706.6" y2="113.86" stroke="#ba4f53" stroke-width="9" stroke-linecap="butt"/>
+<line x1="706.6" y1="113.86" x2="709.54" y2="115.62" stroke="#be4f50" stroke-width="9" stroke-linecap="butt"/>
+<line x1="709.54" y1="115.62" x2="712.48" y2="117.92" stroke="#c24e4c" stroke-width="9" stroke-linecap="butt"/>
+<line x1="712.48" y1="117.92" x2="715.42" y2="120.72" stroke="#c64d48" stroke-width="9" stroke-linecap="butt"/>
+<line x1="715.42" y1="120.72" x2="718.36" y2="123.99" stroke="#ca4c45" stroke-width="9" stroke-linecap="butt"/>
+<line x1="718.36" y1="123.99" x2="721.3" y2="127.66" stroke="#ce4b41" stroke-width="9" stroke-linecap="butt"/>
+<line x1="721.3" y1="127.66" x2="724.24" y2="131.69" stroke="#d24b3e" stroke-width="9" stroke-linecap="butt"/>
+<line x1="724.24" y1="131.69" x2="727.18" y2="136.01" stroke="#d64a3a" stroke-width="9" stroke-linecap="butt"/>
+<line x1="727.18" y1="136.01" x2="730.12" y2="140.55" stroke="#da4936" stroke-width="9" stroke-linecap="butt"/>
+<line x1="730.12" y1="140.55" x2="733.06" y2="145.24" stroke="#de4833" stroke-width="9" stroke-linecap="butt"/>
+<line x1="733.06" y1="145.24" x2="736" y2="150" stroke="#e2472f" stroke-width="9" stroke-linecap="butt"/>
+<text x="585" y="232" class="s" >strokeAlongPath(): ~400 short</text>
+<text x="585" y="245" class="s" >butt pieces, color by length</text>
+<rect x="760" y="44" width="175" height="250" rx="6" class="panel" />
+<text x="847" y="64" class="t b c" >brush</text>
+<ellipse cx="774" cy="150" rx="7" ry="2.6" transform="rotate(-40 774 150)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="779.88" cy="159.45" rx="7" ry="2.6" transform="rotate(-40 779.88 159.45)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="785.76" cy="168.31" rx="7" ry="2.6" transform="rotate(-40 785.76 168.31)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="791.64" cy="176.01" rx="7" ry="2.6" transform="rotate(-40 791.64 176.01)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="797.52" cy="182.08" rx="7" ry="2.6" transform="rotate(-40 797.52 182.08)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="803.4" cy="186.14" rx="7" ry="2.6" transform="rotate(-40 803.4 186.14)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="809.28" cy="187.93" rx="7" ry="2.6" transform="rotate(-40 809.28 187.93)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="815.16" cy="187.33" rx="7" ry="2.6" transform="rotate(-40 815.16 187.33)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="821.04" cy="184.38" rx="7" ry="2.6" transform="rotate(-40 821.04 184.38)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="826.92" cy="179.28" rx="7" ry="2.6" transform="rotate(-40 826.92 179.28)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="832.8" cy="172.34" rx="7" ry="2.6" transform="rotate(-40 832.8 172.34)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="838.68" cy="163.99" rx="7" ry="2.6" transform="rotate(-40 838.68 163.99)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="844.56" cy="154.76" rx="7" ry="2.6" transform="rotate(-40 844.56 154.76)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="850.44" cy="145.24" rx="7" ry="2.6" transform="rotate(-40 850.44 145.24)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="856.32" cy="136.01" rx="7" ry="2.6" transform="rotate(-40 856.32 136.01)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="862.2" cy="127.66" rx="7" ry="2.6" transform="rotate(-40 862.2 127.66)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="868.08" cy="120.72" rx="7" ry="2.6" transform="rotate(-40 868.08 120.72)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="873.96" cy="115.62" rx="7" ry="2.6" transform="rotate(-40 873.96 115.62)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="879.84" cy="112.67" rx="7" ry="2.6" transform="rotate(-40 879.84 112.67)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="885.72" cy="112.07" rx="7" ry="2.6" transform="rotate(-40 885.72 112.07)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="891.6" cy="113.86" rx="7" ry="2.6" transform="rotate(-40 891.6 113.86)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="897.48" cy="117.92" rx="7" ry="2.6" transform="rotate(-40 897.48 117.92)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="903.36" cy="123.99" rx="7" ry="2.6" transform="rotate(-40 903.36 123.99)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="909.24" cy="131.69" rx="7" ry="2.6" transform="rotate(-40 909.24 131.69)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="915.12" cy="140.55" rx="7" ry="2.6" transform="rotate(-40 915.12 140.55)" fill="#1e6fe0" opacity="0.35"/>
+<ellipse cx="921" cy="150" rx="7" ry="2.6" transform="rotate(-40 921 150)" fill="#1e6fe0" opacity="0.35"/>
+<text x="770" y="232" class="s" >StrokeOptions::brush: nib hull,</text>
+<text x="770" y="245" class="s" >bent artwork or scatter</text>
+<rect x="20" y="310" width="920" height="140" rx="6" class="soft" />
+<text x="34" y="332" class="t b" >Which branch runs (paintStrokeItem, sketchobject.cpp):</text>
+<text x="34" y="352" class="s" >1. StrokeOptions::brush set      -&gt; paintBrushStroke  (dashes, caps, widths and "along path" are ignored)</text>
+<text x="34" y="369" class="s" >2. width profile (WidthPoint t, left, right) -&gt; filled outline from widthOutline, caps by StrokeCap</text>
+<text x="34" y="386" class="s" >3. gradient paint with alongStroke -&gt; strokeAlongPath; opaque strokes get a disc at each vertex so bends stay filled</text>
+<text x="34" y="403" class="s" >4. otherwise Blend2D strokes the (possibly dashed) path; hit testing uses the same stroker at width + tolerance</text>
+</svg>
