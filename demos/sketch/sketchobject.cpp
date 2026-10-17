@@ -2,6 +2,7 @@
 #include "sketchdocument.h"
 
 #include "pathflatten.h"
+#include "pathops.h"
 #include "brush.h"
 #include "textwarp.h"
 #include "textoutline.h"
@@ -595,6 +596,103 @@ namespace sketch {
             return out;
         }
 
+        // One arrowhead of `style` at `tip`, pointing along `dir` (a unit vector), `length` long, as a closed outline (the stroke width is
+        // used by the chevron, which is a stroked polyline).
+        BLPath arrowhead(ArrowStyle style, const BLPoint& tip, const BLPoint& dir, double length, double width) {
+            const BLPoint side(-dir.y, dir.x);
+            auto at = [&](double along, double across) {
+                return BLPoint(tip.x + dir.x * along + side.x * across, tip.y + dir.y * along + side.y * across);
+            };
+            BLPath head;
+            if (style == ArrowStyle::Filled) {
+                head.move_to(at(0.0, 0.0));
+                head.line_to(at(-length, length * 0.6));
+                head.line_to(at(-length, -length * 0.6));
+                head.close();
+            } else if (style == ArrowStyle::Dot) {
+                const BLPoint center = at(-length * 0.45, 0.0);
+                head.add_circle(BLCircle(center.x, center.y, length * 0.45));
+            } else if (style == ArrowStyle::Simple) {
+                BLPath chevron;
+                chevron.move_to(at(-length, length * 0.6));
+                chevron.line_to(at(0.0, 0.0));
+                chevron.line_to(at(-length, -length * 0.6));
+                BLStrokeOptions stroke;
+                stroke.width = std::max(width, 1.0);
+                stroke.start_cap = stroke.end_cap = BL_STROKE_CAP_ROUND;
+                stroke.join = BL_STROKE_JOIN_ROUND;
+                head.add_stroked_path(chevron, stroke, BLApproximationOptions());
+            }
+            return head;
+        }
+
+        // A stroke that is more than a plain Blend2D stroke - aligned inside / outside a closed outline, or with arrowheads on the ends of
+        // its open paths - as one filled outline (non-zero). The body is the plain / dashed / width-profile stroke; inside and outside
+        // keep only the half of a double-width stroke on that side of the shape. False when nothing is drawn.
+        bool decoratedStroke(const BLPath& path, double width, const StrokeOptions& options, BLPath& out) {
+            out.clear();
+            std::vector<bool> closed;
+            const std::vector<std::vector<BLPoint>> lines = flattenToLines(path, closed);
+            bool allClosed = !lines.empty();
+            for (bool c : closed) { allClosed = allClosed && c; }
+            const bool aligned = options.align != StrokeAlign::Center && allClosed && options.widths.empty();
+            BLPath body;
+            if (!options.widths.empty()) {
+                body = widthOutline(path, width * 0.5, options.widths, options.cap);
+            } else {
+                BLStrokeOptions stroke;
+                stroke.width = aligned ? width * 2.0 : width;
+                stroke.start_cap = stroke.end_cap = uint8_t(blCap(options.cap));
+                stroke.join = uint8_t(blJoin(options.join));
+                stroke.miter_limit = options.miterLimit;
+                const BLPath& source = options.dashes.empty() ? path : dashedPath(path, options.dashes);
+                if (body.add_stroked_path(source, stroke, BLApproximationOptions()) != BL_SUCCESS) {
+                    return false;
+                }
+            }
+            Loops loops = flattenToLoops(body);
+            if (aligned) {
+                loops = combineLoops(loops, flattenToLoops(path), options.align == StrokeAlign::Inside ? BoolOp::Intersect : BoolOp::Subtract);
+            }
+            // Arrowheads: at the very start of the first open subpath and the very end of the last one.
+            const double length = std::max(width, 1.0) * 4.0 * std::max(options.arrowScale, 1.0) / 100.0;
+            auto direction = [&](const std::vector<BLPoint>& line, bool atEnd, BLPoint& tip, BLPoint& dir) {
+                if (line.size() < 2) { return false; }
+                tip = atEnd ? line.back() : line.front();
+                for (std::size_t i = 1; i < line.size(); ++i) {
+                    const BLPoint& other = atEnd ? line[line.size() - 1 - i] : line[i];
+                    const double dx = tip.x - other.x, dy = tip.y - other.y, d = std::sqrt(dx * dx + dy * dy);
+                    if (d >= length * 0.3 || i + 1 == line.size()) {
+                        if (d < 1e-9) { return false; }
+                        dir = BLPoint(dx / d, dy / d);   // pointing out of the path
+                        return true;
+                    }
+                }
+                return false;
+            };
+            std::size_t firstOpen = lines.size(), lastOpen = lines.size();
+            for (std::size_t i = 0; i < lines.size(); ++i) {
+                if (!closed[i]) {
+                    if (firstOpen == lines.size()) { firstOpen = i; }
+                    lastOpen = i;
+                }
+            }
+            auto addHead = [&](ArrowStyle style, std::size_t index, bool atEnd) {
+                BLPoint tip, dir;
+                if (style == ArrowStyle::None || index >= lines.size() || !direction(lines[index], atEnd, tip, dir)) {
+                    return;
+                }
+                const BLPath head = arrowhead(style, tip, dir, length, width);
+                if (head.size() > 0) {
+                    loops = combineLoops(loops, flattenToLoops(head), BoolOp::Union);
+                }
+            };
+            addHead(options.arrowStart, firstOpen, false);
+            addHead(options.arrowEnd, lastOpen, true);
+            out = loopsToPath(loops);
+            return out.size() > 0;
+        }
+
         // The first subpath, flattened and measured: cumulative length at each vertex.
         bool firstSubpath(const BLPath& path, std::vector<BLPoint>& pts, std::vector<double>& at) {
             std::vector<Polyline> lines = flattenPath(path);
@@ -1174,6 +1272,12 @@ namespace sketch {
                 for (const WidthPoint& p : item.strokeOptions.widths) { widest = std::max(widest, std::max(p.left, p.right)); }
                 h *= std::max(widest, 1.0);
             }
+            if (item.strokeOptions.align == StrokeAlign::Outside) {
+                h *= 2.0;
+            }
+            if (item.strokeOptions.arrowStart != ArrowStyle::None || item.strokeOptions.arrowEnd != ArrowStyle::None) {
+                h = std::max(h, std::max(item.strokeWidth, 1.0) * 4.0 * std::max(item.strokeOptions.arrowScale, 1.0) / 100.0 * 1.3);
+            }
             half = std::max(half, h);
         }
         return BLBox(box.x0 - half, box.y0 - half, box.x1 + half, box.y1 + half);
@@ -1269,6 +1373,12 @@ namespace sketch {
             }
             if (options.brush) {
                 paintBrushStroke(ctx, path, item, alpha, box);
+            } else if (options.decorated()) {
+                BLPath outline;
+                if (decoratedStroke(path, width, options, outline) && setPaintStyle(ctx, stroke, box, false)) {
+                    ctx.set_global_alpha(alpha);
+                    ctx.fill_path(outline);
+                }
             } else if (!options.widths.empty() && setPaintStyle(ctx, stroke, box, false)) {
                 ctx.set_global_alpha(alpha);
                 ctx.fill_path(widthOutline(path, width * 0.5, options.widths, options.cap));
@@ -1480,6 +1590,51 @@ namespace sketch {
             }
         }
         compositeLayer(ctx, layer, 1.0, BlendMode::Normal);
+    }
+
+    BLPath SketchObject::itemOutline(std::size_t index) const {
+        BLPath shown = path_;
+        for (std::size_t j = index + 1; j < items_.size(); ++j) {
+            if (items_[j].kind == AppearanceKind::Effect && isGeometryEffect(items_[j].effect) && items_[j].visible) {
+                shown = applyGeometryEffect(shown, items_[j]);
+            }
+        }
+        return shown;
+    }
+
+    bool SketchObject::hasPixelEffects() const {
+        for (const AppearanceItem& item : items_) {
+            if (item.kind == AppearanceKind::Effect && item.visible && !isGeometryEffect(item.effect)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool SketchObject::strokeOutline(std::size_t index, BLPath& out) const {
+        if (index >= items_.size() || items_[index].kind != AppearanceKind::Stroke) {
+            return false;
+        }
+        const AppearanceItem& item = items_[index];
+        if (item.strokeWidth <= 0.0 || item.strokeOptions.brush) {
+            return false;
+        }
+        BLPath shown = itemOutline(index);
+        out.clear();
+        if (item.strokeOptions.decorated()) {
+            return decoratedStroke(shown, item.strokeWidth, item.strokeOptions, out);
+        }
+        if (!item.strokeOptions.widths.empty()) {
+            out = widthOutline(shown, item.strokeWidth * 0.5, item.strokeOptions.widths, item.strokeOptions.cap);
+            return out.size() > 0;
+        }
+        BLStrokeOptions stroke;
+        stroke.width = item.strokeWidth;
+        stroke.start_cap = stroke.end_cap = uint8_t(blCap(item.strokeOptions.cap));
+        stroke.join = uint8_t(blJoin(item.strokeOptions.join));
+        stroke.miter_limit = item.strokeOptions.miterLimit;
+        const BLPath& source = item.strokeOptions.dashes.empty() ? shown : dashedPath(shown, item.strokeOptions.dashes);
+        return out.add_stroked_path(source, stroke, BLApproximationOptions()) == BL_SUCCESS && out.size() > 0;
     }
 
     void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {

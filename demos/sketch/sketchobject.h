@@ -164,6 +164,10 @@ namespace sketch {
     // How the ends and corners of a stroke look (the Stroke panel's Cap / Join / Miter).
     enum class StrokeCap { Butt, Round, Square };
     enum class StrokeJoin { Miter, Round, Bevel };
+    // Where a closed outline's stroke sits: centred on it, or wholly inside / outside it (the Stroke panel's Align row).
+    enum class StrokeAlign { Center, Inside, Outside };
+    // What an open path's end carries (the Stroke panel's Arrows row): a chevron, a filled triangle or a dot.
+    enum class ArrowStyle { None, Simple, Filled, Dot };
     // One point of a variable-width stroke (the Width tool): `t` is the distance along the path as a fraction
     // 0..1 (per subpath); `left`/`right` are the half-widths of the two sides as multiples of half the stroke
     // weight (1 = the plain stroke). Between points the width eases from one to the next; outside the first and
@@ -193,10 +197,19 @@ namespace sketch {
         // is being read, before the library is in.
         std::shared_ptr<const BrushDef> brush;
         std::size_t brushRef = 0;
+        // Inside / outside applies to closed outlines (an open path stays centred). Arrowheads go on the first and last end of the open
+        // paths; `arrowScale` is a percentage of the default size (four stroke weights long). Both are drawn as one filled outline.
+        StrokeAlign align = StrokeAlign::Center;
+        ArrowStyle arrowStart = ArrowStyle::None, arrowEnd = ArrowStyle::None;
+        double arrowScale = 100.0;
+
+        // True when the stroke is drawn as a filled outline made by strokeDecoration() instead of a plain Blend2D stroke.
+        bool decorated() const { return align != StrokeAlign::Center || arrowStart != ArrowStyle::None || arrowEnd != ArrowStyle::None; }
 
         bool operator==(const StrokeOptions& other) const {
             return cap == other.cap && join == other.join && miterLimit == other.miterLimit && dashes == other.dashes && widths == other.widths &&
-                brush == other.brush && brushRef == other.brushRef;
+                brush == other.brush && brushRef == other.brushRef && align == other.align && arrowStart == other.arrowStart &&
+                arrowEnd == other.arrowEnd && arrowScale == other.arrowScale;
         }
         bool operator!=(const StrokeOptions& other) const { return !(*this == other); }
     };
@@ -509,6 +522,15 @@ namespace sketch {
         // Everything through an offscreen layer so the pixel effects can act on what is below them.
         void paintWithEffects(BLContext& ctx) const;
         void drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const;
+    public:
+        // What an appearance item is drawn on: the outline after the geometry effects (round corners, offset path, roughen) that stand
+        // above it in the stack.
+        BLPath itemOutline(std::size_t index) const;
+        // A stroke item as a filled outline (plain, dashed or with a width profile; a brush is not handled here). False when nothing is drawn.
+        bool strokeOutline(std::size_t index, BLPath& out) const;
+        // True when some visible effect works on pixels (shadow, glow, blur): it cannot be expressed as an outline.
+        bool hasPixelEffects() const;
+    private:
         void drawSymbol(BLContext& ctx) const;
         void drawImage(BLContext& ctx) const;
         // Text objects: path_ = the outlines of text_ placed by textMatrix_.

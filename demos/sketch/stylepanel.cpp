@@ -253,6 +253,34 @@ namespace sketch {
         wireOption("joinMiterButton", [](StrokeOptions& o) { o.join = StrokeJoin::Miter; }, "Miter Join");
         wireOption("joinRoundButton", [](StrokeOptions& o) { o.join = StrokeJoin::Round; }, "Round Join");
         wireOption("joinBevelButton", [](StrokeOptions& o) { o.join = StrokeJoin::Bevel; }, "Bevel Join");
+        // Align: where the stroke of a closed outline sits.
+        wireOption("alignCenterStroke", [](StrokeOptions& o) { o.align = StrokeAlign::Center; }, "Align Stroke to Center");
+        wireOption("alignInsideStroke", [](StrokeOptions& o) { o.align = StrokeAlign::Inside; }, "Align Stroke to Inside");
+        wireOption("alignOutsideStroke", [](StrokeOptions& o) { o.align = StrokeAlign::Outside; }, "Align Stroke to Outside");
+        // Arrows: the heads on the ends of an open path, and their size.
+        for (bool atEnd : {false, true}) {
+            if (auto* combo = find<DropDownList>(atEnd ? "arrowEndCombo" : "arrowStartCombo")) {
+                combo->onSelectionChanged += [this, atEnd](DropDownList& changed) {
+                    std::optional<std::size_t> index = changed.selectedIndex();
+                    if (updating_ || !index.has_value()) {
+                        return SyncReturn::Ignored;
+                    }
+                    const ArrowStyle style = *index < 4 ? ArrowStyle(*index) : ArrowStyle::None;
+                    applyStrokeOptions([atEnd, style](StrokeOptions& o) { (atEnd ? o.arrowEnd : o.arrowStart) = style; }, atEnd ? "End Arrow" : "Start Arrow");
+                    return SyncReturn::Handled;
+                };
+            }
+        }
+        if (auto* scale = find<TextField>("arrowScaleField")) {
+            scale->onReturnPressed += [this](TextField&) {
+                applyArrowScale();
+                return SyncReturn::Handled;
+            };
+            scale->onLostFocus += [this](View&) {
+                applyArrowScale();
+                return SyncReturn::Handled;
+            };
+        }
         // Width profiles: presets for the variable-width stroke (the Width tool edits the points by hand).
         wireOption("profileUniformButton", [](StrokeOptions& o) { o.widths.clear(); }, "Uniform Width");
         wireOption("profileTaperButton", [](StrokeOptions& o) { o.widths = taperProfile(); }, "Taper Width");
@@ -1026,6 +1054,18 @@ namespace sketch {
         refresh();
     }
 
+    void StylePanel::applyArrowScale() {
+        if (updating_) {
+            return;
+        }
+        double percent = 0.0;
+        auto* field = find<TextField>("arrowScaleField");
+        if (field != nullptr && leadingNumber(field->text(), percent) && percent >= 1.0) {
+            applyStrokeOptions([percent](StrokeOptions& o) { o.arrowScale = std::min(percent, 1000.0); }, "Arrow Scale");
+        }
+        refresh();
+    }
+
     void StylePanel::applyBlendMode(std::size_t index) {
         std::vector<StyleState> before = document_.snapshotStyle();
         if (baseRowSelected_ && document_.selectedGroup() != 0) {
@@ -1206,6 +1246,8 @@ namespace sketch {
                 {"capButtButton", options.cap == StrokeCap::Butt}, {"capRoundButton", options.cap == StrokeCap::Round},
                 {"capSquareButton", options.cap == StrokeCap::Square}, {"joinMiterButton", options.join == StrokeJoin::Miter},
                 {"joinRoundButton", options.join == StrokeJoin::Round}, {"joinBevelButton", options.join == StrokeJoin::Bevel},
+                {"alignCenterStroke", options.align == StrokeAlign::Center}, {"alignInsideStroke", options.align == StrokeAlign::Inside},
+                {"alignOutsideStroke", options.align == StrokeAlign::Outside},
                 {"profileUniformButton", options.widths.empty()}, {"profileTaperButton", options.widths == taperProfile()},
                 {"profileBulgeButton", options.widths == bulgeProfile()}}) {
             if (auto* button = find<ToolbarButton>(name)) {
@@ -1230,6 +1272,19 @@ namespace sketch {
                     field->setText(widen(buffer));
                 }
             }
+        }
+        for (bool atEnd : {false, true}) {
+            if (auto* combo = find<DropDownList>(atEnd ? "arrowEndCombo" : "arrowStartCombo")) {
+                const std::size_t index = std::size_t(atEnd ? options.arrowEnd : options.arrowStart);
+                if (combo->selectedIndex() != std::optional<std::size_t>(index)) {
+                    combo->setSelectedIndex(index);
+                }
+            }
+        }
+        if (auto* field = find<TextField>("arrowScaleField")) {
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "%g%%", options.arrowScale);
+            field->setText(widen(buffer));
         }
         if (auto* field = find<TextField>("miterLimitField")) {
             char buffer[32];

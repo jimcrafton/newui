@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="330" viewBox="0 0 960 330" role="img" aria-label="Making a clipping mask">
+<title>Making a clipping mask</title>
+<desc>Stack the mask on top, select both, make the mask; release puts everything back.</desc>
+<defs><style>
+text{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;fill:#222222}
+.t{font-size:12px}.s{font-size:10.5px;fill:#666666}.b{font-weight:600}.h{font-size:15px;font-weight:700}.m{font-family:Consolas,'Courier New',monospace;font-size:11px;white-space:pre}
+.c{text-anchor:middle}.e{text-anchor:end}
+.box{fill:#fff;stroke:#9a9a9a;stroke-width:1.2}.soft{fill:#e8f0fc;stroke:#1e6fe0;stroke-width:1.2}.panel{fill:#f4f4f4;stroke:#9a9a9a;stroke-width:1}
+.line{stroke:#222222;stroke-width:1.4;fill:none}.thin{stroke:#9a9a9a;stroke-width:1;fill:none}.acc{stroke:#1e6fe0;stroke-width:1.8;fill:none}
+.dash{stroke-dasharray:5 4}.field{fill:#fff;stroke:#b5b5b5;stroke-width:1}
+</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#222222"/></marker><marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1e6fe0"/></marker><clipPath id="box2"><rect x="42" y="70" width="170" height="120"/></clipPath><clipPath id="box3"><rect x="277" y="70" width="170" height="120"/></clipPath><clipPath id="mk2"><ellipse cx="597" cy="130" rx="62" ry="42"/></clipPath><clipPath id="box5"><rect x="512" y="70" width="170" height="120"/></clipPath><clipPath id="mk3"><ellipse cx="832" cy="130" rx="62" ry="42"/></clipPath><clipPath id="box7"><rect x="747" y="70" width="170" height="120"/></clipPath></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<rect x="20" y="20" width="215" height="292" rx="8" class="panel" />
+<text x="34" y="44" class="h" >1  Stack</text>
+<text x="34" y="232" class="t" >Draw the artwork, then put the</text>
+<text x="34" y="247" class="t" >shape that should show through</text>
+<text x="34" y="262" class="t" >ON TOP of it.</text>
+<rect x="255" y="20" width="215" height="292" rx="8" class="panel" />
+<text x="269" y="44" class="h" >2  Select both</text>
+<text x="269" y="232" class="t" >Select the artwork and the shape</text>
+<text x="269" y="247" class="t" >(drag a box round them, or</text>
+<text x="269" y="262" class="t" >Shift+click each). The mask's own</text>
+<text x="269" y="277" class="t" >colors stop showing in step 3.</text>
+<rect x="490" y="20" width="215" height="292" rx="8" class="panel" />
+<text x="504" y="44" class="h" >3  Make</text>
+<text x="504" y="232" class="t" >Object &gt; Clipping Mask &gt; Make</text>
+<text x="504" y="247" class="t" >(Ctrl+7). The artwork now shows</text>
+<text x="504" y="262" class="t" >only inside the shape.</text>
+<rect x="725" y="20" width="215" height="292" rx="8" class="panel" />
+<text x="739" y="44" class="h" >Release</text>
+<text x="739" y="232" class="t" >Object &gt; Clipping Mask &gt; Release</text>
+<text x="739" y="247" class="t" >(Ctrl+Shift+7): the shape and the</text>
+<text x="739" y="262" class="t" >artwork are separate again.</text>
+<g clip-path="url(#box2)"><g><rect x="42" y="70" width="14" height="120" fill="#e8472b"/><rect x="56" y="70" width="14" height="120" fill="#f2b824"/><rect x="70" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="84" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="98" y="70" width="14" height="120" fill="#e8472b"/><rect x="112" y="70" width="14" height="120" fill="#f2b824"/><rect x="126" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="140" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="154" y="70" width="14" height="120" fill="#e8472b"/><rect x="168" y="70" width="14" height="120" fill="#f2b824"/><rect x="182" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="196" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="210" y="70" width="14" height="120" fill="#e8472b"/><rect x="224" y="70" width="14" height="120" fill="#f2b824"/></g></g>
+<ellipse cx="127" cy="130" rx="62" ry="42" fill="#fbe3df" fill-opacity="0.85" stroke="#d4380d" stroke-width="2"/>
+<g clip-path="url(#box3)"><g><rect x="277" y="70" width="14" height="120" fill="#e8472b"/><rect x="291" y="70" width="14" height="120" fill="#f2b824"/><rect x="305" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="319" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="333" y="70" width="14" height="120" fill="#e8472b"/><rect x="347" y="70" width="14" height="120" fill="#f2b824"/><rect x="361" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="375" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="389" y="70" width="14" height="120" fill="#e8472b"/><rect x="403" y="70" width="14" height="120" fill="#f2b824"/><rect x="417" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="431" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="445" y="70" width="14" height="120" fill="#e8472b"/><rect x="459" y="70" width="14" height="120" fill="#f2b824"/></g></g>
+<ellipse cx="362" cy="130" rx="62" ry="42" fill="#fbe3df" fill-opacity="0.85" stroke="#d4380d" stroke-width="2"/>
+<rect x="275" y="68" width="174" height="124" fill="none" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="272" y="65" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="272" y="127" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="272" y="189" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="359" y="65" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="359" y="189" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="446" y="65" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="446" y="127" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<rect x="446" y="189" width="6" height="6" fill="#fff" stroke="#1e6fe0" stroke-width="1.2"/>
+<g clip-path="url(#box5)"><g clip-path="url(#mk2)"><rect x="512" y="70" width="14" height="120" fill="#e8472b"/><rect x="526" y="70" width="14" height="120" fill="#f2b824"/><rect x="540" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="554" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="568" y="70" width="14" height="120" fill="#e8472b"/><rect x="582" y="70" width="14" height="120" fill="#f2b824"/><rect x="596" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="610" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="624" y="70" width="14" height="120" fill="#e8472b"/><rect x="638" y="70" width="14" height="120" fill="#f2b824"/><rect x="652" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="666" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="680" y="70" width="14" height="120" fill="#e8472b"/><rect x="694" y="70" width="14" height="120" fill="#f2b824"/></g></g>
+<ellipse cx="597" cy="130" rx="62" ry="42" fill="none" stroke="#1e6fe0" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="597" y="205" class="s c" >(faint) outline of the mask</text>
+<g clip-path="url(#box7)"><g><rect x="747" y="70" width="14" height="120" fill="#e8472b"/><rect x="761" y="70" width="14" height="120" fill="#f2b824"/><rect x="775" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="789" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="803" y="70" width="14" height="120" fill="#e8472b"/><rect x="817" y="70" width="14" height="120" fill="#f2b824"/><rect x="831" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="845" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="859" y="70" width="14" height="120" fill="#e8472b"/><rect x="873" y="70" width="14" height="120" fill="#f2b824"/><rect x="887" y="70" width="14" height="120" fill="#1e6fe0"/><rect x="901" y="70" width="14" height="120" fill="#2f7d4f"/><rect x="915" y="70" width="14" height="120" fill="#e8472b"/><rect x="929" y="70" width="14" height="120" fill="#f2b824"/></g></g>
+<ellipse cx="832" cy="130" rx="62" ry="42" fill="#fbe3df" fill-opacity="0.85" stroke="#d4380d" stroke-width="2"/>
+<line x1="237" y1="130" x2="253" y2="130" class="acc" marker-end="url(#arrowAcc)"/>
+<line x1="472" y1="130" x2="488" y2="130" class="acc" marker-end="url(#arrowAcc)"/>
+<line x1="707" y1="130" x2="723" y2="130" class="acc" marker-end="url(#arrowAcc)"/>
+</svg>

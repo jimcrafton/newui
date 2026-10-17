@@ -39,6 +39,8 @@ namespace sketch {
         bool exportImage();
         // File > Export All Artboards: one image per artboard, named after the chosen file ("poster.png" -> "poster_1_Artboard-1.png"...).
         bool exportArtboards();
+        // File > Export As PDF: every artboard as a page of one PDF file (pdfexport.h).
+        bool exportPdf();
         // File > Trace Image: asks for a picture (PNG, BMP or JPEG), traces it into vector shapes (imagetrace.h) and adds them to the page.
         bool traceImage();
         // File > Place Image: asks for a picture (PNG, JPEG, BMP or QOI) and puts it on the active artboard as an Image object.

@@ -1,6 +1,6 @@
 """Regenerates every diagram: python docs/tools/gen_all.py  (writes docs/diagrams/*.svg)."""
 import gen_dev_diagrams_a, gen_dev_diagrams_b, gen_dev_diagrams_c, gen_dev_diagrams_d
-import gen_user_diagrams_a, gen_user_diagrams_b, gen_user_diagrams_c, gen_user_diagrams_d
+import gen_user_diagrams_a, gen_user_diagrams_b, gen_user_diagrams_c, gen_user_diagrams_d, gen_user_diagrams_e
 
 for module, calls in [
     (gen_dev_diagrams_a, ["architecture", "document_structure", "appearance_stack", "render_pipeline", "layer_ordering"]),
@@ -11,6 +11,7 @@ for module, calls in [
     (gen_user_diagrams_b, ["panels_1", "panels_2", "panels_3", "panels_4"]),
     (gen_user_diagrams_c, ["draw_shapes", "pen_pencil", "transform_tools", "align_distribute"]),
     (gen_user_diagrams_d, ["cut_tools", "gradient_width", "text_guide", "brushes_guide", "libraries_guide", "clip_artboards", "guides_snapping", "quickstart"]),
+    (gen_user_diagrams_e, ["mask_steps", "mask_examples", "mask_rules"]),
 ]:
     for name in calls:
         getattr(module, name)()

@@ -104,7 +104,7 @@ namespace sketch {
                 writePaint(out, item.paint);
                 if (item.kind == AppearanceKind::Stroke) {
                     out.f64(item.strokeWidth);
-                    out.u8(unsigned(item.strokeOptions.cap) | (item.strokeOptions.brush ? 0x80u : 0u));   // bit 7: the stroke has a brush
+                    out.u8(unsigned(item.strokeOptions.cap) | (item.strokeOptions.brush ? 0x80u : 0u) | (item.strokeOptions.decorated() ? 0x40u : 0u));   // bit 7: a brush follows; bit 6: align and arrows follow
                     out.u8(unsigned(item.strokeOptions.join));
                     out.f64(item.strokeOptions.miterLimit);
                     out.varint(item.strokeOptions.dashes.size());
@@ -119,6 +119,12 @@ namespace sketch {
                     }
                     if (item.strokeOptions.brush) {
                         out.varint(item.strokeOptions.brush->id);
+                    }
+                    if (item.strokeOptions.decorated()) {
+                        out.u8(unsigned(item.strokeOptions.align));
+                        out.u8(unsigned(item.strokeOptions.arrowStart));
+                        out.u8(unsigned(item.strokeOptions.arrowEnd));
+                        out.f64(item.strokeOptions.arrowScale);
                     }
                 } else if (item.kind == AppearanceKind::Effect) {
                     out.u8(unsigned(item.effect));
@@ -435,7 +441,7 @@ namespace sketch {
                 if (item.kind == AppearanceKind::Stroke) {
                     item.strokeWidth = in.f64();
                     const unsigned capByte = in.u8();
-                    item.strokeOptions.cap = (capByte & 0x7Fu) < 3u ? StrokeCap(capByte & 0x7Fu) : StrokeCap::Butt;
+                    item.strokeOptions.cap = (capByte & 0x3Fu) < 3u ? StrokeCap(capByte & 0x3Fu) : StrokeCap::Butt;
                     item.strokeOptions.join = StrokeJoin(in.enumeration(3));
                     item.strokeOptions.miterLimit = in.f64();
                     std::size_t dashes = in.count(8);
@@ -452,6 +458,12 @@ namespace sketch {
                     }
                     if ((capByte & 0x80u) != 0u) {
                         item.strokeOptions.brushRef = std::size_t(in.varint());   // bound to the brush once the library is in
+                    }
+                    if ((capByte & 0x40u) != 0u) {
+                        item.strokeOptions.align = StrokeAlign(in.enumeration(3));
+                        item.strokeOptions.arrowStart = ArrowStyle(in.enumeration(4));
+                        item.strokeOptions.arrowEnd = ArrowStyle(in.enumeration(4));
+                        item.strokeOptions.arrowScale = in.f64();
                     }
                 } else if (item.kind == AppearanceKind::Effect) {
                     item.effect = EffectKind(in.enumeration(7));
