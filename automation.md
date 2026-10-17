@@ -127,14 +127,383 @@ $w.WriteLine('{"id":1,"cmd":"hello"}'); $r.ReadLine()
 # {"id":1,"ok":true,"protocol":1}
 ```
 
+## Writing a driver
+
+The app side (above) only answers questions. A **driver** is a separate program that starts the app, sends real
+input, and asks the app what it shows. It needs nothing from newui: the protocol is the only coupling, so a driver can
+be written in any language that can open a Windows named pipe and call `SendInput` (this repo's is C++, see
+"Reference implementation"). A driver is a test tool, not part of the app: it needs a desktop session nobody is using.
+
+### What a driver has to do
+
+| # | Job | How |
+|---|-----|-----|
+| 1 | **Be per-monitor DPI aware** | `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` before anything else. The app reports physical screen pixels; a DPI-unaware driver sees scaled coordinates and clicks in the wrong place. |
+| 2 | **Start the app** | `CreateProcess(exe --automation <pipe>)` with a **random** pipe name per run (the pipe is first-instance, so a clash makes `start()` fail). Create the process suspended, put it in a **job object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, then resume it: the app dies with the driver however the test ends (crash, assert, Ctrl+C). |
+| 3 | **Connect to the pipe** | `CreateFile("\\\\.\\pipe\\<pipe>", GENERIC_READ \| GENERIC_WRITE, ...)`, retried every ~50 ms for up to ~20 s. Give up early if the process has exited. The pipe opens a moment *after* the process starts, and the window is shown even later. |
+| 4 | **Say `hello`** | Send `{"cmd":"hello"}` first and refuse a `protocol` you do not know (now `1`). |
+| 5 | **Ask, with a timeout** | One request line, one reply line (`\n` terminated, UTF-8). Do **not** block in `ReadFile`: poll `PeekNamedPipe` and time out (30 s is plenty), because an app inside a modal loop (an open native menu, a file dialog) answers nothing and the test must be able to fail instead of hanging. |
+| 6 | **Find the window** | `EnumWindows` for the app's process id, **visible and titled** (`IsWindowVisible && GetWindowTextLength > 0`). Do not require "no owner": newui's frame is owned by a hidden helper window. |
+| 7 | **Bring it to the front** | `SetForegroundWindow` only works for the foreground thread: `AttachThreadInput` to the current foreground window's thread around the call, restore a minimized window first, then verify `GetAncestor(GetForegroundWindow(), GA_ROOT) == window`. Throw if it did not take. |
+| 8 | **Locate before acting** | Never hard-code coordinates. `findView` gives the screen rectangle of a named view; click its centre. Before every click check that `WindowFromPoint(point)` belongs to the app's process (nothing covers it). |
+| 9 | **Send real input** | `SendInput`. Mouse: absolute coordinates are 0..65535 across the *virtual desktop* (`MOUSEEVENTF_ABSOLUTE \| MOUSEEVENTF_VIRTUALDESK`, normalised with `SM_XVIRTUALSCREEN/SM_CXVIRTUALSCREEN`...). Text: `KEYEVENTF_UNICODE`, one down/up pair per character. Shortcuts: `VK_*` down for the modifiers, the key down/up, modifiers up. A drag is down, **several** moves (controls that capture the mouse need them), up. A double click is one batch, so the two clicks are close enough in time. |
+| 10 | **Wait with `idle`, never `Sleep`** | End every input call with `{"cmd":"idle"}`. `idle` means the UI loop has nothing pending, **not** that background work (indexing, parsing, loading) is done: for that, poll the state you expect. |
+| 11 | **Stay out of the user's way** | Share the real mouse politely (see "Protecting the person at the keyboard"). |
+| 12 | **Report why** | Throw an error that says what failed ("no such view 'x'", "another window covers (x,y)", "could not bring the app to the foreground"). Test failures are read by people. |
+
+Everything else (menus, tree rows, scrollbars, segments, dialogs) is a combination of these plus the query commands
+in the protocol table.
+
+### Protecting the person at the keyboard
+
+`SendInput` drives the *real* cursor and keyboard. A driver that ignores that will click into whatever window is in
+front. The reference driver therefore:
+
+- waits until nobody has touched the mouse or keyboard for 1.5 s (`GetLastInputInfo`) before it injects anything, and gives
+  up with an error after 30 s;
+- remembers the input clock after each of its own injections, and **aborts the test** if the clock moves for any other
+  reason (releasing a held mouse button first);
+- is switchable off (`userInputGuard = false`) for a VM or build machine with nobody at it.
+
+Treat "another window covers ...", "could not bring the app to the foreground" and "input from outside" as *the person
+was busy*, not as a bug in the app: rerun when the machine is idle. Make the first run of any new driver read-only
+(`hello`, `findView`, `screenshot`) before it sends any input.
+
+### Sample implementation
+
+A complete, working minimal driver (about 200 lines, Win32 only, no newui dependency): it launches the app, connects,
+clicks a named view with a real click, types, and reads the text back. It is deliberately small: replies are scanned by
+key rather than parsed (fine for flat replies; use a real JSON parser or a small scanner for arrays such as menu items and
+tree rows). Build with `cl /EHsc /std:c++17 mini_driver.cpp user32.lib`.
+
+```cpp
+// mini_driver.cpp - the smallest useful driver for a newui app: launch it, talk to its automation pipe, click a named view
+// with real input, read a text box back. Win32 only. Build: cl /EHsc /std:c++17 mini_driver.cpp user32.lib
+#include <windows.h>
+
+#include <chrono>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+// 1. Pixel coordinates from newui are physical: be per-monitor DPI aware before anything else.
+struct DpiAwareness {
+    DpiAwareness() { ::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); }
+} dpiAwareness;
+
+std::wstring widen(const std::string& s) {
+    int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(n > 0 ? n - 1 : 0, L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+    return w;
+}
+
+// The value of a string field of a flat reply line, e.g. field(line, "text"). Enough for simple replies; a driver that
+// reads arrays (menus, tree rows) needs a real JSON parser or a small scanner like guitest::Reply.
+std::string field(const std::string& line, const std::string& key) {
+    size_t at = line.find("\"" + key + "\":");
+    if (at == std::string::npos) return "";
+    at += key.size() + 3;
+    if (at < line.size() && line[at] == '"') {
+        std::string out;
+        for (size_t i = at + 1; i < line.size() && line[i] != '"'; ++i) {
+            if (line[i] == '\\' && i + 1 < line.size()) ++i;
+            out += line[i];
+        }
+        return out;
+    }
+    size_t end = line.find_first_of(",}", at);
+    return line.substr(at, end - at);
+}
+
+class App {
+public:
+    explicit App(const std::string& exe) {
+        // 2. A random pipe name per run: the app creates \\.\pipe\<name> with FILE_FLAG_FIRST_PIPE_INSTANCE.
+        std::string pipeName = "mini_guitest_" + std::to_string(::GetCurrentProcessId()) + "_" + std::to_string(::GetTickCount64());
+        std::wstring command = widen("\"" + exe + "\" --automation " + pipeName);
+
+        // 3. A job object that kills the app when the driver goes away, however the test ends.
+        job_ = ::CreateJobObjectW(nullptr, nullptr);
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+
+        STARTUPINFOW startup = { sizeof(startup) };
+        PROCESS_INFORMATION info = {};
+        if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, nullptr, &startup, &info)) {
+            throw std::runtime_error("could not start " + exe);
+        }
+        ::AssignProcessToJobObject(job_, info.hProcess);
+        ::ResumeThread(info.hThread);
+        ::CloseHandle(info.hThread);
+        process_ = info.hProcess;
+        pid_ = info.dwProcessId;
+
+        // 4. The pipe opens a moment after the process starts: retry until it does (or the app dies).
+        std::wstring path = L"\\\\.\\pipe\\" + widen(pipeName);
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (pipe_ == INVALID_HANDLE_VALUE) {
+            pipe_ = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (pipe_ != INVALID_HANDLE_VALUE) break;
+            if (::WaitForSingleObject(process_, 0) != WAIT_TIMEOUT || std::chrono::steady_clock::now() > deadline) {
+                throw std::runtime_error("no automation pipe");
+            }
+            ::Sleep(50);
+        }
+        // 5. hello first; refuse a protocol you do not know.
+        if (field(ask("{\"cmd\":\"hello\"}"), "protocol") != "1") throw std::runtime_error("unknown protocol");
+    }
+
+    ~App() {
+        if (pipe_ != INVALID_HANDLE_VALUE) ::CloseHandle(pipe_);
+        if (job_) ::CloseHandle(job_);          // kills the app
+        if (process_) ::CloseHandle(process_);
+    }
+    App(const App&) = delete;
+    App& operator=(const App&) = delete;
+
+    // One request line, one reply line. Poll with PeekNamedPipe instead of blocking in ReadFile: an app stuck in a
+    // modal loop (an open native menu or dialog) answers nothing, and the driver must be able to time out.
+    std::string ask(const std::string& json) {
+        std::string line = json + "\n";
+        DWORD done = 0;
+        if (!::WriteFile(pipe_, line.data(), static_cast<DWORD>(line.size()), &done, nullptr)) throw std::runtime_error("pipe closed");
+        std::string answer;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        for (char c;;) {
+            DWORD available = 0;
+            if (!::PeekNamedPipe(pipe_, nullptr, 0, nullptr, &available, nullptr)) throw std::runtime_error("pipe closed");
+            if (available == 0) {
+                if (std::chrono::steady_clock::now() > deadline) throw std::runtime_error("no answer to " + json);
+                ::Sleep(2);
+                continue;
+            }
+            ::ReadFile(pipe_, &c, 1, &done, nullptr);
+            if (c == '\n') return answer;
+            answer += c;
+        }
+    }
+
+    // Blocks until the app has nothing pending: use this instead of Sleep after sending input.
+    void waitIdle() { ask("{\"cmd\":\"idle\"}"); }
+
+    POINT centerOf(const std::string& name) {
+        std::string r = ask("{\"cmd\":\"findView\",\"name\":\"" + name + "\"}");
+        if (field(r, "ok") != "true") throw std::runtime_error(field(r, "error"));
+        return POINT{ static_cast<LONG>(std::stod(field(r, "x")) + std::stod(field(r, "w")) / 2),
+                      static_cast<LONG>(std::stod(field(r, "y")) + std::stod(field(r, "h")) / 2) };
+    }
+
+    std::string textOf(const std::string& name) { return field(ask("{\"cmd\":\"getText\",\"name\":\"" + name + "\"}"), "text"); }
+
+    // A real click at the centre of a named view.
+    void click(const std::string& name) {
+        POINT p = centerOf(name);
+        bringToFront();
+        // Never click blind: the point must belong to the app's own window (nothing else may cover it).
+        DWORD pid = 0;
+        ::GetWindowThreadProcessId(::WindowFromPoint(p), &pid);
+        if (pid != pid_) throw std::runtime_error("another window covers the target");
+        // Absolute mouse coordinates are 0..65535 across the whole virtual desktop (all monitors).
+        int left = ::GetSystemMetrics(SM_XVIRTUALSCREEN), top = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int w = ::GetSystemMetrics(SM_CXVIRTUALSCREEN), h = ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        INPUT in[3] = {};
+        in[0].type = in[1].type = in[2].type = INPUT_MOUSE;
+        in[0].mi.dx = static_cast<LONG>((p.x - left) * 65535.0 / (w - 1) + 0.5);
+        in[0].mi.dy = static_cast<LONG>((p.y - top) * 65535.0 / (h - 1) + 0.5);
+        in[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+        in[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        in[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        ::SendInput(3, in, sizeof(INPUT));
+        waitIdle();
+    }
+
+    // Typing: one KEYEVENTF_UNICODE down/up pair per character (layout independent).
+    void type(const std::wstring& text) {
+        bringToFront();
+        for (wchar_t c : text) {
+            INPUT in[2] = {};
+            in[0].type = in[1].type = INPUT_KEYBOARD;
+            in[0].ki.wScan = in[1].ki.wScan = c;
+            in[0].ki.dwFlags = KEYEVENTF_UNICODE;
+            in[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            ::SendInput(2, in, sizeof(INPUT));
+        }
+        waitIdle();
+    }
+
+private:
+    // The app's frame is owned by a hidden helper window, so look for "visible and titled", not "no owner".
+    HWND mainWindow() {
+        struct Search { DWORD pid; HWND found; } s = { pid_, nullptr };
+        ::EnumWindows([](HWND w, LPARAM p) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(p);
+            DWORD pid = 0;
+            ::GetWindowThreadProcessId(w, &pid);
+            if (pid == s->pid && ::IsWindowVisible(w) && ::GetWindowTextLengthW(w) > 0) { s->found = w; return FALSE; }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&s));
+        return s.found;
+    }
+
+    void bringToFront() {
+        HWND w = nullptr;
+        for (int i = 0; i < 100 && !(w = mainWindow()); ++i) ::Sleep(50);   // the frame shows after the pipe opens
+        if (!w) throw std::runtime_error("the app has no visible window");
+        if (::IsIconic(w)) ::ShowWindow(w, SW_RESTORE);
+        // Windows only lets the foreground thread hand the foreground over: attach to its input queue for the call.
+        HWND current = ::GetForegroundWindow();
+        DWORD theirs = current ? ::GetWindowThreadProcessId(current, nullptr) : 0, ours = ::GetCurrentThreadId();
+        if (theirs && theirs != ours) ::AttachThreadInput(ours, theirs, TRUE);
+        ::SetForegroundWindow(w);
+        if (theirs && theirs != ours) ::AttachThreadInput(ours, theirs, FALSE);
+        if (::GetAncestor(::GetForegroundWindow(), GA_ROOT) != w) throw std::runtime_error("could not bring the app to the foreground");
+    }
+
+    HANDLE process_ = nullptr, job_ = nullptr, pipe_ = INVALID_HANDLE_VALUE;
+    DWORD pid_ = 0;
+};
+
+}
+
+int main(int argc, char** argv) {
+    try {
+        App app(argc > 1 ? argv[1] : "testharness.exe");
+        app.click("filterInput");
+        app.type(L"Box");
+        std::string text = app.textOf("filterInput");
+        printf("filterInput = '%s' -> %s\n", text.c_str(), text == "Box" ? "PASS" : "FAIL");
+        return text == "Box" ? 0 : 1;
+    } catch (const std::exception& e) {
+        printf("FAIL: %s\n", e.what());
+        return 2;
+    }
+}
+```
+
+### Reference implementation
+
+`guitest/GuiDriver.h` / `GuiDriver.cpp` (the canonical copy lives in the cpp_codetools repo; demos/sketch_guitest holds a
+copy) is the full version of the sample: a `guitest::App` class with typed wrappers for every query command, tree rows,
+scrollbars, segments, native menus (`openMenu` / `chooseMenuItem` / `closeMenu`), `drag`, `wheel`, `key`, the user-input guard, and
+a `Reply` scanner for arrays. `demos/sketch_guitest/guitest_tests.cpp` shows it used (GoogleTest, one `App` per test).
+The reference driver is itself documented in the skill that ships with it (see the next section).
+
+### Things that will bite you
+
+- **A control that is only partly inside a scrolling parent.** `findView` reports the view's whole bounds, even the
+  part clipped away. A click on the clipped edge, or below the parent's visible area, silently does nothing (or hits the
+  neighbour). Scroll the parent until the control is fully inside its visible rectangle (`scrollInfo` / the mouse wheel)
+  before clicking. A toggle button that is half-clipped looks "dead".
+- **Modifier keys and injected chords.** newui reads Ctrl/Shift/Alt for a key event with `GetKeyState` (the state as of
+  that message). An older version used `GetAsyncKeyState` (the live state), which made a chord sent in one batch (Ctrl down, Z
+  down/up, Ctrl up) arrive as a bare Z, because Ctrl was already released when the message was handled. A driver written
+  against a framework that still has that bug has to hold modifiers for a few milliseconds.
+- **Focus decides who gets the keys.** After typing into a text box, Ctrl+Z belongs to the box, not to the canvas or the
+  document. Click the thing that should receive the shortcut first, or use a menu command.
+- **Native menus and dialogs are modal loops.** While a menu is open `idle` does not answer, so a click that opens one must
+  not wait for idle (`settle=false`) and the driver must poll `popupMenu` instead. Clicks inside an open menu must not bring the
+  window to the front (that closes it). `Escape` closes one level of nesting, not all of them. A native file dialog
+  is a separate top-level window of the app: type into it with raw `SendInput` after checking it is the foreground window
+  (class `#32770`); a driver helper that first calls "bring the main window to the front" would pull the main window over
+  the dialog.
+- **A submenu is not open the moment you click its parent.** `popupMenu` keeps reporting the parent's items for a moment:
+  poll until the label you want appears.
+- **Handles drawn on top of the thing you want to drag.** In an editor, the middle of a selected object may hold a
+  handle (sketch's transform-origin marker): grab the object off-centre. This is app behaviour, not a driver bug.
+- **Screenshots.** `screenshot` writes a `.bmp` of a RootView rendered by the framework itself (it cannot be occluded, but
+  it also is not what the desktop shows). The path in the JSON request needs escaped backslashes, or just use forward slashes.
+  Pixel offsets are relative to the root view: subtract the root view's screen position (`findView` of the root view).
+  Probe with the colour the app really uses; a "dark pixel" test misses a mid-blue stroke.
+- **Names.** A view without a name cannot be found. Names must be unique inside the exposed windows; `findView` returns
+  the first match.
+- **Timing.** `idle` covers the UI loop only. Poll for background results with a bounded loop (`for 300 x Sleep(100)`) on the
+  state you expect, and give the loop a message that says what never happened.
+- **Do not ship it.** A build with automation on exposes the whole view tree, every text and screenshots to any
+  process of the same user. Keep it behind the CMake option, off in release builds.
+- **Never leave input held.** If anything throws between "button down" and "button up", release the button before
+  rethrowing, or the person's desktop keeps dragging.
+
+### Adding a command to the server
+
+Commands are an `if (cmd == "...")` chain in `Automation::handle()` (`src/automation.cpp`); there is no plugin
+registration. Write a `fooReply(const Request&)`, add the branch, document it in the table above and in the header
+comment at the top of `automation.cpp`, add a headless case in `unittests/test_automation.cpp`, then a typed wrapper in the driver.
+Replies run on the app's UI thread. The one exception, `popupMenu`, is answered off it so it works while a native
+menu's modal loop is running.
+
+## Teaching Claude Code to use it (a skill)
+
+A *skill* is a folder that Claude Code loads when a request matches its description. A skill for a driver lets Claude
+write and extend GUI tests without being walked through the protocol each time. The reference skill is
+`.claude/skills/newui-gui-driver/` (copied into this repo from cpp_codetools).
+
+### Layout
+
+```
+.claude/skills/<skill-name>/
+    SKILL.md             required: frontmatter (name, description) + the instructions Claude follows
+    reference.md         optional: command and driver API tables, linked from SKILL.md
+    driver/              optional: a bundled COPY of the driver source Claude should copy into a new app
+        GuiDriver.h
+        GuiDriver.cpp
+    templates/           optional: CMake and test templates with placeholders (myapp, MYAPP_GUI_AUTOMATION ...)
+        CMakeLists.txt.in
+        example_tests.cpp.in
+```
+
+### What to do
+
+1. **Write `SKILL.md`.** Start with frontmatter:
+
+   ```markdown
+   ---
+   name: newui-gui-driver
+   description: Create or extend a GUI test driver for a newui (Win32/Blend2D) app using newui's automation server - real SendInput plus a named-pipe query protocol. Use when asked to add a GUI/live-input test, drive the app from outside, set up automation in a new newui app, or add an automation command.
+   ---
+   ```
+
+   The `description` is what Claude matches against the request, so say both **what** the skill does and **when** to use
+   it, with the words a person would use ("GUI test", "drive the app", "automation"). Keep the body short and procedural:
+   the steps for a new app (CMake option, `--automation` handling, `expose`/`start`/`stop`, naming views), how to write a test,
+   the rules that keep tests reliable (wait with `idle`, poll background work, scroll clipped controls into view), the user-input guard,
+   how to add a server command, and the pitfalls from "Things that will bite you" above. Link long tables instead of pasting them.
+2. **Put the long material in sibling files.** The command table and driver API go in `reference.md`; link it from `SKILL.md`.
+   Keep it a digest and name `automation.md` as the source of truth, so the two do not drift.
+3. **Bundle the driver as a copy** in `driver/` (and templates in `templates/`) so the skill works in a project that
+   does not have the driver yet. State in the skill and in a README next to it which copy is canonical, and how to refresh the
+   bundled one, for example `Copy-Item guitest\GuiDriver.* .claude\skills\newui-gui-driver\driver\`. **Never edit a bundled copy.**
+4. **Write the safety rules into the skill**, because Claude will otherwise run a test as readily as it writes one:
+   - GUI tests move the person's real mouse and type on their keyboard. **Ask before every run that sends input**; build
+     freely, but run only after an explicit go-ahead, and say which window must stay uncovered.
+   - Make a new driver's first run read-only (`hello`, `findView`, `screenshot`).
+   - A failure such as "another window covers", "could not bring the app to the foreground" or "input from outside" means the person
+     was active: report it, do not retry in a loop.
+   - Do not turn the user-input guard off except on a machine the person says is unattended.
+   - Never ship a build with automation enabled.
+5. **Install it.** For one project, put the folder in `<project>\.claude\skills\<skill-name>\`. For every project, put it in
+   `%USERPROFILE%\.claude\skills\<skill-name>\`. Restart Claude Code (or start a new session) so it is picked up; then it triggers
+   from a matching request or by name (`/<skill-name>`). Check it is found by asking for something it covers.
+6. **Keep a `README.md` in `.claude/skills/`** that lists the skills, says how to copy one into another project, and where the canonical
+   source of any bundled files lives (the reference skill's README does this).
+7. **Keep it in sync.** When the protocol, the driver API or a pitfall changes, update `automation.md` first, then the skill's
+   `reference.md` and `SKILL.md`, then refresh the bundled driver copy. A skill that describes a driver that no longer exists is worse than none.
+
+The skill is guidance, not enforcement. If a rule must hold regardless (for example "no input without asking"), also put it in the
+project's `CLAUDE.md` or its permission settings; do not rely on the skill text alone.
+
 ## Limits
 
 - Window bounds are screen pixels; with a DPI-unaware driver they will not line up. Make the
   driver per-monitor DPI aware.
 - `SendInput` moves the real cursor and needs the target window in the foreground: run tests on a
   session nobody is using, and check the window isn't covered before trusting a click.
-- No enabled/disabled state is reported (views don't carry one).
-- No `getProperty`/tree snapshot yet.
+- Enabled / visible / checked state is only available through `describe` / `get` (reflected properties of the control);
+  `findView` reports `visible` but not whether the view is clipped by a scrolling parent (see "Things that will bite you").
+- There is no whole-window tree dump yet; `tree` covers `TreeView` rows only (custom views such as a hand-drawn list
+  expose nothing unless they have reflected properties).
 
 ## Tests
 
