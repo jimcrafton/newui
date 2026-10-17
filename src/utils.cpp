@@ -636,19 +636,18 @@ namespace newui {
 		HKL keyboardLayout = GetKeyboardLayout(GetWindowThreadProcessId(hwnd, NULL));
 
 		ToAsciiEx(outInfo.VKeyCode, outInfo.scanCode, &keyState[0], &outInfo.character, 1, keyboardLayout);
-		std::bitset<16> keyBits;
-		keyBits = GetAsyncKeyState(VK_SHIFT);
-		if (keyBits[15] == 1) {
+		// GetKeyState, not GetAsyncKeyState: this is the modifier state as of the message being handled. The async
+		// (live) state is already wrong when keys are injected in one quick batch (SendInput: Ctrl down, Z down,
+		// Z up, Ctrl up) because Ctrl has been released again by the time the Z message is processed.
+		if (GetKeyState(VK_SHIFT) < 0) {
 			outInfo.keyMask |= kmShift;
 		}
 
-		keyBits = GetAsyncKeyState(VK_CONTROL);
-		if (keyBits[15] == 1) {
+		if (GetKeyState(VK_CONTROL) < 0) {
 			outInfo.keyMask |= kmCtrl;
 		}
 
-		keyBits = GetAsyncKeyState(VK_MENU);
-		if (keyBits[15] == 1) {
+		if (GetKeyState(VK_MENU) < 0) {
 			outInfo.altKeyDown = true;
 			outInfo.keyMask |= kmAlt;
 		}

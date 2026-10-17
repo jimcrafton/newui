@@ -64,7 +64,7 @@ add_executable(sketch
 
 target_link_libraries(sketch PRIVATE newui zlib_static windowscodecs ole32)
 
-# GUI automation (see automation.md at the repository root): `sketch.exe --automation <pipe>` lets tests/gui/sketch_gui_tests.py drive the
+# GUI automation (see automation.md at the repository root): `sketch.exe --automation <pipe>` lets the Python GUI tests in demos/sketch/tests/gui (driver: tools/guitest) drive the
 # window. Turn it OFF for a build that is shipped - nothing of it is then compiled in.
 option(SKETCH_GUI_AUTOMATION "Build sketch with newui's automation server" ON)
 if(SKETCH_GUI_AUTOMATION)
@@ -125,3 +125,4 @@ add_executable(sketch_tests
 )
 target_link_libraries(sketch_tests PRIVATE newui zlib_static windowscodecs ole32 GTest::gtest_main)
 target_include_directories(sketch_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+

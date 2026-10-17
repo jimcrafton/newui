@@ -131,8 +131,11 @@ $w.WriteLine('{"id":1,"cmd":"hello"}'); $r.ReadLine()
 
 The app side (above) only answers questions. A **driver** is a separate program that starts the app, sends real
 input, and asks the app what it shows. It needs nothing from newui: the protocol is the only coupling, so a driver can
-be written in any language that can open a Windows named pipe and call `SendInput` (this repo's is C++, see
-"Reference implementation"). A driver is a test tool, not part of the app: it needs a desktop session nobody is using.
+be written in any language that can open a Windows named pipe and call `SendInput`. This repo's reference driver is
+**Python** (`tools/guitest`, the `newui_guitest` package, standard library only): use it as it is, and write an app's tests
+and helpers in Python on top of it. Python is the canonical driver because anything that does not fit a config file
+(where the exe is, "draw a rectangle", how to find a dialog) is a few lines of test code rather than a C++ rebuild.
+A driver is a test tool, not part of the app: it needs a desktop session nobody is using.
 
 ### What a driver has to do
 
@@ -157,13 +160,14 @@ in the protocol table.
 ### Protecting the person at the keyboard
 
 `SendInput` drives the *real* cursor and keyboard. A driver that ignores that will click into whatever window is in
-front. The reference driver therefore:
+front. The reference driver (`newui_guitest.App`) therefore:
 
 - waits until nobody has touched the mouse or keyboard for 1.5 s (`GetLastInputInfo`) before it injects anything, and gives
   up with an error after 30 s;
 - remembers the input clock after each of its own injections, and **aborts the test** if the clock moves for any other
   reason (releasing a held mouse button first);
-- is switchable off (`userInputGuard = false`) for a VM or build machine with nobody at it.
+- is switchable off (`App.user_input_guard = False`, or the environment variable `GUITEST_NO_GUARD=1`) for a VM or build
+  machine with nobody at it.
 
 Treat "another window covers ...", "could not bring the app to the foreground" and "input from outside" as *the person
 was busy*, not as a bug in the app: rerun when the machine is idle. Make the first run of any new driver read-only
@@ -171,10 +175,46 @@ was busy*, not as a bug in the app: rerun when the machine is idle. Make the fir
 
 ### Sample implementation
 
-A complete, working minimal driver (about 200 lines, Win32 only, no newui dependency): it launches the app, connects,
-clicks a named view with a real click, types, and reads the text back. It is deliberately small: replies are scanned by
-key rather than parsed (fine for flat replies; use a real JSON parser or a small scanner for arrays such as menu items and
-tree rows). Build with `cl /EHsc /std:c++17 mini_driver.cpp user32.lib`.
+A complete test with the Python driver (`tools/guitest`). It launches the app, clicks a named view with a real click,
+types, reads the text back, and checks the pixels with a screenshot. Run it with `python -m unittest -v test_myapp`.
+
+```python
+import sys
+sys.path.insert(0, r"D:\code
+ewui-demos	ools\guitest")
+from newui_guitest import AppTestCase, differs
+
+
+class FilterTests(AppTestCase):
+    exe = r"D:uild\myapp.exe"            # a fresh app per test, killed however the test ends
+
+    def test_typing_fills_the_filter(self):
+        self.app.click("filterInput")                       # find -> covered-point check -> SendInput -> wait for idle
+        self.app.type("Box")
+        self.assertEqual("Box", self.app.text_of("filterInput"))
+
+    def test_a_menu_command_changes_the_picture(self):
+        before = self.app.screenshot()
+        self.app.choose_menu("menuBar", "View", "Zoom In")  # nested menus work: choose_menu(bar, "A", "B", "C")
+        after = self.app.screenshot()
+        r = self.app.find("canvas")
+        self.assertGreater(before.changed(after, r.x, r.y, r.x + r.w, r.y + r.h), 0)
+
+    def test_background_work_is_polled_not_slept(self):
+        # idle means the UI loop is empty, not that indexing has finished
+        self.app.wait_until(lambda: self.app.tree("itemsTree", 10), "the tree to fill")
+```
+
+The first run of any new app should be read-only: `python -m newui_guitest check D:uild\myapp.exe --view canvas`.
+`tools/guitest/README.md` has the whole API. A large app subclasses `AppTestCase` once for its own helpers: see
+`demos/sketch/tests/gui/test_sketch_gui.py`.
+
+### A driver in another language
+
+The Python driver is the reference; a driver in another language only has to do the twelve jobs in the table above. As a
+size guide, this is the smallest useful one in C++ (about 200 lines, Win32 only, no newui dependency). It is deliberately
+small: replies are scanned by key rather than parsed (fine for flat replies; use a real JSON parser for arrays such as menu
+items and tree rows). Build with `cl /EHsc /std:c++17 mini_driver.cpp user32.lib`.
 
 ```cpp
 // mini_driver.cpp - the smallest useful driver for a newui app: launch it, talk to its automation pipe, click a named view
@@ -385,11 +425,66 @@ int main(int argc, char** argv) {
 
 ### Reference implementation
 
-`guitest/GuiDriver.h` / `GuiDriver.cpp` (the canonical copy lives in the cpp_codetools repo; demos/sketch_guitest holds a
-copy) is the full version of the sample: a `guitest::App` class with typed wrappers for every query command, tree rows,
-scrollbars, segments, native menus (`openMenu` / `chooseMenuItem` / `closeMenu`), `drag`, `wheel`, `key`, the user-input guard, and
-a `Reply` scanner for arrays. `demos/sketch_guitest/guitest_tests.cpp` shows it used (GoogleTest, one `App` per test).
-The reference driver is itself documented in the skill that ships with it (see the next section).
+`tools/guitest/newui_guitest/app.py` is the full version of the sample: an `App` class with typed wrappers for every query
+command, tree rows, scrollbars, segments, native menus (`open_menu` / `choose_menu` / `close_menu`), native file dialogs,
+`drag`, `wheel`, `key`, `reveal`, `screenshot` (with a BMP reader), the user-input guard and the covered-point check.
+`tools/guitest/tests/test_pure.py` tests the parts that need no desktop (key chords, the BMP reader, the Win32 struct
+layouts). `demos/sketch/tests/gui/test_sketch_gui.py` shows it used on a real app (16 tests, `unittest`, one app per test).
+The driver is also described in the skill that ships with it (see the next section).
+
+### Customizing the driver for an app
+
+There is no config file. Customizing is writing a few lines of Python, from the least to the most change:
+
+1. **Say where the app is.** Set `exe` (and `args`, extra command-line arguments) on an `AppTestCase` subclass. Take the path
+   from an environment variable so a build machine can override it:
+
+   ```python
+   class MyCase(AppTestCase):
+       exe = os.environ.get("MYAPP_EXE", r"D:\code\myappuild\Debug\myapp.exe")
+       args = ("--demo-data",)
+   ```
+
+2. **Add the app's vocabulary as helpers** on that subclass. This is where "draw a rectangle", "open the settings tab" or
+   "type into the search box" live, built from the driver calls (`click`, `drag`, `type`, `choose_menu`, `text_of`...).
+   Put them in one base class and share it between test files (`demos/sketch/tests/gui/test_sketch_gui.py` has `SketchCase`
+   with `draw`, `choose_tool`, `set_field`, `canvas_at`...).
+
+3. **Change how the app starts.** Override `launch()` to prepare something first (a temp folder, a document to open) and
+   return an `App`; `setUp` and the cleanup that kills it are inherited:
+
+   ```python
+   def launch(self):
+       self.workdir = tempfile.mkdtemp()
+       self.addCleanup(shutil.rmtree, self.workdir, True)
+       return App(self.exe, ("--open", os.path.join(self.workdir, "test.doc")), cwd=self.workdir)
+   ```
+
+4. **Tune the timing and the guard.** `App.CONNECT_TIMEOUT`, `REPLY_TIMEOUT`, `QUIET_PERIOD`, `QUIET_TIMEOUT` are class attributes;
+   a slow app raises the first two. On an unattended machine set `GUITEST_NO_GUARD=1` or `App.user_input_guard = False`.
+
+5. **Reach more than one window.** Each window the app calls `expose()` on is a root. Pass its name to `screenshot("editorRoot")`
+   and name its views as usual. A native dialog is not newui: use `wait_for_dialog`, `type_raw` and `key_raw`.
+
+6. **Call a command the driver has no wrapper for.** `app.ask("myCommand", name="x", value=3)` sends any command (see "Adding
+   a command to the server") and returns the reply as a dict, raising `AutomationError` when `ok` is false. Wrap it in a
+   helper on your test class when it is used more than once.
+
+7. **Extend the driver itself** by subclassing `App` (and returning that from `launch()`), for a behaviour every test of that app
+   needs, such as a custom control's click target or a lookup that is not a plain name:
+
+   ```python
+   class MyApp(App):
+       def click_tab(self, title):                  # a custom tab strip that findView cannot address by name
+           bar = self.find("tabStrip")
+           self.click_at((bar.x + 40 + 120 * TAB_TITLES.index(title), bar.y + bar.h / 2))
+   ```
+
+   A change that every app would want (a new query, a new input kind, a Windows quirk) belongs in `tools/guitest` itself,
+   with a case in `tests/test_pure.py` when it can be tested without a desktop.
+
+What cannot be customized from the driver is *what the app reports*: a view must have a name, and a custom control exposes
+only its reflected properties. Name the views and add reflected properties (or a server command) in the app.
 
 ### Things that will bite you
 
@@ -438,7 +533,7 @@ menu's modal loop is running.
 
 A *skill* is a folder that Claude Code loads when a request matches its description. A skill for a driver lets Claude
 write and extend GUI tests without being walked through the protocol each time. The reference skill is
-`.claude/skills/newui-gui-driver/` (copied into this repo from cpp_codetools).
+`.claude/skills/newui-gui-driver/`, which points at the Python driver in `tools/guitest`.
 
 ### Layout
 
@@ -446,12 +541,9 @@ write and extend GUI tests without being walked through the protocol each time. 
 .claude/skills/<skill-name>/
     SKILL.md             required: frontmatter (name, description) + the instructions Claude follows
     reference.md         optional: command and driver API tables, linked from SKILL.md
-    driver/              optional: a bundled COPY of the driver source Claude should copy into a new app
-        GuiDriver.h
-        GuiDriver.cpp
-    templates/           optional: CMake and test templates with placeholders (myapp, MYAPP_GUI_AUTOMATION ...)
-        CMakeLists.txt.in
-        example_tests.cpp.in
+    templates/           optional: test and CMake templates with placeholders (myapp, MYAPP_GUI_AUTOMATION ...)
+        example_tests.py.in
+        CMakeLists.txt.in   the app-side CMake snippet
 ```
 
 ### What to do
@@ -472,9 +564,9 @@ write and extend GUI tests without being walked through the protocol each time. 
    how to add a server command, and the pitfalls from "Things that will bite you" above. Link long tables instead of pasting them.
 2. **Put the long material in sibling files.** The command table and driver API go in `reference.md`; link it from `SKILL.md`.
    Keep it a digest and name `automation.md` as the source of truth, so the two do not drift.
-3. **Bundle the driver as a copy** in `driver/` (and templates in `templates/`) so the skill works in a project that
-   does not have the driver yet. State in the skill and in a README next to it which copy is canonical, and how to refresh the
-   bundled one, for example `Copy-Item guitest\GuiDriver.* .claude\skills\newui-gui-driver\driver\`. **Never edit a bundled copy.**
+3. **Point at the driver, do not copy it.** The Python driver is a package (`tools/guitest`), so the skill names its path and
+   tells Claude to put it on `sys.path` (or `PYTHONPATH`) rather than carrying a copy that can drift. Put test templates
+   in `templates/`. A skill installed in a project that does not have `tools/guitest` must say where to get it.
 4. **Write the safety rules into the skill**, because Claude will otherwise run a test as readily as it writes one:
    - GUI tests move the person's real mouse and type on their keyboard. **Ask before every run that sends input**; build
      freely, but run only after an explicit go-ahead, and say which window must stay uncovered.
@@ -489,7 +581,7 @@ write and extend GUI tests without being walked through the protocol each time. 
 6. **Keep a `README.md` in `.claude/skills/`** that lists the skills, says how to copy one into another project, and where the canonical
    source of any bundled files lives (the reference skill's README does this).
 7. **Keep it in sync.** When the protocol, the driver API or a pitfall changes, update `automation.md` first, then the skill's
-   `reference.md` and `SKILL.md`, then refresh the bundled driver copy. A skill that describes a driver that no longer exists is worse than none.
+   `reference.md` and `SKILL.md`. A skill that describes a driver that no longer exists is worse than none.
 
 The skill is guidance, not enforcement. If a rule must hold regardless (for example "no input without asking"), also put it in the
 project's `CLAUDE.md` or its permission settings; do not rely on the skill text alone.
