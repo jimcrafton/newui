@@ -93,6 +93,13 @@ namespace sketch {
     void SketchCommandController::addObjectCommands() {
         add("object.group", [this]() { document_.groupSelection(); });
         add("object.ungroup", [this]() { document_.ungroupSelection(); });
+        add("symbol.new", [this]() { document_.makeSymbol(""); });
+        add("symbol.place", [this]() { document_.placeActiveSymbol(); });
+        add("symbol.redefine", [this]() { document_.redefineSymbol(document_.activeSymbol()); });
+        add("symbol.break", [this]() { document_.breakSymbolLink(); });
+        add("pattern.make", [this]() { document_.makePattern(""); });
+        add("pattern.fill", [this]() { document_.applyPattern(document_.activePattern(), false); });
+        add("pattern.stroke", [this]() { document_.applyPattern(document_.activePattern(), true); });
         add("artboard.new", [this]() { document_.addArtboardBesideLast(); });
         add("artboard.delete", [this]() { document_.deleteArtboard(document_.activeArtboard()); });
         add("artboard.previous", [this]() {

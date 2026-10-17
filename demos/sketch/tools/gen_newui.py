@@ -248,6 +248,8 @@ MENUS = [
     mi("Object", children=[
         mi("Group", "Ctrl+G"), mi("Ungroup", "Ctrl+Shift+G"),
         mi("Clipping Mask", children=[mi("Make", "Ctrl+7"), mi("Release", "Ctrl+Shift+7")]),
+        mi("Symbol", children=[mi("New Symbol"), mi("Place Symbol"), mi("Redefine Symbol"), mi("Break Link to Symbol")]),
+        mi("Pattern", children=[mi("Make Pattern"), SEP, mi("Fill with Pattern"), mi("Stroke with Pattern")]),
         mi("Artboards", children=[mi("New Artboard"), mi("Delete Artboard"), SEP, mi("Previous Artboard"), mi("Next Artboard"), SEP, mi("Fit Artboard in Window")]), SEP,
         mi("Lock", "Ctrl+2"), mi("Unlock All"), mi("Hide", "Ctrl+3"), mi("Show All"), SEP,
         mi("Transform", children=[mi("Transform Again", "Ctrl+Shift+D"), SEP, mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
@@ -493,6 +495,35 @@ def artboards_panel():
     return panel("artboardsPanel", "Artboards", body)
 
 
+def symbols_panel():
+    # LibraryPanel (librarypanel.h): the symbol library of the document. New makes a symbol of the selection, Place puts one on the
+    # active artboard, Redefine swaps the artwork of every instance, Break Link turns an instance back into plain objects.
+    body = [
+        hbox("symbolCombos", [dropdown("symbolCombo", ["(none)"], weight=1)], h=24),
+        hbox("symbolActions", [
+            tbtn("newSymbolButton", "symbol-new", s=24), tbtn("placeSymbolButton", "symbol-place", s=24),
+            tbtn("redefineSymbolButton", "symbol-redefine", s=24), tbtn("breakSymbolButton", "symbol-break", s=24),
+            tbtn("deleteSymbolButton", "layer-delete", s=24)], h=26),
+        hbox("symbolNameRow", [label("Name", w=44), field("symbolNameField", "", weight=1)]),
+    ]
+    return panel("symbolsPanel", "Symbols", body)
+
+
+def patterns_panel():
+    # The pattern library: tiles of artwork that repeat to fill a shape. New makes a pattern of the selection (which stays), Fill /
+    # Stroke apply it to the selected objects; Scale and Angle edit the pattern of the selection.
+    body = [
+        hbox("patternCombos", [dropdown("patternCombo", ["(none)"], weight=1)], h=24),
+        hbox("patternActions", [
+            tbtn("newPatternButton", "pattern-new", s=24), tbtn("patternFillButton", "pattern-fill", s=24),
+            tbtn("patternStrokeButton", "pattern-stroke", s=24), tbtn("deletePatternButton", "layer-delete", s=24)], h=26),
+        hbox("patternNameRow", [label("Name", w=44), field("patternNameField", "", weight=1)]),
+        hbox("patternTransformRow", [label("Scale", w=44), field("patternScaleField", "", weight=1), label("%", w=14),
+                                     label("Angle", w=40), field("patternAngleField", "", weight=1)]),
+    ]
+    return panel("patternsPanel", "Patterns", body)
+
+
 def layers_panel():
     # LayerTree (layertree.h) draws the rows; LayersPanel feeds it from the document: eye, lock, open triangle, name and the
     # selection square per layer, sublayers indented. Drag a row to reorder / nest it.
@@ -515,7 +546,7 @@ def sidebar():
     SubView - and the real content goes inside it. Putting the content directly in childViews[0]
     would merge it into the viewport (it then gets resized to the viewport on every layout)."""
     panels = []
-    for i, p in enumerate([transform_panel(), color_panel(), stroke_panel(), text_panel(), appearance_panel(), styles_panel(), layers_panel(), artboards_panel()]):
+    for i, p in enumerate([transform_panel(), color_panel(), stroke_panel(), text_panel(), appearance_panel(), styles_panel(), symbols_panel(), patterns_panel(), layers_panel(), artboards_panel()]):
         if i:
             panels += divider("panelDivider%d" % i)
         panels.append(p)

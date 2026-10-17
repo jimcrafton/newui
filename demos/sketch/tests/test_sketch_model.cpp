@@ -4449,3 +4449,243 @@ TEST(SketchArtboards, ATraceLandsOnTheActiveArtboard) {
     EXPECT_GE(b.y0, 500.0);
     EXPECT_LE(b.y1, 600.0);
 }
+
+// ---- symbols ----
+
+namespace {
+    std::uint32_t pixelAt(const SketchDocument& doc, int x, int y) {
+        BLImage image;
+        if (!renderPageImage(doc, 1.0, image)) {
+            return 0;
+        }
+        BLImageData data;
+        image.get_data(&data);
+        return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride)[x];
+    }
+
+    // A 100 x 100 page with one red 20 x 20 square at (10, 10), selected.
+    std::size_t symbolFixture(SketchDocument& doc) {
+        doc.setPageSize(100, 100);
+        SketchObject& square = doc.add(SketchObject::makeRect(10, 10, 20, 20));
+        square.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+        square.setStroke(SketchPaint::none());
+        doc.setSelection({square.id()});
+        return square.id();
+    }
+}
+
+TEST(SketchSymbols, MakeReplacesTheSelectionWithAnInstanceAndUndoes) {
+    SketchDocument doc;
+    symbolFixture(doc);
+    std::size_t id = doc.makeSymbol("Square");
+    ASSERT_NE(id, 0u);
+    ASSERT_EQ(doc.symbols().size(), 1u);
+    EXPECT_EQ(doc.symbols()[0]->name, "Square");
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_TRUE(doc.object(0).isSymbol());
+    EXPECT_EQ(doc.symbolUseCount(id), 1u);
+    EXPECT_TRUE(isRed(pixelAt(doc, 20, 20))) << "the instance draws the artwork where it was";
+    EXPECT_FALSE(isRed(pixelAt(doc, 60, 60)));
+    EXPECT_NE(doc.hitTest(BLPoint(20, 20), 0.0), nullptr);
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_FALSE(doc.object(0).isSymbol());
+    doc.undoStack().redo();
+    EXPECT_TRUE(doc.object(0).isSymbol());
+    EXPECT_EQ(doc.symbolUseCount(id), 1u);
+}
+
+TEST(SketchSymbols, InstancesFollowTransformsAndRedefinition) {
+    SketchDocument doc;
+    symbolFixture(doc);
+    std::size_t id = doc.makeSymbol("");
+    EXPECT_EQ(doc.symbols()[0]->name, "Symbol 1");
+    std::size_t second = doc.placeSymbol(id, BLPoint(70, 70));
+    ASSERT_NE(second, 0u);
+    EXPECT_EQ(doc.symbolUseCount(id), 2u);
+    EXPECT_TRUE(isRed(pixelAt(doc, 70, 70))) << "centred where it was placed";
+
+    // Transforms act on the instance like on any object (here a scale about its centre to 2 x).
+    SketchObject* instance = doc.findById(second);
+    BLBox before = instance->geometryBounds();
+    BLMatrix2D scale = BLMatrix2D::make_translation(-70, -70);
+    scale.post_scale(2.0, 2.0);
+    scale.post_translate(70, 70);
+    doc.transformObjects({second}, scale, "Scale");
+    BLBox after = doc.findById(second)->geometryBounds();
+    EXPECT_NEAR(after.x1 - after.x0, 2.0 * (before.x1 - before.x0), 1e-6);
+    EXPECT_TRUE(isRed(pixelAt(doc, 85, 70))) << "the artwork is carried along with the instance";
+
+    // Redefine: the selection (a blue circle) becomes the artwork, both instances follow and keep their place.
+    SketchObject& blue = doc.add(SketchObject::makeEllipse(60, 20, 10, 10));
+    blue.setFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    blue.setStroke(SketchPaint::none());
+    doc.setSelection({blue.id()});
+    ASSERT_TRUE(doc.redefineSymbol(id));
+    EXPECT_EQ(doc.symbolUseCount(id), 2u);
+    EXPECT_FALSE(isRed(pixelAt(doc, 20, 20))) << "the first instance now shows the new artwork";
+    EXPECT_FALSE(isRed(pixelAt(doc, 70, 70)));
+    doc.undoStack().undo();
+    EXPECT_TRUE(isRed(pixelAt(doc, 70, 70))) << "undone: the old artwork is back";
+    doc.setSelection({doc.object(0).id()});
+    EXPECT_FALSE(doc.redefineSymbol(id)) << "a symbol cannot be redefined from its own instance";
+}
+
+TEST(SketchSymbols, BreakLinkAndLibraryHousekeeping) {
+    SketchDocument doc;
+    symbolFixture(doc);
+    std::size_t id = doc.makeSymbol("Box");
+    doc.setSelection({doc.object(0).id()});
+    EXPECT_TRUE(doc.canBreakSymbolLink());
+    EXPECT_FALSE(doc.deleteSymbol(id)) << "a symbol in use stays";
+    ASSERT_TRUE(doc.breakSymbolLink());
+    ASSERT_EQ(doc.objectCount(), 1u);
+    EXPECT_FALSE(doc.object(0).isSymbol());
+    BLBox b = doc.object(0).geometryBounds();
+    EXPECT_NEAR(b.x0, 10.0, 1e-6);
+    EXPECT_NEAR(b.x1, 30.0, 1e-6);
+    EXPECT_TRUE(isRed(pixelAt(doc, 20, 20)));
+    EXPECT_EQ(doc.symbolUseCount(id), 0u);
+    EXPECT_TRUE(doc.renameSymbol(id, "Crate"));
+    EXPECT_EQ(doc.findSymbol(id)->name, "Crate");
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findSymbol(id)->name, "Box");
+    ASSERT_TRUE(doc.deleteSymbol(id));
+    EXPECT_TRUE(doc.symbols().empty());
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.symbols().size(), 1u);
+}
+
+TEST(SketchSymbols, SurviveSvgBinaryAndClipboardRoundTrips) {
+    SketchDocument doc;
+    symbolFixture(doc);
+    std::size_t id = doc.makeSymbol("Box");
+    std::size_t second = doc.placeSymbol(id, BLPoint(70, 70));
+    ASSERT_NE(second, 0u);
+
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_EQ(fromSvg.symbols().size(), 1u);
+    EXPECT_EQ(fromSvg.symbols()[0]->name, "Box");
+    EXPECT_EQ(fromSvg.symbolUseCount(fromSvg.symbols()[0]->id), 2u);
+    EXPECT_TRUE(isRed(pixelAt(fromSvg, 70, 70)));
+    EXPECT_TRUE(isRed(pixelAt(fromSvg, 20, 20)));
+
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), fromBin));
+    ASSERT_EQ(fromBin.symbols().size(), 1u);
+    EXPECT_EQ(fromBin.symbolUseCount(fromBin.symbols()[0]->id), 2u);
+    EXPECT_TRUE(isRed(pixelAt(fromBin, 70, 70)));
+
+    // Copy and paste into another document brings the artwork along, once.
+    doc.setSelection({second});
+    std::string clip = doc.selectionToSvg();
+    SketchDocument other;
+    other.setPageSize(100, 100);
+    ASSERT_TRUE(other.pasteSvg(clip, 0, 0));
+    ASSERT_EQ(other.symbols().size(), 1u);
+    EXPECT_TRUE(isRed(pixelAt(other, 70, 70)));
+    ASSERT_TRUE(other.pasteSvg(clip, 5, 5));
+    EXPECT_EQ(other.symbols().size(), 1u) << "the same artwork is not added twice";
+    EXPECT_EQ(other.symbolUseCount(other.symbols()[0]->id), 2u);
+}
+
+// ---- patterns ----
+
+TEST(SketchPatterns, MakeApplyAndTile) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    // The tile: a 10 x 10 box with a red 5 x 5 square in its top left corner.
+    doc.add(SketchObject::makeRect(0, 0, 10, 10)).setFill(SketchPaint::none());
+    SketchObject& dot = doc.add(SketchObject::makeRect(0, 0, 5, 5));
+    dot.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    dot.setStroke(SketchPaint::none());
+    doc.object(0).setStroke(SketchPaint::none());
+    doc.selectAll();
+    std::size_t id = doc.makePattern("Dots");
+    ASSERT_NE(id, 0u);
+    EXPECT_EQ(doc.patterns().size(), 1u);
+    EXPECT_EQ(doc.objectCount(), 2u) << "making a pattern leaves the artwork";
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.patterns().empty());
+    doc.undoStack().redo();
+    ASSERT_EQ(doc.patterns().size(), 1u);
+
+    doc.clearSelection();
+    SketchObject& area = doc.add(SketchObject::makeRect(20, 20, 60, 60));
+    area.setStroke(SketchPaint::none());
+    std::size_t areaId = area.id();
+    doc.setSelection({areaId});
+    ASSERT_TRUE(doc.applyPattern(id, false));
+    EXPECT_TRUE(doc.findById(areaId)->fill().isPattern());
+    EXPECT_EQ(doc.patternUseCount(id), 1u);
+    EXPECT_FALSE(doc.deletePattern(id)) << "in use";
+    // The red square repeats every 10 points from the origin: (21, 21) is inside one, (26, 21) is not.
+    EXPECT_TRUE(isRed(pixelAt(doc, 22, 22)));
+    EXPECT_FALSE(isRed(pixelAt(doc, 27, 22)));
+    EXPECT_TRUE(isRed(pixelAt(doc, 32, 22)));
+
+    ASSERT_TRUE(doc.setPatternTransform(2.0, 0.0));
+    EXPECT_DOUBLE_EQ(doc.findById(areaId)->fill().patternScale(), 2.0);
+    EXPECT_TRUE(isRed(pixelAt(doc, 22, 22)));
+    EXPECT_TRUE(isRed(pixelAt(doc, 27, 22))) << "at twice the size the square is 10 points wide";
+    EXPECT_FALSE(isRed(pixelAt(doc, 32, 22)));
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.findById(areaId)->fill().patternScale(), 1.0);
+    EXPECT_NE(doc.selectedPatternPaint(), nullptr);
+}
+
+TEST(SketchPatterns, SurviveSvgBinaryAndClipboardRoundTrips) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    SketchObject& dot = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    dot.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    dot.setStroke(SketchPaint::none());
+    doc.selectAll();
+    std::size_t id = doc.makePattern("Red");
+    SketchObject& area = doc.add(SketchObject::makeRect(20, 20, 60, 60));
+    area.setStroke(SketchPaint::none());
+    doc.setSelection({area.id()});
+    ASSERT_TRUE(doc.applyPattern(id, false));
+    doc.setPatternTransform(1.5, 0.0);
+
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_EQ(fromSvg.patterns().size(), 1u);
+    EXPECT_EQ(fromSvg.patterns()[0]->name, "Red");
+    ASSERT_EQ(fromSvg.objectCount(), 2u);
+    EXPECT_TRUE(fromSvg.object(1).fill().isPattern());
+    EXPECT_DOUBLE_EQ(fromSvg.object(1).fill().patternScale(), 1.5);
+    EXPECT_TRUE(fromSvg.object(1).fill().patternDef() != nullptr);
+    EXPECT_TRUE(isRed(pixelAt(fromSvg, 60, 60)));
+
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), fromBin));
+    ASSERT_EQ(fromBin.patterns().size(), 1u);
+    ASSERT_EQ(fromBin.objectCount(), 2u);
+    EXPECT_TRUE(fromBin.object(1).fill().isPattern());
+    EXPECT_TRUE(fromBin.object(1).fill().patternDef() != nullptr);
+    EXPECT_TRUE(isRed(pixelAt(fromBin, 60, 60)));
+
+    doc.setSelection({doc.object(1).id()});
+    std::string clip = doc.selectionToSvg();
+    SketchDocument other;
+    other.setPageSize(100, 100);
+    ASSERT_TRUE(other.pasteSvg(clip, 0, 0));
+    ASSERT_TRUE(other.pasteSvg(clip, 3, 3));
+    EXPECT_EQ(other.patterns().size(), 1u);
+    EXPECT_TRUE(other.object(0).fill().isPattern());
+    EXPECT_EQ(other.object(0).fill().patternDef(), other.object(1).fill().patternDef());
+}
+
+TEST(SketchSymbols, ASymbolCanHoldAPatternFill) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    SketchObject& tile = doc.add(SketchObject::makeRect(10, 10, 40, 40));
+    tile.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    doc.selectAll();
+    std::size_t pattern = doc.makePattern("");
+    ASSERT_TRUE(doc.applyPattern(pattern, false));
+    ASSERT_NE(doc.makeSymbol(""), 0u);
+    EXPECT_TRUE(isRed(pixelAt(doc, 20, 20)));
+}

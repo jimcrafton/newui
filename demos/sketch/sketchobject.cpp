@@ -1,4 +1,5 @@
 #include "sketchobject.h"
+#include "sketchdocument.h"
 
 #include "textoutline.h"
 
@@ -24,6 +25,47 @@ namespace sketch {
         paint.gradient_ = gradient;
         paint.color_ = gradient.stops.empty() ? SketchColor() : gradient.stops.front().color;
         return paint;
+    }
+
+    SketchPaint SketchPaint::pattern(const std::shared_ptr<const SymbolDef>& def, double scale, double angleDegrees) {
+        SketchPaint paint;
+        paint.kind_ = Kind::Pattern;
+        paint.color_ = SketchColor::gray(0.5f);   // what color-only callers (and other viewers) see
+        paint.pattern_ = def;
+        paint.patternId_ = def ? def->id : 0;
+        paint.patternScale_ = scale;
+        paint.patternAngle_ = angleDegrees;
+        return paint;
+    }
+
+    SketchPaint SketchPaint::patternRef(std::size_t id, double scale, double angleDegrees) {
+        SketchPaint paint = pattern(nullptr, scale, angleDegrees);
+        paint.patternId_ = id;
+        return paint;
+    }
+
+    const BLImage& SymbolDef::tile(int width, int height) const {
+        for (const auto& entry : tiles) {
+            if (std::get<0>(entry) == width && std::get<1>(entry) == height) {
+                return std::get<2>(entry);
+            }
+        }
+        BLImage image;
+        if (image.create(width, height, BL_FORMAT_PRGB32) == BL_SUCCESS) {
+            BLContext ctx(image);
+            ctx.clear_all();
+            ctx.scale(double(width) / (box.x1 - box.x0), double(height) / (box.y1 - box.y0));
+            ctx.translate(-box.x0, -box.y0);
+            if (content) {
+                content->paint(ctx);
+            }
+            ctx.end();
+        }
+        if (tiles.size() >= 6) {
+            tiles.erase(tiles.begin());
+        }
+        tiles.emplace_back(width, height, image);
+        return std::get<2>(tiles.back());
     }
 
     SketchPaint SketchPaint::radial(const SketchGradient& gradient) {
@@ -154,6 +196,25 @@ namespace sketch {
                 return false;
             }
             double w = box.x1 - box.x0, h = box.y1 - box.y0;
+            if (paint.isPattern()) {
+                const SymbolDef* def = paint.patternDef().get();
+                const double tw = def != nullptr ? def->box.x1 - def->box.x0 : 0.0, th = def != nullptr ? def->box.y1 - def->box.y0 : 0.0;
+                const double scale = paint.patternScale();
+                if (def == nullptr || !def->content || !(tw > 0.0) || !(th > 0.0) || !(scale > 0.0)) {
+                    return false;
+                }
+                // The tile is drawn at the device's resolution and repeated; its size in pixels is a whole number, so the period is exact.
+                BLMatrix2D m = ctx.final_transform();
+                const double device = std::sqrt(std::fabs(m.m00 * m.m11 - m.m01 * m.m10));
+                const int pw = std::max(1, std::min(2048, int(std::lround(tw * scale * device)))), ph = std::max(1, std::min(2048, int(std::lround(th * scale * device))));
+                BLMatrix2D place = BLMatrix2D::make_scaling(tw * scale / double(pw), th * scale / double(ph));
+                if (paint.patternAngle() != 0.0) {
+                    place.post_transform(BLMatrix2D::make_rotation(paint.patternAngle() * 3.14159265358979323846 / 180.0));
+                }
+                BLPattern pattern(def->tile(pw, ph), BL_EXTEND_MODE_REPEAT, place);
+                if (asStroke) { ctx.set_stroke_style(pattern); } else { ctx.set_fill_style(pattern); }
+                return true;
+            }
             if (!paint.isGradient() || paint.gradient().stops.empty() || (w < 1e-6 && h < 1e-6)) {
                 BLRgba32 color = paint.color().toRgba32();
                 if (asStroke) { ctx.set_stroke_style(color); } else { ctx.set_fill_style(color); }
@@ -705,6 +766,48 @@ namespace sketch {
         return new SketchObject(SketchObjectType::Ellipse, path);
     }
 
+    SketchObject* SketchObject::makeSymbolInstance(const std::shared_ptr<const SymbolDef>& def, const BLMatrix2D& placement) {
+        const BLBox& b = def->box;
+        BLPoint corners[4] = {placement.map_point(b.x0, b.y0), placement.map_point(b.x1, b.y0), placement.map_point(b.x1, b.y1), placement.map_point(b.x0, b.y1)};
+        BLPath path;
+        path.move_to(corners[0]);
+        path.line_to(corners[1]);
+        path.line_to(corners[2]);
+        path.line_to(corners[3]);
+        path.close();
+        SketchObject* object = new SketchObject(SketchObjectType::Symbol, path);
+        object->symbol_ = def;
+        object->name_ = def->name;
+        object->setFill(SketchPaint::none());
+        object->setStroke(SketchPaint::none());
+        return object;
+    }
+
+    BLMatrix2D SketchObject::symbolMatrix() const {
+        BLPathView view = path_.view();
+        if (!symbol_ || view.size < 4) {
+            return BLMatrix2D::make_identity();
+        }
+        const BLBox& b = symbol_->box;
+        const double u = b.x1 - b.x0, v = b.y1 - b.y0;
+        if (!(u > 0.0) || !(v > 0.0)) {
+            return BLMatrix2D::make_identity();
+        }
+        const BLPoint p0 = view.vertex_data[0], p1 = view.vertex_data[1], p3 = view.vertex_data[3];
+        const double a = (p1.x - p0.x) / u, bb = (p1.y - p0.y) / u, c = (p3.x - p0.x) / v, d = (p3.y - p0.y) / v;
+        return BLMatrix2D(a, bb, c, d, p0.x - (a * b.x0 + c * b.y0), p0.y - (bb * b.x0 + d * b.y0));
+    }
+
+    void SketchObject::drawSymbol(BLContext& ctx) const {
+        if (!symbol_ || !symbol_->content) {
+            return;
+        }
+        ctx.save();
+        ctx.apply_transform(symbolMatrix());
+        symbol_->content->paint(ctx);
+        ctx.restore();
+    }
+
     SketchObject* SketchObject::makePolygon(const std::vector<BLPoint>& points) {
         if (points.size() < 3) {
             throw std::runtime_error("SketchObject::makePolygon: need at least 3 points");
@@ -942,6 +1045,7 @@ namespace sketch {
         copy->fontSize_ = fontSize_;
         copy->textMatrix_ = textMatrix_;
         copy->textStyle_ = textStyle_;
+        copy->symbol_ = symbol_;
         return copy;
     }
 
@@ -1060,6 +1164,9 @@ namespace sketch {
         if (point.x < box.x0 - tolerance || point.x > box.x1 + tolerance ||
             point.y < box.y0 - tolerance || point.y > box.y1 + tolerance) {
             return false;
+        }
+        if (type_ == SketchObjectType::Symbol) {
+            return path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN;
         }
         if (isClosed() && path_.hit_test(point, BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN) {
             for (const AppearanceItem& item : items_) {
@@ -1306,6 +1413,13 @@ namespace sketch {
 
     void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {
         const AppearanceItem& item = items_[index];
+        if (type_ == SketchObjectType::Symbol) {
+            // The artwork stands where the first fill would be drawn; strokes and fills of an instance paint nothing.
+            if (item.kind == AppearanceKind::Fill && index == activeIndexOf(items_, AppearanceKind::Fill, 0)) {
+                drawSymbol(ctx);
+            }
+            return;
+        }
         // Geometry effects above this item (later in the stack) reshape its outline, in stack order.
         BLPath shown = path_;
         for (std::size_t j = index + 1; j < items_.size(); ++j) {

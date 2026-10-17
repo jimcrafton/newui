@@ -83,6 +83,10 @@ namespace sketch {
                 writeColor(out, paint.color());
             } else if (paint.isGradient()) {
                 writeGradient(out, paint.gradient());
+            } else if (paint.isPattern()) {
+                out.varint(paint.patternId());
+                out.f64(paint.patternScale());
+                out.f64(paint.patternAngle());
             }
         }
 
@@ -311,8 +315,16 @@ namespace sketch {
         }
 
         SketchPaint readPaint(ByteReader& in) {
-            unsigned kind = in.enumeration(4);
+            unsigned kind = in.enumeration(5);
             switch (SketchPaint::Kind(kind)) {
+                case SketchPaint::Kind::Pattern: {
+                    std::size_t id = std::size_t(in.varint());
+                    double scale = in.f64(), angle = in.f64();
+                    if (!(scale > 0.0) || !std::isfinite(scale) || !std::isfinite(angle)) {
+                        return SketchPaint::none();
+                    }
+                    return SketchPaint::patternRef(id, scale, angle);   // bound to its tile once the library is in
+                }
                 case SketchPaint::Kind::Solid: return SketchPaint::solid(readColor(in));
                 case SketchPaint::Kind::Linear: return SketchPaint::linear(readGradient(in));
                 case SketchPaint::Kind::Radial: return SketchPaint::radial(readGradient(in));
@@ -410,7 +422,7 @@ namespace sketch {
 
             unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 ? 4u : 0u) |
                 (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u) |
-                (object.isText() && !object.textStyle().isDefault() ? 32u : 0u);
+                (object.isText() && !object.textStyle().isDefault() ? 32u : 0u) | (object.isSymbol() && object.symbol() ? 64u : 0u);
             objects.u8(unsigned(object.type()));
             objects.u8(flags);
             objects.varint(strings.add(object.name()));
@@ -442,6 +454,9 @@ namespace sketch {
                 objects.u8((style.bold ? 1u : 0u) | (style.italic ? 2u : 0u) | (unsigned(style.align) << 2));
                 objects.f64(style.tracking);
                 objects.f64(style.leading);
+            }
+            if (flags & 64u) {
+                objects.varint(object.symbol()->id);
             }
             BLPathView view = object.geometry().view();
             objects.varint(view.size);
@@ -519,6 +534,30 @@ namespace sketch {
             boards.f64(board.height);
         }
 
+        ByteWriter symbolChunk;
+        symbolChunk.varint(document.symbols().size());
+        for (const std::shared_ptr<const SymbolDef>& def : document.symbols()) {
+            symbolChunk.varint(def->id);
+            symbolChunk.text(def->name);
+            symbolChunk.f64(def->box.x0);
+            symbolChunk.f64(def->box.y0);
+            symbolChunk.f64(def->box.x1);
+            symbolChunk.f64(def->box.y1);
+            symbolChunk.text(def->content ? binaryFromDocument(*def->content, false) : std::string());
+        }
+
+        ByteWriter patternChunk;
+        patternChunk.varint(document.patterns().size());
+        for (const std::shared_ptr<const SymbolDef>& def : document.patterns()) {
+            patternChunk.varint(def->id);
+            patternChunk.text(def->name);
+            patternChunk.f64(def->box.x0);
+            patternChunk.f64(def->box.y0);
+            patternChunk.f64(def->box.x1);
+            patternChunk.f64(def->box.y1);
+            patternChunk.text(def->content ? binaryFromDocument(*def->content, false) : std::string());
+        }
+
         ByteWriter clips;
         {
             std::vector<std::size_t> clipIds;
@@ -563,6 +602,8 @@ namespace sketch {
         chunk(body, "STYL", lookChunk.data());
         chunk(body, "GRPS", groups.data());
         chunk(body, "CLIP", clips.data());
+        chunk(body, "SYMB", symbolChunk.data());
+        chunk(body, "PATN", patternChunk.data());
         chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
         chunk(body, "OBJS", objects.data());
@@ -616,6 +657,8 @@ namespace sketch {
         std::vector<std::size_t> layerNames;                              // string index per layer (resolved once the strings are in)
         std::vector<std::pair<std::size_t, std::size_t>> layerRuns;       // (layer id, object count) in stacking order
         std::vector<std::unique_ptr<SketchObject>> objects;
+        std::vector<std::size_t> symbolRefs;   // the symbol id of each object (0 = not an instance)
+        std::vector<std::shared_ptr<const SymbolDef>> symbolLibrary, patternLibrary;
         bool havePage = false, haveObjects = false;
 
         ByteReader file(body, bodySize);
@@ -730,6 +773,28 @@ namespace sketch {
                 if (!in.ok()) {
                     return false;
                 }
+            } else if (tag == "SYMB" || tag == "PATN") {
+                std::vector<std::shared_ptr<const SymbolDef>>& target = tag == "SYMB" ? symbolLibrary : patternLibrary;
+                std::size_t n = in.count(40);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    auto def = std::make_shared<SymbolDef>();
+                    def->id = std::size_t(in.varint());
+                    def->name = in.text();
+                    double x0 = in.f64(), y0 = in.f64(), x1 = in.f64(), y1 = in.f64();
+                    std::string blob = in.text();
+                    if (!in.ok() || !std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1) || !(x1 > x0) || !(y1 > y0)) {
+                        return false;
+                    }
+                    def->box = BLBox(x0, y0, x1, y1);
+                    def->content = std::make_shared<SketchDocument>();
+                    if (!documentFromBinary(blob, *def->content)) {
+                        return false;
+                    }
+                    target.push_back(def);
+                }
+                if (!in.ok()) {
+                    return false;
+                }
             } else if (tag == "ABRD") {
                 std::size_t n = in.count(33);
                 artboardActive = std::size_t(in.varint());
@@ -780,7 +845,7 @@ namespace sketch {
                 std::size_t n = in.count(4);
                 objects.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
-                    unsigned type = in.enumeration(unsigned(SketchObjectType::Text) + 1);
+                    unsigned type = in.enumeration(unsigned(SketchObjectType::Symbol) + 1);
                     unsigned objectFlags = in.u8();
                     std::size_t nameAt = std::size_t(in.varint());
                     std::size_t lookAt = std::size_t(in.varint());
@@ -828,6 +893,10 @@ namespace sketch {
                             return false;
                         }
                     }
+                    std::size_t symbolRef = 0;
+                    if (objectFlags & 64u) {
+                        symbolRef = std::size_t(in.varint());
+                    }
                     std::size_t vertices = in.count(1 + sizeof(BLPoint));
                     BLPath path;
                     if (vertices > 0) {
@@ -867,6 +936,7 @@ namespace sketch {
                     object->setFrameAngle(frameAngle);
                     object->setGroups(objectGroups);
                     objects.push_back(std::move(object));
+                    symbolRefs.push_back(symbolRef);
                 }
                 if (!in.ok()) {
                     return false;
@@ -901,10 +971,22 @@ namespace sketch {
             }
         }
         document.setSwatches(swatches);
+        document.setSymbols(symbolLibrary);
+        document.setPatterns(patternLibrary);   // the paints that name a tile are bound to it once the objects are in
         document.setLayers(layers);   // empty = the one default layer
         std::size_t runAt = 0, runUsed = 0;
         std::map<std::size_t, std::size_t> groupIds;
+        std::size_t objectAt = 0;
         for (std::unique_ptr<SketchObject>& object : objects) {
+            if (object->type() == SketchObjectType::Symbol) {
+                std::shared_ptr<const SymbolDef> def = document.findSymbol(symbolRefs[objectAt]);
+                if (def) {
+                    object->setSymbol(def);
+                } else {
+                    object.reset(SketchObject::make(SketchObjectType::Path, object->geometry()));   // its artwork is missing: keep the outline
+                }
+            }
+            ++objectAt;
             while (runAt < layerRuns.size() && runUsed >= layerRuns[runAt].second) {
                 ++runAt;
                 runUsed = 0;
@@ -931,6 +1013,7 @@ namespace sketch {
             object->setGroups(mapped);
             document.add(object.release());
         }
+        document.bindPatternPaints();
         document.undoStack().clear();
         document.clearSelection();
         return true;

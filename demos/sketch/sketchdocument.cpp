@@ -127,6 +127,9 @@ namespace sketch {
         }
         resetLayers();
         swatches_ = defaultSwatches();
+        symbols_.clear();
+        patterns_.clear();
+        nextSymbolId_ = 1;
         undoStack_.clear();
         updateAllViews();
         // Panels that show the selection or the document follow (this is not an edit: the document is not marked modified).
@@ -578,7 +581,8 @@ namespace sketch {
         addObjectsUndoable(std::move(copies), "Duplicate");
     }
 
-    std::vector<std::size_t> SketchDocument::addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description) {
+    std::vector<std::size_t> SketchDocument::addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description,
+        const SketchDocument* groupsFrom) {
         std::vector<std::shared_ptr<Slot>> slots;
         std::vector<std::size_t> ids;
         std::size_t index = objects_.size();
@@ -588,7 +592,15 @@ namespace sketch {
             std::vector<std::size_t> groups = object->groups();
             for (std::size_t& g : groups) {
                 auto it = freshGroups.find(g);
-                g = it != freshGroups.end() ? it->second : (freshGroups[g] = nextGroupId_++);
+                if (it == freshGroups.end()) {
+                    std::size_t fresh = nextGroupId_++;
+                    GroupProps props = (groupsFrom != nullptr ? groupsFrom : this)->groupProps(g);
+                    if (!props.isDefault()) {
+                        groupProps_[fresh] = props;
+                    }
+                    it = freshGroups.emplace(g, fresh).first;
+                }
+                g = it->second;
             }
             object->setGroups(groups);
             auto slot = std::make_shared<Slot>();
@@ -621,6 +633,8 @@ namespace sketch {
         SketchDocument scratch;
         scratch.setPageSize(pageWidth(), pageHeight());
         scratch.setColorMode(colorMode_);
+        scratch.setSymbols(symbols_);
+        scratch.setPatterns(patterns_);
         for (const std::unique_ptr<SketchObject>& object : objects_) {  // stacking order, so groups stay adjacent
             if (isSelected(object->id())) {
                 scratch.add(object->clone());
@@ -638,8 +652,22 @@ namespace sketch {
         for (std::size_t i = 0; i < scratch.objectCount(); ++i) {
             objects.emplace_back(scratch.object(i).clone());
             objects.back()->transform(BLMatrix2D::make_translation(dx, dy));
+            if (objects.back()->isSymbol()) {
+                objects.back()->setSymbol(importSymbol(objects.back()->symbol()));
+            }
+            std::vector<AppearanceItem> items = objects.back()->appearance();
+            bool rebound = false;
+            for (AppearanceItem& item : items) {
+                if (item.paint.isPattern() && item.paint.patternDef()) {
+                    item.paint = SketchPaint::pattern(importPattern(item.paint.patternDef()), item.paint.patternScale(), item.paint.patternAngle());
+                    rebound = true;
+                }
+            }
+            if (rebound) {
+                objects.back()->setAppearance(items);
+            }
         }
-        addObjectsUndoable(std::move(objects), "Paste");
+        addObjectsUndoable(std::move(objects), "Paste", &scratch);
         return true;
     }
 

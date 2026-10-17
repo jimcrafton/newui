@@ -256,6 +256,63 @@ namespace sketch {
         const SketchObject* clipMaskOf(std::size_t groupId) const;
         bool canUngroup() const;
 
+        // ---- Symbols (documentsymbols.cpp) ----
+        // The library: artwork defined once and placed as Symbol objects (SketchObject::isSymbol). Making, placing, redefining, breaking
+        // the link, renaming and deleting are undo steps (undoing "Make Symbol" leaves the definition in the library).
+        const std::vector<std::shared_ptr<const SymbolDef>>& symbols() const { return symbols_; }
+        std::shared_ptr<const SymbolDef> findSymbol(std::size_t id) const;
+        // The symbol / pattern the Libraries panel and the Object menu act on (view state, not an undo step): the one chosen in the panel,
+        // else the one last made, else the first; 0 when the library is empty.
+        std::size_t activeSymbol() const;
+        void setActiveSymbol(std::size_t id);
+        std::size_t activePattern() const;
+        void setActivePattern(std::size_t id);
+        // Places the active symbol in the middle of the active artboard.
+        std::size_t placeActiveSymbol();
+        // How many objects are instances of the symbol.
+        std::size_t symbolUseCount(std::size_t id) const;
+        // Replaces the library (loading a file); not an undo step.
+        void setSymbols(std::vector<std::shared_ptr<const SymbolDef>> symbols);
+        // The selection becomes a new symbol (named `name`, "Symbol N" when empty) and is replaced by one instance of it. Returns the id, 0
+        // when nothing is selected.
+        std::size_t makeSymbol(const std::string& name);
+        // A new instance centred on `center`; returns its id (0 for an unknown symbol). The instance becomes the selection.
+        std::size_t placeSymbol(std::size_t symbolId, const BLPoint& center);
+        // The selection becomes the new artwork of the symbol; every instance follows, keeping its place. False when nothing is selected or
+        // the selection holds an instance of the symbol itself.
+        bool redefineSymbol(std::size_t symbolId);
+        // Selected instances are replaced by copies of their artwork (as ordinary objects). False when none is selected.
+        bool breakSymbolLink();
+        bool canBreakSymbolLink() const;
+        bool renameSymbol(std::size_t symbolId, const std::string& name);
+        // Removes a symbol nothing uses; false when it is used or unknown.
+        bool deleteSymbol(std::size_t symbolId);
+        // `def` (from another document) as a member of this library: the entry that already is the same, else a copy under a fresh id.
+        std::shared_ptr<const SymbolDef> importSymbol(const std::shared_ptr<const SymbolDef>& def);
+
+        // ---- Patterns (documentsymbols.cpp): tiles of artwork that repeat to fill a shape (SketchPaint::pattern). ----
+        // The pattern library works like the symbol library but holds the tiles. Making one copies the selection (which stays); undoing
+        // "Make Pattern" removes it again. Applying sets the fill (or stroke) of every selected object.
+        const std::vector<std::shared_ptr<const SymbolDef>>& patterns() const { return patterns_; }
+        std::shared_ptr<const SymbolDef> findPattern(std::size_t id) const;
+        std::size_t patternUseCount(std::size_t id) const;
+        // Replaces the library (loading a file); not an undo step. Pattern paints that only know their id are bound to it.
+        void setPatterns(std::vector<std::shared_ptr<const SymbolDef>> patterns);
+        // Points every pattern paint of the document (objects and graphic styles) that has an id but no tile at the library's tile.
+        void bindPatternPaints();
+        // The selection, its bounds as the tile, becomes a pattern ("Pattern N" when `name` is empty); returns the id, 0 when nothing is selected.
+        std::size_t makePattern(const std::string& name);
+        // The fill (or stroke) of every selected object becomes the pattern; the scale and angle of a pattern already there are kept.
+        bool applyPattern(std::size_t patternId, bool toStroke);
+        // The scale (1 = the tile's own size) and angle (degrees) of the pattern fills and strokes of the selection. False when none has one.
+        bool setPatternTransform(double scale, double angleDegrees);
+        // The first selected object's pattern fill (or stroke) when it has one, else null.
+        const SketchPaint* selectedPatternPaint() const;
+        bool renamePattern(std::size_t patternId, const std::string& name);
+        // Removes a pattern no object uses; false when it is used or unknown.
+        bool deletePattern(std::size_t patternId);
+        std::shared_ptr<const SymbolDef> importPattern(const std::shared_ptr<const SymbolDef>& def);
+
         // ---- Selection (ids, in selection order; a removed object drops out) ----
         const std::vector<std::size_t>& selection() const { return selection_; }
         bool isSelected(std::size_t id) const;
@@ -287,7 +344,10 @@ namespace sketch {
         newui::UndoStack& undoStack() { return undoStack_; }
         // Adds on top and selects it.
         // Adds the objects (new ids) as one undo step and selects them; returns the ids.
-        std::vector<std::size_t> addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description);
+        // Their groups come along as new groups carrying the same opacity / blend / clip, taken from `groupsFrom` (the document the objects
+        // were made in; this one when null).
+        std::vector<std::size_t> addObjectsUndoable(std::vector<std::unique_ptr<SketchObject>> objects, const std::string& description,
+            const SketchDocument* groupsFrom = nullptr);
         SketchObject& addUndoable(SketchObject* object, const std::string& description);
         // Deletes the selection.
         void deleteSelection();
@@ -612,6 +672,11 @@ namespace sketch {
 
         std::vector<Artboard> artboards_{Artboard{"Artboard 1", 0.0, 0.0, 612.0, 792.0}};
         std::size_t activeArtboard_ = 0;
+        std::vector<std::shared_ptr<const SymbolDef>> symbols_;
+        std::vector<std::shared_ptr<const SymbolDef>> patterns_;
+        std::size_t activeSymbol_ = 0;
+        std::size_t activePattern_ = 0;
+        std::size_t nextSymbolId_ = 1;
         float ppi_ = 72.0f;
         std::optional<SketchColor> pageBackground_ = SketchColor::rgb(1.0f, 1.0f, 1.0f);
         std::vector<std::unique_ptr<SketchObject>> objects_;

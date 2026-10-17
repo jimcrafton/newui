@@ -49,6 +49,13 @@ namespace sketch {
             {"Object", "Ungroup", "object.ungroup"},
             {"Object/Clipping Mask", "Make", "object.clipMake"},
             {"Object/Clipping Mask", "Release", "object.clipRelease"},
+            {"Object/Symbol", "New Symbol", "symbol.new"},
+            {"Object/Symbol", "Place Symbol", "symbol.place"},
+            {"Object/Symbol", "Redefine Symbol", "symbol.redefine"},
+            {"Object/Symbol", "Break Link to Symbol", "symbol.break"},
+            {"Object/Pattern", "Make Pattern", "pattern.make"},
+            {"Object/Pattern", "Fill with Pattern", "pattern.fill"},
+            {"Object/Pattern", "Stroke with Pattern", "pattern.stroke"},
             {"Object/Artboards", "New Artboard", "artboard.new"},
             {"Object/Artboards", "Delete Artboard", "artboard.delete"},
             {"Object/Artboards", "Previous Artboard", "artboard.previous"},
@@ -184,6 +191,7 @@ namespace sketch {
         textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);   // font, size, style, alignment, spacing of text
         layersPanel_ = std::make_unique<LayersPanel>(frame_.rootView(), document_);   // the layer tree
         artboardPanel_ = std::make_unique<ArtboardPanel>(frame_.rootView(), document_);   // the artboard list and the active one
+        libraryPanel_ = std::make_unique<LibraryPanel>(frame_.rootView(), document_);   // symbols and patterns
         transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);   // X / Y / W / H / angle of the selection
 
         bindFileEvents();

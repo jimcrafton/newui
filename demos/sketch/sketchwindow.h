@@ -7,6 +7,7 @@
 #include "stylepanel.h"
 #include "layerspanel.h"
 #include "artboardpanel.h"
+#include "librarypanel.h"
 #include "textpanel.h"
 #include "transformpanel.h"
 
@@ -90,6 +91,7 @@ namespace sketch {
         std::unique_ptr<TransformPanel> transformPanel_;
         std::unique_ptr<LayersPanel> layersPanel_;
         std::unique_ptr<ArtboardPanel> artboardPanel_;
+        std::unique_ptr<LibraryPanel> libraryPanel_;
         std::unique_ptr<TextPanel> textPanel_;
         // Menu items whose text or state changes ("View/Color Mode/RGB", "Edit/Undo"), found once.
         std::map<std::string, newui::MenuItem*> menuItems_;

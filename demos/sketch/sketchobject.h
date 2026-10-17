@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
+#include <tuple>
 #include <string>
 #include <vector>
 
@@ -20,6 +22,9 @@ namespace sketch {
 
         bool operator==(const GradientStop& other) const { return offset == other.offset && color == other.color; }
     };
+
+    struct SymbolDef;
+    class SketchDocument;
 
     enum class GradientSpread { Pad, Repeat, Reflect };
 
@@ -84,20 +89,49 @@ namespace sketch {
         bool operator!=(const SketchGradient& other) const { return !(*this == other); }
     };
 
-    // What fill and stroke hold: nothing, a solid color or a gradient.
+    class SketchDocument;
+
+    // A library definition: artwork made once and used by reference - placed any number of times as Symbol objects (the symbol library), or
+    // repeated to fill a shape as a Pattern paint (the pattern library). `content` is a
+    // small document holding the artwork in its own coordinates; `box` is the area of it that an instance shows - an instance is a
+    // quadrilateral, and the artwork is carried from `box` onto it, so moving, resizing, rotating and shearing the instance work like
+    // they do on any other object. Definitions are never changed once made (redefining a symbol swaps in a new one).
+    // @reflect ignore=true
+    struct SymbolDef {
+        std::size_t id = 0;
+        std::string name;
+        BLBox box = BLBox(0, 0, 1, 1);
+        std::shared_ptr<SketchDocument> content;
+        // The artwork drawn into a w x h pixel image (the box scaled to fit it), for patterns; the last few sizes are kept.
+        const BLImage& tile(int width, int height) const;
+        mutable std::vector<std::tuple<int, int, BLImage>> tiles;
+    };
+
+    // What fill and stroke hold: nothing, a solid color, a gradient or a repeating pattern.
     class SketchPaint {
     public:
-        enum class Kind { None, Solid, Linear, Radial };
+        enum class Kind { None, Solid, Linear, Radial, Pattern };
 
         SketchPaint() = default;
         static SketchPaint none() { return SketchPaint(); }
         static SketchPaint solid(const SketchColor& color);
         static SketchPaint linear(const SketchGradient& gradient);
         static SketchPaint radial(const SketchGradient& gradient);
+        // The pattern's tile (a SymbolDef: its box is the tile, its artwork what is repeated) at `scale` times its size and turned by
+        // `angleDegrees`, anchored at the document origin. patternRef is the same before the definition is known (loading a file): it is
+        // bound by bindPattern once the library is in.
+        static SketchPaint pattern(const std::shared_ptr<const SymbolDef>& def, double scale = 1.0, double angleDegrees = 0.0);
+        static SketchPaint patternRef(std::size_t id, double scale, double angleDegrees);
 
         Kind kind() const { return kind_; }
         bool isNone() const { return kind_ == Kind::None; }
         bool isGradient() const { return kind_ == Kind::Linear || kind_ == Kind::Radial; }
+        bool isPattern() const { return kind_ == Kind::Pattern; }
+        const std::shared_ptr<const SymbolDef>& patternDef() const { return pattern_; }
+        std::size_t patternId() const { return patternId_; }
+        double patternScale() const { return patternScale_; }
+        double patternAngle() const { return patternAngle_; }
+        void bindPattern(const std::shared_ptr<const SymbolDef>& def) { pattern_ = def; if (def) { patternId_ = def->id; } }
         // The solid color; for a gradient, its first stop (so color-only callers keep working).
         const SketchColor& color() const { return color_; }
         const SketchGradient& gradient() const { return gradient_; }
@@ -109,6 +143,9 @@ namespace sketch {
             if (kind_ == Kind::None) {
                 return true;
             }
+            if (kind_ == Kind::Pattern) {
+                return patternId_ == other.patternId_ && pattern_ == other.pattern_ && patternScale_ == other.patternScale_ && patternAngle_ == other.patternAngle_;
+            }
             return isGradient() ? gradient_ == other.gradient_ : color_ == other.color_;
         }
         bool operator!=(const SketchPaint& other) const { return !(*this == other); }
@@ -117,6 +154,10 @@ namespace sketch {
         Kind kind_ = Kind::None;
         SketchColor color_;
         SketchGradient gradient_;
+        std::shared_ptr<const SymbolDef> pattern_;
+        std::size_t patternId_ = 0;
+        double patternScale_ = 1.0;
+        double patternAngle_ = 0.0;
     };
 
     // How the ends and corners of a stroke look (the Stroke panel's Cap / Join / Miter).
@@ -250,7 +291,9 @@ namespace sketch {
     // Like paintIsolated, with opacity 1 and Normal, but only what lies inside `mask` (document units, filled non-zero) is kept - a clipping mask.
     void paintClipped(BLContext& ctx, const BLBox& userBounds, const BLPath& mask, const std::function<void(BLContext&)>& content);
 
-    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text };
+    enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text, Symbol };
+
+
 
     // One drawable thing. Geometry is kept as a BLPath in document units (points, y down) so
     // rendering, bounds and hit-testing all share it; the typed factories build that path.
@@ -268,6 +311,9 @@ namespace sketch {
         // A Text object: the glyph outlines of `text` with the first baseline starting at `origin`. Its outline is rebuilt by
         // setText() / setFontSize() / setFontName(); moving, resizing and rotating the object are remembered (textMatrix()) so
         // editing the words later keeps the object where it was put.
+        // An instance of a symbol: its outline is the definition's box carried by `placement` (a four point polygon, so the usual
+        // transforms keep working); it paints the symbol's artwork instead of fills and strokes (only the opacity, blend mode and effects apply).
+        static SketchObject* makeSymbolInstance(const std::shared_ptr<const SymbolDef>& def, const BLMatrix2D& placement);
         static SketchObject* makeText(const std::string& text, const std::string& fontName, double fontSize, const BLPoint& origin);
         // An object of the given type around an existing outline (what the SVG reader uses).
         static SketchObject* make(SketchObjectType type, const BLPath& path);
@@ -332,6 +378,12 @@ namespace sketch {
         // How the whole object (fill and stroke) is blended with what is below it.
         BlendMode blendMode() const { return blendMode_; }
         void setBlendMode(BlendMode mode) { blendMode_ = mode; }
+
+        // Symbol instances only: the definition, and the matrix that carries its artwork (definition space) onto the instance's outline.
+        bool isSymbol() const { return type_ == SketchObjectType::Symbol; }
+        const std::shared_ptr<const SymbolDef>& symbol() const { return symbol_; }
+        void setSymbol(const std::shared_ptr<const SymbolDef>& def) { symbol_ = def; }
+        BLMatrix2D symbolMatrix() const;
 
         // Text objects only (type() == SketchObjectType::Text). The words ('\n' separates lines), the font name ("" = the default
         // font) and size, and the matrix that places the un-transformed outline (baseline at the origin) in the document.
@@ -403,6 +455,7 @@ namespace sketch {
         // Everything through an offscreen layer so the pixel effects can act on what is below them.
         void paintWithEffects(BLContext& ctx) const;
         void drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const;
+        void drawSymbol(BLContext& ctx) const;
         // Text objects: path_ = the outlines of text_ placed by textMatrix_.
         void rebuildText();
         std::size_t storedActive(AppearanceKind kind) const { return kind == AppearanceKind::Fill ? activeFill_ : (kind == AppearanceKind::Stroke ? activeStroke_ : activeEffect_); }
@@ -432,6 +485,7 @@ namespace sketch {
         double fontSize_ = 24.0;
         BLMatrix2D textMatrix_ = BLMatrix2D::make_identity();
         TextStyle textStyle_;
+        std::shared_ptr<const SymbolDef> symbol_;
     };
 
 }

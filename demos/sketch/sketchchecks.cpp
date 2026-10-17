@@ -62,6 +62,7 @@ namespace sketch {
                 checkSelectTools();
                 checkArtboards();
                 checkClippingMenu();
+                checkLibraries();
                 checkShapeBuilder();
                 checkColorPanel();
                 checkGradientTool();
@@ -101,6 +102,7 @@ namespace sketch {
         void checkSelectTools();
         void checkArtboards();
         void checkClippingMenu();
+        void checkLibraries();
 
         // The Text panel: size, weight, alignment, tracking of the selected text.
         void checkTextPanel();
@@ -610,6 +612,33 @@ namespace sketch {
         document.clearObjects();
         document.undoStack().clear();
         canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    void ToolChecks::checkLibraries() {
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        document.add(sketch::SketchObject::makeRect(10, 10, 40, 40));
+        document.selectAll();
+        newui::MenuItem* make = window_.menuItem("Object/Symbol", "New Symbol");
+        newui::MenuItem* place = window_.menuItem("Object/Symbol", "Place Symbol");
+        newui::MenuItem* patternMake = window_.menuItem("Object/Pattern", "Make Pattern");
+        newui::MenuItem* patternFill = window_.menuItem("Object/Pattern", "Fill with Pattern");
+        expect(make != nullptr && place != nullptr && patternMake != nullptr && patternFill != nullptr, "Object has Symbol and Pattern submenus");
+        if (make != nullptr && place != nullptr && patternMake != nullptr && patternFill != nullptr) {
+            patternMake->onClick(*patternMake);
+            expect(document.patterns().size() == 1, "Make Pattern adds a pattern to the library");
+            patternFill->onClick(*patternFill);
+            expect(document.selectedPatternPaint() != nullptr, "Fill with Pattern fills the selection with it");
+            make->onClick(*make);
+            expect(document.symbols().size() == 1 && document.symbolUseCount(document.symbols()[0]->id) == 1, "New Symbol turns the selection into an instance");
+            place->onClick(*place);
+            expect(document.symbolUseCount(document.symbols()[0]->id) == 2, "Place Symbol adds another instance");
+        }
+        expect(dynamic_cast<newui::DropDownList*>(frame_.rootView().findView("symbolCombo")) != nullptr, "the Symbols panel is in the layout");
+        expect(dynamic_cast<newui::DropDownList*>(frame_.rootView().findView("patternCombo")) != nullptr, "the Patterns panel is in the layout");
+        document.clearObjects();
+        document.undoStack().clear();
     }
 
     void ToolChecks::checkClippingMenu() {

@@ -93,6 +93,26 @@
               },
               {
                 type: "MenuItem",
+                text: "Symbol",
+                children: [
+                  { type: "MenuItem", text: "New Symbol" },
+                  { type: "MenuItem", text: "Place Symbol" },
+                  { type: "MenuItem", text: "Redefine Symbol" },
+                  { type: "MenuItem", text: "Break Link to Symbol" }
+                ]
+              },
+              {
+                type: "MenuItem",
+                text: "Pattern",
+                children: [
+                  { type: "MenuItem", text: "Make Pattern" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Fill with Pattern" },
+                  { type: "MenuItem", text: "Stroke with Pattern" }
+                ]
+              },
+              {
+                type: "MenuItem",
                 text: "Artboards",
                 children: [
                   { type: "MenuItem", text: "New Artboard" },
@@ -738,7 +758,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1847 },
+            contentSize: { type: "Size", width: 268, height: 2143 },
             childViews: [
               {
                 type: "SubView",
@@ -752,9 +772,9 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1847 }
+                      size: { type: "Size", width: 268, height: 2143 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1847 },
+                    desiredSize: { type: "Size", width: 268, height: 2143 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
@@ -2676,6 +2696,406 @@
                       },
                       {
                         type: "SubView",
+                        name: "symbolsPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 124 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "symbolsPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "symbolsPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "symbolsPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Symbols",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Symbols",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "symbolsPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "symbolsPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 102 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "symbolCombos",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "DropDownList",
+                                    name: "symbolCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["(none)"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "symbolActions",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "newSymbolButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/symbol-new.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "placeSymbolButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/symbol-place.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "redefineSymbolButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/symbol-redefine.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "breakSymbolButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/symbol-break.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "deleteSymbolButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "symbolNameRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Name",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Name", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "symbolNameField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider7Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider7",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
+                        name: "patternsPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 154 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "patternsPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "patternsPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "patternsPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Patterns",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Patterns",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "patternsPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "patternsPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 132 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "patternCombos",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "DropDownList",
+                                    name: "patternCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["(none)"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "patternActions",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "newPatternButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/pattern-new.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "patternFillButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/pattern-fill.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "patternStrokeButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/pattern-stroke.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "deletePatternButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "patternNameRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Name",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Name", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "patternNameField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "patternTransformRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Scale",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Scale", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "patternScaleField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "%",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "%", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 40, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Angle",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Angle", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "patternAngleField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: ""
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider8Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider8",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "layersPanel",
                         visible: true,
                         desiredSize: { type: "Size", width: 268, height: 260 },
@@ -2805,14 +3225,14 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider7Gap",
+                        name: "panelDivider9Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider7",
+                        name: "panelDivider9",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,

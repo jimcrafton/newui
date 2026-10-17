@@ -157,6 +157,11 @@ namespace sketch {
                 out << " " << prefix << "=\"url(#" << id << ")\"";
                 return out.str();
             }
+            if (paint.isPattern()) {
+                // A flat grey for other viewers; the tile is in the pattern library (<defs>) and found again by its id.
+                out << " " << prefix << "=\"#808080\" data-" << prefix << "-pattern=\"" << paint.patternId() << "," << num(paint.patternScale()) << "," << num(paint.patternAngle()) << "\"";
+                return out.str();
+            }
             const SketchColor& color = paint.color();
             out << " " << prefix << "=\"" << color.toHex() << "\"";
             if (color.alpha() < 1.0f) {
@@ -359,6 +364,7 @@ namespace sketch {
                 case SketchObjectType::Polygon: return "Polygon";
                 case SketchObjectType::Polyline: return "Polyline";
                 case SketchObjectType::Text: return "Text";
+                case SketchObjectType::Symbol: return "Symbol";
                 default: return "Path";
             }
         }
@@ -932,7 +938,7 @@ namespace sketch {
             static const char* kKeys[] = {
                 "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "opacity", "display",
                 "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-dasharray", "data-width-profile",
-                "data-fill-color", "data-stroke-color",
+                "data-fill-color", "data-stroke-color", "data-fill-pattern", "data-stroke-pattern",
             };
             for (const char* key : kKeys) {
                 if (const std::string* v = node.attr(key)) {
@@ -1030,6 +1036,20 @@ namespace sketch {
         // A paint value ("none", color, "url(#id)") for an object whose outline bounds are `box`.
         SketchPaint readPaint(const ReadContext& ctx, const Style& style, const char* name, const BLBox& box) {
             std::string prefix = name;
+            if (const std::string* own = style.get("data-" + prefix + "-pattern")) {
+                std::istringstream in(*own);
+                std::string idText, scaleText, angleText;
+                std::getline(in, idText, ',');
+                std::getline(in, scaleText, ',');
+                std::getline(in, angleText, ',');
+                double scale = std::strtod(scaleText.c_str(), nullptr), angle = std::strtod(angleText.c_str(), nullptr);
+                std::shared_ptr<const SymbolDef> def = ctx.document != nullptr ? ctx.document->findPattern(std::size_t(std::strtoull(idText.c_str(), nullptr, 10))) : nullptr;
+                if (def && scale > 0.0 && std::isfinite(scale) && std::isfinite(angle)) {
+                    return SketchPaint::pattern(def, scale, angle);
+                }
+                // The tile is missing: the flat grey the pattern was written with.
+                return SketchPaint::solid(SketchColor::gray(0.5f));
+            }
             const std::string* value = style.get(prefix);
             std::string text = value != nullptr ? trim(*value) : (prefix == "fill" ? std::string("#000000") : std::string("none"));
             if (text == "none" || text.empty()) {
@@ -1160,6 +1180,9 @@ namespace sketch {
         // Text objects: the words, font, size and placement matrix their outline was made from (other viewers just see the
         // outline path). Empty for every other kind of object.
         std::string textAttrs(const SketchObject& object) {
+            if (object.isSymbol() && object.symbol()) {
+                return " data-symbol=\"" + std::to_string(object.symbol()->id) + "\"";   // the artwork is in the symbol library (<defs>)
+            }
             if (!object.isText()) {
                 return std::string();
             }
@@ -1179,6 +1202,22 @@ namespace sketch {
 
         // The reverse: a Text object keeps its words and font when the attributes are there (the file's own `matrix` is folded into
         // the placement); without them the outline is all there is, so it becomes a plain path.
+        // A Symbol object finds its definition by the data-symbol id (the library is read first); without one it is just an outline.
+        SketchObject* restoreSymbol(const ReadContext& ctx, const XmlNode& node, SketchObject* object) {
+            if (object->type() != SketchObjectType::Symbol) {
+                return object;
+            }
+            const std::string* id = node.attr("data-symbol");
+            std::shared_ptr<const SymbolDef> def = id != nullptr && ctx.document != nullptr ? ctx.document->findSymbol(std::size_t(std::strtoull(id->c_str(), nullptr, 10))) : nullptr;
+            if (def) {
+                object->setSymbol(def);
+                return object;
+            }
+            SketchObject* plain = SketchObject::make(SketchObjectType::Path, object->geometry());
+            delete object;
+            return plain;
+        }
+
         SketchObject* restoreText(const XmlNode& node, SketchObject* object, const BLMatrix2D& matrix) {
             if (object->type() != SketchObjectType::Text) {
                 return object;
@@ -1218,6 +1257,7 @@ namespace sketch {
                 {"Line", SketchObjectType::Line}, {"Rect", SketchObjectType::Rect}, {"RoundRect", SketchObjectType::RoundRect},
                 {"Ellipse", SketchObjectType::Ellipse}, {"Polygon", SketchObjectType::Polygon},
                 {"Polyline", SketchObjectType::Polyline}, {"Path", SketchObjectType::Path}, {"Text", SketchObjectType::Text},
+                {"Symbol", SketchObjectType::Symbol},
             };
             for (const auto& entry : kTypes) {
                 if (name == entry.first) {
@@ -1386,6 +1426,7 @@ namespace sketch {
             if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
                 object.reset(restoreText(node, object.release(), matrix));
             }
+            object.reset(restoreSymbol(ctx, node, object.release()));
             BLBox box = object->geometryBounds();
             double scale = std::sqrt(std::fabs(matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10));
             if (scale <= 1e-9) {
@@ -1548,6 +1589,7 @@ namespace sketch {
             if (const std::string* dt = node.attr("data-type"); dt != nullptr && *dt == "Text") {
                 object.reset(restoreText(node, object.release(), matrix));
             }
+            object.reset(restoreSymbol(ctx, node, object.release()));
             BLBox box = object->geometryBounds();
 
             object->setFill(readPaint(ctx, style, "fill", box));
@@ -1794,6 +1836,31 @@ namespace sketch {
             << "\" data-color-mode=\"" << (document.colorMode() == ColorSpace::CMYK ? "cmyk" : "rgb")
             << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\"" << artboardAttr(document) << guideAttr(document) << layerAttr(document) << swatchAttr(document) << ">\n";
         std::string defsText = defs.str();
+        // The symbol library: each definition's artwork as a nested <svg> of its own (written by this same function).
+        for (const std::shared_ptr<const SymbolDef>& def : document.symbols()) {
+            if (!def->content) {
+                continue;
+            }
+            std::string inner = svgFromDocument(*def->content);
+            std::size_t at = inner.find("<svg ");
+            if (at == std::string::npos) {
+                continue;
+            }
+            defsText += "<svg data-sketch-symbol=\"" + std::to_string(def->id) + "\" data-name=\"" + escape(def->name) + "\" data-box=\"" + num(def->box.x0) + " " +
+                num(def->box.y0) + " " + num(def->box.x1) + " " + num(def->box.y1) + "\" " + inner.substr(at + 5);
+        }
+        for (const std::shared_ptr<const SymbolDef>& def : document.patterns()) {
+            if (!def->content) {
+                continue;
+            }
+            std::string inner = svgFromDocument(*def->content);
+            std::size_t at = inner.find("<svg ");
+            if (at == std::string::npos) {
+                continue;
+            }
+            defsText += "<svg data-sketch-pattern=\"" + std::to_string(def->id) + "\" data-name=\"" + escape(def->name) + "\" data-box=\"" + num(def->box.x0) + " " +
+                num(def->box.y0) + " " + num(def->box.x1) + " " + num(def->box.y1) + "\" " + inner.substr(at + 5);
+        }
         if (!defsText.empty()) {
             out << "<defs>\n" << defsText << "</defs>\n";
         }
@@ -1813,12 +1880,17 @@ namespace sketch {
         return out.str();
     }
 
+    static bool documentFromXml(const XmlNode* root, SketchDocument& document);
+
     bool documentFromSvg(const std::string& text, SketchDocument& document) {
         std::unique_ptr<XmlNode> root = XmlParser(text).parseDocument();
         if (!root || root->name != "svg") {
             return false;
         }
+        return documentFromXml(root.get(), document);
+    }
 
+    static bool documentFromXml(const XmlNode* root, SketchDocument& document) {
         ReadContext ctx;
         collectIds(*root, ctx.byId);
 
@@ -1882,6 +1954,41 @@ namespace sketch {
         document.setGuides(root->attr("data-guides") != nullptr ? parseGuides(*root->attr("data-guides")) : std::vector<Guide>());
         document.setLayers(root->attr("data-layers") != nullptr ? parseLayers(*root->attr("data-layers")) : std::vector<Layer>());
         document.setSwatches(root->attr("data-swatches") != nullptr ? parseSwatches(*root->attr("data-swatches")) : defaultSwatches());
+        {
+            // The symbol library comes first: the instances are resolved against it as they are read.
+            std::vector<std::shared_ptr<const SymbolDef>> library, patterns;
+            for (const auto& child : root->children) {
+                if (child->name != "defs") {
+                    continue;
+                }
+                for (const auto& entry : child->children) {
+                    const std::string* id = entry->attr("data-sketch-symbol");
+                    const bool isPattern = id == nullptr;
+                    if (isPattern) {
+                        id = entry->attr("data-sketch-pattern");
+                    }
+                    if (entry->name != "svg" || id == nullptr) {
+                        continue;
+                    }
+                    auto def = std::make_shared<SymbolDef>();
+                    def->id = std::size_t(std::strtoull(id->c_str(), nullptr, 10));
+                    if (const std::string* name = entry->attr("data-name")) {
+                        def->name = *name;
+                    }
+                    std::vector<double> box = entry->attr("data-box") != nullptr ? numberList(*entry->attr("data-box")) : std::vector<double>();
+                    if (box.size() != 4 || !(box[2] > box[0]) || !(box[3] > box[1]) || def->id == 0) {
+                        continue;
+                    }
+                    def->box = BLBox(box[0], box[1], box[2], box[3]);
+                    def->content = std::make_shared<SketchDocument>();
+                    if (documentFromXml(entry.get(), *def->content)) {
+                        (isPattern ? patterns : library).push_back(def);
+                    }
+                }
+            }
+            document.setSymbols(library);
+            document.setPatterns(patterns);
+        }
         ctx.document = &document;
         Style rootStyle = styleFor(*root, Style());
         for (const auto& child : root->children) {

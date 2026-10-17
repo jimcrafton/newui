@@ -22,6 +22,7 @@ add_executable(sketch
     layertree.h layertree.cpp
     layerspanel.h layerspanel.cpp
     artboardpanel.h artboardpanel.cpp
+    librarypanel.h librarypanel.cpp
     textpanel.h textpanel.cpp
     numberscrubber.h numberscrubber.cpp
     sketchcolor.h sketchcolor.cpp
@@ -35,6 +36,7 @@ add_executable(sketch
     documentswatches.cpp
     documentselect.cpp
     documentclip.cpp
+    documentsymbols.cpp
     documentartboards.cpp
     documenttrace.cpp
     imagetrace.h imagetrace.cpp
@@ -77,6 +79,7 @@ add_executable(sketch_tests
     documentswatches.cpp
     documentselect.cpp
     documentclip.cpp
+    documentsymbols.cpp
     documentartboards.cpp
     documenttrace.cpp
     imagetrace.cpp

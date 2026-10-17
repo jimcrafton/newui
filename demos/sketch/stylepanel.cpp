@@ -1084,7 +1084,7 @@ namespace sketch {
         }
         // What the Appearance panel is showing: the kind of the selected object ("3 objects" for several).
         if (auto* info = find<Label>("appearancePanelHeaderInfo")) {
-            static const char* kKinds[] = {"Line", "Rectangle", "Rounded Rectangle", "Ellipse", "Polygon", "Polyline", "Path", "Text"};
+            static const char* kKinds[] = {"Line", "Rectangle", "Rounded Rectangle", "Ellipse", "Polygon", "Polyline", "Path", "Text", "Symbol"};
             std::string kind;
             if (document_.selection().size() > 1) {
                 kind = std::to_string(document_.selection().size()) + " objects";
