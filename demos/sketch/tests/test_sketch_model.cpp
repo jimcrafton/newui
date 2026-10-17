@@ -1,11 +1,17 @@
-#include "sketchcolor.h"
+﻿#include "sketchcolor.h"
 #include "sketchdocument.h"
 #include "sketchobject.h"
 #include "cursorset.h"
 #include "shapetools.h"
 #include "pathops.h"
+#include "imagetrace.h"
 #include "sketchsvg.h"
 #include "gzip.h"
+#include "sketchexport.h"
+#include "numberscrubber.h"
+
+#include <newui/keyboard_constants.h>
+#include <newui/mouse_constants.h>
 #include "sketchbin.h"
 
 #include <array>
@@ -3524,4 +3530,922 @@ TEST(SketchCutting, TheScissorsOpenAClosedPathAndDivideAnOpenOne) {
     EXPECT_NEAR(second.x1, 100.0, 1e-6);
     EXPECT_FALSE(doc.scissorsCut(BLPoint(0, 0), 5.0)) << "cutting at the end of an open path changes nothing";
     EXPECT_EQ(doc.objectCount(), 2u);
+}
+
+// ---- image export and Object > Path ----
+
+TEST(SketchExport, RendersThePageAtTheRequestedScale) {
+    SketchDocument doc;
+    doc.setPageSize(100, 50);
+    doc.setPageBackground(SketchColor::rgb(1.0f, 1.0f, 1.0f));
+    SketchObject& square = doc.add(SketchObject::makeRect(10, 10, 20, 20));
+    square.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    square.setStroke(SketchPaint::none());
+    BLImage image;
+    ASSERT_TRUE(renderPageImage(doc, 2.0, image));
+    EXPECT_EQ(image.width(), 200);
+    EXPECT_EQ(image.height(), 100);
+    BLImageData data;
+    image.get_data(&data);
+    auto pixel = [&](int x, int y) { return reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride)[x]; };
+    EXPECT_EQ(pixel(40, 40) & 0xFFFFFFu, 0xFF0000u) << "inside the square (scaled by 2)";
+    EXPECT_EQ(pixel(150, 80) & 0xFFFFFFu, 0xFFFFFFu) << "the page color elsewhere";
+    // No page color: transparent.
+    doc.setPageBackground(std::nullopt);
+    ASSERT_TRUE(renderPageImage(doc, 1.0, image));
+    image.get_data(&data);
+    EXPECT_EQ(reinterpret_cast<const uint32_t*>(data.pixel_data)[0] >> 24, 0u);
+    // Silly sizes are refused.
+    EXPECT_FALSE(renderPageImage(doc, 0.0, image));
+    EXPECT_FALSE(renderPageImage(doc, 1.0e6, image));
+}
+
+TEST(SketchExport, WritesPngAndBmpFilesByExtension) {
+    SketchDocument doc;
+    doc.setPageSize(64, 32);
+    doc.setPageBackground(std::nullopt);
+    doc.add(SketchObject::makeRect(0, 0, 32, 32));
+    std::filesystem::path folder = std::filesystem::temp_directory_path();
+    std::string png = (folder / "sketch_export_test.PNG").string(), jpg = (folder / "sketch_export_test.bmp").string();
+    ASSERT_TRUE(exportPageImage(doc, png, 1.0));
+    ASSERT_TRUE(exportPageImage(doc, jpg, 2.0));
+    EXPECT_FALSE(exportPageImage(doc, (folder / "sketch_export_test.jpg").string(), 1.0)) << "no JPEG writer";
+    BLImage back;
+    ASSERT_EQ(back.read_from_file(png.c_str()), BL_SUCCESS);
+    EXPECT_EQ(back.width(), 64);
+    EXPECT_EQ(back.height(), 32);
+    ASSERT_EQ(back.read_from_file(jpg.c_str()), BL_SUCCESS);
+    EXPECT_EQ(back.width(), 128);
+    EXPECT_FALSE(exportPageImage(doc, "Z:/no/such/folder/x.png", 1.0));
+    EXPECT_NEAR(exportScaleFor(doc), double(doc.ppi()) / 72.0, 1e-9);
+    std::filesystem::remove(png);
+    std::filesystem::remove(jpg);
+}
+
+TEST(SketchPathCommands, ReverseJoinAndSimplify) {
+    SketchDocument doc;
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 10, 0));
+    std::size_t lineId = line.id();
+    doc.setSelection({lineId});
+    ASSERT_TRUE(doc.reverseSelection());
+    std::vector<SubPath> subs = pathToSubPaths(doc.findById(lineId)->geometry());
+    ASSERT_EQ(subs.size(), 1u);
+    EXPECT_NEAR(subs[0].anchors.front().point.x, 10.0, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_NEAR(pathToSubPaths(doc.findById(lineId)->geometry())[0].anchors.front().point.x, 0.0, 1e-9);
+
+    // One open path: join closes it.
+    BLPath triangle;
+    triangle.move_to(0, 0);
+    triangle.line_to(100, 0);
+    triangle.line_to(50, 80);
+    SketchObject& open = doc.add(SketchObject::makePath(triangle));
+    doc.setSelection({open.id()});
+    ASSERT_TRUE(doc.joinSelection());
+    EXPECT_TRUE(pathToSubPaths(doc.findById(open.id())->geometry())[0].closed);
+    doc.undoStack().undo();
+    EXPECT_FALSE(pathToSubPaths(doc.findById(open.id())->geometry())[0].closed);
+
+    // Two open paths whose ends are near each other are chained (the second one turned round when needed).
+    doc.clearObjects();
+    std::size_t a = doc.add(SketchObject::makeLine(0, 0, 50, 0)).id();
+    std::size_t b = doc.add(SketchObject::makeLine(100, 0, 50, 0)).id();   // runs toward the first
+    doc.setSelection({a, b});
+    ASSERT_TRUE(doc.joinSelection());
+    ASSERT_EQ(doc.objectCount(), 1u);
+    subs = pathToSubPaths(doc.object(0).geometry());
+    ASSERT_EQ(subs.size(), 1u);
+    EXPECT_EQ(subs[0].anchors.size(), 3u) << "meeting ends become one anchor";
+    EXPECT_FALSE(subs[0].closed);
+    EXPECT_NEAR(subs[0].anchors.back().point.x, 100.0, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 2u);
+    doc.setSelection({});
+    EXPECT_FALSE(doc.joinSelection());
+
+    // Simplify: a hundred points along a gentle wave become a few anchors that stay on it.
+    doc.clearObjects();
+    std::vector<BLPoint> wave;
+    for (int i = 0; i <= 100; ++i) { wave.push_back(BLPoint(i * 2.0, 20.0 * std::sin(i * 0.06))); }
+    SketchObject& dense = doc.add(SketchObject::makePolyline(wave));
+    doc.setSelection({dense.id()});
+    ASSERT_TRUE(doc.simplifySelection(0.5));
+    std::vector<SubPath> simple = pathToSubPaths(doc.object(0).geometry());
+    ASSERT_EQ(simple.size(), 1u);
+    EXPECT_LT(simple[0].anchors.size(), 12u);
+    EXPECT_GE(simple[0].anchors.size(), 2u);
+    BLBox box = doc.object(0).geometryBounds();
+    EXPECT_NEAR(box.x1, 200.0, 0.5);
+    EXPECT_NEAR(box.y0, -20.0 * std::sin(1.57 / 0.06 * 0.06) * 1.0 + 0.0, 40.0) << "still the same wave, give or take";
+    doc.undoStack().undo();
+    EXPECT_EQ(pathToSubPaths(doc.object(0).geometry())[0].anchors.size(), 101u);
+}
+
+TEST(SketchPathCommands, OutlineStrokeTurnsTheStrokeIntoAShape) {
+    SketchDocument doc;
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 100, 0));
+    line.setStroke(SketchPaint::solid(SketchColor::fromHex("#00aa00")));
+    line.setStrokeWidth(10.0);
+    doc.setSelection({line.id()});
+    ASSERT_TRUE(doc.outlineStroke());
+    ASSERT_EQ(doc.objectCount(), 1u) << "a line has no fill: only the outlined stroke remains";
+    const SketchObject& ring = doc.object(0);
+    EXPECT_EQ(ring.fill().color().toHex(), "#00aa00") << "it wears the stroke's color as a fill";
+    EXPECT_TRUE(ring.stroke().isNone());
+    BLBox box = ring.geometryBounds();
+    EXPECT_NEAR(box.y1 - box.y0, 10.0, 1e-6);
+    EXPECT_NEAR(box.x1 - box.x0, 100.0, 1e-6) << "butt caps add nothing";
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.object(0).type(), SketchObjectType::Line);
+
+    // A filled, stroked rectangle: the fill stays, the stroke becomes a ring above it.
+    doc.clearObjects();
+    SketchObject& card = doc.add(SketchObject::makeRect(0, 0, 100, 60));
+    card.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    card.setStroke(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    card.setStrokeWidth(4.0);
+    doc.setSelection({card.id()});
+    ASSERT_TRUE(doc.outlineStroke());
+    ASSERT_EQ(doc.objectCount(), 2u);
+    EXPECT_EQ(doc.object(0).fill().color().toHex(), "#ff0000");
+    EXPECT_TRUE(doc.object(0).stroke().isNone());
+    EXPECT_EQ(doc.object(1).fill().color().toHex(), "#0000ff");
+    BLBox outer = doc.object(1).geometryBounds();
+    EXPECT_NEAR(outer.x1 - outer.x0, 104.0, 0.1) << "the ring reaches half the weight past the outline";
+    // Nothing to outline: no stroke.
+    doc.setSelection({doc.object(0).id()});
+    EXPECT_FALSE(doc.outlineStroke());
+}
+
+// ---- numeric transforms and Transform Again ----
+
+TEST(SketchTransform, SetBoxMovesAndResizesTheSelection) {
+    SketchDocument doc;
+    SketchObject& a = doc.add(SketchObject::makeRect(10, 20, 100, 50));
+    doc.setSelection({a.id()});
+    ASSERT_TRUE(doc.setSelectionBox(BLBox(30, 40, 230, 140)));   // twice as wide and tall, moved
+    BLBox box = doc.object(0).geometryBounds();
+    EXPECT_NEAR(box.x0, 30.0, 1e-9);
+    EXPECT_NEAR(box.y0, 40.0, 1e-9);
+    EXPECT_NEAR(box.x1, 230.0, 1e-9);
+    EXPECT_NEAR(box.y1, 140.0, 1e-9);
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Resize");
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.object(0).geometryBounds().x1, 110.0, 1e-9);
+    ASSERT_TRUE(doc.setSelectionBox(BLBox(0, 0, 100, 50)));   // the same size: only a move
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Move");
+    EXPECT_FALSE(doc.setSelectionBox(BLBox(0, 0, 100, 50))) << "nothing to change";
+    EXPECT_FALSE(doc.setSelectionBox(BLBox(0, 0, -5, 50))) << "a negative size is refused";
+    // A straight line has no height: it can move and change its length, nothing else.
+    doc.clearObjects();
+    SketchObject& line = doc.add(SketchObject::makeLine(0, 0, 100, 0));
+    doc.setSelection({line.id()});
+    ASSERT_TRUE(doc.setSelectionBox(BLBox(10, 5, 60, 5)));
+    EXPECT_NEAR(doc.object(0).geometryBounds().x0, 10.0, 1e-9);
+    EXPECT_NEAR(doc.object(0).geometryBounds().x1, 60.0, 1e-9);
+    EXPECT_NEAR(doc.object(0).geometryBounds().y0, 5.0, 1e-9);
+    // Nothing selected: nothing happens.
+    doc.clearSelection();
+    EXPECT_FALSE(doc.setSelectionBox(BLBox(0, 0, 10, 10)));
+}
+
+TEST(SketchTransform, RotateByAnAngleTurnsTheFrameToo) {
+    SketchDocument doc;
+    SketchObject& a = doc.add(SketchObject::makeRect(0, 0, 100, 20));
+    doc.setSelection({a.id()});
+    const double pi = 3.14159265358979323846;
+    ASSERT_TRUE(doc.rotateSelectionBy(pi / 2.0));
+    BLBox box = doc.object(0).geometryBounds();
+    EXPECT_NEAR(box.x1 - box.x0, 20.0, 1e-6) << "a quarter turn swaps the sides";
+    EXPECT_NEAR(box.y1 - box.y0, 100.0, 1e-6);
+    EXPECT_NEAR((box.x0 + box.x1) / 2.0, 50.0, 1e-6) << "about the center";
+    EXPECT_NEAR(doc.object(0).frameAngle(), pi / 2.0, 1e-9);
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.object(0).frameAngle(), 0.0, 1e-9);
+    EXPECT_FALSE(doc.rotateSelectionBy(0.0));
+}
+
+TEST(SketchTransform, TransformAgainRepeatsTheLastMoveOnTheSelection) {
+    SketchDocument doc;
+    EXPECT_FALSE(doc.canTransformAgain());
+    SketchObject& a = doc.add(SketchObject::makeRect(0, 0, 10, 10));
+    SketchObject& b = doc.add(SketchObject::makeRect(100, 0, 10, 10));
+    std::size_t idB = b.id();
+    doc.setSelection({a.id()});
+    EXPECT_FALSE(doc.transformAgain());
+    doc.transformObjects({a.id()}, BLMatrix2D::make_translation(15, 5), "Move");
+    EXPECT_TRUE(doc.canTransformAgain());
+    ASSERT_TRUE(doc.transformAgain());
+    EXPECT_NEAR(doc.object(0).geometryBounds().x0, 30.0, 1e-9) << "moved by (15, 5) once more";
+    EXPECT_NEAR(doc.object(0).geometryBounds().y0, 10.0, 1e-9);
+    EXPECT_EQ(doc.undoStack().undoDescription(), "Transform Again");
+    doc.setSelection({idB});
+    ASSERT_TRUE(doc.transformAgain());
+    EXPECT_NEAR(doc.findById(idB)->geometryBounds().x0, 115.0, 1e-9) << "and on whatever is selected now";
+    doc.undoStack().undo();
+    EXPECT_NEAR(doc.findById(idB)->geometryBounds().x0, 100.0, 1e-9);
+    // A rotation is repeated about the same point, and the frames turn again.
+    doc.setSelection({a.id()});
+    const double pi = 3.14159265358979323846;
+    doc.rotateSelectionBy(pi / 6.0);
+    double first = doc.object(0).frameAngle();
+    ASSERT_TRUE(doc.transformAgain());
+    EXPECT_NEAR(doc.object(0).frameAngle(), first + pi / 6.0, 1e-9);
+}
+
+// ---- scrubbing numbers by dragging their captions ----
+
+TEST(SketchScrub, StepsFollowTheModifierKeys) {
+    EXPECT_DOUBLE_EQ(NumberScrubber::stepFor(1.0, 0), 1.0);
+    EXPECT_DOUBLE_EQ(NumberScrubber::stepFor(1.0, newui::kmShift), 0.1);
+    EXPECT_DOUBLE_EQ(NumberScrubber::stepFor(1.0, newui::kmShift | newui::kmCtrl), 0.01);
+    EXPECT_DOUBLE_EQ(NumberScrubber::stepFor(0.5, newui::kmShift), 0.05) << "relative to the field's own unit";
+    EXPECT_DOUBLE_EQ(NumberScrubber::stepFor(1.0, newui::kmCtrl), 1.0) << "Ctrl alone changes nothing";
+    EXPECT_DOUBLE_EQ(NumberScrubber::roundToStep(12.34, 1.0), 12.0);
+    EXPECT_DOUBLE_EQ(NumberScrubber::roundToStep(12.36, 0.1), 12.4);
+    EXPECT_DOUBLE_EQ(NumberScrubber::roundToStep(0.1 + 0.2, 0.01), 0.3) << "no binary noise";
+    EXPECT_DOUBLE_EQ(NumberScrubber::roundToStep(5.0, 0.0), 5.0) << "no step: unchanged";
+}
+
+TEST(SketchScrub, ADragOnALabelReportsValuesThenEnds) {
+    newui::Label label;
+    std::vector<double> seen;
+    bool began = false, ended = false, endedChanged = false;
+    NumberScrubber::Callbacks callbacks;
+    callbacks.begin = [&](double& value) { value = 10.0; began = true; return true; };
+    callbacks.change = [&](double value) { seen.push_back(value); };
+    callbacks.end = [&](bool changed) { ended = true; endedChanged = changed; };
+    NumberScrubber::attach(label, 1.0, 0.0, 100.0, callbacks);
+    label.onMouseDown(label, newui::Point(50, 5), std::uint32_t(newui::mbmLeftButton), 0u);
+    EXPECT_TRUE(began);
+    label.onMouseMove(label, newui::Point(53, 5), std::uint32_t(newui::mbmLeftButton), 0u);   // 3 px: 3 units
+    label.onMouseMove(label, newui::Point(53, 40), std::uint32_t(newui::mbmLeftButton), 0u);  // only sideways counts
+    label.onMouseMove(label, newui::Point(63, 5), std::uint32_t(newui::mbmLeftButton), std::uint32_t(newui::kmShift));   // 10 px with Shift: +1.0
+    label.onMouseMove(label, newui::Point(73, 5), std::uint32_t(newui::mbmLeftButton), std::uint32_t(newui::kmShift | newui::kmCtrl));   // +0.1
+    label.onMouseMove(label, newui::Point(-500, 5), std::uint32_t(newui::mbmLeftButton), 0u);   // far left: clamped at the minimum
+    label.onMouseUp(label, newui::Point(-500, 5), std::uint32_t(newui::mbmLeftButton), 0u);
+    ASSERT_EQ(seen.size(), 4u);
+    EXPECT_DOUBLE_EQ(seen[0], 13.0);
+    EXPECT_DOUBLE_EQ(seen[1], 14.0);
+    EXPECT_DOUBLE_EQ(seen[2], 14.1);
+    EXPECT_DOUBLE_EQ(seen[3], 0.0);
+    EXPECT_TRUE(ended);
+    EXPECT_TRUE(endedChanged);
+    // A press with the right button, or a begin that says no, starts nothing.
+    seen.clear();
+    label.onMouseDown(label, newui::Point(0, 0), std::uint32_t(newui::mbmRightButton), 0u);
+    label.onMouseMove(label, newui::Point(20, 0), std::uint32_t(0), 0u);
+    EXPECT_TRUE(seen.empty());
+}
+
+// ---- ruler guides ----
+
+TEST(SketchGuides, AreUndoableAndSurviveSvgAndBinary) {
+    SketchDocument doc;
+    EXPECT_TRUE(doc.guides().empty());
+    std::size_t a = doc.addGuide(true, 100.0);
+    std::size_t b = doc.addGuide(false, 50.5);
+    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(b, 1u);
+    ASSERT_EQ(doc.guides().size(), 2u);
+    EXPECT_TRUE(doc.guides()[0].vertical);
+    EXPECT_DOUBLE_EQ(doc.guides()[1].position, 50.5);
+    EXPECT_TRUE(doc.isModified());
+
+    EXPECT_TRUE(doc.moveGuide(0, 120.0));
+    EXPECT_DOUBLE_EQ(doc.guides()[0].position, 120.0);
+    EXPECT_FALSE(doc.moveGuide(0, 120.0)) << "no change";
+    EXPECT_FALSE(doc.moveGuide(9, 1.0)) << "bad index";
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(doc.guides()[0].position, 100.0);
+    doc.undoStack().redo();
+
+    SketchDocument copy, packed;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), copy));
+    ASSERT_EQ(copy.guides().size(), 2u);
+    EXPECT_TRUE(copy.guides()[0].vertical);
+    EXPECT_DOUBLE_EQ(copy.guides()[0].position, 120.0);
+    EXPECT_FALSE(copy.guides()[1].vertical);
+    EXPECT_DOUBLE_EQ(copy.guides()[1].position, 50.5);
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), packed));
+    ASSERT_EQ(packed.guides().size(), 2u);
+    EXPECT_DOUBLE_EQ(packed.guides()[1].position, 50.5);
+
+    EXPECT_TRUE(doc.removeGuide(0));
+    ASSERT_EQ(doc.guides().size(), 1u);
+    EXPECT_FALSE(doc.guides()[0].vertical);
+    doc.undoStack().undo();
+    ASSERT_EQ(doc.guides().size(), 2u);
+    EXPECT_TRUE(doc.guides()[0].vertical) << "a deleted guide comes back in its place";
+    EXPECT_TRUE(doc.clearGuides());
+    EXPECT_TRUE(doc.guides().empty());
+    EXPECT_FALSE(doc.clearGuides());
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.guides().size(), 2u);
+    doc.clearObjects();
+    EXPECT_TRUE(doc.guides().empty()) << "a new document starts without guides";
+    // A document with none writes no attribute, and one read from a file without it has none.
+    SketchDocument plain;
+    EXPECT_EQ(svgFromDocument(plain).find("data-guides"), std::string::npos);
+    ASSERT_TRUE(documentFromSvg("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' data-guides='v1 h2 x3 v'/>", plain));
+    EXPECT_EQ(plain.guides().size(), 2u) << "bad entries are skipped";
+}
+
+// ---- layers ----
+
+TEST(SketchLayers, TreeStackingVisibilityAndUndo) {
+    SketchDocument doc;
+    ASSERT_EQ(doc.layers().size(), 1u);
+    std::size_t base = doc.activeLayer();
+    std::size_t a = doc.add(SketchObject::makeRect(0, 0, 10, 10)).id();
+    std::size_t top = doc.addLayer(0, "Top");
+    EXPECT_EQ(doc.activeLayer(), top);
+    std::size_t b = doc.add(SketchObject::makeRect(20, 0, 10, 10)).id();
+    std::size_t sub = doc.addLayer(base, "Sub");
+    std::size_t c = doc.add(SketchObject::makeRect(40, 0, 10, 10)).id();
+    EXPECT_EQ(doc.layerDepth(sub), 1u);
+    EXPECT_TRUE(doc.layerContains(base, sub));
+    // Stacking: base's sublayer, then base's own objects, then the Top layer.
+    ASSERT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(doc.object(0).id(), c);
+    EXPECT_EQ(doc.object(1).id(), a);
+    EXPECT_EQ(doc.object(2).id(), b);
+
+    // Hiding a layer hides what is in it and its sublayers; own flags stay untouched.
+    EXPECT_TRUE(doc.setLayerVisible(base, false));
+    EXPECT_FALSE(doc.findById(a)->isVisible());
+    EXPECT_FALSE(doc.findById(c)->isVisible());
+    EXPECT_TRUE(doc.findById(a)->ownVisible());
+    EXPECT_TRUE(doc.findById(b)->isVisible());
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(a)->isVisible());
+    EXPECT_TRUE(doc.setLayerLocked(top, true));
+    EXPECT_TRUE(doc.findById(b)->isLocked());
+    EXPECT_FALSE(doc.findById(b)->ownLocked());
+    doc.setLayerLocked(top, false);
+
+    // Moving the selection to another layer puts it on top of that layer; undo restores the order.
+    doc.setSelection({a});
+    EXPECT_TRUE(doc.moveSelectionToLayer(top));
+    EXPECT_EQ(doc.findById(a)->layer(), top);
+    EXPECT_EQ(doc.object(2).id(), a);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findById(a)->layer(), base);
+    EXPECT_EQ(doc.object(1).id(), a);
+
+    // Reparenting, and no moving a layer into itself.
+    EXPECT_FALSE(doc.moveLayer(base, sub, 0));
+    EXPECT_TRUE(doc.moveLayer(top, base, 0));
+    EXPECT_EQ(doc.findLayer(top)->parent, base);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.findLayer(top)->parent, 0u);
+
+    // Saved in both formats.
+    SketchDocument svg, bin;
+    doc.renameLayer(top, "Top & <more>");
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), svg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), bin));
+    for (SketchDocument* d : {&svg, &bin}) {
+        ASSERT_EQ(d->layers().size(), 3u);
+        EXPECT_EQ(d->findLayer(top)->name, "Top & <more>");
+        EXPECT_EQ(d->findLayer(sub)->parent, base);
+        EXPECT_EQ(d->layerObjectCount(base, true), 2u);
+        EXPECT_EQ(d->layerObjectCount(top, false), 1u);
+    }
+
+    // Deleting a layer removes its sublayers and objects; undo brings them back in place; the last layer stays.
+    EXPECT_TRUE(doc.deleteLayer(base));
+    EXPECT_EQ(doc.objectCount(), 1u);
+    EXPECT_EQ(doc.layers().size(), 1u);
+    EXPECT_FALSE(doc.deleteLayer(top));
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 3u);
+    EXPECT_EQ(doc.layers().size(), 3u);
+    EXPECT_EQ(doc.object(0).id(), c);
+    // Arrange stays inside the layer.
+    doc.setSelection({a});
+    EXPECT_FALSE(doc.arrangeSelection(SketchDocument::ArrangeOp::BringToFront)) << "a is already the topmost of its layer";
+}
+
+// ---- Shape Builder ----
+
+TEST(SketchShapeBuilder, CellsAreJoinedOrErasedAndTheRestStaysWhole) {
+    auto make = [](SketchDocument& doc) {
+        std::size_t a = doc.add(SketchObject::makeRect(0, 0, 100, 100)).id();
+        std::size_t b = doc.add(SketchObject::makeRect(50, 0, 100, 100)).id();
+        doc.setSelection({a, b});
+    };
+    SketchDocument doc;
+    make(doc);
+    SketchDocument::ShapeBuilderModel model = doc.shapeBuilderModel();
+    ASSERT_EQ(model.objects.size(), 2u);
+    ASSERT_EQ(model.cells.size(), 3u) << "A alone, the overlap, B alone";
+    std::size_t overlap = model.cells.size();
+    for (std::size_t i = 0; i < model.cells.size(); ++i) {
+        if (model.cells[i].members.size() == 2) {
+            overlap = i;
+        }
+    }
+    ASSERT_LT(overlap, model.cells.size());
+
+    // Joining the overlap on its own makes it a shape; both rectangles lose it.
+    ASSERT_TRUE(doc.shapeBuild({overlap}, false));
+    EXPECT_EQ(doc.objectCount(), 3u);
+    double total = 0.0;
+    for (std::size_t i = 0; i < doc.objectCount(); ++i) {
+        BLBox box = doc.object(i).geometryBounds();
+        total += (box.x1 - box.x0) * (box.y1 - box.y0);
+    }
+    EXPECT_NEAR(total, 5000.0 * 3, 1e-6) << "A without the overlap, the overlap, B without it: three 50 x 100 pieces";
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 2u);
+
+    // Erasing it leaves the two crescents.
+    ASSERT_TRUE(doc.shapeBuild({overlap}, true));
+    EXPECT_EQ(doc.objectCount(), 2u);
+    EXPECT_NEAR(doc.object(0).geometryBounds().x1, 50.0, 1e-6);
+    doc.undoStack().undo();
+
+    // Joining every cell is the union: one shape.
+    ASSERT_TRUE(doc.shapeBuild({0, 1, 2}, false));
+    EXPECT_EQ(doc.objectCount(), 1u);
+    EXPECT_NEAR(doc.object(0).geometryBounds().x1, 150.0, 1e-6);
+    EXPECT_FALSE(doc.shapeBuild({}, false));
+    EXPECT_FALSE(doc.shapeBuild({9}, false));
+}
+
+// ---- swatches and the eyedropper ----
+
+TEST(SketchSwatches, AreUndoableAndSavedAndTheEyedropperCopiesALook) {
+    SketchDocument doc;
+    EXPECT_EQ(doc.swatches(), defaultSwatches());
+    EXPECT_TRUE(doc.addSwatch("#AABBCC"));
+    EXPECT_EQ(doc.swatches().back(), "#aabbcc");
+    EXPECT_FALSE(doc.addSwatch("#aabbcc")) << "no duplicates";
+    EXPECT_FALSE(doc.addSwatch("red")) << "hex only";
+    SketchDocument svg, bin;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), svg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), bin));
+    EXPECT_EQ(svg.swatches(), doc.swatches());
+    EXPECT_EQ(bin.swatches(), doc.swatches());
+    EXPECT_TRUE(doc.deleteSwatch(0));
+    EXPECT_EQ(doc.swatches().front(), "#555555");
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.swatches().front(), "#000000");
+    EXPECT_FALSE(doc.deleteSwatch(99));
+    while (doc.swatches().size() < 24) {
+        char hex[16];
+        std::snprintf(hex, sizeof(hex), "#0000%02x", int(doc.swatches().size()) + 100);
+        ASSERT_TRUE(doc.addSwatch(hex));
+    }
+    EXPECT_FALSE(doc.addSwatch("#fefefe")) << "at most 24";
+
+    SketchObject& source = doc.add(SketchObject::makeRect(0, 0, 50, 50));
+    source.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    source.setOpacity(0.5);
+    SketchObject& target = doc.add(SketchObject::makeRect(100, 0, 50, 50));
+    doc.setSelection({target.id()});
+    ASSERT_TRUE(doc.sampleLook(BLPoint(25, 25), 2.0));
+    EXPECT_EQ(target.fill().color().toHex(), "#ff0000");
+    EXPECT_DOUBLE_EQ(target.opacity(), 0.5);
+    doc.undoStack().undo();
+    EXPECT_DOUBLE_EQ(target.opacity(), 1.0);
+    EXPECT_FALSE(doc.sampleLook(BLPoint(500, 500), 2.0));
+    // With only the source selected the look becomes the default for new shapes.
+    doc.setSelection({source.id()});
+    ASSERT_TRUE(doc.sampleLook(BLPoint(25, 25), 2.0));
+    EXPECT_EQ(doc.defaultFill().color().toHex(), "#ff0000");
+}
+
+// ---- Select Same, Magic Wand, Lasso ----
+
+TEST(SketchSelect, SameWandAndLasso) {
+    SketchDocument doc;
+    auto rect = [&doc](double x, const char* fill) -> SketchObject& {
+        SketchObject& r = doc.add(SketchObject::makeRect(x, 0, 40, 40));
+        r.setFill(SketchPaint::solid(SketchColor::fromHex(fill)));
+        return r;
+    };
+    SketchObject& a = rect(0, "#ff0000");
+    SketchObject& b = rect(100, "#ff0000");
+    SketchObject& c = rect(200, "#00ff00");
+    SketchObject& d = rect(300, "#fe0202");   // nearly red
+    c.setOpacity(0.5);
+    EXPECT_FALSE(doc.selectSame(SketchDocument::SameKind::FillColor)) << "nothing selected";
+    doc.setSelection({a.id()});
+    ASSERT_TRUE(doc.selectSame(SketchDocument::SameKind::FillColor));
+    EXPECT_EQ(doc.selection().size(), 2u);
+    EXPECT_TRUE(doc.isSelected(b.id()));
+    doc.setSelection({c.id()});
+    doc.selectSame(SketchDocument::SameKind::Opacity);
+    EXPECT_EQ(doc.selection().size(), 1u);
+
+    ASSERT_TRUE(doc.selectSimilar(a.id(), false, 0.08));
+    EXPECT_EQ(doc.selection().size(), 3u) << "the wand tolerates a little difference (a, b and d)";
+    EXPECT_FALSE(doc.isSelected(c.id()));
+    ASSERT_TRUE(doc.selectSimilar(c.id(), true, 0.0));
+    EXPECT_EQ(doc.selection().size(), 4u) << "adding keeps the selection";
+    doc.setSelection({});
+    doc.selectSimilar(a.id(), false, 0.0);
+    EXPECT_FALSE(doc.isSelected(d.id())) << "with no tolerance only the exact color";
+
+    // The lasso takes what it touches.
+    doc.selectInPolygon({BLPoint(-10, -10), BLPoint(150, -10), BLPoint(150, 60), BLPoint(-10, 60)}, false);
+    EXPECT_EQ(doc.selection().size(), 2u);
+    doc.selectInPolygon({BLPoint(195, 20), BLPoint(205, 20), BLPoint(205, 25)}, true);
+    EXPECT_EQ(doc.selection().size(), 3u) << "a loop wholly inside a shape touches it";
+    doc.selectInPolygon({BLPoint(500, 500), BLPoint(510, 500), BLPoint(510, 510)}, false);
+    EXPECT_TRUE(doc.selection().empty());
+}
+
+// ---- text style ----
+
+TEST(SketchText, StyleChangesTheOutlineAndSurvivesUndoAndFiles) {
+    SketchDocument doc;
+    SketchObject& text = doc.add(SketchObject::makeText("Hello\nWorld wide", "", 24.0, BLPoint(10, 40)));
+    doc.setSelection({text.id()});
+    BLBox plain = text.geometryBounds();
+    ASSERT_GT(plain.x1, plain.x0);
+    EXPECT_TRUE(text.textStyle().isDefault());
+
+    // Tracking widens it; undo brings the old outline back.
+    ASSERT_TRUE(doc.changeSelectionText([](SketchObject& o) { TextStyle s = o.textStyle(); s.tracking = 5.0; o.setTextStyle(s); }, "Tracking"));
+    EXPECT_GT(text.geometryBounds().x1 - text.geometryBounds().x0, plain.x1 - plain.x0 + 10.0);
+    doc.undoStack().undo();
+    EXPECT_NEAR(text.geometryBounds().x1, plain.x1, 1e-6);
+    doc.undoStack().redo();
+
+    // Leading spreads the lines; alignment moves the shorter line.
+    TextStyle style;
+    style.leading = 2.0;
+    ASSERT_TRUE(doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "Leading"));
+    EXPECT_GT(text.geometryBounds().y1 - text.geometryBounds().y0, (plain.y1 - plain.y0) * 1.3);
+    EXPECT_NEAR(textLineHeight("", 24.0, style), textLineHeight("", 24.0, TextStyle()) * 2.0, 1e-9);
+    TextStyle right;
+    right.align = TextStyle::Right;
+    EXPECT_GT(textLineOffset("Hi\nA much longer line", 0, "", 24.0, right), 10.0);
+    EXPECT_NEAR(textLineOffset("Hi\nA much longer line", 1, "", 24.0, right), 0.0, 1e-9);
+    EXPECT_NEAR(textLineOffset("Hi\nA much longer line", 0, "", 24.0, TextStyle()), 0.0, 1e-9);
+    EXPECT_FALSE(doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "Again")) << "no change, no step";
+
+    // Both file formats keep the style.
+    style.bold = true;
+    style.italic = true;
+    style.align = TextStyle::Center;
+    style.tracking = 1.5;
+    doc.changeSelectionText([&style](SketchObject& o) { o.setTextStyle(style); }, "All");
+    SketchDocument svg, bin;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), svg));
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), bin));
+    for (SketchDocument* d : {&svg, &bin}) {
+        ASSERT_EQ(d->objectCount(), 1u);
+        EXPECT_TRUE(d->object(0).textStyle() == style);
+    }
+    // Not text: nothing to change.
+    SketchDocument other;
+    other.setSelection({other.add(SketchObject::makeRect(0, 0, 10, 10)).id()});
+    EXPECT_FALSE(other.changeSelectionText([](SketchObject& o) { o.setFontSize(10.0); }, "x"));
+}
+
+// ---- Image Trace ----
+
+TEST(SketchTrace, ABlockPictureBecomesStackedShapes) {
+    // 20 x 20: white background, a red 8 x 8 square with a white 2 x 2 hole... and a transparent corner.
+    const int w = 20, h = 20;
+    std::vector<std::uint32_t> pixels(std::size_t(w * h), 0xFFFFFFFFu);
+    for (int y = 4; y < 12; ++y) {
+        for (int x = 4; x < 12; ++x) {
+            pixels[std::size_t(y * w + x)] = 0xFFFF0000u;
+        }
+    }
+    for (int y = 7; y < 9; ++y) {
+        for (int x = 7; x < 9; ++x) {
+            pixels[std::size_t(y * w + x)] = 0xFFFFFFFFu;
+        }
+    }
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            pixels[std::size_t(y * w + x)] = 0x00000000u;   // transparent
+        }
+    }
+    TraceOptions options;
+    options.colors = 2;
+    options.minArea = 1.0;
+    TraceResult trace = traceRgba(pixels, w, h, options);
+    EXPECT_EQ(trace.width, w);
+    ASSERT_EQ(trace.shapes.size(), 2u) << "the white background below, the red above";
+    EXPECT_EQ(trace.shapes[0].rgb, 0xFFFFFFu) << "the largest color is the bottom layer";
+    EXPECT_EQ(trace.shapes[1].rgb, 0xFF0000u);
+    BLBox red;
+    trace.shapes[1].path.get_bounding_box(&red);
+    EXPECT_NEAR(red.x0, 4.0, 1.5);
+    EXPECT_NEAR(red.x1, 12.0, 1.5);
+    BLBox base;
+    trace.shapes[0].path.get_bounding_box(&base);
+    EXPECT_GT(base.x1 - base.x0, 15.0);
+    // The red layer covers its own pixels only, and the hole in it is empty (the white shows through from below).
+    BLPath hole = trace.shapes[1].path;
+    EXPECT_TRUE(hole.hit_test(BLPoint(5.5, 5.5), BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN);
+    EXPECT_FALSE(hole.hit_test(BLPoint(8.0, 8.0), BL_FILL_RULE_NON_ZERO) == BL_HIT_TEST_IN);
+
+    SketchDocument doc;
+    doc.setPageSize(200, 100);
+    std::vector<std::size_t> ids = doc.addTrace(trace);
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(doc.objectCount(), 2u);
+    EXPECT_FALSE(doc.object(0).groups().empty()) << "the layers are one group";
+    BLBox all;
+    doc.selectionBounds(all);
+    EXPECT_GE(all.x0, 0.0);
+    EXPECT_LE(all.x1, 200.0);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.objectCount(), 0u);
+    EXPECT_TRUE(doc.addTrace(TraceResult()).empty());
+    EXPECT_TRUE(traceRgba({}, 0, 0).shapes.empty());
+}
+
+
+TEST(SketchTrace, ARenderedPictureCanBeLoadedAndTraced) {
+    SketchDocument source;
+    source.setPageSize(120, 120);
+    SketchObject& disc = source.add(SketchObject::makeEllipse(60, 60, 40, 40));
+    disc.setFill(SketchPaint::solid(SketchColor::fromHex("#d02020")));
+    disc.setStroke(SketchPaint::none());
+    SketchObject& dot = source.add(SketchObject::makeEllipse(60, 60, 10, 10));
+    dot.setFill(SketchPaint::solid(SketchColor::fromHex("#2020d0")));
+    dot.setStroke(SketchPaint::none());
+    std::string path = (std::filesystem::temp_directory_path() / "sketch_trace_test.png").string();
+    ASSERT_TRUE(exportPageImage(source, path, 2.0));
+    std::vector<std::uint32_t> pixels;
+    int w = 0, h = 0;
+    ASSERT_TRUE(loadImagePixels(path, pixels, w, h));
+    EXPECT_EQ(w, 240);
+    EXPECT_EQ(h, 240);
+    TraceOptions options;
+    options.colors = 3;
+    TraceResult trace = traceRgba(pixels, w, h, options);
+    EXPECT_EQ(trace.shapes.size(), 3u) << "white page, red disc, blue dot";
+    SketchDocument doc;
+    EXPECT_FALSE(doc.addTrace(trace).empty());
+    std::filesystem::remove(path);
+    EXPECT_FALSE(loadImagePixels((std::filesystem::temp_directory_path() / "no_such_picture.png").string(), pixels, w, h));
+}
+
+
+// ---- clipping masks ----
+
+namespace {
+    // A 100 x 100 page: a big red square, then a small circle on top as the would-be mask.
+    std::pair<std::size_t, std::size_t> clipFixture(SketchDocument& doc) {
+        doc.setPageSize(100, 100);
+        SketchObject& square = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+        square.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+        square.setStroke(SketchPaint::none());
+        std::size_t a = square.id();
+        SketchObject& circle = doc.add(SketchObject::makeEllipse(50, 50, 20, 20));
+        circle.setFill(SketchPaint::solid(SketchColor::fromHex("#00ff00")));
+        circle.setStroke(SketchPaint::none());
+        return {a, circle.id()};
+    }
+
+    bool isRed(std::uint32_t argb) { return ((argb >> 16) & 255u) > 200u && ((argb >> 8) & 255u) < 60u && (argb & 255u) < 60u; }
+}
+
+TEST(SketchClip, MakeCutsTheGroupToTheTopmostObjectAndUndoes) {
+    SketchDocument doc;
+    auto [square, circle] = clipFixture(doc);
+    doc.setSelection({square, circle});
+    EXPECT_TRUE(doc.canMakeClippingMask());
+    ASSERT_TRUE(doc.makeClippingMask());
+    std::size_t group = doc.findById(square)->groups().front();
+    EXPECT_TRUE(doc.groupProps(group).clip);
+    EXPECT_EQ(doc.clipMaskOf(group), doc.findById(circle));
+    EXPECT_TRUE(doc.canReleaseClippingMask());
+    EXPECT_FALSE(doc.canMakeClippingMask());
+
+    std::string path = (std::filesystem::temp_directory_path() / "sketch_clip_test.png").string();
+    std::vector<std::uint32_t> pixels;
+    int w = 0, h = 0;
+    ASSERT_TRUE(exportPageImage(doc, path, 1.0));
+    ASSERT_TRUE(loadImagePixels(path, pixels, w, h));
+    // The mask itself is not drawn (so no green), the square shows only inside the circle.
+    EXPECT_TRUE(isRed(pixels[50 * w + 50])) << "inside the mask the square shows";
+    EXPECT_FALSE(isRed(pixels[5 * w + 5])) << "outside the mask nothing shows";
+    EXPECT_FALSE(isRed(pixels[50 * w + 90]));
+
+    EXPECT_EQ(doc.hitTest(BLPoint(5, 5), 0.0), nullptr) << "clipped away parts cannot be picked";
+    EXPECT_NE(doc.hitTest(BLPoint(50, 50), 0.0), nullptr);
+
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.findById(square)->groups().empty());
+    ASSERT_TRUE(exportPageImage(doc, path, 1.0));
+    ASSERT_TRUE(loadImagePixels(path, pixels, w, h));
+    EXPECT_TRUE(isRed(pixels[5 * w + 5])) << "undone: the square shows fully";
+    doc.undoStack().redo();
+    EXPECT_TRUE(doc.groupProps(doc.findById(square)->groups().front()).clip);
+    std::filesystem::remove(path);
+}
+
+TEST(SketchClip, ReleaseKeepsTheGroupAndUndoes) {
+    SketchDocument doc;
+    auto [square, circle] = clipFixture(doc);
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.makeClippingMask());
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.releaseClippingMask());
+    std::size_t group = doc.findById(square)->groups().front();
+    EXPECT_FALSE(doc.groupProps(group).clip);
+    EXPECT_EQ(doc.clipMaskOf(group), nullptr);
+    EXPECT_NE(doc.hitTest(BLPoint(5, 5), 0.0), nullptr);
+    doc.undoStack().undo();
+    EXPECT_TRUE(doc.groupProps(group).clip);
+    // An existing plain group can be turned into a mask too.
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.groupSelection());
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.makeClippingMask());
+    EXPECT_TRUE(doc.groupProps(doc.findById(square)->groups().front()).clip);
+}
+
+TEST(SketchClip, SurvivesSvgAndBinaryRoundTrips) {
+    SketchDocument doc;
+    auto [square, circle] = clipFixture(doc);
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.makeClippingMask());
+
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_EQ(fromSvg.objectCount(), 2u);
+    std::size_t g1 = fromSvg.object(0).groups().front();
+    EXPECT_TRUE(fromSvg.groupProps(g1).clip);
+
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), fromBin));
+    ASSERT_EQ(fromBin.objectCount(), 2u);
+    std::size_t g2 = fromBin.object(0).groups().front();
+    EXPECT_TRUE(fromBin.groupProps(g2).clip);
+    EXPECT_NE(fromBin.clipMaskOf(g2), nullptr);
+}
+
+TEST(SketchClip, SelectionBoxIsTheVisiblePart) {
+    SketchDocument doc;
+    auto [square, circle] = clipFixture(doc);
+    doc.setSelection({square, circle});
+    ASSERT_TRUE(doc.makeClippingMask());
+    doc.setSelection({square});
+    BLBox box;
+    ASSERT_TRUE(doc.selectionBounds(box));
+    EXPECT_NEAR(box.x0, 30.0, 1e-6);
+    EXPECT_NEAR(box.x1, 70.0, 1e-6);
+    EXPECT_NEAR(box.y0, 30.0, 1e-6);
+    EXPECT_NEAR(box.y1, 70.0, 1e-6);
+}
+
+TEST(SketchClip, AnOpenPathMasksByItsClosedShapeButALineCannot) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    SketchObject& square = doc.add(SketchObject::makeRect(0, 0, 100, 100));
+    square.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    square.setStroke(SketchPaint::none());
+    std::size_t a = square.id();
+    BLPath triangle;
+    triangle.move_to(10, 10);
+    triangle.line_to(90, 10);
+    triangle.line_to(50, 90);
+    std::size_t t = doc.add(SketchObject::makePath(triangle)).id();   // open: no close
+    doc.setSelection({a, t});
+    ASSERT_TRUE(doc.makeClippingMask());
+    EXPECT_NE(doc.hitTest(BLPoint(50, 30), 0.0), nullptr) << "inside the implied triangle";
+    EXPECT_EQ(doc.hitTest(BLPoint(10, 80), 0.0), nullptr) << "outside it";
+
+    SketchDocument other;
+    other.setPageSize(100, 100);
+    std::size_t b = other.add(SketchObject::makeRect(0, 0, 100, 100)).id();
+    BLPath line;
+    line.move_to(10, 50);
+    line.line_to(90, 50);
+    std::size_t l = other.add(SketchObject::makePath(line)).id();
+    other.setSelection({b, l});
+    EXPECT_FALSE(other.canMakeClippingMask()) << "a straight line encloses nothing";
+    EXPECT_FALSE(other.makeClippingMask());
+}
+
+// ---- artboards ----
+
+TEST(SketchArtboards, AdditionDeletionAndUndo) {
+    SketchDocument doc;
+    ASSERT_EQ(doc.artboards().size(), 1u);
+    EXPECT_EQ(doc.artboards()[0].name, "Artboard 1");
+    EXPECT_FALSE(doc.deleteArtboard(0)) << "the last artboard stays";
+    std::size_t second = doc.addArtboardBesideLast();
+    EXPECT_EQ(second, 1u);
+    EXPECT_EQ(doc.activeArtboard(), 1u);
+    EXPECT_EQ(doc.artboards()[1].name, "Artboard 2");
+    EXPECT_NEAR(doc.artboards()[1].x, 612.0 + 40.0, 1e-9) << "beside the others, with a gap";
+    EXPECT_EQ(doc.artboardAt(BLPoint(700, 100)), 1);
+    EXPECT_EQ(doc.artboardAt(BLPoint(5, 5)), 0);
+    EXPECT_EQ(doc.artboardAt(BLPoint(630, 100)), -1);
+    BLBox all = doc.artboardsBounds();
+    EXPECT_NEAR(all.x1, 612.0 + 40.0 + 612.0, 1e-9);
+
+    Artboard moved = doc.artboards()[1];
+    moved.x = 800;
+    moved.width = 100;
+    moved.name = "Cover";
+    EXPECT_TRUE(doc.setArtboard(1, moved));
+    EXPECT_FALSE(doc.setArtboard(1, moved)) << "no change, no step";
+    EXPECT_EQ(doc.artboards()[1].name, "Cover");
+    EXPECT_FLOAT_EQ(doc.pageWidth(), 100.0f) << "the active artboard is the page";
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.artboards()[1].name, "Artboard 2");
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.artboards().size(), 1u);
+    doc.undoStack().redo();
+    ASSERT_EQ(doc.artboards().size(), 2u);
+    EXPECT_TRUE(doc.deleteArtboard(0));
+    EXPECT_EQ(doc.artboards().size(), 1u);
+    EXPECT_EQ(doc.activeArtboard(), 0u);
+    doc.undoStack().undo();
+    EXPECT_EQ(doc.artboards().size(), 2u);
+}
+
+TEST(SketchArtboards, AlignAndExportFollowTheActiveArtboard) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    doc.addArtboard(Artboard{"Right", 300, 50, 200, 100});
+    SketchObject& box = doc.add(SketchObject::makeRect(0, 0, 20, 20));
+    box.setFill(SketchPaint::solid(SketchColor::fromHex("#ff0000")));
+    box.setStroke(SketchPaint::none());
+    std::size_t id = box.id();
+    doc.setSelection({id});
+    ASSERT_TRUE(doc.alignSelection(SketchDocument::AlignMode::Center));
+    BLBox b = doc.findById(id)->geometryBounds();
+    EXPECT_NEAR((b.x0 + b.x1) * 0.5, 400.0, 1e-6) << "centred on the active artboard";
+
+    BLImage image;
+    ASSERT_TRUE(renderArtboardImage(doc, 1, 1.0, image));
+    EXPECT_EQ(image.width(), 200);
+    EXPECT_EQ(image.height(), 100);
+    BLImageData data;
+    image.get_data(&data);
+    auto at = [&data](int x, int y) { return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + std::ptrdiff_t(y) * data.stride)[x]; };
+    EXPECT_NE(at(100, 50) & 0x00FF0000u, 0u) << "the square, in the artboard's own pixels";
+    BLImage first;
+    ASSERT_TRUE(renderArtboardImage(doc, 0, 1.0, first));
+    EXPECT_EQ(first.width(), 100);
+    EXPECT_FALSE(renderArtboardImage(doc, 2, 1.0, first));
+    EXPECT_EQ(artboardFilePath("C:/out/poster.png", "Artboard 2", 2), "C:/out/poster_2_Artboard-2.png");
+    EXPECT_EQ(artboardFilePath("poster", "", 1), "poster_1");
+}
+
+TEST(SketchArtboards, SurviveSvgAndBinaryRoundTrips) {
+    SketchDocument doc;
+    doc.addArtboard(Artboard{"Back Cover", 700, 20, 300, 400});
+    SketchObject& dot = doc.add(SketchObject::makeRect(710, 30, 10, 10));
+    dot.setFill(SketchPaint::solid(SketchColor::fromHex("#0000ff")));
+    doc.setActiveArtboard(0);
+
+    SketchDocument fromSvg;
+    ASSERT_TRUE(documentFromSvg(svgFromDocument(doc), fromSvg));
+    ASSERT_EQ(fromSvg.artboards().size(), 2u);
+    EXPECT_EQ(fromSvg.artboards()[1].name, "Back Cover");
+    EXPECT_NEAR(fromSvg.artboards()[1].x, 700.0, 1e-6);
+    EXPECT_NEAR(fromSvg.artboards()[1].height, 400.0, 1e-6);
+    EXPECT_EQ(fromSvg.activeArtboard(), 0u);
+    ASSERT_EQ(fromSvg.objectCount(), 1u);
+    EXPECT_NEAR(fromSvg.object(0).geometryBounds().x0, 710.0, 1e-6) << "objects keep their canvas position";
+
+    SketchDocument fromBin;
+    ASSERT_TRUE(documentFromBinary(binaryFromDocument(doc), fromBin));
+    ASSERT_EQ(fromBin.artboards().size(), 2u);
+    EXPECT_EQ(fromBin.artboards()[1].name, "Back Cover");
+    EXPECT_NEAR(fromBin.artboards()[1].width, 300.0, 1e-9);
+
+    // A plain old file with no artboard list reads as one artboard of its page size.
+    SketchDocument plain;
+    ASSERT_TRUE(documentFromSvg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200pt\" height=\"100pt\" viewBox=\"0 0 200 100\"></svg>", plain));
+    ASSERT_EQ(plain.artboards().size(), 1u);
+    EXPECT_NEAR(plain.artboards()[0].width, 200.0, 1e-6);
+    EXPECT_NEAR(plain.artboards()[0].height, 100.0, 1e-6);
+}
+
+TEST(SketchArtboards, ATraceLandsOnTheActiveArtboard) {
+    SketchDocument doc;
+    doc.setPageSize(100, 100);
+    doc.addArtboard(Artboard{"Far", 1000, 500, 100, 100});
+    TraceResult trace;
+    trace.width = 10;
+    trace.height = 10;
+    TracedShape shape;
+    shape.rgb = 0x336699;
+    shape.path.add_rect(0, 0, 10, 10);
+    trace.shapes.push_back(shape);
+    ASSERT_FALSE(doc.addTrace(trace).empty());
+    BLBox b = doc.object(0).geometryBounds();
+    EXPECT_GE(b.x0, 1000.0);
+    EXPECT_LE(b.x1, 1100.0);
+    EXPECT_GE(b.y0, 500.0);
+    EXPECT_LE(b.y1, 600.0);
 }

@@ -105,10 +105,15 @@ namespace sketch {
         // ---- Graphic Styles ----
         // Redraws the style tiles (each style painted on a small shape) and sizes the grid to its rows.
         void refreshGraphicStyles();
+        // The Color panel's swatch grid shows the document's swatches; the buttons add the shown color / delete the chosen swatch.
+        void refreshSwatches();
         void styleTilePicked();
 
         void beginDrag();
         void endDrag();
+        // Dragging the caption `labelName` sideways scrubs the number in `fieldName` (numberscrubber.h): every change goes through the
+        // field's own Enter handler, and the whole drag is one undo step (beginDrag / endDrag). `unit` is the plain step.
+        void bindScrub(const char* labelName, const char* fieldName, double unit, double minimum, double maximum);
         // Runs `edit` (which changes the selection live) and either records a step now or leaves it to endDrag().
         void edit(const char* description, const std::function<void()>& onSelection, const std::function<void()>& onDefaults);
 

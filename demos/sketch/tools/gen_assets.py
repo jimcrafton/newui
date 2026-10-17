@@ -101,7 +101,13 @@ ICONS = {
     # layers panel
     "eye": '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     "lock": '<rect x="5" y="11" width="14" height="10" rx="1"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    "text-bold": '<path d="M7 5h6a3.500 3.500 0 0 1 0 7H7zM7 12h7a3.500 3.500 0 0 1 0 7H7z"/>',
+    "text-italic": '<path d="M10 5h7M7 19h7M14 5l-4 14"/>',
+    "text-align-left": '<path d="M4 6h16M4 11h10M4 16h16M4 21h10"/>',
+    "text-align-center": '<path d="M4 6h16M7 11h10M4 16h16M7 21h10"/>',
+    "text-align-right": '<path d="M4 6h16M10 11h10M4 16h16M10 21h10"/>',
     "layer-add": '<path d="M12 5v14M5 12h14"/>',
+    "layer-sublayer": '<path d="M5 4v10h6M15 14h5M17.5 11.5v5"/>',
     "layer-delete": '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
 }
 

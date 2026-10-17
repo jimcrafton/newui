@@ -17,7 +17,7 @@
 namespace sketch {
 
     // What a left-button drag on the canvas does. The order matches the status bar hints in main.cpp.
-    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Text, Gradient, Width, Scissors, Knife, Eraser, Hand, Zoom };
+    enum class SketchTool { Select, DirectSelect, Rectangle, Ellipse, Circle, RoundRect, Polygon, Star, Arc, Line, Pen, Pencil, Text, Gradient, Width, Scissors, Knife, Eraser, ShapeBuilder, Eyedropper, MagicWand, Lasso, Artboard, Hand, Zoom };
 
     // The drawing surface: the gray pasteboard, the white page with its grid, and (later) the
     // document's objects, the selection overlay and the rulers - all painted by this one view,
@@ -91,6 +91,8 @@ namespace sketch {
 
         // Zoom so the whole page fits the drawing area with a small margin, and re-center it.
         void zoomToFit();
+        // Zoom so the active artboard fills the drawing area, and centre it.
+        void fitActiveArtboard();
 
         // The active tool. Select: click/shift-click/marquee, drag to move, handles to resize/rotate.
         // Rectangle/Ellipse/Line: drag out a shape (Shift = square/circle/45 degrees). Hand: drag pans.
@@ -112,6 +114,14 @@ namespace sketch {
         void setStarPoints(int points);
         double arcSweep() const { return arcSweep_; }
         void setArcSweep(double radians);
+        // Guides: lines dragged out of the rulers that things snap to (the document keeps them). Dragging a guide with the Select tool moves it
+        // (back onto a ruler deletes it) unless guides are locked. Smart Guides: snapping to the edges and centers of the other objects.
+        bool showGuides() const { return showGuides_; }
+        void setShowGuides(bool value);
+        bool guidesLocked() const { return guidesLocked_; }
+        void setGuidesLocked(bool value);
+        bool smartGuides() const { return smartGuides_; }
+        void setSmartGuides(bool value);
         // The Eraser's pen width in document units (the Up / Down arrows change it by 2 while that tool is chosen).
         double eraserSize() const { return eraserSize_; }
         void setEraserSize(double size);
@@ -186,9 +196,32 @@ namespace sketch {
         bool snapToGrid_ = true;
         BLPoint pointerDoc_;
         BLBox dragBounds_;  // the selection's bounds when a move began
-        // `value` moved onto the nearest grid line when it is within snapThreshold px of one.
-        double snapValue(double value) const;
-        BLPoint snapPoint(const BLPoint& point) const { return BLPoint(snapValue(point.x), snapValue(point.y)); }
+        // ---- Guides and snapping (guides.cpp) ----
+        // `value` (an x for axis 0, a y for axis 1) moved onto the nearest grid line, guide or - Smart Guides - object edge / center within
+        // a few pixels. `line` receives the object line it caught (NaN when none), which the overlay draws in magenta.
+        double snapAxis(int axis, double value, double* line) const;
+        double snapValue(double value, int axis) const;
+        BLPoint snapPoint(const BLPoint& point) const;
+        void rememberSnapLines(double x, double y) const;
+        struct SnapLine {
+            double position;
+            bool guide;   // a ruler guide (always snapped to) rather than an object's edge
+        };
+        void collectSnapLines() const;
+        int guideAt(const newui::Point& pt) const;
+        bool beginGuideDrag(const newui::Point& pt);
+        void updateGuideDrag(const newui::Point& pt);
+        void finishGuideDrag(const newui::Point& pt);
+        void paintGuides(BLContext& ctx) const;
+        bool showGuides_ = true;
+        bool guidesLocked_ = false;
+        bool smartGuides_ = true;
+        mutable bool snapCacheValid_ = false;           // rebuilt on the first snap after a press
+        mutable std::vector<SnapLine> snapX_, snapY_;
+        mutable std::vector<double> smartX_, smartY_;   // the object lines the last snap caught
+        int guideDragIndex_ = -1;                       // the guide being dragged (-1: a new one)
+        bool guideDragVertical_ = false;
+        double guideDragPosition_ = 0.0;
         bool centered_ = true;  // cleared by the first manual pan/zoom
         float panX_ = 20.0f;
         float panY_ = 20.0f;
@@ -199,7 +232,7 @@ namespace sketch {
         float panStartY_ = 0.0f;
 
         // ---- Tool interaction ----
-        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width, Pencil, PenHandle, DirectEdit, LiveShape, Knife, Erase };
+        enum class Drag { None, Move, Resize, Rotate, Shear, Warp, Origin, Marquee, Draw, GradientNew, GradientEnd, GradientStop, Width, Pencil, PenHandle, DirectEdit, LiveShape, Knife, Erase, ShapeBuild, Lasso, ArtboardNew, ArtboardMove, ArtboardResize, Guide };
         // Handles 0..7 clockwise from the top-left corner; 8 is the rotate knob above top-center.
         // 9 is the transform-origin marker.
         static constexpr int kRotateHandle = 8;
@@ -284,6 +317,29 @@ namespace sketch {
         void paintCutOverlay(BLContext& ctx) const;
         std::vector<BLPoint> cutPoints_;   // the Knife's or Eraser's path so far, in document units
         double eraserSize_ = 14.0;
+
+        // ---- Shape Builder (cuttools.cpp) ----
+        // At the press the selected shapes are cut into cells (SketchDocument::shapeBuilderModel); the drag collects the cells it passes
+        // over (shapeHit_, shown tinted) and the release joins them into one shape - or, with Alt, erases them.
+        void shapeBuildMove(const BLPoint& point);
+        void finishShapeBuild();
+        void paintShapeBuilder(BLContext& ctx) const;
+        // The Lasso collects its freehand path in cutPoints_ and selects what it touches when let go (Shift keeps the selection).
+        void paintLasso(BLContext& ctx) const;
+
+        // The Artboard tool (artboardtool.cpp): the artboard being made / moved / resized is kept in artboardLive_ and only goes to the
+        // document when the pointer is let go.
+        int artboardHandleAt(const BLPoint& point) const;
+        void artboardPress(const BLPoint& point);
+        void artboardMove(const BLPoint& point, std::uint32_t keys);
+        void finishArtboard(Drag kind);
+        void paintArtboardTool(BLContext& ctx) const;
+        std::size_t artboardIndex_ = 0;
+        Artboard artboardStart_;
+        Artboard artboardLive_;
+        SketchDocument::ShapeBuilderModel shapeModel_;
+        std::vector<bool> shapeHit_;
+        bool shapeErase_ = false;
 
         // ---- Direct Select (canvastools.cpp) ----
         // Shows the anchors of the selected objects; a click picks an anchor, a drag moves it (or a handle of the picked
@@ -406,6 +462,8 @@ namespace sketch {
         BLPoint dragNowDoc_;
         newui::Point dragNowView_;
         std::vector<GeometryState> dragBefore_;
+        BLMatrix2D dragMatrix_ = BLMatrix2D::make_identity();   // the last matrix applyToSelection() applied (what Transform Again repeats)
+        double dragAngle_ = 0.0;
         FrameState dragFrameBefore_;  // the document group angle / quad frame when a drag began
         SelectionFrame dragFrame_;  // selection frame when a resize/rotate began
         int dragHandle_ = 0;

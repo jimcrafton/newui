@@ -45,6 +45,16 @@ namespace sketch {
     // The separate pieces of a shape: each outer outline together with the holes inside it. `loops` must come from combineLoops.
     std::vector<Loops> splitIntoRegions(const Loops& loops);
 
+    // One piece of the plane cut up by several shapes: a connected area (an outer outline with its holes) and which of the shapes cover
+    // it (indices into the list given to arrangeCells). Every point of the shapes is in exactly one cell.
+    struct ShapeCell {
+        Loops region;
+        std::vector<std::size_t> members;
+    };
+
+    // The cells that `shapes` (in any order) make together - what the Shape Builder lets the user pick from. Slivers of no area are dropped.
+    std::vector<ShapeCell> arrangeCells(const std::vector<Loops>& shapes);
+
     // The polygon covering a pen stroke `width` wide along `line` (round caps and joins; a single point gives a circle).
     Loops strokeToLoops(const std::vector<BLPoint>& line, double width);
 

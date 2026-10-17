@@ -118,7 +118,7 @@ def label(text, w=None, h=20, align="Left", name=None, bold=False, weight=None):
     return node("Label", name, w=w, h=h, weight=weight, text=text, textAlignment=align, style=style)
 
 
-def field(name, text, w=None, h=24, weight=None):
+def field(name, text, w=None, h=20, weight=None):
     return node("TextField", name, w=w, h=h, weight=weight, text=text)
 
 
@@ -152,7 +152,7 @@ def toolbar(name, orientation, children, w=None, h=None, weight=None):
                 childViews=children)
 
 
-def dropdown(name, items, w=None, h=24, selected=0, weight=None):
+def dropdown(name, items, w=None, h=20, selected=0, weight=None):
     # `model` must be read before `selectedIndex` - an index into a not-yet-loaded model is dropped.
     return node("DropDownList", name, w=w, h=h, weight=weight,
                 model={"type": "StringListModel", "items": items}, selectedIndex=selected)
@@ -237,17 +237,20 @@ MENUS = [
     mi("File", children=[
         mi("New", "Ctrl+N"), mi("Open...", "Ctrl+O"), mi("Open Recent"), SEP,
         mi("Save", "Ctrl+S"), mi("Save As...", "Ctrl+Shift+S"), SEP,
-        mi("Export As Image..."), mi("Export As PDF..."), SEP,
+        mi("Export As Image..."), mi("Export All Artboards..."), mi("Trace Image..."), mi("Export As PDF..."), SEP,
         mi("Document Setup..."), SEP, mi("Exit", "Alt+F4")]),
     mi("Edit", children=[
         mi("Undo", "Ctrl+Z"), mi("Redo", "Ctrl+Y"), SEP,
         mi("Cut", "Ctrl+X"), mi("Copy", "Ctrl+C"), mi("Paste", "Ctrl+V"),
         mi("Paste In Place", "Ctrl+Shift+V"), mi("Duplicate", "Ctrl+D"), mi("Delete", "Del"), SEP,
-        mi("Select All", "Ctrl+A"), mi("Deselect", "Ctrl+Shift+A")]),
+        mi("Select All", "Ctrl+A"), mi("Deselect", "Ctrl+Shift+A"),
+        mi("Select Same", children=[mi("Fill Color"), mi("Stroke Color"), mi("Stroke Weight"), mi("Opacity"), mi("Blend Mode"), mi("Object Type")])]),
     mi("Object", children=[
-        mi("Group", "Ctrl+G"), mi("Ungroup", "Ctrl+Shift+G"), SEP,
+        mi("Group", "Ctrl+G"), mi("Ungroup", "Ctrl+Shift+G"),
+        mi("Clipping Mask", children=[mi("Make", "Ctrl+7"), mi("Release", "Ctrl+Shift+7")]),
+        mi("Artboards", children=[mi("New Artboard"), mi("Delete Artboard"), SEP, mi("Previous Artboard"), mi("Next Artboard"), SEP, mi("Fit Artboard in Window")]), SEP,
         mi("Lock", "Ctrl+2"), mi("Unlock All"), mi("Hide", "Ctrl+3"), mi("Show All"), SEP,
-        mi("Transform", children=[mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
+        mi("Transform", children=[mi("Transform Again", "Ctrl+Shift+D"), SEP, mi("Rotate 90 CW"), mi("Rotate 90 CCW"), mi("Flip Horizontal"), mi("Flip Vertical"), SEP, mi("Reset Bounding Box", "Ctrl+Shift+B")]),
         mi("Path", children=[mi("Join"), mi("Reverse Direction"), mi("Simplify"), mi("Outline Stroke")]),
         mi("Pathfinder", children=[mi("Unite"), mi("Minus Front"), mi("Intersect"), mi("Exclude")]),
         mi("Expand Appearance")]),
@@ -258,7 +261,8 @@ MENUS = [
     mi("View", children=[
         mi("Zoom In", "Ctrl++"), mi("Zoom Out", "Ctrl+-"), mi("Fit Page", "Ctrl+0"), mi("Actual Size", "Ctrl+1"), SEP,
         mi("Show Grid", "Ctrl+'", checked=True), mi("Snap to Grid", "Ctrl+Shift+'", checked=True),
-        mi("Show Rulers", "Ctrl+R", checked=True), mi("Smart Guides", checked=True), SEP,
+        mi("Show Rulers", "Ctrl+R", checked=True), mi("Smart Guides", checked=True),
+        mi("Show Guides", "Ctrl+;", checked=True), mi("Lock Guides"), mi("Clear Guides"), SEP,
         mi("Color Mode", children=[mi("RGB", checked=True), mi("CMYK")])]),
     mi("Help", children=[mi("About sketch")]),
 ]
@@ -286,7 +290,9 @@ def main_toolbar():
 
 
 def tool_palette():
-    kids = [
+    # Two columns of tools side by side (there are more tools than fit in one column of the window); which tool is on is kept by
+    # SketchWindowController, not by the toolbars, so the split is only layout.
+    first = [
         tbtn("selectTool", "tool-select", checked=True, s=32),
         tbtn("directSelectTool", "tool-direct-select", toggle=True, s=32), tsep(False),
         tbtn("rectangleTool", "tool-rectangle", toggle=True, s=32),
@@ -296,22 +302,31 @@ def tool_palette():
         tbtn("polygonTool", "tool-polygon", toggle=True, s=32),
         tbtn("starTool", "tool-star", toggle=True, s=32),
         tbtn("arcTool", "tool-arc", toggle=True, s=32),
-        tbtn("lineTool", "tool-line", toggle=True, s=32),
+        tbtn("lineTool", "tool-line", toggle=True, s=32), tsep(False),
         tbtn("penTool", "tool-pen", toggle=True, s=32),
         tbtn("pencilTool", "tool-pencil", toggle=True, s=32),
         tbtn("textTool", "tool-text", toggle=True, s=32),
         tbtn("gradientTool", "tool-gradient", toggle=True, s=32),
-        tbtn("widthTool", "tool-width", toggle=True, s=32), tsep(False),
+        tbtn("widthTool", "tool-width", toggle=True, s=32),
+    ]
+    second = [
         tbtn("scissorsTool", "tool-scissors", toggle=True, s=32),
         tbtn("knifeTool", "tool-knife", toggle=True, s=32),
-        tbtn("eraserTool", "tool-eraser", toggle=True, s=32), tsep(False),
+        tbtn("eraserTool", "tool-eraser", toggle=True, s=32),
+        tbtn("shapeBuilderTool", "tool-shapebuilder", toggle=True, s=32), tsep(False),
+        tbtn("eyedropperTool", "tool-eyedropper", toggle=True, s=32),
+        tbtn("magicWandTool", "tool-magicwand", toggle=True, s=32),
+        tbtn("lassoTool", "tool-lasso", toggle=True, s=32),
+        tbtn("artboardTool", "tool-artboard", toggle=True, s=32), tsep(False),
         tbtn("handTool", "tool-hand", toggle=True, s=32),
         tbtn("zoomTool", "tool-zoom", toggle=True, s=32),
         spacer(1),
         color_well("fillWell", "#e8452cff"),
         color_well("strokeWell", "#1b3a6bff"),
     ]
-    return toolbar("toolPalette", "Vertical", kids, w=40)
+    return node("SubView", "toolPalette", w=80, visible=True, layout=flex("Horizontal"), childViews=[
+        toolbar("toolColumn1", "Vertical", first, w=40),
+        toolbar("toolColumn2", "Vertical", second, w=40)])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -319,6 +334,16 @@ def tool_palette():
 # ---------------------------------------------------------------------------------------------
 SWATCHES = ["#000000", "#555555", "#aaaaaa", "#ffffff", "#e8452c", "#f2b824",
             "#2f7d4f", "#0078d4", "#6a4fc7", "#1b3a6b", "#00aeef", "#ec008c"]
+
+
+def transform_panel():
+    body = [
+        hbox("transformPosRow", [label("X", w=14, name="transformXLabel"), field("transformXField", "0", w=70), label("Y", w=14, name="transformYLabel"), field("transformYField", "0", w=70)]),
+        hbox("transformSizeRow", [label("W", w=14, name="transformWLabel"), field("transformWField", "0", w=70), label("H", w=14, name="transformHLabel"), field("transformHField", "0", w=70),
+                                  tbtn("linkAspectButton", "link-aspect", toggle=True, s=24)]),
+        hbox("transformAngleRow", [label("Angle", w=44, name="transformAngleLabel"), field("transformAngleField", "0", w=70), label("deg", w=30)]),
+    ]
+    return panel("transformPanel", "Transform", body, header_right="no selection")
 
 
 def color_panel():
@@ -329,8 +354,8 @@ def color_panel():
     gradient_bar = node("GradientBar", "gradientBar", h=30, stops=[
         "0.0 #f2b824ff", "0.55 #e8452cff", "1.0 #6a4fc7ff"], selectedStop=1)
     stop_row = hbox("stopRow", [
-        label("Stop", w=32), field("stopOffsetField", "55%", w=48),
-        label("Angle", w=38), field("gradientAngleField", "35\u00b0", w=52),
+        label("Stop", w=32, name="stopOffsetLabel"), field("stopOffsetField", "55%", w=48),
+        label("Angle", w=38, name="gradientAngleLabel"), field("gradientAngleField", "35\u00b0", w=52),
         tbtn("addStopButton", "stop-add", s=24), tbtn("deleteStopButton", "stop-delete", s=24),
         tbtn("reverseGradientButton", "gradient-reverse", s=24),
     ])
@@ -349,7 +374,9 @@ def color_panel():
         slider_row("comp2Slider", "B", 44), slider_row("comp3Slider", "K", 0),
         slider_row("alphaSlider", "A", 100),
         hbox("hexRow", [label("Hex", w=32), field("hexField", "#E8452C", w=96)]),
-        node("SwatchGrid", "swatchGrid", h=22, columns=12, gap=3, swatches=SWATCHES, selectedIndex=4),
+        hbox("swatchActions", [label("Swatches", w=70), tbtn("addSwatchButton", "layer-add", s=24), tbtn("deleteSwatchButton", "layer-delete", s=24)], h=26),
+        # The document swatches (up to 24: two rows); StylePanel fills the grid from the document.
+        node("SwatchGrid", "swatchGrid", h=48, columns=12, gap=3, swatches=SWATCHES, selectedIndex=4),
     ]
     return panel("colorPanel", "Color", body, header_right="Fill ●   Stroke ○")
 
@@ -357,8 +384,8 @@ def color_panel():
 def stroke_panel():
     body = [
         hbox("weightRow", [
-            label("Weight", w=44), field("strokeWeightField", "4 pt", w=56),
-            label("Miter", w=36), field("miterLimitField", "10", w=44)]),
+            label("Weight", w=44, name="strokeWeightLabel"), field("strokeWeightField", "4 pt", w=56),
+            label("Miter", w=36, name="miterLimitLabel"), field("miterLimitField", "10", w=44)]),
         hbox("capJoinRow", [
             label("Cap", w=28),
             toolbar("capBar", "Horizontal", [
@@ -440,14 +467,41 @@ def styles_panel():
     return panel("stylesPanel", "Graphic Styles", body)
 
 
+def text_panel():
+    # TextPanel (textpanel.h) fills the font list and follows the selected text; the controls are disabled when none is selected.
+    body = [
+        hbox("textFontRow", [label("Font", w=44), dropdown("textFontCombo", ["Segoe UI"], weight=1)]),
+        hbox("textSizeRow", [label("Size", w=44), field("textSizeField", "24", w=56),
+                             tbtn("textBoldButton", "text-bold", toggle=True, s=24), tbtn("textItalicButton", "text-italic", toggle=True, s=24),
+                             tbtn("textAlignLeftButton", "text-align-left", checked=True, s=24),
+                             tbtn("textAlignCenterButton", "text-align-center", toggle=True, s=24),
+                             tbtn("textAlignRightButton", "text-align-right", toggle=True, s=24)], h=26),
+        hbox("textSpacingRow", [label("Track", w=44), field("textTrackingField", "0", w=50), label("Lead", w=34), field("textLeadingField", "100", w=50), label("%", w=14)]),
+    ]
+    return panel("textPanel", "Text", body)
+
+
+def artboards_panel():
+    # ArtboardPanel (artboardpanel.h) lists the artboards and edits the active one; the Artboard tool (shortcut-less, in the palette) draws them.
+    body = [
+        hbox("artboardActions", [tbtn("addArtboardButton", "layer-add", s=24), tbtn("deleteArtboardButton", "layer-delete", s=24),
+                                 dropdown("artboardCombo", ["Artboard 1"], weight=1)], h=26),
+        hbox("artboardNameRow", [label("Name", w=44), field("artboardNameField", "Artboard 1", weight=1)]),
+        hbox("artboardPositionRow", [label("X", w=14), field("artboardXField", "0", weight=1), label("Y", w=14), field("artboardYField", "0", weight=1)]),
+        hbox("artboardSizeRow", [label("W", w=14), field("artboardWidthField", "612", weight=1), label("H", w=14), field("artboardHeightField", "792", weight=1)]),
+    ]
+    return panel("artboardsPanel", "Artboards", body)
+
+
 def layers_panel():
-    items = ["Layer 1", "    Rounded Rectangle", "    Ellipse (gradient)", "    Polygon (locked)",
-             "    Path", "    Text \"Sketch demo\"", "Background"]
+    # LayerTree (layertree.h) draws the rows; LayersPanel feeds it from the document: eye, lock, open triangle, name and the
+    # selection square per layer, sublayers indented. Drag a row to reorder / nest it.
     body = [
         hbox("layerActions", [
-            tbtn("addLayerButton", "layer-add", s=24), tbtn("deleteLayerButton", "layer-delete", s=24),
-            tbtn("toggleVisibilityButton", "eye", s=24), tbtn("toggleLockButton", "lock", s=24)], h=26),
-        listview("layersList", items, h=len(items) * 22 + 4, selected=1),
+            tbtn("addLayerButton", "layer-add", s=24), tbtn("addSublayerButton", "layer-sublayer", s=24),
+            tbtn("deleteLayerButton", "layer-delete", s=24)], h=26),
+        node("LayerTree", "layersTree", h=160),
+        hbox("layerNameRow", [label("Name", w=44), field("layerNameField", "Layer 1", weight=1)]),
     ]
     return panel("layersPanel", "Layers", body)
 
@@ -461,7 +515,7 @@ def sidebar():
     SubView - and the real content goes inside it. Putting the content directly in childViews[0]
     would merge it into the viewport (it then gets resized to the viewport on every layout)."""
     panels = []
-    for i, p in enumerate([color_panel(), stroke_panel(), appearance_panel(), styles_panel(), layers_panel()]):
+    for i, p in enumerate([transform_panel(), color_panel(), stroke_panel(), text_panel(), appearance_panel(), styles_panel(), layers_panel(), artboards_panel()]):
         if i:
             panels += divider("panelDivider%d" % i)
         panels.append(p)

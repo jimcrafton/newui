@@ -664,4 +664,44 @@ namespace sketch {
         return true;
     }
 
+
+    std::vector<ShapeCell> arrangeCells(const std::vector<Loops>& shapes) {
+        std::vector<ShapeCell> cells;
+        for (std::size_t s = 0; s < shapes.size(); ++s) {
+            std::vector<ShapeCell> next;
+            Loops outside = shapes[s];   // the part of this shape no cell covers yet
+            for (ShapeCell& cell : cells) {
+                Loops inside = combineLoops(cell.region, shapes[s], BoolOp::Intersect);
+                Loops rest = combineLoops(cell.region, shapes[s], BoolOp::Subtract);
+                if (!inside.empty()) {
+                    ShapeCell both{std::move(inside), cell.members};
+                    both.members.push_back(s);
+                    next.push_back(std::move(both));
+                    outside = combineLoops(outside, cell.region, BoolOp::Subtract);
+                }
+                if (!rest.empty()) {
+                    next.push_back(ShapeCell{std::move(rest), cell.members});
+                }
+            }
+            if (!outside.empty()) {
+                next.push_back(ShapeCell{std::move(outside), {s}});
+            }
+            cells = std::move(next);
+        }
+        // Each cell may be several separate pieces; the user picks pieces.
+        std::vector<ShapeCell> pieces;
+        for (const ShapeCell& cell : cells) {
+            for (Loops& region : splitIntoRegions(cell.region)) {
+                double area = 0.0;
+                for (const Loop& loop : region) {
+                    area += signedArea(loop);
+                }
+                if (std::fabs(area) > 0.01) {
+                    pieces.push_back(ShapeCell{std::move(region), cell.members});
+                }
+            }
+        }
+        return pieces;
+    }
+
 }

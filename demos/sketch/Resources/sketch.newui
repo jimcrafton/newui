@@ -38,6 +38,8 @@
               { type: "MenuItem", text: "Save As...", shortcutText: "Ctrl+Shift+S" },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Export As Image..." },
+              { type: "MenuItem", text: "Export All Artboards..." },
+              { type: "MenuItem", text: "Trace Image..." },
               { type: "MenuItem", text: "Export As PDF..." },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Document Setup..." },
@@ -60,7 +62,19 @@
               { type: "MenuItem", text: "Delete", shortcutText: "Del" },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Select All", shortcutText: "Ctrl+A" },
-              { type: "MenuItem", text: "Deselect", shortcutText: "Ctrl+Shift+A" }
+              { type: "MenuItem", text: "Deselect", shortcutText: "Ctrl+Shift+A" },
+              {
+                type: "MenuItem",
+                text: "Select Same",
+                children: [
+                  { type: "MenuItem", text: "Fill Color" },
+                  { type: "MenuItem", text: "Stroke Color" },
+                  { type: "MenuItem", text: "Stroke Weight" },
+                  { type: "MenuItem", text: "Opacity" },
+                  { type: "MenuItem", text: "Blend Mode" },
+                  { type: "MenuItem", text: "Object Type" }
+                ]
+              }
             ]
           },
           {
@@ -69,6 +83,27 @@
             children: [
               { type: "MenuItem", text: "Group", shortcutText: "Ctrl+G" },
               { type: "MenuItem", text: "Ungroup", shortcutText: "Ctrl+Shift+G" },
+              {
+                type: "MenuItem",
+                text: "Clipping Mask",
+                children: [
+                  { type: "MenuItem", text: "Make", shortcutText: "Ctrl+7" },
+                  { type: "MenuItem", text: "Release", shortcutText: "Ctrl+Shift+7" }
+                ]
+              },
+              {
+                type: "MenuItem",
+                text: "Artboards",
+                children: [
+                  { type: "MenuItem", text: "New Artboard" },
+                  { type: "MenuItem", text: "Delete Artboard" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Previous Artboard" },
+                  { type: "MenuItem", text: "Next Artboard" },
+                  { type: "MenuItem", text: "", separator: true },
+                  { type: "MenuItem", text: "Fit Artboard in Window" }
+                ]
+              },
               { type: "MenuItem", text: "", separator: true },
               { type: "MenuItem", text: "Lock", shortcutText: "Ctrl+2" },
               { type: "MenuItem", text: "Unlock All" },
@@ -79,6 +114,8 @@
                 type: "MenuItem",
                 text: "Transform",
                 children: [
+                  { type: "MenuItem", text: "Transform Again", shortcutText: "Ctrl+Shift+D" },
+                  { type: "MenuItem", text: "", separator: true },
                   { type: "MenuItem", text: "Rotate 90 CW" },
                   { type: "MenuItem", text: "Rotate 90 CCW" },
                   { type: "MenuItem", text: "Flip Horizontal" },
@@ -140,6 +177,9 @@
               { type: "MenuItem", text: "Snap to Grid", shortcutText: "Ctrl+Shift+'", checked: true },
               { type: "MenuItem", text: "Show Rulers", shortcutText: "Ctrl+R", checked: true },
               { type: "MenuItem", text: "Smart Guides", checked: true },
+              { type: "MenuItem", text: "Show Guides", shortcutText: "Ctrl+;", checked: true },
+              { type: "MenuItem", text: "Lock Guides" },
+              { type: "MenuItem", text: "Clear Guides" },
               { type: "MenuItem", text: "", separator: true },
               {
                 type: "MenuItem",
@@ -360,7 +400,7 @@
           {
             type: "DropDownList",
             name: "zoomCombo",
-            desiredSize: { type: "Size", width: 84, height: 24 },
+            desiredSize: { type: "Size", width: 84, height: 20 },
             desiredSizeOverride: true,
             model: {
               type: "StringListModel",
@@ -378,241 +418,313 @@
         layout: { type: "FlexLayout", orientation: "Horizontal" },
         childViews: [
           {
-            type: "Toolbar",
+            type: "SubView",
             name: "toolPalette",
             visible: true,
-            desiredSize: { type: "Size", width: 40, height: 0 },
+            desiredSize: { type: "Size", width: 80, height: 0 },
             desiredSizeOverride: true,
-            orientation: "Vertical",
-            layout: { type: "FlexLayout", orientation: "Vertical", crossAxisAlignment: "Center", spacing: 2 },
+            layout: { type: "FlexLayout", orientation: "Horizontal" },
             childViews: [
               {
-                type: "ToolbarButton",
-                name: "selectTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-select.svg",
-                toggleButton: true,
-                checked: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "directSelectTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-direct-select.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarSeparator",
-                horizontal: false,
-                desiredSize: { type: "Size", width: 28, height: 9 },
-                desiredSizeOverride: true
-              },
-              {
-                type: "ToolbarButton",
-                name: "rectangleTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-rectangle.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "ellipseTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-ellipse.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "circleTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-circle.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "roundRectTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-roundrect.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "polygonTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-polygon.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "starTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-star.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "arcTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-arc.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "lineTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-line.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "penTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-pen.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "pencilTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-pencil.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "textTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-text.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "gradientTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-gradient.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "widthTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-width.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarSeparator",
-                horizontal: false,
-                desiredSize: { type: "Size", width: 28, height: 9 },
-                desiredSizeOverride: true
-              },
-              {
-                type: "ToolbarButton",
-                name: "scissorsTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-scissors.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "knifeTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-knife.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "eraserTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-eraser.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarSeparator",
-                horizontal: false,
-                desiredSize: { type: "Size", width: 28, height: 9 },
-                desiredSizeOverride: true
-              },
-              {
-                type: "ToolbarButton",
-                name: "handTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-hand.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "ToolbarButton",
-                name: "zoomTool",
-                desiredSize: { type: "Size", width: 32, height: 32 },
-                desiredSizeOverride: true,
-                icon: "icons/tool-zoom.svg",
-                toggleButton: true,
-                iconSize: 20
-              },
-              {
-                type: "SubView",
+                type: "Toolbar",
+                name: "toolColumn1",
                 visible: true,
-                layoutParams: { type: "FlexLayoutParams", weight: 1 }
+                desiredSize: { type: "Size", width: 40, height: 0 },
+                desiredSizeOverride: true,
+                orientation: "Vertical",
+                layout: { type: "FlexLayout", orientation: "Vertical", crossAxisAlignment: "Center", spacing: 2 },
+                childViews: [
+                  {
+                    type: "ToolbarButton",
+                    name: "selectTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-select.svg",
+                    toggleButton: true,
+                    checked: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "directSelectTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-direct-select.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarSeparator",
+                    horizontal: false,
+                    desiredSize: { type: "Size", width: 28, height: 9 },
+                    desiredSizeOverride: true
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "rectangleTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-rectangle.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "ellipseTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-ellipse.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "circleTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-circle.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "roundRectTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-roundrect.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "polygonTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-polygon.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "starTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-star.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "arcTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-arc.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "lineTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-line.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarSeparator",
+                    horizontal: false,
+                    desiredSize: { type: "Size", width: 28, height: 9 },
+                    desiredSizeOverride: true
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "penTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-pen.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "pencilTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-pencil.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "textTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-text.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "gradientTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-gradient.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "widthTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-width.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  }
+                ]
               },
               {
-                type: "SubView",
-                name: "fillWell",
+                type: "Toolbar",
+                name: "toolColumn2",
                 visible: true,
-                desiredSize: { type: "Size", width: 18, height: 18 },
+                desiredSize: { type: "Size", width: 40, height: 0 },
                 desiredSizeOverride: true,
-                style: {
-                  type: "ViewStyle",
-                  borderWidth: 1,
-                  backgroundFill: { type: "Fill", kind: "Color", color: "#e8452cff" }
-                }
-              },
-              {
-                type: "SubView",
-                name: "strokeWell",
-                visible: true,
-                desiredSize: { type: "Size", width: 18, height: 18 },
-                desiredSizeOverride: true,
-                style: {
-                  type: "ViewStyle",
-                  borderWidth: 1,
-                  backgroundFill: { type: "Fill", kind: "Color", color: "#1b3a6bff" }
-                }
+                orientation: "Vertical",
+                layout: { type: "FlexLayout", orientation: "Vertical", crossAxisAlignment: "Center", spacing: 2 },
+                childViews: [
+                  {
+                    type: "ToolbarButton",
+                    name: "scissorsTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-scissors.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "knifeTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-knife.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "eraserTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-eraser.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "shapeBuilderTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-shapebuilder.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarSeparator",
+                    horizontal: false,
+                    desiredSize: { type: "Size", width: 28, height: 9 },
+                    desiredSizeOverride: true
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "eyedropperTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-eyedropper.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "magicWandTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-magicwand.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "lassoTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-lasso.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "artboardTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-artboard.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarSeparator",
+                    horizontal: false,
+                    desiredSize: { type: "Size", width: 28, height: 9 },
+                    desiredSizeOverride: true
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "handTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-hand.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "ToolbarButton",
+                    name: "zoomTool",
+                    desiredSize: { type: "Size", width: 32, height: 32 },
+                    desiredSizeOverride: true,
+                    icon: "icons/tool-zoom.svg",
+                    toggleButton: true,
+                    iconSize: 20
+                  },
+                  {
+                    type: "SubView",
+                    visible: true,
+                    layoutParams: { type: "FlexLayoutParams", weight: 1 }
+                  },
+                  {
+                    type: "SubView",
+                    name: "fillWell",
+                    visible: true,
+                    desiredSize: { type: "Size", width: 18, height: 18 },
+                    desiredSizeOverride: true,
+                    style: {
+                      type: "ViewStyle",
+                      borderWidth: 1,
+                      backgroundFill: { type: "Fill", kind: "Color", color: "#e8452cff" }
+                    }
+                  },
+                  {
+                    type: "SubView",
+                    name: "strokeWell",
+                    visible: true,
+                    desiredSize: { type: "Size", width: 18, height: 18 },
+                    desiredSizeOverride: true,
+                    style: {
+                      type: "ViewStyle",
+                      borderWidth: 1,
+                      backgroundFill: { type: "Fill", kind: "Color", color: "#1b3a6bff" }
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -626,7 +738,7 @@
             name: "sidebar",
             desiredSize: { type: "Size", width: 284, height: 0 },
             desiredSizeOverride: true,
-            contentSize: { type: "Size", width: 268, height: 1330 },
+            contentSize: { type: "Size", width: 268, height: 1847 },
             childViews: [
               {
                 type: "SubView",
@@ -640,17 +752,234 @@
                     bounds: {
                       type: "Rect",
                       pos: { type: "Point", x: 0, y: 0 },
-                      size: { type: "Size", width: 268, height: 1330 }
+                      size: { type: "Size", width: 268, height: 1847 }
                     },
-                    desiredSize: { type: "Size", width: 268, height: 1330 },
+                    desiredSize: { type: "Size", width: 268, height: 1847 },
                     desiredSizeOverride: true,
                     layout: { type: "FlexLayout", orientation: "Vertical" },
                     childViews: [
                       {
                         type: "SubView",
+                        name: "transformPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 122 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "transformPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "transformPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "transformPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Transform",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Transform",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "Label",
+                                name: "transformPanelHeaderInfo",
+                                desiredSize: { type: "Size", width: 86, height: 22 },
+                                desiredSizeOverride: true,
+                                text: "no selection",
+                                textAlignment: "Right",
+                                style: { type: "LabelStyle", text: "no selection", textAlignment: "Right" }
+                              },
+                              {
+                                type: "SubView",
+                                name: "transformPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "transformPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 100 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "transformPosRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "transformXLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "X",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "X", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "transformXField",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    name: "transformYLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Y",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Y", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "transformYField",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "transformSizeRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "transformWLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "W",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "W", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "transformWField",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    name: "transformHLabel",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "H",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "H", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "transformHField",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "linkAspectButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/link-aspect.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "transformAngleRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    name: "transformAngleLabel",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Angle",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Angle", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "transformAngleField",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 30, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "deg",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "deg", textAlignment: "Left" }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider1Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider1",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
                         name: "colorPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 432 },
+                        desiredSize: { type: "Size", width: 268, height: 490 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -710,7 +1039,7 @@
                             type: "SubView",
                             name: "colorPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 410 },
+                            desiredSize: { type: "Size", width: 0, height: 468 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -780,6 +1109,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
+                                    name: "stopOffsetLabel",
                                     desiredSize: { type: "Size", width: 32, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Stop",
@@ -789,12 +1119,13 @@
                                   {
                                     type: "TextField",
                                     name: "stopOffsetField",
-                                    desiredSize: { type: "Size", width: 48, height: 24 },
+                                    desiredSize: { type: "Size", width: 48, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "55%"
                                   },
                                   {
                                     type: "Label",
+                                    name: "gradientAngleLabel",
                                     desiredSize: { type: "Size", width: 38, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Angle",
@@ -804,7 +1135,7 @@
                                   {
                                     type: "TextField",
                                     name: "gradientAngleField",
-                                    desiredSize: { type: "Size", width: 52, height: 24 },
+                                    desiredSize: { type: "Size", width: 52, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "35°"
                                   },
@@ -870,7 +1201,7 @@
                                   {
                                     type: "DropDownList",
                                     name: "spreadCombo",
-                                    desiredSize: { type: "Size", width: 0, height: 24 },
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                                     model: {
@@ -900,7 +1231,7 @@
                                   {
                                     type: "DropDownList",
                                     name: "gradientApplyCombo",
-                                    desiredSize: { type: "Size", width: 0, height: 24 },
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                                     model: {
@@ -949,7 +1280,7 @@
                                   {
                                     type: "TextField",
                                     name: "comp0SliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "232"
                                   }
@@ -985,7 +1316,7 @@
                                   {
                                     type: "TextField",
                                     name: "comp1SliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "69"
                                   }
@@ -1021,7 +1352,7 @@
                                   {
                                     type: "TextField",
                                     name: "comp2SliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "44"
                                   }
@@ -1057,7 +1388,7 @@
                                   {
                                     type: "TextField",
                                     name: "comp3SliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "0"
                                   }
@@ -1093,7 +1424,7 @@
                                   {
                                     type: "TextField",
                                     name: "alphaSliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "100"
                                   }
@@ -1118,16 +1449,50 @@
                                   {
                                     type: "TextField",
                                     name: "hexField",
-                                    desiredSize: { type: "Size", width: 96, height: 24 },
+                                    desiredSize: { type: "Size", width: 96, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "#E8452C"
                                   }
                                 ]
                               },
                               {
+                                type: "SubView",
+                                name: "swatchActions",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 70, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Swatches",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Swatches", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "addSwatchButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-add.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "deleteSwatchButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
                                 type: "SwatchGrid",
                                 name: "swatchGrid",
-                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSize: { type: "Size", width: 0, height: 48 },
                                 desiredSizeOverride: true,
                                 columns: 12,
                                 gap: 3,
@@ -1140,14 +1505,14 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider1Gap",
+                        name: "panelDivider2Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider1",
+                        name: "panelDivider2",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,
@@ -1234,6 +1599,7 @@
                                 childViews: [
                                   {
                                     type: "Label",
+                                    name: "strokeWeightLabel",
                                     desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Weight",
@@ -1243,12 +1609,13 @@
                                   {
                                     type: "TextField",
                                     name: "strokeWeightField",
-                                    desiredSize: { type: "Size", width: 56, height: 24 },
+                                    desiredSize: { type: "Size", width: 56, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "4 pt"
                                   },
                                   {
                                     type: "Label",
+                                    name: "miterLimitLabel",
                                     desiredSize: { type: "Size", width: 36, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "Miter",
@@ -1258,7 +1625,7 @@
                                   {
                                     type: "TextField",
                                     name: "miterLimitField",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "10"
                                   }
@@ -1497,28 +1864,28 @@
                                   {
                                     type: "TextField",
                                     name: "dashField",
-                                    desiredSize: { type: "Size", width: 36, height: 24 },
+                                    desiredSize: { type: "Size", width: 36, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "12"
                                   },
                                   {
                                     type: "TextField",
                                     name: "gapField",
-                                    desiredSize: { type: "Size", width: 36, height: 24 },
+                                    desiredSize: { type: "Size", width: 36, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "6"
                                   },
                                   {
                                     type: "TextField",
                                     name: "dash2Field",
-                                    desiredSize: { type: "Size", width: 36, height: 24 },
+                                    desiredSize: { type: "Size", width: 36, height: 20 },
                                     desiredSizeOverride: true,
                                     text: ""
                                   },
                                   {
                                     type: "TextField",
                                     name: "gap2Field",
-                                    desiredSize: { type: "Size", width: 36, height: 24 },
+                                    desiredSize: { type: "Size", width: 36, height: 20 },
                                     desiredSizeOverride: true,
                                     text: ""
                                   }
@@ -1543,7 +1910,7 @@
                                   {
                                     type: "DropDownList",
                                     name: "arrowStartCombo",
-                                    desiredSize: { type: "Size", width: 52, height: 24 },
+                                    desiredSize: { type: "Size", width: 52, height: 20 },
                                     desiredSizeOverride: true,
                                     model: {
                                       type: "StringListModel",
@@ -1554,7 +1921,7 @@
                                   {
                                     type: "DropDownList",
                                     name: "arrowEndCombo",
-                                    desiredSize: { type: "Size", width: 52, height: 24 },
+                                    desiredSize: { type: "Size", width: 52, height: 20 },
                                     desiredSizeOverride: true,
                                     model: {
                                       type: "StringListModel",
@@ -1573,7 +1940,7 @@
                                   {
                                     type: "TextField",
                                     name: "arrowScaleField",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "100%"
                                   }
@@ -1585,14 +1952,244 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider2Gap",
+                        name: "panelDivider3Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider2",
+                        name: "panelDivider3",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
+                        name: "textPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 124 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "textPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "textPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "textPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Text",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Text",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "textPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "textPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 102 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "textFontRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Font",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Font", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "DropDownList",
+                                    name: "textFontCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["Segoe UI"]
+                                    },
+                                    selectedIndex: 0
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "textSizeRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Size",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Size", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "textSizeField",
+                                    desiredSize: { type: "Size", width: 56, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "24"
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textBoldButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-bold.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textItalicButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-italic.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textAlignLeftButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-align-left.svg",
+                                    toggleButton: true,
+                                    checked: true,
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textAlignCenterButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-align-center.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "textAlignRightButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/text-align-right.svg",
+                                    toggleButton: true,
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "textSpacingRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Track",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Track", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "textTrackingField",
+                                    desiredSize: { type: "Size", width: 50, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 34, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Lead",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Lead", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "textLeadingField",
+                                    desiredSize: { type: "Size", width: 50, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "100"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "%",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "%", textAlignment: "Left" }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider4Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider4",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,
@@ -1808,7 +2405,7 @@
                                   {
                                     type: "TextField",
                                     name: "opacitySliderValue",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "75"
                                   }
@@ -1833,7 +2430,7 @@
                                   {
                                     type: "DropDownList",
                                     name: "blendModeCombo",
-                                    desiredSize: { type: "Size", width: 0, height: 24 },
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
                                     desiredSizeOverride: true,
                                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                                     model: {
@@ -1864,7 +2461,7 @@
                                   {
                                     type: "TextField",
                                     name: "effectXField",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "4"
                                   },
@@ -1880,7 +2477,7 @@
                                   {
                                     type: "TextField",
                                     name: "effectYField",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "4"
                                   },
@@ -1896,7 +2493,7 @@
                                   {
                                     type: "TextField",
                                     name: "effectSizeField",
-                                    desiredSize: { type: "Size", width: 44, height: 24 },
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "6"
                                   }
@@ -1933,7 +2530,7 @@
                                   {
                                     type: "TextField",
                                     name: "effectColorField",
-                                    desiredSize: { type: "Size", width: 84, height: 24 },
+                                    desiredSize: { type: "Size", width: 84, height: 20 },
                                     desiredSizeOverride: true,
                                     text: "#000000"
                                   }
@@ -1945,14 +2542,14 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider3Gap",
+                        name: "panelDivider5Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider3",
+                        name: "panelDivider5",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,
@@ -2061,14 +2658,14 @@
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider4Gap",
+                        name: "panelDivider6Gap",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 8 },
                         desiredSizeOverride: true
                       },
                       {
                         type: "SubView",
-                        name: "panelDivider4",
+                        name: "panelDivider6",
                         visible: true,
                         desiredSize: { type: "Size", width: 0, height: 1 },
                         desiredSizeOverride: true,
@@ -2081,7 +2678,7 @@
                         type: "SubView",
                         name: "layersPanel",
                         visible: true,
-                        desiredSize: { type: "Size", width: 268, height: 228 },
+                        desiredSize: { type: "Size", width: 268, height: 260 },
                         desiredSizeOverride: true,
                         layout: { type: "FlexLayout", orientation: "Vertical" },
                         childViews: [
@@ -2132,7 +2729,7 @@
                             type: "SubView",
                             name: "layersPanelBody",
                             visible: true,
-                            desiredSize: { type: "Size", width: 0, height: 206 },
+                            desiredSize: { type: "Size", width: 0, height: 238 },
                             desiredSizeOverride: true,
                             layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
                             childViews: [
@@ -2154,41 +2751,282 @@
                                   },
                                   {
                                     type: "ToolbarButton",
+                                    name: "addSublayerButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-sublayer.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
                                     name: "deleteLayerButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-delete.svg",
+                                    iconSize: 15
+                                  }
+                                ]
+                              },
+                              {
+                                type: "LayerTree",
+                                name: "layersTree",
+                                desiredSize: { type: "Size", width: 0, height: 160 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "SubView",
+                                name: "layerNameRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Name",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Name", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "layerNameField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "Layer 1"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider7Gap",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 8 },
+                        desiredSizeOverride: true
+                      },
+                      {
+                        type: "SubView",
+                        name: "panelDivider7",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 0, height: 1 },
+                        desiredSizeOverride: true,
+                        style: {
+                          type: "ViewStyle",
+                          backgroundFill: { type: "Fill", kind: "Color", color: "ControlBorder" }
+                        }
+                      },
+                      {
+                        type: "SubView",
+                        name: "artboardsPanel",
+                        visible: true,
+                        desiredSize: { type: "Size", width: 268, height: 154 },
+                        desiredSizeOverride: true,
+                        layout: { type: "FlexLayout", orientation: "Vertical" },
+                        childViews: [
+                          {
+                            type: "SubView",
+                            name: "artboardsPanelHeaderBar",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 22 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "artboardsPanelHeaderPadL",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              },
+                              {
+                                type: "Label",
+                                name: "artboardsPanelHeader",
+                                desiredSize: { type: "Size", width: 0, height: 22 },
+                                desiredSizeOverride: true,
+                                layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                text: "Artboards",
+                                textAlignment: "Left",
+                                style: {
+                                  type: "LabelStyle",
+                                  text: "Artboards",
+                                  textAlignment: "Left",
+                                  font: { type: "Font", name: "Segoe UI", size: 12, bold: true }
+                                }
+                              },
+                              {
+                                type: "SubView",
+                                name: "artboardsPanelHeaderPadR",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 6, height: 1 },
+                                desiredSizeOverride: true
+                              }
+                            ],
+                            style: {
+                              type: "ViewStyle",
+                              backgroundFill: { type: "Fill", kind: "Color", color: "#e6e6e6" }
+                            }
+                          },
+                          {
+                            type: "SubView",
+                            name: "artboardsPanelBody",
+                            visible: true,
+                            desiredSize: { type: "Size", width: 0, height: 132 },
+                            desiredSizeOverride: true,
+                            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 8 },
+                            childViews: [
+                              {
+                                type: "SubView",
+                                name: "artboardActions",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 26 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "addArtboardButton",
+                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    desiredSizeOverride: true,
+                                    icon: "icons/layer-add.svg",
+                                    iconSize: 15
+                                  },
+                                  {
+                                    type: "ToolbarButton",
+                                    name: "deleteArtboardButton",
                                     desiredSize: { type: "Size", width: 24, height: 24 },
                                     desiredSizeOverride: true,
                                     icon: "icons/layer-delete.svg",
                                     iconSize: 15
                                   },
                                   {
-                                    type: "ToolbarButton",
-                                    name: "toggleVisibilityButton",
-                                    desiredSize: { type: "Size", width: 24, height: 24 },
+                                    type: "DropDownList",
+                                    name: "artboardCombo",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
                                     desiredSizeOverride: true,
-                                    icon: "icons/eye.svg",
-                                    iconSize: 15
-                                  },
-                                  {
-                                    type: "ToolbarButton",
-                                    name: "toggleLockButton",
-                                    desiredSize: { type: "Size", width: 24, height: 24 },
-                                    desiredSizeOverride: true,
-                                    icon: "icons/lock.svg",
-                                    iconSize: 15
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    model: {
+                                      type: "StringListModel",
+                                      items: ["Artboard 1"]
+                                    },
+                                    selectedIndex: 0
                                   }
                                 ]
                               },
                               {
-                                type: "ListView",
-                                name: "layersList",
-                                desiredSize: { type: "Size", width: 0, height: 158 },
+                                type: "SubView",
+                                name: "artboardNameRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
                                 desiredSizeOverride: true,
-                                rowHeight: 22,
-                                model: {
-                                  type: "StringListModel",
-                                  items: ["Layer 1", "    Rounded Rectangle", "    Ellipse (gradient)", "    Polygon (locked)", "    Path", "    Text \"Sketch demo\"", "Background"]
-                                },
-                                selectedIndex: 1
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 44, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Name",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Name", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "artboardNameField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "Artboard 1"
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "artboardPositionRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "X",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "X", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "artboardXField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "0"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "Y",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "Y", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "artboardYField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "0"
+                                  }
+                                ]
+                              },
+                              {
+                                type: "SubView",
+                                name: "artboardSizeRow",
+                                visible: true,
+                                desiredSize: { type: "Size", width: 0, height: 24 },
+                                desiredSizeOverride: true,
+                                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 6 },
+                                childViews: [
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "W",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "W", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "artboardWidthField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "612"
+                                  },
+                                  {
+                                    type: "Label",
+                                    desiredSize: { type: "Size", width: 14, height: 20 },
+                                    desiredSizeOverride: true,
+                                    text: "H",
+                                    textAlignment: "Left",
+                                    style: { type: "LabelStyle", text: "H", textAlignment: "Left" }
+                                  },
+                                  {
+                                    type: "TextField",
+                                    name: "artboardHeightField",
+                                    desiredSize: { type: "Size", width: 0, height: 20 },
+                                    desiredSizeOverride: true,
+                                    layoutParams: { type: "FlexLayoutParams", weight: 1 },
+                                    text: "792"
+                                  }
+                                ]
                               }
                             ]
                           }

@@ -178,6 +178,69 @@ namespace sketch {
         return true;
     }
 
+    // ---- Shape Builder ----
+
+    SketchDocument::ShapeBuilderModel SketchDocument::shapeBuilderModel() const {
+        ShapeBuilderModel model;
+        std::vector<Loops> shapes;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            if (isSelected(object->id()) && workable(*object) && paintsFill(*object)) {
+                model.objects.push_back(object->id());
+                shapes.push_back(flattenToLoops(object->geometry()));
+            }
+        }
+        model.cells = arrangeCells(shapes);
+        return model;
+    }
+
+    bool SketchDocument::shapeBuild(const std::vector<std::size_t>& cellIndices, bool erase) {
+        ShapeBuilderModel model = shapeBuilderModel();
+        std::vector<std::size_t> chosen;
+        for (std::size_t index : cellIndices) {
+            if (index < model.cells.size() && std::find(chosen.begin(), chosen.end(), index) == chosen.end()) {
+                chosen.push_back(index);
+            }
+        }
+        if (chosen.empty()) {
+            return false;
+        }
+        Loops taken;
+        std::vector<bool> touched(model.objects.size(), false);
+        std::size_t lookOf = 0;   // the topmost shape under the first chosen cell wears the joined shape's look
+        for (std::size_t n = 0; n < chosen.size(); ++n) {
+            const ShapeCell& cell = model.cells[chosen[n]];
+            taken = taken.empty() ? cell.region : combineLoops(taken, cell.region, BoolOp::Union);
+            for (std::size_t member : cell.members) {
+                touched[member] = true;
+                if (n == 0) {
+                    lookOf = std::max(lookOf, member);
+                }
+            }
+        }
+        if (taken.empty()) {
+            return false;
+        }
+        Replacement replacement;
+        for (std::size_t k = 0; k < model.objects.size(); ++k) {
+            if (!touched[k]) {
+                continue;
+            }
+            const SketchObject* source = findById(model.objects[k]);
+            replacement.remove.push_back(source->id());
+            Loops left = combineLoops(flattenToLoops(source->geometry()), taken, BoolOp::Subtract);
+            if (!left.empty()) {
+                replacement.add.emplace_back(source->cloneWithGeometry(SketchObjectType::Path, loopsToPath(left)));
+            }
+        }
+        if (!erase) {
+            replacement.add.emplace_back(findById(model.objects[lookOf])->cloneWithGeometry(SketchObjectType::Path, loopsToPath(taken)));
+        }
+        std::vector<Replacement> all;
+        all.push_back(std::move(replacement));
+        replaceUndoable(std::move(all), erase ? "Shape Builder Erase" : "Shape Builder");
+        return true;
+    }
+
     // ---- Knife ----
 
     namespace {

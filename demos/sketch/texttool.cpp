@@ -124,7 +124,7 @@ namespace sketch {
         }
         BLPoint local = inverse.map_point(doc);
         double size = object->fontSize();
-        double lineHeight = textLineHeight(object->fontName(), size);
+        double lineHeight = textLineHeight(object->fontName(), size, object->textStyle());
         long line = std::max(0L, long(std::floor((local.y + 0.8 * size) / lineHeight)));
         std::size_t start = 0;
         for (long i = 0; i < line; ++i) {
@@ -140,7 +140,8 @@ namespace sketch {
         std::size_t best = start;
         double bestDistance = 1e300;
         for (std::size_t i = start;; i = nextIndex(textBuffer_, i)) {
-            double x = textAdvance(textBuffer_.substr(start, i - start), object->fontName(), size);
+            double x = textLineOffset(textBuffer_, std::size_t(line), object->fontName(), size, object->textStyle()) +
+                       textAdvance(textBuffer_.substr(start, i - start), object->fontName(), size, object->textStyle());
             double distance = std::fabs(x - local.x);
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -384,9 +385,10 @@ namespace sketch {
         // The caret: a vertical line at the caret position, in the text's own (possibly turned or scaled) frame.
         std::size_t start = lineStart(textBuffer_, textCaret_);
         double size = object->fontSize();
-        double lineHeight = textLineHeight(object->fontName(), size);
+        double lineHeight = textLineHeight(object->fontName(), size, object->textStyle());
         std::size_t line = std::count(textBuffer_.begin(), textBuffer_.begin() + std::ptrdiff_t(start), '\n');
-        double x = textAdvance(textBuffer_.substr(start, textCaret_ - start), object->fontName(), size);
+        double x = textLineOffset(textBuffer_, line, object->fontName(), size, object->textStyle()) +
+                   textAdvance(textBuffer_.substr(start, textCaret_ - start), object->fontName(), size, object->textStyle());
         double baseline = double(line) * lineHeight;
         BLPoint top = toView(object->textMatrix().map_point(x, baseline - 0.8 * size));
         BLPoint bottom = toView(object->textMatrix().map_point(x, baseline + 0.25 * size));

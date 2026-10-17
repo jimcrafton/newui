@@ -25,6 +25,8 @@ namespace sketch {
         const std::vector<std::string>& swatches() const { return swatches_; }
         void addSwatch(const std::string& color);
         void removeSwatch(const std::string& color);
+        // Replaces every swatch at once (the selection is kept while it still points at one).
+        void setSwatches(const std::vector<std::string>& colors);
 
         // Tiles per row. Always at least 1.
         std::size_t columns() const { return columns_; }

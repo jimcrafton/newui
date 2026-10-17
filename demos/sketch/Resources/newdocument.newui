@@ -107,7 +107,7 @@
                   {
                     type: "TextField",
                     name: "newDocumentName",
-                    desiredSize: { type: "Size", width: 0, height: 24 },
+                    desiredSize: { type: "Size", width: 0, height: 20 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                     text: "Untitled-1"
@@ -134,14 +134,14 @@
                   {
                     type: "TextField",
                     name: "widthField",
-                    desiredSize: { type: "Size", width: 110, height: 24 },
+                    desiredSize: { type: "Size", width: 110, height: 20 },
                     desiredSizeOverride: true,
                     text: "8.5"
                   },
                   {
                     type: "DropDownList",
                     name: "unitCombo",
-                    desiredSize: { type: "Size", width: 0, height: 24 },
+                    desiredSize: { type: "Size", width: 0, height: 20 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                     model: {
@@ -172,7 +172,7 @@
                   {
                     type: "TextField",
                     name: "heightField",
-                    desiredSize: { type: "Size", width: 110, height: 24 },
+                    desiredSize: { type: "Size", width: 110, height: 20 },
                     desiredSizeOverride: true,
                     text: "11"
                   },
@@ -283,14 +283,14 @@
                   {
                     type: "TextField",
                     name: "ppiField",
-                    desiredSize: { type: "Size", width: 110, height: 24 },
+                    desiredSize: { type: "Size", width: 110, height: 20 },
                     desiredSizeOverride: true,
                     text: "300"
                   },
                   {
                     type: "DropDownList",
                     name: "ppiPresetCombo",
-                    desiredSize: { type: "Size", width: 0, height: 24 },
+                    desiredSize: { type: "Size", width: 0, height: 20 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                     model: {
@@ -321,7 +321,7 @@
                   {
                     type: "DropDownList",
                     name: "backgroundCombo",
-                    desiredSize: { type: "Size", width: 0, height: 24 },
+                    desiredSize: { type: "Size", width: 0, height: 20 },
                     desiredSizeOverride: true,
                     layoutParams: { type: "FlexLayoutParams", weight: 1 },
                     model: {

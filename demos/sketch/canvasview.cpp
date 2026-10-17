@@ -159,6 +159,12 @@ namespace sketch {
         }
         commitText();
 
+        snapCacheValid_ = false;   // the lines to snap to are collected again on the first snap of this press
+        smartX_.clear();
+        smartY_.clear();
+        if (beginGuideDrag(pt)) {   // a press in a ruler, or on a guide
+            return SyncReturn::Handled;
+        }
         dragStartDoc_ = toDocument(pt);
         dragNowDoc_ = dragStartDoc_;
         dragNowView_ = pt;
@@ -187,6 +193,39 @@ namespace sketch {
             cutPoints_.assign(1, dragStartDoc_);
             drag_ = tool_ == SketchTool::Knife ? Drag::Knife : Drag::Erase;
             style().markDirty();
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::MagicWand) {
+            const bool shift = (keys & kmShift) != 0;
+            if (SketchObject* hit = document_->hitTest(dragStartDoc_, 4.0 / double(zoom_))) {
+                document_->selectSimilar(hit->id(), shift, 0.08);   // a click selects what has the same fill (within a little)
+            } else if (!shift) {
+                document_->clearSelection();
+            }
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Lasso) {
+            cutPoints_.assign(1, dragStartDoc_);
+            drag_ = Drag::Lasso;
+            style().markDirty();
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Artboard) {
+            artboardPress(dragStartDoc_);
+            style().markDirty();
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::Eyedropper) {
+            document_->sampleLook(dragStartDoc_, 4.0 / double(zoom_));   // a click on an object copies its look onto the selection
+            return SyncReturn::Handled;
+        }
+        if (tool_ == SketchTool::ShapeBuilder) {
+            shapeModel_ = document_->shapeBuilderModel();
+            shapeHit_.assign(shapeModel_.cells.size(), false);
+            shapeErase_ = (keys & kmAlt) != 0;
+            cutPoints_.clear();
+            drag_ = Drag::ShapeBuild;
+            shapeBuildMove(dragStartDoc_);
             return SyncReturn::Handled;
         }
         if (tool_ == SketchTool::Pen) {
@@ -302,6 +341,8 @@ namespace sketch {
     }
 
     void CanvasView::applyToSelection(const BLMatrix2D& matrix, double angleDelta) {
+        dragMatrix_ = matrix;
+        dragAngle_ = angleDelta;
         for (const GeometryState& entry : dragBefore_) {
             if (SketchObject* object = document_->findById(entry.id)) {
                 object->setGeometry(entry.path);
@@ -339,21 +380,26 @@ namespace sketch {
                 if (shift) {  // constrain to the dominant axis
                     if (std::fabs(dx) > std::fabs(dy)) { dy = 0.0; } else { dx = 0.0; }
                 }
-                if (snapToGrid_) {  // an edge or the middle of the selection's box jumps onto a grid line
-                    auto pull = [this](double lo, double hi, double delta) {
+                {   // an edge or the middle of the selection's box jumps onto a grid line, a guide or another object's edge or center
+                    double lineX = std::nan(""), lineY = std::nan("");
+                    auto pull = [this](int axis, double lo, double hi, double delta, double& line) {
                         double best = delta, bestGap = 1e30;
+                        line = std::nan("");
                         for (double edge : {lo, (lo + hi) * 0.5, hi}) {
-                            double snapped = snapValue(edge + delta);
+                            double caught = std::nan("");
+                            double snapped = snapAxis(axis, edge + delta, &caught);
                             double gap = std::fabs(snapped - (edge + delta));
                             if (gap > 0.0 && gap < bestGap) {
                                 bestGap = gap;
                                 best = snapped - edge;
+                                line = caught;
                             }
                         }
                         return best;
                     };
-                    if (!shift || dx != 0.0) { dx = pull(dragBounds_.x0, dragBounds_.x1, dx); }
-                    if (!shift || dy != 0.0) { dy = pull(dragBounds_.y0, dragBounds_.y1, dy); }
+                    if (!shift || dx != 0.0) { dx = pull(0, dragBounds_.x0, dragBounds_.x1, dx, lineX); }
+                    if (!shift || dy != 0.0) { dy = pull(1, dragBounds_.y0, dragBounds_.y1, dy, lineY); }
+                    rememberSnapLines(lineX, lineY);
                 }
                 applyToSelection(BLMatrix2D::make_translation(dx, dy));
                 break;
@@ -368,6 +414,13 @@ namespace sketch {
                 bool movesRight = (h == 2 || h == 3 || h == 4);
                 bool movesTop = (h == 0 || h == 1 || h == 2);
                 bool movesBottom = (h == 4 || h == 5 || h == 6);
+                if (std::fabs(dragFrame_.angle) < 1e-9 && !dragFrameBefore_.quad.has_value()) {
+                    // An upright frame's edges snap to the grid, guides and other objects, like a moved edge does.
+                    double lineX = std::nan(""), lineY = std::nan("");
+                    if (movesLeft || movesRight) { mouse.x = snapAxis(0, mouse.x, &lineX); }
+                    if (movesTop || movesBottom) { mouse.y = snapAxis(1, mouse.y, &lineY); }
+                    rememberSnapLines(lineX, lineY);
+                }
                 double ax = movesLeft ? box.x1 : box.x0;
                 double ay = movesTop ? box.y1 : box.y0;
                 if ((keys & kmAlt) != 0) {  // Alt: scale about the center instead of the opposite side
@@ -513,6 +566,21 @@ namespace sketch {
             case Drag::Erase:
                 cutMove(dragNowDoc_);
                 break;
+            case Drag::Lasso:
+                cutMove(dragNowDoc_);
+                break;
+            case Drag::ShapeBuild:
+                shapeErase_ = (keys & kmAlt) != 0;
+                shapeBuildMove(dragNowDoc_);
+                break;
+            case Drag::ArtboardNew:
+            case Drag::ArtboardMove:
+            case Drag::ArtboardResize:
+                artboardMove(dragNowDoc_, keys);
+                break;
+            case Drag::Guide:
+                updateGuideDrag(pt);
+                break;
             case Drag::PenHandle:
                 penDrag(dragNowDoc_, (keys & kmAlt) != 0);
                 break;
@@ -555,6 +623,9 @@ namespace sketch {
                         default: break;
                     }
                     document_->commitGeometry(dragBefore_, what, dragFrameBefore_);
+                    if (finished == Drag::Move || finished == Drag::Resize || finished == Drag::Rotate) {
+                        document_->noteTransform(dragMatrix_, dragAngle_);
+                    }
                 }
                 break;
             case Drag::Origin:
@@ -631,6 +702,30 @@ namespace sketch {
                 break;
             case Drag::Pencil:
                 finishPencil();
+                break;
+            case Drag::Guide:
+                finishGuideDrag(pt);
+                break;
+            case Drag::Lasso: {
+                std::vector<BLPoint> lasso = cutPoints_;
+                cutPoints_.clear();
+                if (lasso.size() < 3) {
+                    if (!((keys & kmShift) != 0)) {
+                        document_->clearSelection();   // a click in empty space
+                    }
+                } else {
+                    document_->selectInPolygon(lasso, (keys & kmShift) != 0);
+                }
+                style().markDirty();
+                break;
+            }
+            case Drag::ShapeBuild:
+                finishShapeBuild();
+                break;
+            case Drag::ArtboardNew:
+            case Drag::ArtboardMove:
+            case Drag::ArtboardResize:
+                finishArtboard(finished);
                 break;
             case Drag::Knife:
                 finishKnife();
@@ -729,6 +824,10 @@ namespace sketch {
             case SketchTool::Scissors: return "scissors";
             case SketchTool::Knife: return "knife";
             case SketchTool::Eraser: return "eraser";
+            case SketchTool::ShapeBuilder: return "crosshair";
+            case SketchTool::Eyedropper: return "crosshair";
+            case SketchTool::MagicWand: return "crosshair";
+            case SketchTool::Lasso: return "crosshair";
             case SketchTool::Text: return "text";
             case SketchTool::Gradient: return "gradient";
             case SketchTool::Hand: return "hand";
@@ -778,6 +877,8 @@ namespace sketch {
             name = "move";
         } else if (drag_ == Drag::Rotate) {
             name = "rotate";
+        } else if (drag_ == Drag::Guide) {
+            name = guideDragVertical_ ? "resize-we" : "resize-ns";
         } else if (drag_ == Drag::LiveShape) {
             name = liveHandleCursor(liveStart_, liveHandle_);   // keeps its arrow for the whole drag
         } else if (drag_ != Drag::None) {
@@ -804,6 +905,11 @@ namespace sketch {
                     BLPoint center = toView(frame.pointAt(0.5, 0.5)), at = handlePosition(handle, frame);
                     name = resizeCursorFor(at.x - center.x, at.y - center.y);
                 }
+            } else if (liveHandle == kLiveNone && !guidesLocked_) {
+                int guide = guideAt(pt);   // over a guide: the arrow it can be dragged along
+                if (guide >= 0) {
+                    name = document_->guides()[std::size_t(guide)].vertical ? "resize-we" : "resize-ns";
+                }
             }
         }
         setCanvasCursor(name);
@@ -817,7 +923,11 @@ namespace sketch {
         }
         if (drag_ != Drag::None) {
             finishDrag(pt, keys);
+            smartX_.clear();
+            smartY_.clear();
+            snapCacheValid_ = false;
             refreshCursor(pt, keys);
+            style().markDirty();
             return SyncReturn::Handled;
         }
         return SyncReturn::Ignored;
@@ -910,8 +1020,16 @@ namespace sketch {
             paste(shift);
             return SyncReturn::Handled;
         }
+        if (ctrl && vkCode == vkNumber7) {
+            if (shift) { document_->releaseClippingMask(); } else { document_->makeClippingMask(); }
+            return SyncReturn::Handled;
+        }
         if (ctrl && vkCode == vkLetterG) {
             if (shift) { document_->ungroupSelection(); } else { document_->groupSelection(); }
+            return SyncReturn::Handled;
+        }
+        if (ctrl && shift && vkCode == vkLetterD) {
+            document_->transformAgain();
             return SyncReturn::Handled;
         }
         if (ctrl && vkCode == vkLetterD) {
@@ -928,6 +1046,10 @@ namespace sketch {
             return SyncReturn::Handled;
         }
         if ((vkCode == vkUpArrow || vkCode == vkDownArrow) && adjustShapeParameter(vkCode == vkUpArrow ? 1 : -1)) {
+            return SyncReturn::Handled;
+        }
+        if (vkCode == vkDelete && tool_ == SketchTool::Artboard) {
+            document_->deleteArtboard(document_->activeArtboard());
             return SyncReturn::Handled;
         }
         if (vkCode == vkDelete && tool_ == SketchTool::DirectSelect && deleteDirectAnchor()) {
@@ -988,6 +1110,7 @@ namespace sketch {
         if (document_ == nullptr) {
             return;
         }
+        paintGuides(ctx);
         if (textEditing_) {
             paintTextEditor(ctx);
         }
@@ -1081,6 +1204,15 @@ namespace sketch {
         }
         if (drag_ == Drag::Knife || drag_ == Drag::Erase || tool_ == SketchTool::Eraser) {
             paintCutOverlay(ctx);
+        }
+        if (drag_ == Drag::Lasso) {
+            paintLasso(ctx);
+        }
+        if (drag_ == Drag::ShapeBuild) {
+            paintShapeBuilder(ctx);
+        }
+        if (tool_ == SketchTool::Artboard) {
+            paintArtboardTool(ctx);
         }
         if (tool_ == SketchTool::Pen) {
             paintPenOverlay(ctx);
@@ -1735,24 +1867,34 @@ namespace sketch {
         if (availW <= 0.0f || availH <= 0.0f) {
             return;
         }
-        float fitW = availW / pageWidth_;
-        float fitH = availH / pageHeight_;
+        BLBox all = document_ != nullptr ? document_->artboardsBounds() : BLBox(0, 0, pageWidth_, pageHeight_);
+        float fitW = availW / float(all.x1 - all.x0);
+        float fitH = availH / float(all.y1 - all.y0);
         float fit = fitW < fitH ? fitW : fitH;
         centered_ = true;
         setZoom(fit < kMinZoom ? kMinZoom : (fit > kMaxZoom ? kMaxZoom : fit));
     }
 
-    void CanvasView::setSnapToGrid(bool value) {
-        snapToGrid_ = value;
+    void CanvasView::fitActiveArtboard() {
+        if (document_ == nullptr) {
+            return;
+        }
+        const Artboard& board = document_->activeArtboardRect();
+        Rect client = getClientBounds();
+        float availW = client.width() - rulerSize() - 40.0f;
+        float availH = client.height() - rulerSize() - 40.0f;
+        if (availW <= 0.0f || availH <= 0.0f) {
+            return;
+        }
+        float fit = std::min(availW / float(board.width), availH / float(board.height));
+        centered_ = false;
+        setZoom(fit < kMinZoom ? kMinZoom : (fit > kMaxZoom ? kMaxZoom : fit));
+        float w = client.width() - rulerSize(), h = client.height() - rulerSize();
+        setPan((w - float(board.width) * zoom_) * 0.5f - float(board.x) * zoom_, (h - float(board.height) * zoom_) * 0.5f - float(board.y) * zoom_);
     }
 
-    double CanvasView::snapValue(double value) const {
-        if (!snapToGrid_ || gridSpacing_ <= 0.0f) {
-            return value;
-        }
-        double spacing = double(gridSpacing_);
-        double nearest = std::round(value / spacing) * spacing;
-        return std::fabs(nearest - value) * double(zoom_) <= 6.0 ? nearest : value;
+    void CanvasView::setSnapToGrid(bool value) {
+        snapToGrid_ = value;
     }
 
     void CanvasView::setShowGrid(bool value) {
@@ -1793,59 +1935,67 @@ namespace sketch {
         ctx.set_fill_style(BLRgba32(0xFF7A7A7Au));
         ctx.fill_rect(BLRect(client.left(), client.top(), client.width(), client.height()));
 
-        // Until the user pans or wheel-zooms, the page stays centered in the drawing area
-        // (vertically only when it fits, else a fixed top margin).
+        // Until the user pans or wheel-zooms, the artboards stay centered in the drawing area
+        // (vertically only when they fit, else a fixed top margin).
+        BLBox all = document_ != nullptr ? document_->artboardsBounds() : BLBox(0, 0, pageWidth_, pageHeight_);
         if (centered_) {
             float availW = client.width() - rulerSize;
             float availH = client.height() - rulerSize;
-            float w = pageWidth_ * zoom_;
-            float h = pageHeight_ * zoom_;
-            panX_ = (availW - w) * 0.5f;
-            panY_ = h < availH - 40.0f ? (availH - h) * 0.5f : 20.0f;
+            float w = float(all.x1 - all.x0) * zoom_;
+            float h = float(all.y1 - all.y0) * zoom_;
+            panX_ = (availW - w) * 0.5f - float(all.x0) * zoom_;
+            panY_ = (h < availH - 40.0f ? (availH - h) * 0.5f : 20.0f) - float(all.y0) * zoom_;
         }
 
-        // Page, with its top-left at the pan offset from the drawing area's corner.
+        // Document (0, 0) sits at the pan offset from the drawing area's corner; each artboard is a page at its own place.
         double pageLeft = client.left() + rulerSize + double(panX_);
         double pageTop = client.top() + rulerSize + double(panY_);
-        double pageW = double(pageWidth_) * double(zoom_);
-        double pageH = double(pageHeight_) * double(zoom_);
-        if (document_ != nullptr && !document_->pageBackground()) {
-            // Transparent: a light checkerboard, clipped to the page.
-            ctx.save();
-            ctx.clip_to_rect(BLRect(pageLeft, pageTop, pageW, pageH));
-            ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
-            ctx.fill_rect(BLRect(pageLeft, pageTop, pageW, pageH));
-            ctx.set_fill_style(BLRgba32(0xFFD9D9D9u));
-            const double square = 10.0;
-            for (double y = 0.0, row = 0.0; y < pageH; y += square, row += 1.0) {
-                for (double x = (std::fmod(row, 2.0) == 0.0 ? 0.0 : square), col = 0.0; x < pageW; x += 2.0 * square, col += 1.0) {
-                    ctx.fill_rect(BLRect(pageLeft + x, pageTop + y, square, square));
+        Font labelFont = FontManager::getSystemFont(SystemUIFont::Status);
+        labelFont.setSize(10.0f);
+        const std::vector<Artboard> single{Artboard{"", 0.0, 0.0, double(pageWidth_), double(pageHeight_)}};
+        const std::vector<Artboard>& boards = document_ != nullptr ? document_->artboards() : single;
+        for (std::size_t index = 0; index < boards.size(); ++index) {
+            const Artboard& board = boards[index];
+            double left = pageLeft + board.x * double(zoom_), top = pageTop + board.y * double(zoom_);
+            double pageW = board.width * double(zoom_), pageH = board.height * double(zoom_);
+            if (document_ != nullptr && !document_->pageBackground()) {
+                // Transparent: a light checkerboard, clipped to the page.
+                ctx.save();
+                ctx.clip_to_rect(BLRect(left, top, pageW, pageH));
+                ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
+                ctx.fill_rect(BLRect(left, top, pageW, pageH));
+                ctx.set_fill_style(BLRgba32(0xFFD9D9D9u));
+                const double square = 10.0;
+                for (double y = 0.0, row = 0.0; y < pageH; y += square, row += 1.0) {
+                    for (double x = (std::fmod(row, 2.0) == 0.0 ? 0.0 : square), col = 0.0; x < pageW; x += 2.0 * square, col += 1.0) {
+                        ctx.fill_rect(BLRect(left + x, top + y, square, square));
+                    }
                 }
+                ctx.restore();
+            } else {
+                ctx.set_fill_style(document_ != nullptr ? document_->pageBackground()->toRgba32() : BLRgba32(0xFFFFFFFFu));
+                ctx.fill_rect(BLRect(left, top, pageW, pageH));
             }
-            ctx.restore();
-        } else {
-            ctx.set_fill_style(document_ != nullptr ? document_->pageBackground()->toRgba32() : BLRgba32(0xFFFFFFFFu));
-            ctx.fill_rect(BLRect(pageLeft, pageTop, pageW, pageH));
-        }
 
-        if (showGrid_) {
-            double step = double(gridSpacing_) * double(zoom_);
-            // Below ~4px a grid is just noise.
-            if (step >= 4.0) {
-                BLPath grid;
-                for (double x = step; x < pageW; x += step) {
-                    double px = std::floor(pageLeft + x) + 0.5;
-                    grid.move_to(px, pageTop);
-                    grid.line_to(px, pageTop + pageH);
+            if (showGrid_) {
+                double step = double(gridSpacing_) * double(zoom_);
+                // Below ~4px a grid is just noise. The lines sit on multiples of the spacing in document units.
+                if (step >= 4.0) {
+                    BLPath grid;
+                    for (double gx = (std::floor(board.x / double(gridSpacing_)) + 1.0) * double(gridSpacing_); gx < board.x + board.width; gx += double(gridSpacing_)) {
+                        double px = std::floor(pageLeft + gx * double(zoom_)) + 0.5;
+                        grid.move_to(px, top);
+                        grid.line_to(px, top + pageH);
+                    }
+                    for (double gy = (std::floor(board.y / double(gridSpacing_)) + 1.0) * double(gridSpacing_); gy < board.y + board.height; gy += double(gridSpacing_)) {
+                        double py = std::floor(pageTop + gy * double(zoom_)) + 0.5;
+                        grid.move_to(left, py);
+                        grid.line_to(left + pageW, py);
+                    }
+                    ctx.set_stroke_style(BLRgba32(0xFFE7E7E7u));
+                    ctx.set_stroke_width(1.0);
+                    ctx.stroke_path(grid);
                 }
-                for (double y = step; y < pageH; y += step) {
-                    double py = std::floor(pageTop + y) + 0.5;
-                    grid.move_to(pageLeft, py);
-                    grid.line_to(pageLeft + pageW, py);
-                }
-                ctx.set_stroke_style(BLRgba32(0xFFE7E7E7u));
-                ctx.set_stroke_width(1.0);
-                ctx.stroke_path(grid);
             }
         }
 
@@ -1859,9 +2009,20 @@ namespace sketch {
             paintOverlay(ctx);
         }
 
-        ctx.set_stroke_style(BLRgba32(0x59000000u));
-        ctx.set_stroke_width(1.0);
-        ctx.stroke_rect(BLRect(pageLeft - 0.5, pageTop - 0.5, pageW + 1.0, pageH + 1.0));
+        // Outlines (the active artboard's is stronger when there are several) and the names above them.
+        BLFont* nameFont = labelFont.blFont();
+        for (std::size_t index = 0; index < boards.size(); ++index) {
+            const Artboard& board = boards[index];
+            double left = pageLeft + board.x * double(zoom_), top = pageTop + board.y * double(zoom_);
+            bool active = document_ != nullptr && boards.size() > 1 && index == document_->activeArtboard();
+            ctx.set_stroke_style(active ? BLRgba32(0xFF1E6FE0u) : BLRgba32(0x59000000u));
+            ctx.set_stroke_width(1.0);
+            ctx.stroke_rect(BLRect(left - 0.5, top - 0.5, board.width * double(zoom_) + 1.0, board.height * double(zoom_) + 1.0));
+            if (boards.size() > 1 && nameFont != nullptr && nameFont->is_valid() && top - 14.0 > client.top() + rulerSize) {
+                ctx.set_fill_style(active ? BLRgba32(0xFFFFFFFFu) : BLRgba32(0xFFD8D8D8u));
+                ctx.fill_utf8_text(BLPoint(left, top - 5.0), *nameFont, board.name.c_str(), board.name.size());
+            }
+        }
         ctx.restore();
 
         if (showRulers_) {

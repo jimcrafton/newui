@@ -748,7 +748,7 @@ namespace sketch {
     }
 
     void SketchObject::rebuildText() {
-        BLPath outline = textOutline(text_, fontName_, fontSize_);
+        BLPath outline = textOutline(text_, fontName_, fontSize_, textStyle_);
         outline.transform(textMatrix_);
         path_ = outline;
     }
@@ -768,6 +768,22 @@ namespace sketch {
             throw std::runtime_error("SketchObject::setFontSize: size must be positive");
         }
         fontSize_ = size;
+        rebuildText();
+    }
+
+    void SketchObject::setTextStyle(const TextStyle& style) {
+        textStyle_ = style;
+        rebuildText();
+    }
+
+    void SketchObject::setTextAll(const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style) {
+        if (fontSize <= 0.0) {
+            throw std::runtime_error("SketchObject::setTextAll: size must be positive");
+        }
+        text_ = text;
+        fontName_ = fontName;
+        fontSize_ = fontSize;
+        textStyle_ = style;
         rebuildText();
     }
 
@@ -910,6 +926,9 @@ namespace sketch {
         copy->name_ = name_;
         copy->visible_ = visible_;
         copy->locked_ = locked_;
+        copy->layer_ = layer_;
+        copy->layerHidden_ = layerHidden_;
+        copy->layerLocked_ = layerLocked_;
         copy->items_ = items_;
         copy->activeFill_ = activeFill_;
         copy->activeStroke_ = activeStroke_;
@@ -922,6 +941,7 @@ namespace sketch {
         copy->fontName_ = fontName_;
         copy->fontSize_ = fontSize_;
         copy->textMatrix_ = textMatrix_;
+        copy->textStyle_ = textStyle_;
         return copy;
     }
 
@@ -933,6 +953,9 @@ namespace sketch {
         copy->name_ = name_;
         copy->visible_ = visible_;
         copy->locked_ = locked_;
+        copy->layer_ = layer_;
+        copy->layerHidden_ = layerHidden_;
+        copy->layerLocked_ = layerLocked_;
         copy->items_ = items_;
         copy->activeFill_ = activeFill_;
         copy->activeStroke_ = activeStroke_;
@@ -1243,6 +1266,44 @@ namespace sketch {
         compositeLayer(ctx, layer, opacity, mode);
     }
 
+    void paintClipped(BLContext& ctx, const BLBox& userBounds, const BLPath& mask, const std::function<void(BLContext&)>& content) {
+        DeviceLayer layer;
+        if (!makeLayer(ctx, userBounds, layer)) {
+            return;
+        }
+        BLImage cover;
+        if (cover.create(layer.image.width(), layer.image.height(), BL_FORMAT_PRGB32) != BL_SUCCESS) {
+            return;
+        }
+        {
+            BLContext lc(layer.image);
+            lc.clear_all();
+            lc.set_transform(layer.toLayer);
+            content(lc);
+            lc.end();
+            BLContext mc(cover);
+            mc.clear_all();
+            mc.set_transform(layer.toLayer);
+            mc.set_fill_style(BLRgba32(0xFFFFFFFFu));
+            mc.fill_path(mask);
+            mc.end();
+        }
+        BLImageData ld, cd;
+        layer.image.get_data(&ld);
+        cover.get_data(&cd);
+        for (int y = 0; y < ld.size.h; ++y) {
+            uint32_t* to = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ld.pixel_data) + std::ptrdiff_t(y) * ld.stride);
+            const uint32_t* from = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(cd.pixel_data) + std::ptrdiff_t(y) * cd.stride);
+            for (int x = 0; x < ld.size.w; ++x) {
+                uint32_t k = from[x] >> 24;
+                uint32_t c = to[x];
+                to[x] = k == 255u ? c : (((((c >> 24) & 255u) * k + 127u) / 255u) << 24) | (((((c >> 16) & 255u) * k + 127u) / 255u) << 16) |
+                    (((((c >> 8) & 255u) * k + 127u) / 255u) << 8) | ((((c & 255u) * k + 127u) / 255u));
+            }
+        }
+        compositeLayer(ctx, layer, 1.0, BlendMode::Normal);
+    }
+
     void SketchObject::drawItem(BLContext& ctx, std::size_t index, const BLBox& box) const {
         const AppearanceItem& item = items_[index];
         // Geometry effects above this item (later in the stack) reshape its outline, in stack order.
@@ -1334,7 +1395,7 @@ namespace sketch {
     }
 
     void SketchObject::paint(BLContext& ctx) const {
-        if (!visible_) {
+        if (!isVisible()) {
             return;
         }
         bool pixelEffects = false;

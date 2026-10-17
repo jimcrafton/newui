@@ -1,5 +1,8 @@
 #include "sketchcontroller.h"
 
+#include "imagetrace.h"
+#include "sketchexport.h"
+
 #include "newdocumentdialog.h"
 
 #include <newui/dialogs.h>
@@ -152,6 +155,79 @@ namespace sketch {
         remember(document_.filePath());
         onStatus(*this, "Saved " + document_.filePath());
         onStateChanged(*this);
+        return true;
+    }
+
+    bool SketchDocumentController::exportImage() {
+        newui::FileDialogOptions options;
+        options.title = "Export As Image";
+        options.filters.push_back({"PNG Image", "*.png"});
+        options.filters.push_back({"Bitmap", "*.bmp"});
+        options.defaultExtension = "png";
+        std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
+        options.defaultFileName = stem + ".png";
+        std::string path;
+        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        if (!exportPageImage(document_, path, exportScaleFor(document_))) {
+            reportError("Could not export the image to " + path);
+            return false;
+        }
+        onStatus(*this, "Exported " + path);
+        return true;
+    }
+
+    bool SketchDocumentController::exportArtboards() {
+        newui::FileDialogOptions options;
+        options.title = "Export All Artboards";
+        options.filters.push_back({"PNG Image", "*.png"});
+        options.filters.push_back({"Bitmap", "*.bmp"});
+        options.defaultExtension = "png";
+        std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
+        options.defaultFileName = stem + ".png";
+        std::string path;
+        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < document_.artboards().size(); ++i) {
+            std::string file = artboardFilePath(path, document_.artboards()[i].name, i + 1);
+            if (!exportArtboardImage(document_, i, file, exportScaleFor(document_))) {
+                reportError("Could not export the image to " + file);
+                return false;
+            }
+        }
+        onStatus(*this, "Exported " + std::to_string(document_.artboards().size()) + " artboards");
+        return true;
+    }
+
+    bool SketchDocumentController::traceImage() {
+        newui::FileDialogOptions options;
+        options.title = "Trace Image";
+        options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp"});
+        options.filters.push_back({"All Files", "*.*"});
+        std::string path;
+        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        if (path.empty()) {
+            return false;
+        }
+        return traceImageFile(path);
+    }
+
+    bool SketchDocumentController::traceImageFile(const std::string& path) {
+        std::vector<std::uint32_t> pixels;
+        int width = 0, height = 0;
+        if (!loadImagePixels(path, pixels, width, height)) {
+            reportError("Could not read the picture " + path);
+            return false;
+        }
+        if (document_.addTrace(traceRgba(pixels, width, height)).empty()) {
+            reportError("Nothing could be traced from " + path);
+            return false;
+        }
+        onStatus(*this, "Traced " + path);
         return true;
     }
 

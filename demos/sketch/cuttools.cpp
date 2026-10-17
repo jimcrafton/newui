@@ -95,4 +95,97 @@ namespace sketch {
         ctx.restore();
     }
 
+
+    // ---- Shape Builder ----
+
+    // The pointer moved: every cell the path passes over (sampled along each step, so a fast drag misses none) is picked up.
+    void CanvasView::shapeBuildMove(const BLPoint& point) {
+        BLPoint from = cutPoints_.empty() ? point : cutPoints_.back();
+        double length = std::hypot(point.x - from.x, point.y - from.y);
+        int steps = std::max(1, int(std::ceil(length * double(zoom_) / 2.0)));
+        for (int i = 1; i <= steps; ++i) {
+            BLPoint p(from.x + (point.x - from.x) * double(i) / double(steps), from.y + (point.y - from.y) * double(i) / double(steps));
+            for (std::size_t c = 0; c < shapeModel_.cells.size(); ++c) {
+                if (!shapeHit_[c] && pointInLoops(p, shapeModel_.cells[c].region)) {
+                    shapeHit_[c] = true;
+                }
+            }
+        }
+        cutPoints_.push_back(point);
+        dragMoved_ = true;
+        style().markDirty();
+    }
+
+    void CanvasView::finishShapeBuild() {
+        std::vector<std::size_t> picked;
+        for (std::size_t c = 0; c < shapeHit_.size(); ++c) {
+            if (shapeHit_[c]) {
+                picked.push_back(c);
+            }
+        }
+        const bool erase = shapeErase_;
+        cutPoints_.clear();
+        shapeHit_.clear();
+        style().markDirty();
+        if (!picked.empty()) {
+            document_->shapeBuild(picked, erase);
+        }
+    }
+
+    // The cells picked up so far tinted (blue to join, red to erase), and the path of the pointer.
+    void CanvasView::paintShapeBuilder(BLContext& ctx) const {
+        ctx.save();
+        ctx.set_fill_style(BLRgba32(shapeErase_ ? 0x66D02020u : 0x663B82F6u));
+        for (std::size_t c = 0; c < shapeModel_.cells.size() && c < shapeHit_.size(); ++c) {
+            if (!shapeHit_[c]) {
+                continue;
+            }
+            BLPath path;
+            for (const Loop& loop : shapeModel_.cells[c].region) {
+                for (std::size_t i = 0; i < loop.size(); ++i) {
+                    BLPoint p = toView(loop[i]);
+                    if (i == 0) { path.move_to(p.x, p.y); } else { path.line_to(p.x, p.y); }
+                }
+                path.close();
+            }
+            ctx.fill_path(path);
+        }
+        if (cutPoints_.size() >= 2) {
+            BLPath line;
+            BLPoint first = toView(cutPoints_[0]);
+            line.move_to(first.x, first.y);
+            for (std::size_t i = 1; i < cutPoints_.size(); ++i) {
+                BLPoint p = toView(cutPoints_[i]);
+                line.line_to(p.x, p.y);
+            }
+            ctx.set_stroke_width(1.5);
+            ctx.set_stroke_style(BLRgba32(shapeErase_ ? 0xFFD02020u : 0xFF3B82F6u));
+            ctx.stroke_path(line);
+        }
+        ctx.restore();
+    }
+
+
+    // The lasso so far: a dashed outline closing back to where it began, lightly tinted.
+    void CanvasView::paintLasso(BLContext& ctx) const {
+        if (cutPoints_.size() < 2) {
+            return;
+        }
+        BLPath path;
+        BLPoint first = toView(cutPoints_[0]);
+        path.move_to(first.x, first.y);
+        for (std::size_t i = 1; i < cutPoints_.size(); ++i) {
+            BLPoint p = toView(cutPoints_[i]);
+            path.line_to(p.x, p.y);
+        }
+        path.close();
+        ctx.save();
+        ctx.set_fill_style(BLRgba32(0x203B82F6u));
+        ctx.fill_path(path);
+        ctx.set_stroke_width(1.0);
+        ctx.set_stroke_style(BLRgba32(0xFF3B82F6u));
+        ctx.stroke_path(path);
+        ctx.restore();
+    }
+
 }

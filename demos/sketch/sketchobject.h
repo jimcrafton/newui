@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sketchcolor.h"
+#include "textoutline.h"
 
 #include <blend2d/blend2d.h>
 
@@ -246,6 +247,8 @@ namespace sketch {
     // resolution, then composites the layer with `opacity` and the blend mode - so everything in the layer blends as one
     // piece (overlapping fills and strokes do not double up). Used for objects and groups with opacity < 1 or a blend mode.
     void paintIsolated(BLContext& ctx, const BLBox& userBounds, double opacity, BlendMode mode, const std::function<void(BLContext&)>& content);
+    // Like paintIsolated, with opacity 1 and Normal, but only what lies inside `mask` (document units, filled non-zero) is kept - a clipping mask.
+    void paintClipped(BLContext& ctx, const BLBox& userBounds, const BLPath& mask, const std::function<void(BLContext&)>& content);
 
     enum class SketchObjectType { Line, Rect, RoundRect, Ellipse, Polygon, Polyline, Path, Text };
 
@@ -277,10 +280,19 @@ namespace sketch {
         const std::string& name() const { return name_; }
         void setName(const std::string& name) { name_ = name; }
 
-        bool isVisible() const { return visible_; }
+        // isVisible() / isLocked() are what the object IS now: its own flag together with those of the layers it is in (a hidden
+        // or locked layer hides / locks everything in it, sublayers included). ownVisible() / ownLocked() are the object's own flags,
+        // the ones that are saved and that Hide / Lock set. The document keeps the layer part up to date (setLayerState).
+        bool isVisible() const { return visible_ && !layerHidden_; }
+        bool ownVisible() const { return visible_; }
         void setVisible(bool value) { visible_ = value; }
-        bool isLocked() const { return locked_; }
+        bool isLocked() const { return locked_ || layerLocked_; }
+        bool ownLocked() const { return locked_; }
         void setLocked(bool value) { locked_ = value; }
+        // The layer the object is in (an id of SketchDocument::layers(); 0 = not placed yet - the document puts it in the active layer).
+        std::size_t layer() const { return layer_; }
+        void setLayer(std::size_t layer) { layer_ = layer; }
+        void setLayerState(bool hidden, bool locked) { layerHidden_ = hidden; layerLocked_ = locked; }
 
         // The appearance stack, bottom to top. One fill and one stroke are "active" (the Appearance panel's selected
         // row of that kind): fill()/stroke()/strokeWidth()/strokeOptions() and their setters - and so the Color and Stroke
@@ -335,6 +347,11 @@ namespace sketch {
         void setFontName(const std::string& fontName);
         void setFontSize(double size);
         void setTextState(const std::string& text, const std::string& fontName, double fontSize, const BLMatrix2D& matrix);
+        // Weight, slant, alignment, tracking and leading (see TextStyle); the outline is rebuilt.
+        const TextStyle& textStyle() const { return textStyle_; }
+        void setTextStyle(const TextStyle& style);
+        // Everything that shapes the words at once (one rebuild) - what undo of a text change restores.
+        void setTextAll(const std::string& text, const std::string& fontName, double fontSize, const TextStyle& style);
 
         const BLPath& geometry() const { return path_; }
         // Replaces the outline (undo restores the pre-edit one through this).
@@ -398,6 +415,9 @@ namespace sketch {
         std::string name_;
         bool visible_ = true;
         bool locked_ = false;
+        std::size_t layer_ = 0;
+        bool layerHidden_ = false;   // a layer it is in is hidden / locked (kept by the document)
+        bool layerLocked_ = false;
         std::vector<AppearanceItem> items_ = {AppearanceItem::makeFill(SketchPaint::solid(SketchColor::gray(1.0f))),
             AppearanceItem::makeStroke(SketchPaint::solid(SketchColor::gray(0.0f)), 1.0)};
         double opacity_ = 1.0;
@@ -411,6 +431,7 @@ namespace sketch {
         std::string fontName_;
         double fontSize_ = 24.0;
         BLMatrix2D textMatrix_ = BLMatrix2D::make_identity();
+        TextStyle textStyle_;
     };
 
 }

@@ -1,11 +1,14 @@
 #include "stylepanel.h"
 
+#include "numberscrubber.h"
+
 #include <newui/color.h>
 #include <newui/menus.h>
 #include <newui/models.h>
 #include <newui/mouse_constants.h>
 
 #include <algorithm>
+#include <cctype>
 #include <memory>
 #include <cmath>
 #include <cstdio>
@@ -361,6 +364,18 @@ namespace sketch {
             }
             refreshGraphicStyles();
         });
+        onTool("addSwatchButton", [this]() {
+            document_.addSwatch(displayedColor().convertedTo(ColorSpace::RGB).toHex());
+            refreshSwatches();
+        });
+        onTool("deleteSwatchButton", [this]() {
+            if (auto* grid = find<SwatchGrid>("swatchGrid")) {
+                if (document_.deleteSwatch(grid->selectedIndex())) {
+                    grid->setSelectedIndex(document_.swatches().size());   // none chosen
+                }
+            }
+            refreshSwatches();
+        });
         if (auto* swatches = find<SwatchGrid>("swatchGrid")) {
             swatches->onSwatchPicked += [this](SwatchGrid& grid) {
                 std::size_t index = grid.selectedIndex();
@@ -581,7 +596,46 @@ namespace sketch {
             }
             return SyncReturn::Handled;
         };
+        // Dragging a caption scrubs its number. The plain step is the unit; Shift makes it a tenth, Ctrl+Shift a hundredth.
+        bindScrub("strokeWeightLabel", "strokeWeightField", 0.5, 0.0, 1000.0);
+        bindScrub("miterLimitLabel", "miterLimitField", 1.0, 1.0, 500.0);
+        bindScrub("stopOffsetLabel", "stopOffsetField", 1.0, 0.0, 100.0);
+        bindScrub("gradientAngleLabel", "gradientAngleField", 1.0, -360.0, 360.0);
+        bindScrub("effectXLabel", "effectXField", 1.0, -1000.0, 1000.0);
+        bindScrub("effectYLabel", "effectYField", 1.0, -1000.0, 1000.0);
+        bindScrub("effectSizeLabel", "effectSizeField", 1.0, -1000.0, 1000.0);   // Offset Path may go negative; the others clamp at 0 themselves
         refresh();
+    }
+
+    void StylePanel::bindScrub(const char* labelName, const char* fieldName, double unit, double minimum, double maximum) {
+        auto* label = find<Label>(labelName);
+        if (label == nullptr || find<TextField>(fieldName) == nullptr) {
+            return;
+        }
+        auto suffix = std::make_shared<std::string>();   // what follows the number in the field ("pt", "%", the degree sign)
+        NumberScrubber::Callbacks callbacks;
+        callbacks.begin = [this, fieldName, suffix](double& value) {
+            auto* field = find<TextField>(fieldName);
+            if (field == nullptr || !field->isEnabled() || !field->isVisible() || !leadingNumber(field->text(), value)) {
+                return false;
+            }
+            std::string text = narrow(field->text());
+            std::size_t at = 0;
+            while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.' || text[at] == '-' || text[at] == '+')) { ++at; }
+            *suffix = text.substr(at);
+            beginDrag();
+            return true;
+        };
+        callbacks.change = [this, fieldName, suffix](double value) {
+            if (auto* field = find<TextField>(fieldName)) {
+                char buffer[48];
+                std::snprintf(buffer, sizeof(buffer), "%g", value);
+                field->setText(widen(buffer + *suffix));
+                field->onReturnPressed(*field);
+            }
+        };
+        callbacks.end = [this](bool) { endDrag(); };
+        NumberScrubber::attach(*label, unit, minimum, maximum, std::move(callbacks));
     }
 
     namespace {
@@ -1204,8 +1258,18 @@ namespace sketch {
         refreshAppearance(first);
         refreshEffectOptions(first);
         refreshGraphicStyles();
+        refreshSwatches();
 
         updating_ = false;
+    }
+
+    void StylePanel::refreshSwatches() {
+        if (auto* grid = find<SwatchGrid>("swatchGrid")) {
+            grid->setSwatches(document_.swatches());
+            if (auto* button = find<Control>("deleteSwatchButton")) {
+                button->setEnabled(grid->selectedIndex() < document_.swatches().size());
+            }
+        }
     }
 
     // ---- Effects ----

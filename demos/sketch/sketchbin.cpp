@@ -408,8 +408,9 @@ namespace sketch {
                 lookAt = found->second;
             }
 
-            unsigned flags = (object.isVisible() ? 1u : 0u) | (object.isLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 ? 4u : 0u) |
-                (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u);
+            unsigned flags = (object.ownVisible() ? 1u : 0u) | (object.ownLocked() ? 2u : 0u) | (object.frameAngle() != 0.0 ? 4u : 0u) |
+                (object.groups().empty() ? 0u : 8u) | (object.isText() ? 16u : 0u) |
+                (object.isText() && !object.textStyle().isDefault() ? 32u : 0u);
             objects.u8(unsigned(object.type()));
             objects.u8(flags);
             objects.varint(strings.add(object.name()));
@@ -436,6 +437,12 @@ namespace sketch {
                 objects.f64(m.m20);
                 objects.f64(m.m21);
             }
+            if (flags & 32u) {   // text style: weight / slant / alignment, tracking, leading
+                const TextStyle& style = object.textStyle();
+                objects.u8((style.bold ? 1u : 0u) | (style.italic ? 2u : 0u) | (unsigned(style.align) << 2));
+                objects.f64(style.tracking);
+                objects.f64(style.leading);
+            }
             BLPathView view = object.geometry().view();
             objects.varint(view.size);
             objects.bytes(view.command_data, view.size);
@@ -454,6 +461,44 @@ namespace sketch {
             page.u8(0);
         }
 
+        ByteWriter guideChunk;
+        guideChunk.varint(document.guides().size());
+        for (const Guide& guide : document.guides()) {
+            guideChunk.u8(guide.vertical ? 1u : 0u);
+            guideChunk.f64(guide.position);
+        }
+
+        // Layers: the tree (id, parent, flags, name), then the stacking order as runs of (layer id, object count).
+        ByteWriter layerChunk;
+        layerChunk.varint(document.layers().size());
+        for (const Layer& layer : document.layers()) {
+            layerChunk.varint(layer.id);
+            layerChunk.varint(layer.parent);
+            layerChunk.u8((layer.visible ? 0u : 1u) | (layer.locked ? 2u : 0u) | (layer.expanded ? 0u : 4u));
+            layerChunk.varint(strings.add(layer.name));
+        }
+        {
+            std::vector<std::pair<std::size_t, std::size_t>> runs;
+            for (std::size_t i = 0; i < document.objectCount(); ++i) {
+                std::size_t layer = document.object(i).layer();
+                if (runs.empty() || runs.back().first != layer) {
+                    runs.push_back({layer, 0});
+                }
+                ++runs.back().second;
+            }
+            layerChunk.varint(runs.size());
+            for (const auto& run : runs) {
+                layerChunk.varint(run.first);
+                layerChunk.varint(run.second);
+            }
+        }
+
+        ByteWriter swatchChunk;
+        swatchChunk.varint(document.swatches().size());
+        for (const std::string& swatch : document.swatches()) {
+            swatchChunk.text(swatch);
+        }
+
         ByteWriter groups;
         groups.varint(groupIds.size());
         for (std::size_t id : groupIds) {
@@ -461,6 +506,31 @@ namespace sketch {
             groups.varint(id);
             groups.f64(props.opacity);
             groups.u8(unsigned(props.blendMode));
+        }
+
+        ByteWriter boards;
+        boards.varint(document.artboards().size());
+        boards.varint(document.activeArtboard());
+        for (const Artboard& board : document.artboards()) {
+            boards.text(board.name);
+            boards.f64(board.x);
+            boards.f64(board.y);
+            boards.f64(board.width);
+            boards.f64(board.height);
+        }
+
+        ByteWriter clips;
+        {
+            std::vector<std::size_t> clipIds;
+            for (std::size_t id : groupIds) {
+                if (document.groupProps(id).clip) {
+                    clipIds.push_back(id);
+                }
+            }
+            clips.varint(clipIds.size());
+            for (std::size_t id : clipIds) {
+                clips.varint(id);
+            }
         }
 
         ByteWriter styles;
@@ -486,9 +556,14 @@ namespace sketch {
 
         std::string body;
         chunk(body, "PAGE", page.data());
+        chunk(body, "GUID", guideChunk.data());
+        chunk(body, "LAYR", layerChunk.data());
+        chunk(body, "SWCH", swatchChunk.data());
         chunk(body, "STRS", stringChunk.data());
         chunk(body, "STYL", lookChunk.data());
         chunk(body, "GRPS", groups.data());
+        chunk(body, "CLIP", clips.data());
+        chunk(body, "ABRD", boards.data());
         chunk(body, "GSTY", styles.data());
         chunk(body, "OBJS", objects.data());
 
@@ -531,7 +606,15 @@ namespace sketch {
         std::vector<std::string> strings;
         std::vector<Look> looks;
         std::map<std::size_t, GroupProps> groupProps;
+        std::set<std::size_t> clipGroups;
+        std::vector<Artboard> artboards;
+        std::size_t artboardActive = 0;
         std::vector<GraphicStyle> graphicStyles;
+        std::vector<Guide> guides;
+        std::vector<std::string> swatches = defaultSwatches();
+        std::vector<Layer> layers;
+        std::vector<std::size_t> layerNames;                              // string index per layer (resolved once the strings are in)
+        std::vector<std::pair<std::size_t, std::size_t>> layerRuns;       // (layer id, object count) in stacking order
         std::vector<std::unique_ptr<SketchObject>> objects;
         bool havePage = false, haveObjects = false;
 
@@ -560,6 +643,53 @@ namespace sketch {
                     return false;
                 }
                 havePage = true;
+            } else if (tag == "GUID") {
+                std::size_t n = in.count(9);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    Guide guide;
+                    guide.vertical = in.u8() == 1u;
+                    guide.position = in.f64();
+                    if (std::isfinite(guide.position)) {
+                        guides.push_back(guide);
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "SWCH") {
+                std::size_t n = in.count(1);
+                swatches.clear();
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    swatches.push_back(in.text());
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "LAYR") {
+                std::size_t n = in.count(4);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    Layer layer;
+                    layer.id = std::size_t(in.varint());
+                    layer.parent = std::size_t(in.varint());
+                    unsigned flags = in.u8();
+                    layer.visible = (flags & 1u) == 0;
+                    layer.locked = (flags & 2u) != 0;
+                    layer.expanded = (flags & 4u) == 0;
+                    layerNames.push_back(std::size_t(in.varint()));
+                    if (layer.id != 0) {
+                        layers.push_back(layer);
+                    } else {
+                        layerNames.pop_back();
+                    }
+                }
+                std::size_t runs = in.count(2);
+                for (std::size_t i = 0; i < runs && in.ok(); ++i) {
+                    std::size_t id = std::size_t(in.varint());
+                    layerRuns.push_back({id, std::size_t(in.varint())});
+                }
+                if (!in.ok()) {
+                    return false;
+                }
             } else if (tag == "STRS") {
                 std::size_t n = in.count(1);
                 strings.reserve(n);
@@ -596,6 +726,32 @@ namespace sketch {
                     props.opacity = in.f64();
                     props.blendMode = BlendMode(in.enumeration(12));
                     groupProps[id] = props;
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "ABRD") {
+                std::size_t n = in.count(33);
+                artboardActive = std::size_t(in.varint());
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    Artboard board;
+                    board.name = in.text();
+                    board.x = in.f64();
+                    board.y = in.f64();
+                    board.width = in.f64();
+                    board.height = in.f64();
+                    if (std::isfinite(board.x) && std::isfinite(board.y) && std::isfinite(board.width) && std::isfinite(board.height) &&
+                        board.width >= 1.0 && board.height >= 1.0) {
+                        artboards.push_back(board);
+                    }
+                }
+                if (!in.ok()) {
+                    return false;
+                }
+            } else if (tag == "CLIP") {
+                std::size_t n = in.count(1);
+                for (std::size_t i = 0; i < n && in.ok(); ++i) {
+                    clipGroups.insert(std::size_t(in.varint()));
                 }
                 if (!in.ok()) {
                     return false;
@@ -660,6 +816,18 @@ namespace sketch {
                             return false;
                         }
                     }
+                    TextStyle textStyle;
+                    if (objectFlags & 32u) {
+                        unsigned bits = in.u8();
+                        textStyle.bold = (bits & 1u) != 0;
+                        textStyle.italic = (bits & 2u) != 0;
+                        textStyle.align = int((bits >> 2) & 3u) > 2 ? 0 : int((bits >> 2) & 3u);
+                        textStyle.tracking = in.f64();
+                        textStyle.leading = in.f64();
+                        if (!std::isfinite(textStyle.tracking) || !(textStyle.leading > 0.0) || !std::isfinite(textStyle.leading)) {
+                            return false;
+                        }
+                    }
                     std::size_t vertices = in.count(1 + sizeof(BLPoint));
                     BLPath path;
                     if (vertices > 0) {
@@ -685,6 +853,7 @@ namespace sketch {
                     std::unique_ptr<SketchObject> object(SketchObject::make(SketchObjectType(type), path));
                     if (SketchObjectType(type) == SketchObjectType::Text) {
                         object->setTextState(words, font, fontSize, matrix);
+                        object->setTextStyle(textStyle);
                         object->setGeometry(path);   // the outline as saved, whatever the fonts here would make of the words
                     }
                     const Look& look = looks[lookAt];
@@ -713,12 +882,37 @@ namespace sketch {
         // Accepted: install it. Group ids in the file are only labels; each gets a fresh id from the document.
         document.clearObjects();
         document.setPageSize(pageWidth, pageHeight);
+        if (!artboards.empty()) {
+            document.setArtboards(artboards, artboardActive);
+        }
         document.setPpi(ppi);
         document.setPageBackground(background);
         document.setColorMode(colorMode);                // converts the document's defaults and styles into the mode, so
-        document.setGraphicStyles(graphicStyles);        // the saved styles go in after it, exactly as they were written
+        document.setGraphicStyles(graphicStyles);
+        document.setGuides(guides);        // the saved styles go in after it, exactly as they were written
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            layers[i].name = layerNames[i] < strings.size() ? strings[layerNames[i]] : "Layer " + std::to_string(layers[i].id);
+            bool known = false;
+            for (const Layer& p : layers) {
+                known = known || (p.id == layers[i].parent && p.id != layers[i].id);
+            }
+            if (!known) {
+                layers[i].parent = 0;
+            }
+        }
+        document.setSwatches(swatches);
+        document.setLayers(layers);   // empty = the one default layer
+        std::size_t runAt = 0, runUsed = 0;
         std::map<std::size_t, std::size_t> groupIds;
         for (std::unique_ptr<SketchObject>& object : objects) {
+            while (runAt < layerRuns.size() && runUsed >= layerRuns[runAt].second) {
+                ++runAt;
+                runUsed = 0;
+            }
+            if (runAt < layerRuns.size()) {
+                object->setLayer(layerRuns[runAt].first);
+                ++runUsed;
+            }
             std::vector<std::size_t> mapped;
             for (std::size_t g : object->groups()) {
                 auto found = groupIds.find(g);
@@ -726,8 +920,10 @@ namespace sketch {
                     std::size_t fresh = document.newGroupId();
                     found = groupIds.emplace(g, fresh).first;
                     auto props = groupProps.find(g);
-                    if (props != groupProps.end()) {
-                        document.setGroupProps(fresh, props->second);
+                    GroupProps restored = props != groupProps.end() ? props->second : GroupProps();
+                    restored.clip = clipGroups.count(g) != 0;
+                    if (!restored.isDefault()) {
+                        document.setGroupProps(fresh, restored);
                     }
                 }
                 mapped.push_back(found->second);

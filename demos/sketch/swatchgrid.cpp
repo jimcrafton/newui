@@ -48,6 +48,17 @@ namespace sketch {
         style().markDirty();
     }
 
+    void SwatchGrid::setSwatches(const std::vector<std::string>& colors) {
+        if (colors == swatches_) {
+            return;
+        }
+        swatches_ = colors;
+        if (selectedIndex_ > swatches_.size()) {
+            selectedIndex_ = swatches_.size();
+        }
+        style().markDirty();
+    }
+
     void SwatchGrid::removeSwatch(const std::string& color) {
         auto it = std::find(swatches_.begin(), swatches_.end(), color);
         if (it != swatches_.end()) {

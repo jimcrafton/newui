@@ -6,6 +6,8 @@ add_executable(sketch
     canvastools.cpp
     texttool.cpp
     cuttools.cpp
+    artboardtool.cpp
+    guides.cpp
     cursorset.h cursorset.cpp
     shapetools.h shapetools.cpp
     pathops.h pathops.cpp
@@ -16,11 +18,28 @@ add_executable(sketch
     swatchgrid.h swatchgrid.cpp
     pagepreview.h pagepreview.cpp
     stylepanel.h stylepanel.cpp
+    transformpanel.h transformpanel.cpp
+    layertree.h layertree.cpp
+    layerspanel.h layerspanel.cpp
+    artboardpanel.h artboardpanel.cpp
+    textpanel.h textpanel.cpp
+    numberscrubber.h numberscrubber.cpp
     sketchcolor.h sketchcolor.cpp
     sketchobject.h sketchobject.cpp
     sketchdocument.h sketchdocument.cpp
     documentcutting.cpp
+    documentpaths.cpp
+    documenttransform.cpp
+    documentguides.cpp
+    documentlayers.cpp
+    documentswatches.cpp
+    documentselect.cpp
+    documentclip.cpp
+    documentartboards.cpp
+    documenttrace.cpp
+    imagetrace.h imagetrace.cpp
     sketchsvg.h sketchsvg.cpp
+    sketchexport.h sketchexport.cpp
     sketchcontroller.h sketchcontroller.cpp
     sketchcommands.h sketchcommands.cpp
     sketchwindow.h sketchwindow.cpp
@@ -51,11 +70,23 @@ add_executable(sketch_tests
     sketchobject.cpp
     sketchdocument.cpp
     documentcutting.cpp
+    documentpaths.cpp
+    documenttransform.cpp
+    documentguides.cpp
+    documentlayers.cpp
+    documentswatches.cpp
+    documentselect.cpp
+    documentclip.cpp
+    documentartboards.cpp
+    documenttrace.cpp
+    imagetrace.cpp
     sketchsvg.cpp
+    sketchexport.cpp
     shapetools.cpp
     pathops.cpp
     textoutline.cpp
     gzip.cpp
+    numberscrubber.cpp
     sketchbin.cpp
     cursorset.cpp
     newdocumentmodel.cpp

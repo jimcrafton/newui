@@ -54,6 +54,9 @@ namespace sketch {
         add("file.save", [this]() { files_.save(); });
         add("file.saveAs", [this]() { files_.saveAs(); });
         add("file.documentSetup", [this]() { files_.documentSetup(); });
+        add("file.exportImage", [this]() { files_.exportImage(); });
+        add("file.traceImage", [this]() { files_.traceImage(); });
+        add("file.exportArtboards", [this]() { files_.exportArtboards(); });
         add("file.exit", [this]() {
             if (files_.canClose()) {
                 newui::RunLoop::current().quit();
@@ -74,6 +77,15 @@ namespace sketch {
         add("edit.delete", [this]() { document_.deleteSelection(); });
         add("edit.selectAll", [this]() { document_.selectAll(); });
         add("edit.deselect", [this]() { document_.clearSelection(); });
+        auto same = [this](const char* id, SketchDocument::SameKind kind) {
+            add(id, [this, kind]() { document_.selectSame(kind); }, [this]() { return !document_.selection().empty(); });
+        };
+        same("edit.sameFill", SketchDocument::SameKind::FillColor);
+        same("edit.sameStroke", SketchDocument::SameKind::StrokeColor);
+        same("edit.sameWeight", SketchDocument::SameKind::StrokeWeight);
+        same("edit.sameOpacity", SketchDocument::SameKind::Opacity);
+        same("edit.sameBlend", SketchDocument::SameKind::BlendMode);
+        same("edit.sameType", SketchDocument::SameKind::ObjectType);
     }
 
     // ---- Object: group, lock, hide, transform. One undo step each (the document does the work). ----
@@ -81,6 +93,16 @@ namespace sketch {
     void SketchCommandController::addObjectCommands() {
         add("object.group", [this]() { document_.groupSelection(); });
         add("object.ungroup", [this]() { document_.ungroupSelection(); });
+        add("artboard.new", [this]() { document_.addArtboardBesideLast(); });
+        add("artboard.delete", [this]() { document_.deleteArtboard(document_.activeArtboard()); });
+        add("artboard.previous", [this]() {
+            std::size_t n = document_.artboards().size();
+            document_.setActiveArtboard((document_.activeArtboard() + n - 1) % n);
+        });
+        add("artboard.next", [this]() { document_.setActiveArtboard((document_.activeArtboard() + 1) % document_.artboards().size()); });
+        add("artboard.fit", [this]() { canvas_.fitActiveArtboard(); });
+        add("object.clipMake", [this]() { document_.makeClippingMask(); });
+        add("object.clipRelease", [this]() { document_.releaseClippingMask(); });
         add("object.lock", [this]() { document_.lockSelection(); });
         add("object.unlockAll", [this]() { document_.unlockAll(); });
         add("object.hide", [this]() { document_.hideSelection(); });
@@ -89,6 +111,7 @@ namespace sketch {
         add("object.rotate90ccw", [this]() { document_.rotateSelection90(false); });
         add("object.flipHorizontal", [this]() { document_.flipSelection(true); });
         add("object.flipVertical", [this]() { document_.flipSelection(false); });
+        add("object.transformAgain", [this]() { document_.transformAgain(); }, [this]() { return document_.canTransformAgain() && !document_.selection().empty(); });
         add("object.resetBoundingBox", [this]() { document_.resetBoundingBox(); });
         // Pathfinder works on two or more selected objects.
         auto twoSelected = [this]() { return document_.selection().size() >= 2; };
@@ -96,6 +119,10 @@ namespace sketch {
         add("pathfinder.minusFront", [this]() { document_.combineSelection(BoolOp::Subtract); }, twoSelected);
         add("pathfinder.intersect", [this]() { document_.combineSelection(BoolOp::Intersect); }, twoSelected);
         add("pathfinder.exclude", [this]() { document_.combineSelection(BoolOp::Exclude); }, twoSelected);
+        add("path.join", [this]() { document_.joinSelection(); });
+        add("path.reverse", [this]() { document_.reverseSelection(); });
+        add("path.simplify", [this]() { document_.simplifySelection(); });
+        add("path.outlineStroke", [this]() { document_.outlineStroke(); });
         add("color.rgb", [this]() { document_.convertToColorMode(ColorSpace::RGB); });
         add("color.cmyk", [this]() { document_.convertToColorMode(ColorSpace::CMYK); });
     }
@@ -132,6 +159,10 @@ namespace sketch {
         add("view.toggleGrid", [this]() { canvas_.setShowGrid(!canvas_.showGrid()); });
         add("view.toggleRulers", [this]() { canvas_.setShowRulers(!canvas_.showRulers()); });
         add("view.toggleSnap", [this]() { canvas_.setSnapToGrid(!canvas_.snapToGrid()); });
+        add("view.toggleGuides", [this]() { canvas_.setShowGuides(!canvas_.showGuides()); });
+        add("view.lockGuides", [this]() { canvas_.setGuidesLocked(!canvas_.guidesLocked()); });
+        add("view.clearGuides", [this]() { document_.clearGuides(); }, [this]() { return !document_.guides().empty(); });
+        add("view.toggleSmartGuides", [this]() { canvas_.setSmartGuides(!canvas_.smartGuides()); });
     }
 
 }

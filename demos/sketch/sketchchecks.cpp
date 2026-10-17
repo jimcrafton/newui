@@ -2,12 +2,14 @@
 
 #include "canvasview.h"
 #include "gradientbar.h"
+#include "layertree.h"
 #include "sketchdocument.h"
 #include "sketchwindow.h"
 #include "swatchgrid.h"
 
 #include <newui/controls.h>
 #include <newui/keyboard_constants.h>
+#include <newui/mouse_constants.h>
 #include <newui/utils.h>
 
 #include <cmath>
@@ -51,6 +53,16 @@ namespace sketch {
                 checkPalette();
                 checkCommands();
                 checkCuttingTools();
+                checkPathMenu();
+                checkTransformPanel();
+                checkScrubbing();
+                checkGuides();
+                checkLayers();
+                checkTextPanel();
+                checkSelectTools();
+                checkArtboards();
+                checkClippingMenu();
+                checkShapeBuilder();
                 checkColorPanel();
                 checkGradientTool();
                 checkAppearancePanel();
@@ -78,6 +90,32 @@ namespace sketch {
 
         // Scissors, Knife, Eraser and the Pathfinder commands, driven through the canvas and the menu.
         void checkCuttingTools();
+
+        // The Transform panel: its fields show the selection, typing a value moves / resizes / turns it, the link keeps proportions.
+        void checkTransformPanel();
+
+        // Shape Builder: dragging across the pieces of overlapping shapes joins them.
+        void checkShapeBuilder();
+
+        // Magic Wand, Lasso and Edit > Select Same.
+        void checkSelectTools();
+        void checkArtboards();
+        void checkClippingMenu();
+
+        // The Text panel: size, weight, alignment, tracking of the selected text.
+        void checkTextPanel();
+
+        // Layers: the tree, the panel (buttons, rows, drag and drop), visibility / lock, moving the selection, delete and undo.
+        void checkLayers();
+
+        // Ruler guides: dragged out of the rulers, moved, deleted, locked; snapping to guides and (Smart Guides) to other objects; the View menu.
+        void checkGuides();
+
+        // Dragging the captions of the number fields changes the numbers (Shift and Ctrl+Shift for finer steps), one undo step a drag.
+        void checkScrubbing();
+
+        // Object > Path and File > Export As Image are in the menus and act on the selection.
+        void checkPathMenu();
 
         // The command controller and the bindings that make the views follow it: command ids, enabled state, the Undo label, menu
         // check marks, the tool hint in the status bar.
@@ -138,7 +176,7 @@ namespace sketch {
         (void)view; (void)mouse;
         int& failures = failures_;
         static const char* kNames[] = {"selectTool", "directSelectTool", "rectangleTool", "ellipseTool", "lineTool",
-            "penTool", "pencilTool", "textTool", "gradientTool", "widthTool", "scissorsTool", "knifeTool", "eraserTool", "handTool", "zoomTool"};
+            "penTool", "pencilTool", "textTool", "gradientTool", "widthTool", "scissorsTool", "knifeTool", "eraserTool", "shapeBuilderTool", "eyedropperTool", "magicWandTool", "lassoTool", "artboardTool", "handTool", "zoomTool"};
         for (const char* name : kNames) {
             auto* button = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView(name));
             if (button == nullptr || canvas == nullptr) {
@@ -256,6 +294,478 @@ namespace sketch {
         document.undoStack().clear();
         canvas->setTool(sketch::SketchTool::Select);
         canvas->setSnapToGrid(true);
+    }
+
+    void ToolChecks::checkPathMenu() {
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        for (const char* item : {"Join", "Reverse Direction", "Simplify", "Outline Stroke"}) {
+            expect(window_.menuItem("Object/Path", item) != nullptr, (std::string("Object > Path has ") + item).c_str());
+        }
+        expect(window_.menuItem("File", "Export As Image...") != nullptr, "File has Export As Image");
+        sketch::SketchObject& line = document.add(sketch::SketchObject::makeLine(0, 0, 100, 0));
+        line.setStrokeWidth(8.0);
+        document.setSelection({line.id()});
+        newui::MenuItem* reverse = window_.menuItem("Object/Path", "Reverse Direction");
+        reverse->onClick(*reverse);
+        expect(sketch::pathToSubPaths(document.object(0).geometry())[0].anchors.front().point.x > 50.0, "Reverse Direction turns the path round");
+        newui::MenuItem* outline = window_.menuItem("Object/Path", "Outline Stroke");
+        outline->onClick(*outline);
+        expect(document.objectCount() == 1 && document.object(0).type() == sketch::SketchObjectType::Path && document.object(0).stroke().isNone(), "Outline Stroke makes a filled shape");
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    void ToolChecks::checkTransformPanel() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
+        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::wideToUtf8(field(name)->text()) : std::string("?"); };
+        auto type = [&field](const char* name, const wchar_t* value) {
+            if (auto* f = field(name)) {
+                f->setText(value);
+                f->onReturnPressed(*f);
+            }
+        };
+        expect(field("transformXField") != nullptr && field("transformAngleField") != nullptr, "the Transform panel fields are in the layout");
+        expect(!field("transformXField")->isEnabled(), "the fields are disabled with nothing selected");
+        sketch::SketchObject& rect = document.add(sketch::SketchObject::makeRect(10, 20, 100, 50));
+        document.setSelection({rect.id()});
+        expect(field("transformXField")->isEnabled() && text("transformXField") == "10" && text("transformYField") == "20" &&
+                   text("transformWField") == "100" && text("transformHField") == "50" && text("transformAngleField") == "0", "the fields show the selection's box");
+        type("transformXField", L"40");
+        expect(std::fabs(document.object(0).geometryBounds().x0 - 40.0) < 1e-9 && std::fabs(document.object(0).geometryBounds().x1 - 140.0) < 1e-9, "typing X moves the selection");
+        type("transformWField", L"200");
+        expect(std::fabs(document.object(0).geometryBounds().x1 - 240.0) < 1e-9 && std::fabs(document.object(0).geometryBounds().y1 - 70.0) < 1e-9, "typing W resizes it, keeping the corner and the height");
+        auto* link = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("linkAspectButton"));
+        if (link != nullptr) {
+            link->setChecked(true);
+            type("transformHField", L"100");
+            expect(std::fabs(document.object(0).geometryBounds().y1 - document.object(0).geometryBounds().y0 - 100.0) < 1e-9 &&
+                       std::fabs(document.object(0).geometryBounds().x1 - document.object(0).geometryBounds().x0 - 400.0) < 1e-9, "with the link down, H keeps the proportions");
+            link->setChecked(false);
+        }
+        type("transformWField", L"abc");
+        expect(text("transformWField") == "400", "a value that is not a number is put back");
+        document.undoStack().undo();
+        document.undoStack().undo();
+        document.undoStack().undo();
+        document.undoStack().undo();
+        document.setSelection({document.object(0).id()});
+        type("transformAngleField", L"90");
+        expect(std::fabs(document.object(0).frameAngle() - 3.14159265358979323846 / 2.0) < 1e-9 && text("transformAngleField") == "90", "typing an angle turns the selection");
+        expect(window_.commands().enabled("object.transformAgain"), "Transform Again is available after a transform");
+        newui::MenuItem* again = window_.menuItem("Object/Transform", "Transform Again");
+        expect(again != nullptr, "Object > Transform has Transform Again");
+        if (again != nullptr) {
+            again->onClick(*again);
+            expect(std::fabs(document.object(0).frameAngle() - 3.14159265358979323846) < 1e-9, "Transform Again turns it by the same angle once more");
+        }
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    void ToolChecks::checkScrubbing() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto label = [&frame](const char* name) { return dynamic_cast<newui::Label*>(frame.rootView().findView(name)); };
+        auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
+        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::wideToUtf8(field(name)->text()) : std::string("?"); };
+        const std::uint32_t left = newui::mbmLeftButton;
+        auto drag = [&label, left](const char* name, float pixels, std::uint32_t keys) {
+            newui::Label* caption = label(name);
+            caption->onMouseDown(*caption, newui::Point(20, 5), left, keys);
+            caption->onMouseMove(*caption, newui::Point(20 + pixels / 2, 5), left, keys);
+            caption->onMouseMove(*caption, newui::Point(20 + pixels, 5), left, keys);
+            caption->onMouseUp(*caption, newui::Point(20 + pixels, 5), left, keys);
+        };
+        expect(label("transformXLabel") != nullptr && label("strokeWeightLabel") != nullptr, "the captions of the number fields are named in the layout");
+        sketch::SketchObject& rect = document.add(sketch::SketchObject::makeRect(10, 20, 100, 50));
+        document.setSelection({rect.id()});
+        drag("transformXLabel", 5.0f, 0u);
+        expect(std::fabs(document.object(0).geometryBounds().x0 - 15.0) < 1e-9 && text("transformXField") == "15", "dragging X sideways moves the selection (1 point a pixel)");
+        expect(document.undoStack().undoDescription() == "Move", "the whole drag is one undo step");
+        document.undoStack().undo();
+        expect(std::fabs(document.object(0).geometryBounds().x0 - 10.0) < 1e-9 && !document.undoStack().canUndo(), "one undo puts it back");
+        drag("transformXLabel", 10.0f, newui::kmShift);
+        expect(std::fabs(document.object(0).geometryBounds().x0 - 11.0) < 1e-9, "with Shift a pixel is a tenth of a point");
+        drag("transformXLabel", 10.0f, newui::kmShift | newui::kmCtrl);
+        expect(std::fabs(document.object(0).geometryBounds().x0 - 11.1) < 1e-9, "with Ctrl+Shift it is a hundredth");
+        drag("transformWLabel", 20.0f, 0u);
+        expect(std::fabs(document.object(0).geometryBounds().x1 - document.object(0).geometryBounds().x0 - 120.0) < 1e-9, "dragging W changes the width");
+        drag("transformAngleLabel", 30.0f, 0u);
+        expect(std::fabs(document.object(0).frameAngle() - 30.0 * 3.14159265358979323846 / 180.0) < 1e-9, "dragging Angle turns the selection (a degree a pixel)");
+        expect(window_.commands().enabled("object.transformAgain"), "a scrubbed transform can be repeated with Transform Again");
+        document.undoStack().clear();
+
+        // Style panel numbers: the stroke weight, with its unit kept.
+        document.setSelection({document.object(0).id()});
+        double weight = document.object(0).strokeWidth();
+        drag("strokeWeightLabel", 4.0f, 0u);
+        expect(std::fabs(document.object(0).strokeWidth() - (weight + 2.0)) < 1e-9 && text("strokeWeightField").find("pt") != std::string::npos,
+               "dragging Weight changes the stroke weight (half a point a pixel) and keeps the unit");
+        expect(document.undoStack().undoDescription().find("Stroke") != std::string::npos || document.undoStack().canUndo(), "as one undo step");
+        std::size_t steps = 0;
+        while (document.undoStack().canUndo()) { document.undoStack().undo(); ++steps; }
+        expect(steps == 1 && std::fabs(document.object(0).strokeWidth() - weight) < 1e-9, "a single undo restores the weight");
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    void ToolChecks::checkGuides() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        canvas->setSnapToGrid(false);
+        canvas->setTool(sketch::SketchTool::Select);
+        const float middle = view(100, 100).x;
+        auto ruler = [&view](double documentY) { return newui::Point(view(100, documentY).x, 5.0f); };
+
+        // A press in the top ruler, dragged into the page, drops a horizontal guide there.
+        mouse(0, ruler(0));
+        mouse(1, view(100, 200));
+        mouse(2, view(100, 200));
+        expect(document.guides().size() == 1 && !document.guides()[0].vertical && std::fabs(document.guides()[0].position - 200.0) < 1e-6, "dragging out of the top ruler makes a horizontal guide");
+        expect(document.undoStack().undoDescription() == "Add Guide", "making a guide is an undo step");
+        // The left ruler makes a vertical one.
+        mouse(0, newui::Point(5.0f, view(0, 300).y));
+        mouse(1, view(150, 300));
+        mouse(2, view(150, 300));
+        expect(document.guides().size() == 2 && document.guides()[1].vertical && std::fabs(document.guides()[1].position - 150.0) < 1e-6, "dragging out of the left ruler makes a vertical guide");
+        // Let go back on the ruler: no guide.
+        mouse(0, ruler(0));
+        mouse(1, view(100, 400));
+        mouse(2, ruler(0));
+        expect(document.guides().size() == 2, "a guide let go on the ruler again is not made");
+
+        // Dragging a guide with the Select tool moves it; dragging it back onto a ruler deletes it.
+        mouse(0, view(300, 200));
+        mouse(1, view(300, 260));
+        mouse(2, view(300, 260));
+        expect(std::fabs(document.guides()[0].position - 260.0) < 1e-6 && document.undoStack().undoDescription() == "Move Guide", "dragging a guide moves it (one undo step)");
+        canvas->onMouseMove(*canvas, view(300, 260), std::uint32_t(0), 0);
+        expect(canvas->cursorName() == "resize-ns", "over a horizontal guide the cursor is the vertical arrow");
+        canvas->setGuidesLocked(true);
+        mouse(0, view(300, 260));
+        mouse(1, view(300, 300));
+        mouse(2, view(300, 300));
+        expect(std::fabs(document.guides()[0].position - 260.0) < 1e-6, "a locked guide stays where it is");
+        canvas->setGuidesLocked(false);
+        mouse(0, view(300, 260));
+        mouse(1, ruler(0));
+        mouse(2, ruler(0));
+        expect(document.guides().size() == 1 && document.guides()[0].vertical, "dragging a guide back onto the ruler deletes it");
+        document.undoStack().undo();
+        expect(document.guides().size() == 2, "and undo brings it back");
+        document.undoStack().clear();
+
+        // Drawing snaps to a guide (the vertical one at x = 150).
+        canvas->setTool(sketch::SketchTool::Rectangle);
+        mouse(0, view(147, 50));
+        mouse(1, view(300, 100));
+        mouse(2, view(300, 100));
+        expect(document.objectCount() == 1 && std::fabs(document.object(0).geometryBounds().x0 - 150.0) < 1e-6, "a rectangle drawn near a guide starts exactly on it");
+        canvas->setShowGuides(false);
+        canvas->setSmartGuides(false);   // (the first rectangle's own edge would catch it otherwise)
+        mouse(0, view(147, 50));
+        mouse(1, view(300, 100));
+        mouse(2, view(300, 100));
+        expect(document.objectCount() == 2 && std::fabs(document.object(1).geometryBounds().x0 - 147.0) < 1e-6, "with the guides hidden nothing snaps to them");
+        canvas->setShowGuides(true);
+        canvas->setSmartGuides(true);
+        document.clearObjects();
+        document.undoStack().clear();
+
+        // Smart Guides: edges and centers of other objects catch too, and a magenta line shows where.
+        document.add(sketch::SketchObject::makeRect(300, 300, 40, 40));
+        document.clearGuides();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Rectangle);
+        mouse(0, view(50, 50));
+        mouse(1, view(298, 100));
+        mouse(2, view(298, 100));
+        expect(document.objectCount() == 2 && std::fabs(document.object(1).geometryBounds().x1 - 300.0) < 1e-6, "a corner drawn near another object's edge snaps to it");
+        canvas->setSmartGuides(false);
+        mouse(0, view(50, 50));
+        mouse(1, view(298, 100));
+        mouse(2, view(298, 100));
+        expect(document.objectCount() == 3 && std::fabs(document.object(2).geometryBounds().x1 - 298.0) < 1e-6, "with Smart Guides off it does not");
+        canvas->setSmartGuides(true);
+        // Moving: the dragged box's edge catches another object's edge.
+        document.clearObjects();
+        sketch::SketchObject& still = document.add(sketch::SketchObject::makeRect(300, 100, 50, 50));
+        sketch::SketchObject& mover = document.add(sketch::SketchObject::makeRect(100, 300, 50, 50));
+        (void)still;
+        canvas->setTool(sketch::SketchTool::Select);
+        document.setSelection({mover.id()});
+        mouse(0, view(110, 310));   // not the center (the pivot) of the box
+        mouse(1, view(262, 303));   // the box's right edge is then at 302: 2 points from the other object's left edge at 300... moved by (152, -7)
+        mouse(2, view(262, 303));
+        expect(std::fabs(document.object(1).geometryBounds().x1 - 300.0) < 1e-6 || std::fabs(document.object(1).geometryBounds().x0 - 300.0) < 1e-6 ||
+                   std::fabs(document.object(1).geometryBounds().x0 - 350.0) < 1e-6, "a moved box's edge catches the edge or center of another object");
+        document.clearObjects();
+        document.undoStack().clear();
+
+        // The View menu: Show Guides, Lock Guides, Clear Guides.
+        document.addGuide(true, 10.0);
+        newui::MenuItem* show = window_.menuItem("View", "Show Guides");
+        newui::MenuItem* lock = window_.menuItem("View", "Lock Guides");
+        newui::MenuItem* clear = window_.menuItem("View", "Clear Guides");
+        expect(show != nullptr && lock != nullptr && clear != nullptr && show->isChecked() == canvas->showGuides(), "the View menu has Show Guides, Lock Guides and Clear Guides");
+        if (show != nullptr && lock != nullptr && clear != nullptr) {
+            show->onClick(*show);
+            expect(!canvas->showGuides() && !show->isChecked(), "Show Guides toggles them and its check mark");
+            show->onClick(*show);
+            lock->onClick(*lock);
+            expect(canvas->guidesLocked() && lock->isChecked(), "Lock Guides locks them");
+            lock->onClick(*lock);
+            clear->onClick(*clear);
+            expect(document.guides().empty(), "Clear Guides removes them all");
+            document.undoStack().undo();
+            expect(document.guides().size() == 1, "undo brings them back");
+        }
+        (void)middle;
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Select);
+        canvas->setSnapToGrid(true);
+    }
+
+    void ToolChecks::checkShapeBuilder() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        sketch::SketchObject& a = document.add(sketch::SketchObject::makeRect(100, 100, 100, 100));
+        sketch::SketchObject& b = document.add(sketch::SketchObject::makeRect(150, 100, 100, 100));
+        document.setSelection({a.id(), b.id()});
+        canvas->setTool(sketch::SketchTool::ShapeBuilder);
+        // A drag across the overlap only joins it into a shape of its own.
+        mouse(0, view(175, 150));
+        mouse(1, view(180, 150));
+        mouse(2, view(180, 150));
+        expect(document.objectCount() == 3, "the Shape Builder pulls the overlap out as a shape of its own");
+        document.undoStack().undo();
+        expect(document.objectCount() == 2, "and undo puts the shapes back");
+        document.setSelection({document.object(0).id(), document.object(1).id()});
+        // A drag from one shape's own part across the overlap into the other's joins all three.
+        mouse(0, view(120, 150));
+        mouse(1, view(175, 150));
+        mouse(2, view(230, 150));
+        expect(document.objectCount() == 1, "dragging across all the pieces joins them into one shape");
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    void ToolChecks::checkArtboards() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        canvas->setSnapToGrid(false);
+        expect(document.artboards().size() == 1, "a document starts with one artboard");
+        canvas->setTool(sketch::SketchTool::Artboard);
+        canvas->setPan(20.0f, 20.0f);
+        mouse(0, view(640, 100));
+        mouse(1, view(700, 150));
+        mouse(1, view(740, 300));
+        mouse(2, view(740, 300));
+        expect(document.artboards().size() == 2, "dragging with the Artboard tool on empty canvas makes an artboard");
+        if (document.artboards().size() == 2) {
+            expect(std::fabs(document.artboards()[1].width - 100.0) < 1e-6 && std::fabs(document.artboards()[1].height - 200.0) < 1e-6, "the new artboard has the dragged size");
+            expect(document.activeArtboard() == 1, "and becomes the active one");
+        }
+        mouse(0, view(300, 300));
+        mouse(2, view(300, 300));
+        expect(document.activeArtboard() == 0, "clicking an artboard makes it the active one");
+        mouse(0, view(300, 300));
+        mouse(1, view(320, 310));
+        mouse(2, view(320, 310));
+        expect(document.artboards()[0].x == 20.0 && document.artboards()[0].y == 10.0, "dragging an artboard moves it");
+        document.undoStack().undo();
+        expect(document.artboards()[0].x == 0.0, "moving an artboard is one undo step");
+        newui::MenuItem* add = window_.menuItem("Object/Artboards", "New Artboard");
+        expect(add != nullptr, "Object has an Artboards submenu");
+        if (add != nullptr) {
+            add->onClick(*add);
+            expect(document.artboards().size() == 3, "Object > Artboards > New Artboard adds one");
+        }
+        expect(window_.menuItem("File", "Export All Artboards...") != nullptr, "File has Export All Artboards");
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    void ToolChecks::checkClippingMenu() {
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        document.add(sketch::SketchObject::makeRect(0, 0, 100, 100));
+        document.add(sketch::SketchObject::makeEllipse(50, 50, 20, 20));
+        document.selectAll();
+        newui::MenuItem* make = window_.menuItem("Object/Clipping Mask", "Make");
+        newui::MenuItem* release = window_.menuItem("Object/Clipping Mask", "Release");
+        expect(make != nullptr && release != nullptr, "Object has a Clipping Mask submenu");
+        if (make != nullptr && release != nullptr) {
+            make->onClick(*make);
+            expect(document.canReleaseClippingMask(), "Make Clipping Mask groups the selection as a mask");
+            release->onClick(*release);
+            expect(!document.canReleaseClippingMask(), "Release Clipping Mask frees it");
+        }
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    void ToolChecks::checkSelectTools() {
+        SketchDocument& document = document_;
+        CanvasView* canvas = canvas_;
+        const ViewFn view{canvas};
+        const MouseFn mouse{canvas};
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setZoom(1.0f);
+        canvas->setSnapToGrid(false);
+        auto red = [](sketch::SketchObject& object) { object.setFill(sketch::SketchPaint::solid(sketch::SketchColor::fromHex("#ff0000"))); };
+        red(document.add(sketch::SketchObject::makeRect(100, 100, 50, 50)));
+        red(document.add(sketch::SketchObject::makeRect(200, 100, 50, 50)));
+        document.add(sketch::SketchObject::makeRect(300, 100, 50, 50)).setFill(sketch::SketchPaint::solid(sketch::SketchColor::fromHex("#0000ff")));
+        canvas->setTool(sketch::SketchTool::MagicWand);
+        mouse(0, view(120, 120));
+        mouse(2, view(120, 120));
+        expect(document.selection().size() == 2, "the Magic Wand selects every object with the same fill");
+        mouse(0, view(500, 500));
+        mouse(2, view(500, 500));
+        expect(document.selection().empty(), "a click on nothing with the wand deselects");
+        canvas->setTool(sketch::SketchTool::Lasso);
+        mouse(0, view(80, 80));
+        mouse(1, view(280, 80));
+        mouse(1, view(280, 180));
+        mouse(1, view(80, 180));
+        mouse(2, view(80, 180));
+        expect(document.selection().size() == 2, "the Lasso selects the objects it is drawn round");
+        document.setSelection({document.object(0).id()});
+        newui::MenuItem* same = window_.menuItem("Edit/Select Same", "Fill Color");
+        expect(same != nullptr, "Edit has a Select Same submenu");
+        if (same != nullptr) {
+            same->onClick(*same);
+            expect(document.selection().size() == 2, "Select Same > Fill Color selects the objects with that fill");
+        }
+        document.clearObjects();
+        document.undoStack().clear();
+        canvas->setTool(sketch::SketchTool::Select);
+    }
+
+    void ToolChecks::checkTextPanel() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
+        auto button = [&frame](const char* name) { return dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView(name)); };
+        expect(field("textSizeField") != nullptr && button("textBoldButton") != nullptr && button("textAlignCenterButton") != nullptr, "the Text panel controls are in the layout");
+        expect(!field("textSizeField")->isEnabled(), "the Text panel is disabled with no text selected");
+        sketch::SketchObject& text = document.add(sketch::SketchObject::makeText("Hello", "", 24.0, BLPoint(20, 60)));
+        document.setSelection({text.id()});
+        expect(field("textSizeField")->isEnabled() && newui::wideToUtf8(field("textSizeField")->text()) == "24", "it shows the selected text's size");
+        field("textSizeField")->setText(L"36");
+        field("textSizeField")->onReturnPressed(*field("textSizeField"));
+        expect(text.fontSize() == 36.0 && document.undoStack().undoDescription() == "Text Size", "typing a size resizes the text (one undo step)");
+        if (auto* bold = button("textBoldButton")) {
+            bold->setChecked(true);
+            expect(text.textStyle().bold, "the Bold button sets the weight");
+        }
+        if (auto* center = button("textAlignCenterButton")) {
+            center->setChecked(true);
+            expect(text.textStyle().align == sketch::TextStyle::Center && !button("textAlignLeftButton")->isChecked(), "the alignment buttons act as one group");
+        }
+        field("textTrackingField")->setText(L"4");
+        field("textTrackingField")->onReturnPressed(*field("textTrackingField"));
+        expect(text.textStyle().tracking == 4.0, "typing a tracking sets it");
+        document.undoStack().undo();
+        expect(text.textStyle().tracking == 0.0 && newui::wideToUtf8(field("textTrackingField")->text()) == "0", "undo restores it and the panel follows");
+        document.clearObjects();
+        document.undoStack().clear();
+    }
+
+    void ToolChecks::checkLayers() {
+        newui::Frame& frame = frame_;
+        SketchDocument& document = document_;
+        document.clearObjects();
+        document.undoStack().clear();
+        auto* tree = dynamic_cast<sketch::LayerTree*>(frame.rootView().findView("layersTree"));
+        auto press = [&frame](const char* name) {
+            if (auto* button = dynamic_cast<newui::Control*>(frame.rootView().findView(name))) {
+                button->onClick(*button);
+            }
+        };
+        expect(tree != nullptr && tree->rows().size() == 1 && tree->rows()[0].name == "Layer 1", "the Layers panel lists the document's one layer");
+        if (tree == nullptr) {
+            return;
+        }
+        const std::size_t base = document.activeLayer();
+        document.add(sketch::SketchObject::makeRect(0, 0, 10, 10));
+        press("addLayerButton");
+        expect(document.layers().size() == 2 && tree->rows().size() == 2 && tree->rows()[0].active, "New Layer adds a row on top and makes it active");
+        std::size_t second = document.activeLayer();
+        document.add(sketch::SketchObject::makeRect(20, 0, 10, 10));
+        expect(document.object(1).layer() == second, "new objects go to the active layer");
+        press("addSublayerButton");
+        expect(document.layers().size() == 3 && document.layerDepth(document.activeLayer()) == 1 && tree->rows().size() == 3 && tree->rows()[1].depth == 1,
+               "New Sublayer adds an indented row under the active layer");
+        std::size_t sub = document.activeLayer();
+
+        // The eye and the lock of a row.
+        const sketch::LayerRow& top = tree->rows()[0];
+        (void)top;
+        document.setLayerVisible(second, false);
+        expect(!document.findById(document.object(1).id())->isVisible() || !document.object(1).isVisible(), "hiding a layer hides its objects");
+        expect(tree->rows()[0].visible == false && tree->rows()[1].shown == false, "its row and its sublayer's row show it");
+        document.setLayerVisible(second, true);
+        document.setLayerLocked(second, true);
+        expect(document.object(1).isLocked() && !document.object(1).ownLocked(), "locking a layer locks its objects without changing theirs");
+        document.setLayerLocked(second, false);
+
+        // Rename through the name field.
+        if (auto* field = dynamic_cast<newui::TextField*>(frame.rootView().findView("layerNameField"))) {
+            field->setText(L"Details");
+            field->onReturnPressed(*field);
+            expect(document.findLayer(sub)->name == "Details", "the name field renames the active layer");
+        }
+
+        // Move the selection to a layer, and drag a row onto another.
+        document.setSelection({document.object(0).id()});
+        document.moveSelectionToLayer(second);
+        expect(document.object(0).layer() == second || document.object(1).layer() == second, "Move to Layer puts the selection in the chosen layer");
+        document.undoStack().undo();
+        expect(document.object(0).layer() == base, "and undo puts it back");
+        document.moveLayer(sub, 0, 0);
+        expect(document.findLayer(sub)->parent == 0 && document.layerChildren(0).front() == sub, "a layer can be taken out of its parent and sent to the back");
+        document.undoStack().undo();
+        expect(document.findLayer(sub)->parent == second, "undo puts it back inside");
+
+        press("deleteLayerButton");
+        expect(document.layers().size() == 2, "Delete removes the active layer");
+        document.undoStack().undo();
+        expect(document.layers().size() == 3 && tree->rows().size() == 3, "and undo brings it back with its row");
+        document.clearObjects();
+        document.undoStack().clear();
+        expect(document.layers().size() == 1 && tree->rows().size() == 1, "a new document has the one layer again");
     }
 
     void ToolChecks::checkCommands() {

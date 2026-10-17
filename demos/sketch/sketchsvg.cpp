@@ -168,6 +168,188 @@ namespace sketch {
             return out.str();
         }
 
+        // The ruler guides as the root's data-guides attribute: "v100 h50.5" (v = a vertical line at x, h = a horizontal one at y).
+        std::string guideAttr(const SketchDocument& document) {
+            if (document.guides().empty()) {
+                return std::string();
+            }
+            std::string text = " data-guides=\"";
+            for (std::size_t i = 0; i < document.guides().size(); ++i) {
+                text += (i ? " " : "") + std::string(document.guides()[i].vertical ? "v" : "h") + num(document.guides()[i].position);
+            }
+            return text + "\"";
+        }
+
+        // The layer tree as the root's data-layers attribute: entries "id,parent,flags,name" separated by ';' (flags: h hidden, l locked,
+        // c closed in the panel, - none; the name has every character but letters and digits written as %XX). Siblings are in stacking
+        // order. A document with just the one untouched layer writes nothing.
+        std::string encodeName(const std::string& name) {
+            static const char* digits = "0123456789ABCDEF";
+            std::string out;
+            for (unsigned char c : name) {
+                if (std::isalnum(c)) {
+                    out += char(c);
+                } else {
+                    out += '%';
+                    out += digits[c >> 4];
+                    out += digits[c & 15];
+                }
+            }
+            return out;
+        }
+
+        std::string decodeName(const std::string& text) {
+            std::string out;
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                if (text[i] == '%' && i + 2 < text.size() && std::isxdigit((unsigned char)text[i + 1]) && std::isxdigit((unsigned char)text[i + 2])) {
+                    out += char(std::stoi(text.substr(i + 1, 2), nullptr, 16));
+                    i += 2;
+                } else {
+                    out += text[i];
+                }
+            }
+            return out;
+        }
+
+        std::string layerAttr(const SketchDocument& document) {
+            const std::vector<Layer>& layers = document.layers();
+            if (layers.size() == 1 && layers[0].name == "Layer 1" && layers[0].visible && !layers[0].locked) {
+                return std::string();
+            }
+            std::string text = " data-layers=\"";
+            for (std::size_t i = 0; i < layers.size(); ++i) {
+                const Layer& l = layers[i];
+                std::string flags = std::string(l.visible ? "" : "h") + (l.locked ? "l" : "") + (l.expanded ? "" : "c");
+                text += (i ? ";" : "") + std::to_string(l.id) + "," + std::to_string(l.parent) + "," + (flags.empty() ? "-" : flags) + "," + encodeName(l.name);
+            }
+            return text + "\"";
+        }
+
+        std::vector<Layer> parseLayers(const std::string& text) {
+            std::vector<Layer> layers;
+            std::istringstream in(text);
+            std::string entry;
+            while (std::getline(in, entry, ';')) {
+                std::vector<std::string> parts;
+                std::istringstream fields(entry);
+                std::string part;
+                while (std::getline(fields, part, ',')) {
+                    parts.push_back(part);
+                }
+                if (parts.size() < 3) {
+                    continue;
+                }
+                Layer l;
+                try {
+                    l.id = std::size_t(std::stoull(parts[0]));
+                    l.parent = std::size_t(std::stoull(parts[1]));
+                } catch (...) {
+                    continue;
+                }
+                if (l.id == 0) {
+                    continue;
+                }
+                l.visible = parts[2].find('h') == std::string::npos;
+                l.locked = parts[2].find('l') != std::string::npos;
+                l.expanded = parts[2].find('c') == std::string::npos;
+                l.name = parts.size() > 3 ? decodeName(parts[3]) : "Layer " + std::to_string(l.id);
+                layers.push_back(l);
+            }
+            // A parent the list does not have (or itself) makes the layer a top-level one.
+            for (Layer& l : layers) {
+                bool known = false;
+                for (const Layer& p : layers) {
+                    known = known || (p.id == l.parent && p.id != l.id);
+                }
+                if (!known) {
+                    l.parent = 0;
+                }
+            }
+            return layers;
+        }
+
+        // The swatches as the root's data-swatches attribute ("#aabbcc #112233"); nothing is written while they are the defaults.
+        std::string swatchAttr(const SketchDocument& document) {
+            if (document.swatches() == defaultSwatches()) {
+                return std::string();
+            }
+            std::string text = " data-swatches=\"";
+            for (std::size_t i = 0; i < document.swatches().size(); ++i) {
+                text += (i ? " " : "") + document.swatches()[i];
+            }
+            return text + "\"";
+        }
+
+        std::vector<std::string> parseSwatches(const std::string& text) {
+            std::vector<std::string> swatches;
+            std::istringstream in(text);
+            std::string token;
+            while (in >> token) {
+                bool ok = token.size() == 7 && token[0] == '#';
+                for (std::size_t i = 1; ok && i < 7; ++i) {
+                    ok = std::isxdigit((unsigned char)token[i]) != 0;
+                }
+                if (ok) {
+                    swatches.push_back(token);
+                }
+            }
+            return swatches;
+        }
+
+        // The artboards as the root's data-artboards attribute: entries "name,x,y,width,height" separated by ';' (the name written with
+        // encodeName), and data-active-artboard (an index). The root's viewBox is the box round all of them.
+        std::string artboardAttr(const SketchDocument& document) {
+            std::string text = " data-artboards=\"";
+            for (std::size_t i = 0; i < document.artboards().size(); ++i) {
+                const Artboard& b = document.artboards()[i];
+                text += (i ? ";" : "") + encodeName(b.name) + "," + num(b.x) + "," + num(b.y) + "," + num(b.width) + "," + num(b.height);
+            }
+            return text + "\" data-active-artboard=\"" + std::to_string(document.activeArtboard()) + "\"";
+        }
+
+        std::vector<Artboard> parseArtboards(const std::string& text) {
+            std::vector<Artboard> boards;
+            std::istringstream entries(text);
+            std::string entry;
+            while (std::getline(entries, entry, ';')) {
+                std::vector<std::string> parts;
+                std::istringstream in(entry);
+                std::string part;
+                while (std::getline(in, part, ',')) {
+                    parts.push_back(part);
+                }
+                if (parts.size() != 5) {
+                    continue;
+                }
+                Artboard b;
+                b.name = decodeName(parts[0]);
+                b.x = std::strtod(parts[1].c_str(), nullptr);
+                b.y = std::strtod(parts[2].c_str(), nullptr);
+                b.width = std::strtod(parts[3].c_str(), nullptr);
+                b.height = std::strtod(parts[4].c_str(), nullptr);
+                if (std::isfinite(b.x) && std::isfinite(b.y) && std::isfinite(b.width) && std::isfinite(b.height) && b.width >= 1.0 && b.height >= 1.0) {
+                    boards.push_back(b);
+                }
+            }
+            return boards;
+        }
+
+        std::vector<Guide> parseGuides(const std::string& text) {
+            std::vector<Guide> guides;
+            std::istringstream in(text);
+            std::string token;
+            while (in >> token) {
+                if (token.size() >= 2 && (token[0] == 'v' || token[0] == 'h')) {
+                    char* end = nullptr;
+                    double position = std::strtod(token.c_str() + 1, &end);
+                    if (end != token.c_str() + 1 && std::isfinite(position)) {
+                        guides.push_back(Guide{token[0] == 'v', position});
+                    }
+                }
+            }
+            return guides;
+        }
+
         const char* typeName(SketchObjectType type) {
             switch (type) {
                 case SketchObjectType::Line: return "Line";
@@ -982,7 +1164,13 @@ namespace sketch {
                 return std::string();
             }
             const BLMatrix2D& m = object.textMatrix();
+            const TextStyle& style = object.textStyle();
             std::ostringstream out;
+            if (style.bold) { out << " data-text-bold=\"true\""; }
+            if (style.italic) { out << " data-text-italic=\"true\""; }
+            if (style.align != TextStyle::Left) { out << " data-text-align=\"" << (style.align == TextStyle::Center ? "center" : "right") << "\""; }
+            if (style.tracking != 0.0) { out << " data-text-tracking=\"" << num(style.tracking) << "\""; }
+            if (style.leading != 1.0) { out << " data-text-leading=\"" << num(style.leading) << "\""; }
             out << " data-text=\"" << escape(object.text()) << "\" data-font-name=\"" << escape(object.fontName()) << "\" data-font-size=\""
                 << num(object.fontSize()) << "\" data-text-matrix=\"" << num(m.m00) << " " << num(m.m01) << " " << num(m.m10) << " "
                 << num(m.m11) << " " << num(m.m20) << " " << num(m.m21) << "\"";
@@ -1003,6 +1191,12 @@ namespace sketch {
                 return plain;
             }
             BLMatrix2D placed = BLMatrix2D::make_identity();
+            TextStyle textStyle;
+            if (const std::string* v = node.attr("data-text-bold")) { textStyle.bold = *v == "true"; }
+            if (const std::string* v = node.attr("data-text-italic")) { textStyle.italic = *v == "true"; }
+            if (const std::string* v = node.attr("data-text-align")) { textStyle.align = *v == "center" ? TextStyle::Center : (*v == "right" ? TextStyle::Right : TextStyle::Left); }
+            if (const std::string* v = node.attr("data-text-tracking")) { textStyle.tracking = number(v, 0.0); }
+            if (const std::string* v = node.attr("data-text-leading")) { textStyle.leading = std::max(0.1, number(v, 1.0)); }
             if (const std::string* stored = node.attr("data-text-matrix")) {
                 double v[6] = {1, 0, 0, 1, 0, 0};
                 std::istringstream in(*stored);
@@ -1015,6 +1209,7 @@ namespace sketch {
             const std::string* font = node.attr("data-font-name");
             double fontSize = number(size, 24.0);
             object->setTextState(*words, font != nullptr ? *font : std::string(), fontSize > 0.0 ? fontSize : 24.0, placed);
+            object->setTextStyle(textStyle);
             return object;
         }
 
@@ -1255,6 +1450,9 @@ namespace sketch {
             if (const std::string* locked = node.attr("data-locked")) {
                 object->setLocked(*locked == "true");
             }
+            if (const std::string* layer = node.attr("data-layer")) {
+                object->setLayer(std::size_t(std::strtoull(layer->c_str(), nullptr, 10)));
+            }
             if (const std::string* name = node.attr("data-name")) {
                 object->setName(*name);
             } else if (const std::string* id = node.attr("id")) {
@@ -1314,6 +1512,9 @@ namespace sketch {
                     if (const std::string* blend = style.get("mix-blend-mode")) {
                         props.blendMode = blendModeFromCss(*blend);
                     }
+                    if (const std::string* clip = node.attr("data-clip")) {
+                        props.clip = *clip == "true";
+                    }
                     if (!props.isDefault()) {
                         ctx.document->setGroupProps(ctx.groupStack.back(), props);
                     }
@@ -1326,7 +1527,7 @@ namespace sketch {
                 }
                 return;
             }
-            if (const std::string* id = node.attr("id"); id != nullptr && *id == "pageBackground") {
+            if (const std::string* id = node.attr("id"); id != nullptr && id->rfind("pageBackground", 0) == 0) {
                 return;  // the page color is carried by data-page-background
             }
             SketchObjectType type = SketchObjectType::Path;
@@ -1366,6 +1567,9 @@ namespace sketch {
             }
             if (const std::string* locked = node.attr("data-locked")) {
                 object->setLocked(*locked == "true");
+            }
+            if (const std::string* layer = node.attr("data-layer")) {
+                object->setLayer(std::size_t(std::strtoull(layer->c_str(), nullptr, 10)));
             }
             if (const std::string* name = node.attr("data-name")) {
                 object->setName(*name);
@@ -1420,7 +1624,7 @@ namespace sketch {
     namespace {
     // One object as SVG: a plain <path>, or - for several fills / strokes, per-item opacity / blend / visibility or effects - a
     // <g data-sketch="appearance"> with one path per item. `idText` is its id attribute.
-    void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount) {
+    void writeObject(const SketchObject& object, const std::string& idText, std::ostringstream& body, std::ostringstream& defs, int& gradientCount, bool withLayers = false) {
         BLBox box = object.geometryBounds();
             {
                 const std::vector<AppearanceItem>& items = object.appearance();
@@ -1443,11 +1647,14 @@ namespace sketch {
                     if (object.blendMode() != BlendMode::Normal) {
                         body << " style=\"mix-blend-mode:" << blendModeCss(object.blendMode()) << "\"";
                     }
-                    if (!object.isVisible()) {
+                    if (!object.ownVisible()) {
                         body << " display=\"none\"";
                     }
-                    if (object.isLocked()) {
+                    if (object.ownLocked()) {
                         body << " data-locked=\"true\"";
+                    }
+                    if (withLayers) {
+                        body << " data-layer=\"" << object.layer() << "\"";
                     }
                     body << ">\n";
                     for (const AppearanceItem& item : items) {
@@ -1510,11 +1717,14 @@ namespace sketch {
             if (object.blendMode() != BlendMode::Normal) {
                 body << " style=\"mix-blend-mode:" << blendModeCss(object.blendMode()) << "\"";
             }
-            if (!object.isVisible()) {
+            if (!object.ownVisible()) {
                 body << " display=\"none\"";
             }
-            if (object.isLocked()) {
+            if (object.ownLocked()) {
                 body << " data-locked=\"true\"";
+            }
+            if (withLayers) {
+                body << " data-layer=\"" << object.layer() << "\"";
             }
             body << "/>\n";
     }
@@ -1544,6 +1754,9 @@ namespace sketch {
                 for (std::size_t k = common; k < groups.size(); ++k) {
                     GroupProps props = document.groupProps(groups[k]);
                     body << "<g";
+                    if (props.clip) {
+                        body << " data-clip=\"true\"";
+                    }
                     if (props.opacity < 1.0) {
                         body << " opacity=\"" << num(props.opacity) << "\"";
                     }
@@ -1554,7 +1767,7 @@ namespace sketch {
                     openGroups.push_back(groups[k]);
                 }
             }
-            writeObject(object, "obj" + std::to_string(object.id()), body, defs, gradientCount);
+            writeObject(object, "obj" + std::to_string(object.id()), body, defs, gradientCount, document.layers().size() > 1);
         }
         for (std::size_t k = openGroups.size(); k > 0; --k) {
             body << "</g>\n";
@@ -1575,20 +1788,25 @@ namespace sketch {
 
         std::ostringstream out;
         out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-        out << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << num(document.pageWidth()) << "pt\" height=\"" << num(document.pageHeight())
-            << "pt\" viewBox=\"0 0 " << num(document.pageWidth()) << " " << num(document.pageHeight()) << "\" data-ppi=\"" << num(document.ppi())
+        const BLBox all = document.artboardsBounds();
+        out << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << num(all.x1 - all.x0) << "pt\" height=\"" << num(all.y1 - all.y0)
+            << "pt\" viewBox=\"" << num(all.x0) << " " << num(all.y0) << " " << num(all.x1 - all.x0) << " " << num(all.y1 - all.y0) << "\" data-ppi=\"" << num(document.ppi())
             << "\" data-color-mode=\"" << (document.colorMode() == ColorSpace::CMYK ? "cmyk" : "rgb")
-            << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\">\n";
+            << "\" data-page-background=\"" << (document.pageBackground() ? nativeColor(*document.pageBackground()) : std::string("none")) << "\"" << artboardAttr(document) << guideAttr(document) << layerAttr(document) << swatchAttr(document) << ">\n";
         std::string defsText = defs.str();
         if (!defsText.empty()) {
             out << "<defs>\n" << defsText << "</defs>\n";
         }
         if (document.pageBackground()) {
-            // A real rectangle so other viewers show the page color; the reader recognizes it by its id and skips it.
-            std::ostringstream unused;
-            int none = 0;
-            out << "<rect id=\"pageBackground\" width=\"" << num(document.pageWidth()) << "\" height=\"" << num(document.pageHeight()) << "\""
-                << paintAttrs("fill", SketchPaint::solid(*document.pageBackground()), BLBox(0, 0, 0, 0), unused, none) << "/>\n";
+            // A real rectangle per artboard so other viewers show the page color; the reader recognizes them by their ids and skips them.
+            for (std::size_t i = 0; i < document.artboards().size(); ++i) {
+                const Artboard& board = document.artboards()[i];
+                std::ostringstream unused;
+                int none = 0;
+                out << "<rect id=\"pageBackground" << (i ? std::to_string(i + 1) : std::string()) << "\" x=\"" << num(board.x) << "\" y=\"" << num(board.y)
+                    << "\" width=\"" << num(board.width) << "\" height=\"" << num(board.height) << "\""
+                    << paintAttrs("fill", SketchPaint::solid(*document.pageBackground()), BLBox(0, 0, 0, 0), unused, none) << "/>\n";
+            }
         }
         out << body.str();
         out << "</svg>\n";
@@ -1619,8 +1837,12 @@ namespace sketch {
         if (!haveWidth || width <= 0.0) { width = haveViewBox ? vbW : 612.0; }
         if (!haveHeight || height <= 0.0) { height = haveViewBox ? vbH : 792.0; }
 
+        std::vector<Artboard> boards;
+        if (const std::string* list = root->attr("data-artboards")) {
+            boards = parseArtboards(*list);
+        }
         BLMatrix2D base = identity();
-        if (haveViewBox) {
+        if (haveViewBox && boards.empty()) {
             double sx = width / vbW, sy = height / vbH;
             base = BLMatrix2D(sx, 0.0, 0.0, sy, -vbX * sx, -vbY * sy);
         }
@@ -1628,6 +1850,14 @@ namespace sketch {
         document.clearObjects();
         document.setGraphicStyles(defaultGraphicStyles());   // replaced by the file's own group, when it has one
         document.setPageSize(float(width), float(height));
+        if (!boards.empty()) {
+            std::size_t active = 0;
+            if (const std::string* index = root->attr("data-active-artboard")) {
+                double value = number(index, 0.0);
+                active = value >= 0.0 && value < double(boards.size()) ? std::size_t(value) : 0;
+            }
+            document.setArtboards(boards, active);
+        }
         if (const std::string* ppi = root->attr("data-ppi")) {
             double value = number(ppi, 72.0);
             if (value > 0.0) {
@@ -1649,6 +1879,9 @@ namespace sketch {
         } else {
             document.setColorMode(ColorSpace::RGB);
         }
+        document.setGuides(root->attr("data-guides") != nullptr ? parseGuides(*root->attr("data-guides")) : std::vector<Guide>());
+        document.setLayers(root->attr("data-layers") != nullptr ? parseLayers(*root->attr("data-layers")) : std::vector<Layer>());
+        document.setSwatches(root->attr("data-swatches") != nullptr ? parseSwatches(*root->attr("data-swatches")) : defaultSwatches());
         ctx.document = &document;
         Style rootStyle = styleFor(*root, Style());
         for (const auto& child : root->children) {

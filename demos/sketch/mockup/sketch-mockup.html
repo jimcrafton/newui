@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -186,6 +186,7 @@
     <button class="tb" title="Scissors (C): click a path to cut it there"><img src="../Resources/icons/tool-scissors.svg" alt=""></button>
     <button class="tb" title="Knife (K): drag across filled shapes to cut them into pieces"><img src="../Resources/icons/tool-knife.svg" alt=""></button>
     <button class="tb" title="Eraser (Shift+E): drag over shapes and lines to rub them out"><img src="../Resources/icons/tool-eraser.svg" alt=""></button>
+    <button class="tb" title="Shape Builder (Shift+M): drag across the pieces of the selected overlapping shapes to join them (Alt-drag erases)"><img src="../Resources/icons/tool-shapebuilder.svg" alt=""></button>
     <div class="sep" style="width:22px;height:1px;margin:3px 0"></div>
     <button class="tb" title="Hand (H)"><img src="../Resources/icons/tool-hand.svg" alt=""></button>
     <button class="tb" title="Zoom (Z)"><img src="../Resources/icons/tool-zoom.svg" alt=""></button>
@@ -238,6 +239,17 @@
 
   <!-- Right dock: ScrollView? no - plain vertical FlexLayout of panels -->
   <aside class="sidebar" data-newui="ScrollView (sidebar)">
+    <section class="panel" data-newui="TransformPanel (SubView)">
+      <h3>Transform <span>1 object</span></h3>
+      <div class="body">
+        <div class="row" data-newui="HBox (transformPosRow)"><label style="min-width:auto">X</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformXField)">
+          <label style="min-width:auto">Y</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformYField)"></div>
+        <div class="row" data-newui="HBox (transformSizeRow)"><label style="min-width:auto">W</label><input class="field" value="200" style="width:70px" data-newui="TextField (transformWField)">
+          <label style="min-width:auto">H</label><input class="field" value="100" style="width:70px" data-newui="TextField (transformHField)">
+          <button class="tb" title="Keep proportions" data-newui="ToolbarButton (linkAspectButton)"><img src="../Resources/icons/link-aspect.svg" width="16" alt=""></button></div>
+        <div class="row" data-newui="HBox (transformAngleRow)"><label style="min-width:44px">Angle</label><input class="field" value="0" style="width:70px" data-newui="TextField (transformAngleField)"><label style="min-width:auto">deg</label></div>
+      </div>
+    </section>
     <section class="panel" data-newui="ColorPanel (SubView)">
       <h3>Color <span>Fill &#9679; &nbsp; Stroke &#9675;</span></h3>
       <div class="body">
@@ -371,3 +383,4 @@
 </script>
 </body>
 </html>
+

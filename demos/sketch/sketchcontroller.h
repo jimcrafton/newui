@@ -34,6 +34,14 @@ namespace sketch {
         // File > Document Setup: change the page size, resolution, color mode and background of this document
         // (the color mode converts the artwork, as one undo step).
         bool documentSetup();
+        // File > Export As Image: asks where, then writes the page as a PNG or BMP at the document's resolution (sketchexport.h).
+        bool exportImage();
+        // File > Export All Artboards: one image per artboard, named after the chosen file ("poster.png" -> "poster_1_Artboard-1.png"...).
+        bool exportArtboards();
+        // File > Trace Image: asks for a picture (PNG, BMP or JPEG), traces it into vector shapes (imagetrace.h) and adds them to the page.
+        bool traceImage();
+        // The same for a picture that is already chosen (what the dialog leads to; also for tests).
+        bool traceImageFile(const std::string& path);
         // True when it is fine to close the window / leave the app: nothing unsaved, or saved/discarded.
         bool canClose();
 

@@ -34,8 +34,8 @@ namespace sketch {
         if (width <= 0.0f || height <= 0.0f) {
             throw std::runtime_error("SketchDocument::setPageSize: width and height must be positive");
         }
-        pageWidth_ = width;
-        pageHeight_ = height;
+        artboards_[activeArtboard_].width = width;
+        artboards_[activeArtboard_].height = height;
         changed();
     }
 
@@ -65,9 +65,10 @@ namespace sketch {
         }
         std::unique_ptr<SketchObject> owned(object);
         owned->setId(nextId_++);
+        SketchObject* raw = owned.get();   // changed() may move it down the stack (into its layer), so keep hold of it here
         objects_.push_back(std::move(owned));
         changed();
-        return *objects_.back();
+        return *raw;
     }
 
     bool SketchDocument::remove(std::size_t id) {
@@ -95,7 +96,17 @@ namespace sketch {
         for (std::size_t i = objects_.size(); i > 0; --i) {
             SketchObject* object = objects_[i - 1].get();
             if (object->isVisible() && !object->isLocked() && object->hitTest(point, tolerance)) {
-                return object;
+                // Inside a clipping group only what shows through the mask can be hit.
+                bool cutAway = false;
+                for (std::size_t group : object->groups()) {
+                    const SketchObject* mask = clipMaskOf(group);
+                    if (mask != nullptr && mask != object && mask->geometry().hit_test(point, BL_FILL_RULE_NON_ZERO) != BL_HIT_TEST_IN) {
+                        cutAway = true;
+                    }
+                }
+                if (!cutAway) {
+                    return object;
+                }
             }
         }
         return nullptr;
@@ -105,8 +116,22 @@ namespace sketch {
         objects_.clear();
         nextId_ = 1;
         selection_.clear();
+        guides_.clear();
+        {
+            // One artboard again, of the same size (a new or opened document sets the size next).
+            Artboard first = artboards_[activeArtboard_];
+            first.name = "Artboard 1";
+            first.x = first.y = 0.0;
+            artboards_.assign(1, first);
+            activeArtboard_ = 0;
+        }
+        resetLayers();
+        swatches_ = defaultSwatches();
         undoStack_.clear();
         updateAllViews();
+        // Panels that show the selection or the document follow (this is not an edit: the document is not marked modified).
+        onSelectionChanged(*this);
+        onChanged(*this);
     }
 
     void SketchDocument::paint(BLContext& ctx) const {
@@ -128,7 +153,8 @@ namespace sketch {
                 ++j;
             }
             GroupProps props = groupProps(group);
-            if (props.isDefault()) {
+            const bool clipped = props.clip && j - i >= 2;
+            if (props.isDefault() || (!clipped && props.opacity >= 1.0 && props.blendMode == BlendMode::Normal)) {
                 paintRange(ctx, i, j, depth + 1);
             } else {
                 bool any = false;
@@ -142,7 +168,36 @@ namespace sketch {
                     any = true;
                 }
                 if (any) {
-                    paintIsolated(ctx, box, props.opacity, props.blendMode, [this, i, j, depth](BLContext& layer) { paintRange(layer, i, j, depth + 1); });
+                    auto paintBody = [this, i, j, depth, clipped](BLContext& target) {
+                        if (!clipped) {
+                            paintRange(target, i, j, depth + 1);
+                            return;
+                        }
+                        // The mask is the topmost member: the others draw into a layer that is cut to its outline.
+                        const SketchObject& mask = *objects_[j - 1];
+                        BLBox m = mask.geometryBounds(), area(0, 0, 0, 0);
+                        bool first = true;
+                        for (std::size_t k = i; k + 1 < j; ++k) {
+                            if (objects_[k]->isVisible()) {
+                                BLBox b = objects_[k]->bounds();
+                                area = first ? b : BLBox(std::min(area.x0, b.x0), std::min(area.y0, b.y0), std::max(area.x1, b.x1), std::max(area.y1, b.y1));
+                                first = false;
+                            }
+                        }
+                        if (first) {
+                            return;
+                        }
+                        BLBox cut(std::max(area.x0, m.x0), std::max(area.y0, m.y0), std::min(area.x1, m.x1), std::min(area.y1, m.y1));
+                        if (cut.x1 <= cut.x0 || cut.y1 <= cut.y0) {
+                            return;
+                        }
+                        paintClipped(target, cut, mask.geometry(), [this, i, j, depth](BLContext& inner) { paintRange(inner, i, j - 1, depth + 1); });
+                    };
+                    if (props.opacity < 1.0 || props.blendMode != BlendMode::Normal) {
+                        paintIsolated(ctx, box, props.opacity, props.blendMode, paintBody);
+                    } else {
+                        paintBody(ctx);
+                    }
                 }
             }
             i = j;
@@ -243,6 +298,14 @@ namespace sketch {
                 continue;
             }
             BLBox box = object->geometryBounds();
+            for (std::size_t group : object->groups()) {
+                const SketchObject* mask = clipMaskOf(group);
+                if (mask != nullptr && mask != object) {
+                    BLBox m = mask->geometryBounds();
+                    BLBox cut(std::max(box.x0, m.x0), std::max(box.y0, m.y0), std::min(box.x1, m.x1), std::min(box.y1, m.y1));
+                    box = cut.x1 >= cut.x0 && cut.y1 >= cut.y0 ? cut : m;
+                }
+            }
             if (!any) {
                 out = box;
                 any = true;
@@ -556,7 +619,7 @@ namespace sketch {
 
     std::string SketchDocument::selectionToSvg() const {
         SketchDocument scratch;
-        scratch.setPageSize(pageWidth_, pageHeight_);
+        scratch.setPageSize(pageWidth(), pageHeight());
         scratch.setColorMode(colorMode_);
         for (const std::unique_ptr<SketchObject>& object : objects_) {  // stacking order, so groups stay adjacent
             if (isSelected(object->id())) {
@@ -654,6 +717,7 @@ namespace sketch {
             if (quadFrame_.has_value()) {
                 quadFrame_ = quadFrame_->transformed(matrix);
             }
+            noteTransform(matrix, 0.0);
             commitGeometry(before, description, frameBefore);
         }
     }
@@ -725,7 +789,7 @@ namespace sketch {
         }
     }
 
-    bool SketchDocument::groupSelection() {
+    bool SketchDocument::groupSelection(bool clip) {
         if (selection_.size() < 2) {
             return false;
         }
@@ -749,6 +813,21 @@ namespace sketch {
         orderAfter.insert(orderAfter.end(), picked.begin(), picked.end());
         orderAfter.insert(orderAfter.end(), upper.begin(), upper.end());
 
+        // Members from different layers all move to the layer of the topmost one.
+        std::vector<std::pair<std::size_t, std::size_t>> layersBefore, layersAfter;
+        for (const std::unique_ptr<SketchObject>& object : objects_) {
+            layersBefore.push_back({object->id(), object->layer()});
+            layersAfter.push_back({object->id(), isSelected(object->id()) ? objects_[top]->layer() : object->layer()});
+        }
+        auto applyObjectLayers = [this](const std::vector<std::pair<std::size_t, std::size_t>>& states) {
+            for (const auto& [id, layer] : states) {
+                if (SketchObject* object = findById(id)) {
+                    object->setLayer(layer);
+                }
+            }
+        };
+        applyObjectLayers(layersAfter);
+        orderAfter = layerSorted(orderAfter);
         std::size_t group = nextGroupId_++;
         std::vector<GroupState> groupsAfter = groupsBefore;
         for (GroupState& state : groupsAfter) {
@@ -756,11 +835,17 @@ namespace sketch {
                 state.groups.insert(state.groups.begin(), group);
             }
         }
+        GroupProps clipProps;
+        clipProps.clip = clip;
+        auto applyProps = [this, group, clipProps](bool on) {
+            if (on && clipProps.clip) { groupProps_[group] = clipProps; } else { groupProps_.erase(group); }
+        };
+        applyProps(true);
         applyGroups(groupsAfter);
         reorder(orderAfter);
-        undoStack_.push({"Group",
-            [this, orderAfter, groupsAfter]() { applyGroups(groupsAfter); reorder(orderAfter); },
-            [this, orderBefore, groupsBefore]() { applyGroups(groupsBefore); reorder(orderBefore); }});
+        undoStack_.push({clip ? "Make Clipping Mask" : "Group",
+            [this, orderAfter, groupsAfter, layersAfter, applyObjectLayers, applyProps]() { applyProps(true); applyObjectLayers(layersAfter); applyGroups(groupsAfter); reorder(orderAfter); },
+            [this, orderBefore, groupsBefore, layersBefore, applyObjectLayers, applyProps]() { applyProps(false); applyObjectLayers(layersBefore); applyGroups(groupsBefore); reorder(orderBefore); }});
         return true;
     }
 
@@ -851,6 +936,7 @@ namespace sketch {
                 break;
             }
         }
+        after = layerSorted(after);   // an object stays inside its layer
         if (after == before) {
             return false;
         }
@@ -867,7 +953,7 @@ namespace sketch {
             return false;
         }
         FrameState frameBefore = frameState();
-        BLBox target(0, 0, pageWidth_, pageHeight_);  // one object (or one group) lines up with the page
+        BLBox target = artboards_[activeArtboard_].box();  // one object (or one group) lines up with the active artboard
         // A group aligns as one piece: its members share the group's bounds.
         auto unitKey = [this](const SketchObject& o) { return o.groups().empty() ? o.id() * 2 : o.groups().front() * 2 + 1; };
         std::map<std::size_t, BLBox> unitBounds;
@@ -990,12 +1076,45 @@ namespace sketch {
         return true;
     }
 
+    bool SketchDocument::changeSelectionText(const std::function<void(SketchObject&)>& change, const std::string& description) {
+        struct Snap {
+            std::size_t id;
+            std::string text, font;
+            double size;
+            TextStyle style;
+            bool operator==(const Snap& o) const { return text == o.text && font == o.font && size == o.size && style == o.style; }
+        };
+        std::vector<Snap> before, after;
+        for (std::size_t id : selection_) {
+            SketchObject* object = findById(id);
+            if (object == nullptr || !object->isText()) {
+                continue;
+            }
+            before.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
+            change(*object);
+            after.push_back({id, object->text(), object->fontName(), object->fontSize(), object->textStyle()});
+        }
+        if (before.empty() || before == after) {
+            return false;
+        }
+        auto apply = [this](const std::vector<Snap>& snaps) {
+            for (const Snap& snap : snaps) {
+                if (SketchObject* object = findById(snap.id)) {
+                    object->setTextAll(snap.text, snap.font, snap.size, snap.style);
+                }
+            }
+            changed();
+        };
+        undoStack_.push({description, [apply, after]() { apply(after); }, [apply, before]() { apply(before); }});
+        return true;
+    }
+
     bool SketchDocument::lockSelection() {
         std::vector<FlagState> before, after;
         for (std::size_t id : selection_) {
             if (const SketchObject* object = findById(id)) {
-                before.push_back({id, object->isVisible(), object->isLocked()});
-                after.push_back({id, object->isVisible(), true});
+                before.push_back({id, object->ownVisible(), object->ownLocked()});
+                after.push_back({id, object->ownVisible(), true});
             }
         }
         return applyFlags(before, after, "Lock");
@@ -1005,8 +1124,8 @@ namespace sketch {
         std::vector<FlagState> before, after;
         for (std::size_t id : selection_) {
             if (const SketchObject* object = findById(id)) {
-                before.push_back({id, object->isVisible(), object->isLocked()});
-                after.push_back({id, false, object->isLocked()});
+                before.push_back({id, object->ownVisible(), object->ownLocked()});
+                after.push_back({id, false, object->ownLocked()});
             }
         }
         return applyFlags(before, after, "Hide");
@@ -1015,9 +1134,9 @@ namespace sketch {
     bool SketchDocument::unlockAll() {
         std::vector<FlagState> before, after;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (object->isLocked()) {
-                before.push_back({object->id(), object->isVisible(), true});
-                after.push_back({object->id(), object->isVisible(), false});
+            if (object->ownLocked()) {
+                before.push_back({object->id(), object->ownVisible(), true});
+                after.push_back({object->id(), object->ownVisible(), false});
             }
         }
         return applyFlags(before, after, "Unlock All");
@@ -1026,9 +1145,9 @@ namespace sketch {
     bool SketchDocument::showAll() {
         std::vector<FlagState> before, after;
         for (const std::unique_ptr<SketchObject>& object : objects_) {
-            if (!object->isVisible()) {
-                before.push_back({object->id(), false, object->isLocked()});
-                after.push_back({object->id(), true, object->isLocked()});
+            if (!object->ownVisible()) {
+                before.push_back({object->id(), false, object->ownLocked()});
+                after.push_back({object->id(), true, object->ownLocked()});
             }
         }
         return applyFlags(before, after, "Show All");
@@ -1069,6 +1188,7 @@ namespace sketch {
     }
 
     void SketchDocument::changed() {
+        syncLayers();   // new objects find their layer, layer state reaches the objects, the stack follows the layers
         markModified();
         updateAllViews();
         onChanged(*this);

@@ -25,6 +25,9 @@ namespace sketch {
             {"File", "Save", "file.save"},
             {"File", "Save As...", "file.saveAs"},
             {"File", "Document Setup...", "file.documentSetup"},
+            {"File", "Export As Image...", "file.exportImage"},
+            {"File", "Export All Artboards...", "file.exportArtboards"},
+            {"File", "Trace Image...", "file.traceImage"},
             {"File", "Exit", "file.exit"},
             {"Edit", "Undo", "edit.undo"},
             {"Edit", "Redo", "edit.redo"},
@@ -36,17 +39,35 @@ namespace sketch {
             {"Edit", "Delete", "edit.delete"},
             {"Edit", "Select All", "edit.selectAll"},
             {"Edit", "Deselect", "edit.deselect"},
+            {"Edit/Select Same", "Fill Color", "edit.sameFill"},
+            {"Edit/Select Same", "Stroke Color", "edit.sameStroke"},
+            {"Edit/Select Same", "Stroke Weight", "edit.sameWeight"},
+            {"Edit/Select Same", "Opacity", "edit.sameOpacity"},
+            {"Edit/Select Same", "Blend Mode", "edit.sameBlend"},
+            {"Edit/Select Same", "Object Type", "edit.sameType"},
             {"Object", "Group", "object.group"},
             {"Object", "Ungroup", "object.ungroup"},
+            {"Object/Clipping Mask", "Make", "object.clipMake"},
+            {"Object/Clipping Mask", "Release", "object.clipRelease"},
+            {"Object/Artboards", "New Artboard", "artboard.new"},
+            {"Object/Artboards", "Delete Artboard", "artboard.delete"},
+            {"Object/Artboards", "Previous Artboard", "artboard.previous"},
+            {"Object/Artboards", "Next Artboard", "artboard.next"},
+            {"Object/Artboards", "Fit Artboard in Window", "artboard.fit"},
             {"Object", "Lock", "object.lock"},
             {"Object", "Unlock All", "object.unlockAll"},
             {"Object", "Hide", "object.hide"},
             {"Object", "Show All", "object.showAll"},
+            {"Object/Transform", "Transform Again", "object.transformAgain"},
             {"Object/Transform", "Rotate 90 CW", "object.rotate90cw"},
             {"Object/Transform", "Rotate 90 CCW", "object.rotate90ccw"},
             {"Object/Transform", "Flip Horizontal", "object.flipHorizontal"},
             {"Object/Transform", "Flip Vertical", "object.flipVertical"},
             {"Object/Transform", "Reset Bounding Box", "object.resetBoundingBox"},
+            {"Object/Path", "Join", "path.join"},
+            {"Object/Path", "Reverse Direction", "path.reverse"},
+            {"Object/Path", "Simplify", "path.simplify"},
+            {"Object/Path", "Outline Stroke", "path.outlineStroke"},
             {"Object/Pathfinder", "Unite", "pathfinder.unite"},
             {"Object/Pathfinder", "Minus Front", "pathfinder.minusFront"},
             {"Object/Pathfinder", "Intersect", "pathfinder.intersect"},
@@ -68,6 +89,10 @@ namespace sketch {
             {"View", "Show Grid", "view.toggleGrid"},
             {"View", "Show Rulers", "view.toggleRulers"},
             {"View", "Snap to Grid", "view.toggleSnap"},
+            {"View", "Smart Guides", "view.toggleSmartGuides"},
+            {"View", "Show Guides", "view.toggleGuides"},
+            {"View", "Lock Guides", "view.lockGuides"},
+            {"View", "Clear Guides", "view.clearGuides"},
             {"View/Color Mode", "RGB", "color.rgb"},
             {"View/Color Mode", "CMYK", "color.cmyk"},
         };
@@ -117,6 +142,11 @@ namespace sketch {
             {"scissorsTool", SketchTool::Scissors, "Scissors: click a path to cut it there (a closed path opens, an open one divides in two)"},
             {"knifeTool", SketchTool::Knife, "Knife: drag a line across filled shapes to cut them into pieces (all it crosses, or only the selection)"},
             {"eraserTool", SketchTool::Eraser, "Eraser: drag over shapes and lines to rub them out; Up / Down arrows change the size"},
+            {"shapeBuilderTool", SketchTool::ShapeBuilder, "Shape Builder: select overlapping shapes, then drag across the pieces to join them into one shape (Alt-drag erases them)"},
+            {"eyedropperTool", SketchTool::Eyedropper, "Eyedropper: click an object to copy its fill, stroke and effects onto the selection (with nothing else selected, onto what new shapes are drawn with)"},
+            {"magicWandTool", SketchTool::MagicWand, "Magic Wand: click an object to select every object with the same fill (Shift adds to the selection)"},
+            {"artboardTool", SketchTool::Artboard, "Artboard: drag to make an artboard, click one to select it, drag it or its handles to move / resize it (Delete removes it)"},
+            {"lassoTool", SketchTool::Lasso, "Lasso: drag a loop round objects to select them (Shift adds to the selection)"},
             {"handTool", SketchTool::Hand, "Hand: drag to pan"},
             {"zoomTool", SketchTool::Zoom, "Zoom: click to zoom in, Shift-click to zoom out"},
         };
@@ -151,6 +181,10 @@ namespace sketch {
         files_ = std::make_unique<SketchDocumentController>(document_, frame_);
         commands_ = std::make_unique<SketchCommandController>(document_, *canvas_, *files_);
         stylePanel_ = std::make_unique<StylePanel>(frame_.rootView(), document_);   // follows the selection and edits it, undoably
+        textPanel_ = std::make_unique<TextPanel>(frame_.rootView(), document_);   // font, size, style, alignment, spacing of text
+        layersPanel_ = std::make_unique<LayersPanel>(frame_.rootView(), document_);   // the layer tree
+        artboardPanel_ = std::make_unique<ArtboardPanel>(frame_.rootView(), document_);   // the artboard list and the active one
+        transformPanel_ = std::make_unique<TransformPanel>(frame_.rootView(), document_);   // X / Y / W / H / angle of the selection
 
         bindFileEvents();
         bindZoom();
@@ -371,7 +405,8 @@ namespace sketch {
 
     void SketchWindowController::syncViewChecks() {
         struct Check { const char* path; bool on; };
-        const Check checks[] = {{"View/Show Grid", canvas_->showGrid()}, {"View/Show Rulers", canvas_->showRulers()}, {"View/Snap to Grid", canvas_->snapToGrid()}};
+        const Check checks[] = {{"View/Show Grid", canvas_->showGrid()}, {"View/Show Rulers", canvas_->showRulers()}, {"View/Snap to Grid", canvas_->snapToGrid()},
+            {"View/Smart Guides", canvas_->smartGuides()}, {"View/Show Guides", canvas_->showGuides()}, {"View/Lock Guides", canvas_->guidesLocked()}};
         for (const Check& check : checks) {
             if (auto it = menuItems_.find(check.path); it != menuItems_.end() && it->second->isChecked() != check.on) {
                 it->second->setChecked(check.on);

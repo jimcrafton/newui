@@ -36,12 +36,52 @@ namespace sketch {
         QuadFrame transformed(const BLMatrix2D& matrix) const;
     };
 
+    struct TraceResult;   // imagetrace.h
+
+    // The colors a new document's swatch list starts with (hex text, "#rrggbb").
+    std::vector<std::string> defaultSwatches();
+
+    // A ruler guide: the vertical line x = position, or the horizontal line y = position (document units).
+    // @reflect ignore=true
+    struct Guide {
+        bool vertical = false;
+        double position = 0.0;
+        bool operator==(const Guide& o) const { return vertical == o.vertical && position == o.position; }
+    };
+
+    // A layer: a named bucket of objects that can be hidden or locked as a whole and that holds sublayers. Layers form a tree
+    // (parent 0 = top level); the document keeps them in `layers()` with siblings in stacking order, back first. A layer paints its
+    // sublayers (in order) and then its own objects on top of them.
+    // @reflect ignore=true
+    struct Layer {
+        std::size_t id = 0;
+        std::size_t parent = 0;
+        std::string name;
+        bool visible = true;
+        bool locked = false;
+        bool expanded = true;   // shown opened in the Layers panel (view state, not saved)
+    };
+
+    // Opacity and blend mode of a whole group, applied to its members drawn together.
+    // One artboard: a named rectangle of the canvas that is exported and aligned to on its own. A document always has at least one;
+    // the first starts at the origin. The active one is "the page" (pageWidth / pageHeight, Align, Image Trace, export).
+    // @reflect ignore=true
+    struct Artboard {
+        std::string name;
+        double x = 0.0, y = 0.0, width = 612.0, height = 792.0;
+        BLBox box() const { return BLBox(x, y, x + width, y + height); }
+        bool contains(const BLPoint& p) const { return p.x >= x && p.x <= x + width && p.y >= y && p.y <= y + height; }
+        bool operator==(const Artboard& o) const { return name == o.name && x == o.x && y == o.y && width == o.width && height == o.height; }
+    };
+
     // Opacity and blend mode of a whole group, applied to its members drawn together.
     // @reflect ignore=true
     struct GroupProps {
         double opacity = 1.0;
         BlendMode blendMode = BlendMode::Normal;
-        bool isDefault() const { return opacity >= 1.0 && blendMode == BlendMode::Normal; }
+        // A clipping mask: the group's topmost object is the mask, and the rest show only inside its outline.
+        bool clip = false;
+        bool isDefault() const { return opacity >= 1.0 && blendMode == BlendMode::Normal && !clip; }
     };
 
     // A named appearance the user saved: the whole stack (fills, strokes, effects) plus the object's opacity and blend
@@ -137,10 +177,33 @@ namespace sketch {
         // Replaces the appearance, opacity and blend mode of every selected object with the style's.
         bool applyGraphicStyle(std::size_t index);
 
-        // Page size in points (1/72 in), and the pixel density used when exporting/previewing.
-        float pageWidth() const { return pageWidth_; }
-        float pageHeight() const { return pageHeight_; }
+        // Page size in points (1/72 in) - the size of the active artboard - and the pixel density used when exporting/previewing.
+        float pageWidth() const { return float(artboards_[activeArtboard_].width); }
+        float pageHeight() const { return float(artboards_[activeArtboard_].height); }
         void setPageSize(float width, float height);
+
+        // ---- Artboards (documentartboards.cpp) ----
+        // Never empty. Edits are undo steps; setActiveArtboard is not (it is a view of the document, like the selection).
+        const std::vector<Artboard>& artboards() const { return artboards_; }
+        std::size_t activeArtboard() const { return activeArtboard_; }
+        const Artboard& activeArtboardRect() const { return artboards_[activeArtboard_]; }
+        void setActiveArtboard(std::size_t index);
+        // The box round all the artboards.
+        BLBox artboardsBounds() const;
+        // The topmost (last) artboard containing the point, or -1.
+        int artboardAt(const BLPoint& point) const;
+        // A name for a new artboard ("Artboard 3").
+        std::string nextArtboardName() const;
+        // Adds an artboard (it becomes the active one) and returns its index; the size is made at least 1 x 1.
+        std::size_t addArtboard(Artboard artboard);
+        // Adds one the size of the active artboard, to the right of all the others with a gap.
+        std::size_t addArtboardBesideLast();
+        // Removes an artboard; false for the last remaining one or an index out of range.
+        bool deleteArtboard(std::size_t index);
+        // Moves / resizes / renames an artboard; false when nothing changes.
+        bool setArtboard(std::size_t index, const Artboard& artboard);
+        // Replaces the whole list (loading a file); keeps `active` in range. Not an undo step.
+        void setArtboards(std::vector<Artboard> artboards, std::size_t active);
         float ppi() const { return ppi_; }
         void setPpi(float ppi);
         // The page's fill: white by default; nullopt = transparent (shown as a checkerboard, written without a
@@ -178,10 +241,19 @@ namespace sketch {
         std::vector<std::size_t> withGroupMembers(const std::vector<std::size_t>& ids) const;
         // Groups the selection (two or more objects) into a new outermost group, placed where its topmost member was;
         // undoable. False when fewer than two objects are selected.
-        bool groupSelection();
+        bool groupSelection(bool clip = false);
         // Dissolves the outermost group of each selected object (the objects stay selected); undoable. False when none is grouped.
         bool ungroupSelection();
         bool canGroup() const { return selection_.size() >= 2; }
+        // Clipping masks (documentclip.cpp): a group flagged `clip` shows its members only inside the outline of its topmost member (the
+        // mask, whose own fill and stroke are not drawn). Make groups the selection (or flags the selected group) so; the topmost selected
+        // object is the mask. Release clears the flag and keeps the group. Both undoable.
+        bool makeClippingMask();
+        bool releaseClippingMask();
+        bool canMakeClippingMask() const;
+        bool canReleaseClippingMask() const;
+        // The mask object of a clipping group (the topmost member), or null when the group is not a clipping group.
+        const SketchObject* clipMaskOf(std::size_t groupId) const;
         bool canUngroup() const;
 
         // ---- Selection (ids, in selection order; a removed object drops out) ----
@@ -275,6 +347,131 @@ namespace sketch {
         // The Scissors: cuts the path nearest to `at` (within `tolerance`) at that point, keeping its curves. A closed path opens; an
         // open one divides in two. False when no path is close enough (or the point is at the end of an open path).
         bool scissorsCut(const BLPoint& at, double tolerance);
+
+        // The Shape Builder: the selected filled shapes (shown, unlocked, not text; bottom to top) cut into the cells they make together -
+        // every distinct overlap and every part that is alone. `objects` are the shapes' ids and each cell's `members` index into it.
+        struct ShapeBuilderModel {
+            std::vector<std::size_t> objects;
+            std::vector<ShapeCell> cells;
+        };
+        ShapeBuilderModel shapeBuilderModel() const;
+        // Joins the chosen cells (indices into shapeBuilderModel().cells) into one new shape, taking them out of the shapes they were part of
+        // (what is left of a shape stays one object, and one that is used up goes). With `erase` the cells are just taken out. One undo step;
+        // the shapes that result become the selection. False when no cell was chosen.
+        bool shapeBuild(const std::vector<std::size_t>& cellIndices, bool erase);
+
+        // Text objects of the selection: `change` edits each one (its font, size or style), recorded as one undo step. False when the
+        // selection holds no text or nothing changed.
+        bool changeSelectionText(const std::function<void(SketchObject&)>& change, const std::string& description);
+
+        // Image Trace (documenttrace.cpp): the layers of a traced picture become filled shapes in one group, fitted onto the page and
+        // centred, as one undo step; they become the selection. Returns their ids (none when there was nothing to add).
+        std::vector<std::size_t> addTrace(const TraceResult& trace);
+
+        // ---- Selecting by look or by lasso (documentselect.cpp): selection changes, not undo steps ----
+        enum class SameKind { FillColor, StrokeColor, StrokeWeight, Opacity, BlendMode, ObjectType };
+        // Selects every selectable object that matches a selected one in the way given. False with nothing selected.
+        bool selectSame(SameKind kind);
+        // The Magic Wand: selects the objects whose fill (stroke, for an unfilled one) is like the one of object `sourceId`, colors within
+        // `tolerance` (0..1) of each other; `add` keeps the current selection too.
+        bool selectSimilar(std::size_t sourceId, bool add, double tolerance);
+        // The Lasso: selects the objects touched by the freehand polygon (document units); `add` keeps the current selection too.
+        bool selectInPolygon(const std::vector<BLPoint>& polygon, bool add);
+
+        // ---- Swatches and the Eyedropper (documentswatches.cpp) ----
+        // Saved colors as "#rrggbb" text, at most 24, shown in the Color panel. Each edit is one undo step; false when nothing changed
+        // (a duplicate, a full list, a bad index).
+        const std::vector<std::string>& swatches() const { return swatches_; }
+        bool addSwatch(const std::string& hex);
+        bool deleteSwatch(std::size_t index);
+        // Replaces the list with no undo step (a load, New).
+        void setSwatches(std::vector<std::string> swatches);
+        // The Eyedropper: the look of the object under `at` goes onto the selected objects (one undo step); with nothing else selected it
+        // becomes the look new shapes are drawn with. False when nothing is under the point.
+        bool sampleLook(const BLPoint& at, double tolerance);
+
+        // ---- Ruler guides (documentguides.cpp): saved with the document; objects, drawing and pen points snap to them ----
+        const std::vector<Guide>& guides() const { return guides_; }
+        // Each is one undo step. addGuide returns the new guide's index; moveGuide / removeGuide are false for a bad index (or no change).
+        std::size_t addGuide(bool vertical, double position);
+        bool moveGuide(std::size_t index, double position);
+        bool removeGuide(std::size_t index);
+        bool clearGuides();   // false when there were none
+        // Replaces the list with no undo step (a load, New) and does not mark the document modified.
+        void setGuides(std::vector<Guide> guides);
+
+        // ---- Layers (documentlayers.cpp) ----
+        // A document always has at least one layer. Every object is in exactly one; the stacking order of the objects follows the layer
+        // tree (layers farther back first, a layer's sublayers below its own objects), which the document keeps true after every change.
+        // Arrange commands therefore work inside the object's layer. Hiding or locking a layer hides / locks all it holds.
+        const std::vector<Layer>& layers() const { return layers_; }
+        const Layer* findLayer(std::size_t id) const;
+        // The sublayers of `parent` (0 = the top level), back to front.
+        std::vector<std::size_t> layerChildren(std::size_t parent) const;
+        // 0 for a top-level layer, 1 for its sublayers, ...
+        std::size_t layerDepth(std::size_t id) const;
+        // True when `ancestor` is `id` or one of the layers above it.
+        bool layerContains(std::size_t ancestor, std::size_t id) const;
+        // A layer is shown / editable when it and every layer above it is.
+        bool layerShown(std::size_t id) const;
+        bool layerEditable(std::size_t id) const;
+        // How many objects are in the layer, and in the layer and its sublayers.
+        std::size_t layerObjectCount(std::size_t id, bool withSublayers) const;
+        // The layer new objects go to (view state: not undoable, not saved). Never 0 - it is a layer that exists.
+        std::size_t activeLayer() const { return activeLayer_; }
+        void setActiveLayer(std::size_t id);
+        // The layer of the (first) selected object, 0 when nothing is selected.
+        std::size_t selectionLayer() const;
+        // Opened / closed in the Layers panel (view state).
+        void setLayerExpanded(std::size_t id, bool expanded);
+        // Each of these is one undo step and false when nothing happened.
+        // A new layer on top of the others in `parent` (0 = top level; a name of "" gives "Layer N"); it becomes the active layer.
+        std::size_t addLayer(std::size_t parent, const std::string& name = std::string());
+        bool renameLayer(std::size_t id, const std::string& name);
+        bool setLayerVisible(std::size_t id, bool visible);
+        bool setLayerLocked(std::size_t id, bool locked);
+        // Deletes the layer with its sublayers and everything in them. Refused for the last layer.
+        bool deleteLayer(std::size_t id);
+        // Puts the layer inside `parent` (0 = top level) at `position` among that layer's sublayers (0 = back). Refused into itself.
+        bool moveLayer(std::size_t id, std::size_t parent, std::size_t position);
+        // The selected objects go to the top of the layer. Grouped objects bring their whole group.
+        bool moveSelectionToLayer(std::size_t id);
+        // Makes the selection every selectable object of the layer and its sublayers. View state like any selection change.
+        void selectLayerObjects(std::size_t id);
+        // Replaces the whole tree with no undo step (a load, New) and does not mark the document modified. An empty list gives the one
+        // default layer. Objects that name a layer the list does not have go to the active layer (the last top-level one).
+        void setLayers(std::vector<Layer> layers);
+
+        // ---- Numeric transforms (documenttransform.cpp) ----
+        // Moves / resizes the selection so that its bounds become `box` (a side with no length only moves). One undo step ("Move" or "Resize").
+        bool setSelectionBox(const BLBox& box);
+        // The matrix that carries the box `from` onto the box `to` (a side of `from` with no length is only moved).
+        static BLMatrix2D matrixForBox(const BLBox& from, const BLBox& to);
+        // Live editing (scrubbing a number): puts the selection's outlines back as they were in `before` and transforms them by `matrix`
+        // (the frame angles turn by `angleDelta`), with NO undo step. When the editing is over, finish with
+        // commitGeometry(before, name, frameBefore) - and noteTransform() - to make it one step.
+        void previewTransform(const std::vector<GeometryState>& before, const BLMatrix2D& matrix, double angleDelta);
+        // Turns the selection about the center of its bounds by `radians` (the frame angles follow). One undo step.
+        bool rotateSelectionBy(double radians);
+        // Transform Again: the last move, resize or rotate (as the matrix it applied, about the same point) is applied once more to the
+        // selection. Moves, nudges, resizes, rotations and the numeric ones above are all remembered; false when nothing was done yet.
+        bool transformAgain();
+        bool canTransformAgain() const { return hasLastTransform_; }
+        // For the canvas, which applies drags itself: remember `matrix` (and the angle it turned the frames by) as the last transform.
+        void noteTransform(const BLMatrix2D& matrix, double angleDelta);
+
+        // ---- Object > Path (documentpaths.cpp) ----
+        // Walks every outline of the selection the other way round (the handles follow). One undo step.
+        bool reverseSelection();
+        // Redraws the selected outlines with as few anchors as keep them within `tolerance` of the original (curve fitting; curves and
+        // corners are kept where they are real). One undo step.
+        bool simplifySelection(double tolerance = 0.5);
+        // One selected open path is closed (its ends joined). Several are chained into one path, each next one being the piece nearest
+        // the chain's end - ends that meet become one anchor, the rest are joined by a straight segment. False when no open path is selected.
+        bool joinSelection();
+        // The stroke of each selected object becomes a filled shape of its own (wearing the stroke's paint), above the object's fill, which
+        // stays as it was without a stroke. Dashes and a width profile are not part of the outline (a plain stroke of the weight).
+        bool outlineStroke();
         // Lock/Hide act on the selection (which is then cleared - a locked or hidden object cannot be selected);
         // Unlock All / Show All act on the whole document.
         bool lockSelection();
@@ -391,8 +588,30 @@ namespace sketch {
         void attach(std::unique_ptr<SketchObject> object, std::size_t index);
         void pruneSelection();
 
-        float pageWidth_ = 612.0f;
-        float pageHeight_ = 792.0f;
+        // ---- layers (documentlayers.cpp) ----
+        // A snapshot of the layer tree for undo; `objectLayers` / `order` are only filled by the steps that move objects.
+        struct LayerState {
+            std::vector<Layer> layers;
+            std::size_t activeLayer = 0;
+            std::vector<std::pair<std::size_t, std::size_t>> objectLayers;   // (object id, layer id)
+            std::vector<std::size_t> order;                                   // every object id, back to front
+        };
+        LayerState snapshotLayers(bool withObjects) const;
+        void applyLayers(const LayerState& state);
+        void pushLayerStep(const std::string& description, const LayerState& before, const LayerState& after);
+        // Rank of each layer in the stacking order, indexed by layer id (a layer unknown to the tree gets the active layer's).
+        std::vector<int> layerRanks() const;
+        // Puts the objects in layers that exist, brings the layers' hidden / locked state to them and sorts the stack by layer.
+        void syncLayers();
+        // `ids` (all the objects, back to front) sorted the way the layers want them (stable, so the order inside a layer is kept).
+        std::vector<std::size_t> layerSorted(const std::vector<std::size_t>& ids) const;
+        void resetLayers();
+        std::size_t nextLayerId() const;
+        std::vector<std::size_t> objectsInLayer(std::size_t id) const;   // the layer and its sublayers
+        void dropUnselectable();
+
+        std::vector<Artboard> artboards_{Artboard{"Artboard 1", 0.0, 0.0, 612.0, 792.0}};
+        std::size_t activeArtboard_ = 0;
         float ppi_ = 72.0f;
         std::optional<SketchColor> pageBackground_ = SketchColor::rgb(1.0f, 1.0f, 1.0f);
         std::vector<std::unique_ptr<SketchObject>> objects_;
@@ -406,6 +625,13 @@ namespace sketch {
         StrokeOptions defaultStrokeOptions_;
         ColorSpace colorMode_ = ColorSpace::RGB;
         std::vector<std::size_t> selection_;
+        std::vector<Guide> guides_;
+        std::vector<std::string> swatches_ = defaultSwatches();
+        std::vector<Layer> layers_ = {Layer{1, 0, "Layer 1", true, false, true}};
+        std::size_t activeLayer_ = 1;
+        BLMatrix2D lastTransform_ = BLMatrix2D::make_identity();
+        double lastTransformAngle_ = 0.0;
+        bool hasLastTransform_ = false;
         std::optional<double> groupAngle_;
         std::optional<QuadFrame> quadFrame_;
         double originU_ = 0.5;
