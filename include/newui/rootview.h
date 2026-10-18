@@ -11,6 +11,7 @@
 #include <newui/geometry.h>
 #include <newui/namemanager.h>
 #include <newui/overlay.h>
+#include <newui/pen.h>
 #include <newui/presentsurface.h>
 
 namespace newui {
@@ -450,6 +451,14 @@ namespace newui {
             return nameManager_;
         }
 
+        // The pen as of the last Windows pointer message (pressure, tilt, barrel, eraser, hover). Windows still sends
+        // the usual mouse messages for a pen, after the pointer message, so mouse handlers can read this for the
+        // pen data that goes with the event. Not in range (and no pressure) when a mouse or touch is the input.
+        //@reflect ignore=true
+        const PenState& penState() const {
+            return penState_;
+        }
+
     protected:
         // Win32-message-driven event entry points - protected (not
         // private) purely for testability, so a test-local subclass can
@@ -589,6 +598,9 @@ namespace newui {
         WNDPROC wndProc_ = nullptr;
 
         bool mouseEnteredControl_ = false;
+
+        PenState penState_;
+        void updatePenState(WPARAM wParam);
 
         // Registered as this window's one real IDropTarget in
         // viewCreated() (RegisterDragDrop()) and revoked in destroy()

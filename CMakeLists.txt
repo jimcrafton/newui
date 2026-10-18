@@ -102,6 +102,7 @@ add_library(newui STATIC
     src/application.cpp
     src/frame.cpp
     "src/rootview.cpp"
+    "include/newui/pen.h" "src/pen.cpp"
     "include/newui/presentsurface.h"
     "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
     "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"

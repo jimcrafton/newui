@@ -1138,6 +1138,32 @@ namespace newui {
 		}
 	}
 
+	void RootView::updatePenState(WPARAM wParam)
+	{
+		const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
+		POINTER_INPUT_TYPE type = PT_POINTER;
+		POINTER_PEN_INFO penInfo = {};
+		if (!::GetPointerType(pointerId, &type) || type != PT_PEN || !::GetPointerPenInfo(pointerId, &penInfo)) {
+			if (type != PT_PEN) {
+				penState_ = PenState();
+			}
+			return;
+		}
+
+		POINT client = penInfo.pointerInfo.ptPixelLocation;
+		::ScreenToClient(viewHwnd_, &client);
+
+		PenInfo info;
+		info.pointerFlags = penInfo.pointerInfo.pointerFlags;
+		info.penFlags = penInfo.penFlags;
+		info.penMask = penInfo.penMask;
+		info.pressure = penInfo.pressure;
+		info.rotation = penInfo.rotation;
+		info.tiltX = penInfo.tiltX;
+		info.tiltY = penInfo.tiltY;
+		penState_ = penStateFrom(info, Point(float(client.x), float(client.y)));
+	}
+
 	bool RootView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT)
 	{
 		bool result = false;
@@ -1247,6 +1273,14 @@ namespace newui {
 				// flicker on every resize/redraw.
 				outLRESULT = 1;
 				result = true;
+			}
+			break;
+
+			case WM_POINTERENTER: case WM_POINTERUPDATE: case WM_POINTERDOWN: case WM_POINTERUP: case WM_POINTERLEAVE: {
+				updatePenState(wParam);
+				// Left unhandled on purpose: the default procedure turns a pen's pointer messages into the mouse
+				// messages the rest of this handler already routes.
+				result = false;
 			}
 			break;
 

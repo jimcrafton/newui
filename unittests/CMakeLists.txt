@@ -20,6 +20,7 @@ add_executable(newui_tests
     test_menus.cpp
     test_tabcontrol.cpp
     test_rootview.cpp
+    test_pen.cpp
     test_gdipresentsurface.cpp
     test_dxgipresentsurface.cpp
     test_layout.cpp
