@@ -1705,6 +1705,8 @@ namespace newui {
 
 	void RootView::destroy() {
 		View::destroy();
+		// RootView declares its own onDestroyed (hiding View's, which View::destroy() fires), so this one needs firing here.
+		onDestroyed(*this);
 		releaseWindow();
 	}
 
