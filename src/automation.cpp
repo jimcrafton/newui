@@ -558,14 +558,12 @@ std::string runOnLoop(RunLoop& loop, const std::string& line) {
         // is answered right here (a sent message to the menu window is still dispatched by that loop).
         return Automation::handle(line);
     }
-    if (request.valid && request.text("cmd") == "idle") {
-        loop.postIdle([promise, line]() {
-            promise->set_value(Automation::handle(line));
-            return true;
-        });
-    } else {
-        loop.post([promise, line]() { promise->set_value(Automation::handle(line)); });
-    }
+    // Idle tasks, not post(): a modal loop (a Dialog's) runs idle work but drops posted thread messages, so a
+    // posted request would never be answered while a dialog is open. "idle" also needs this to mean "queue empty".
+    loop.postIdle([promise, line]() {
+        promise->set_value(Automation::handle(line));
+        return true;
+    });
     return future.get();
 }
 
