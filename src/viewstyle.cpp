@@ -1246,7 +1246,10 @@ namespace newui {
 			                          // width/height, which are just rect's.
 			if (SUCCEEDED(::GetBufferedPaintBits(paintBuffer, &bits, &rowWidthPixels)) && bits != nullptr) {
 				if (newui::UIColorManager::isDarkMode()) {
-					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted,
+					// The hover gamma only applies to a part that really draws differently when hot; a track (always its normal state) would
+					// otherwise change brightness whenever the pointer wandered on or off it, e.g. during a thumb drag.
+					const bool hotLook = highlighted && stateId(true) != stateId(false);
+					invertLightnessInPlace(bits, width, height, rowWidthPixels, hotLook,
 											   newui::UIColorManager::colorOverride(newui::UIColorRole::ControlBackground));
 				}
 
