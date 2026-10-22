@@ -1101,10 +1101,79 @@ namespace newui {
 		return Size(static_cast<float>(sz.cx), static_cast<float>(sz.cy));
 	}
 
+	bool ThemedViewStyle::paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const {
+		if (!ThemeData::instance().isLoaded()) {
+			return false;
+		}
+		const int part = partId();
+		const int state = stateId(highlighted);
+		const bool button = themeClassName_ == L"BUTTON";
+		const bool pushButton = button && part == BP_PUSHBUTTON;
+		const bool toolbarButton = themeClassName_ == L"TOOLBAR" && part == TP_BUTTON;
+		const bool checkBox = button && part == BP_CHECKBOX;
+		const bool radioButton = button && part == BP_RADIOBUTTON;
+		if (!pushButton && !toolbarButton && !checkBox && !radioButton) {
+			return false;
+		}
+		const ThemePartData* data = ThemeData::instance().tryPartData(themeClassName_, part, state);
+		if (data == nullptr || !(data->fillColor || data->edgeFillColor || data->borderColor)) {
+			return false;
+		}
+		const std::optional<Color> fill = data->fillColor ? data->fillColor : data->edgeFillColor;
+		const Color mark = data->textColor ? *data->textColor : UIColorManager::colorFor(UIColorRole::ControlText);
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		const float minDim = size.width < size.height ? size.width : size.height;
+		BLPath path;
+		if (radioButton) {
+			path.add_ellipse(BLEllipse(size.width * 0.5f, size.height * 0.5f, minDim * 0.5f - 0.5f, minDim * 0.5f - 0.5f));
+		} else {
+			const float radius = (checkBox || pushButton || toolbarButton) ? (checkBox ? minDim * 0.2f : 4.0f) : 0.0f;
+			path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, radius));
+		}
+		if (fill && fill->a > 0.0f) {
+			ctx.set_fill_style(fill->toBLRgba32());
+			ctx.fill_path(path);
+		}
+		if (data->borderColor && data->borderColor->a > 0.0f) {
+			ctx.set_stroke_style(data->borderColor->toBLRgba32());
+			ctx.set_stroke_width(1.0f);
+			ctx.stroke_path(path);
+		}
+
+		// The mark of a checked box / selected radio, in the part's text colour; both state families run 5..8 for checked.
+		const bool checked = (checkBox || radioButton) && state >= CBS_CHECKEDNORMAL && state <= CBS_CHECKEDDISABLED;
+		if (checked) {
+			ctx.set_fill_style(mark.toBLRgba32());
+			ctx.set_stroke_style(mark.toBLRgba32());
+			if (radioButton) {
+				ctx.fill_circle(BLCircle(size.width * 0.5f, size.height * 0.5f, minDim * 0.22f));
+			} else {
+				BLPath tick;
+				tick.move_to(size.width * 0.25f, size.height * 0.52f);
+				tick.line_to(size.width * 0.43f, size.height * 0.70f);
+				tick.line_to(size.width * 0.76f, size.height * 0.30f);
+				ctx.set_stroke_width(minDim * 0.12f);
+				ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
+				ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
+				ctx.stroke_path(tick);
+			}
+		}
+		ctx.restore();
+		return true;
+	}
+
 	void ThemedViewStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 
@@ -1206,6 +1275,11 @@ namespace newui {
 			return;
 		}
 
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
+			return;
+		}
+
 		constexpr float kCornerRadius = 4.0f;  // Fluent's own "in-page control" standard - see class comment (viewstyle.h)
 
 		BLPath path;
@@ -1247,6 +1321,11 @@ namespace newui {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 
@@ -1314,6 +1393,11 @@ namespace newui {
 			return;
 		}
 
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
+			return;
+		}
+
 		float minDim = size.width < size.height ? size.width : size.height;
 		float cx = size.width * 0.5f;
 		float cy = size.height * 0.5f;
@@ -1369,6 +1453,11 @@ namespace newui {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 

@@ -789,6 +789,12 @@ namespace newui {
         virtual int partId() const = 0;
         virtual int stateId(bool highlighted) const = 0;
 
+        // Draws this part from the loaded ThemeData's colours (fill/edgeFill, border, text) for its exact state instead of asking
+        // uxtheme - what makes an app's theme file win over Windows' own look. Covers push buttons, toolbar buttons, check boxes and
+        // radio buttons; returns false (and paint() goes native) for any other part, or when no theme is loaded or it has no colours
+        // for this part and state.
+        virtual bool paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const;
+
     private:
         std::wstring themeClassName_;
         mutable HTHEME theme_ = nullptr;
