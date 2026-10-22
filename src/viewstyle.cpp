@@ -1101,21 +1101,91 @@ namespace newui {
 		return Size(static_cast<float>(sz.cx), static_cast<float>(sz.cy));
 	}
 
+	namespace {
+
+		// How a themed part is drawn from ThemeData colours. Arrow and Triangle parts draw their glyph in the part's text colour.
+		enum class PartLook { None, Box, Check, Radio, Groove, Arrow, Triangle };
+
+		struct PartInfo {
+			PartLook look = PartLook::None;
+			float radius = 0.0f;
+			bool horizontal = true;  // Groove
+		};
+
+		PartInfo partInfo(const std::wstring& cls, int part) {
+			using L = PartLook;
+			if (cls == L"BUTTON") {
+				if (part == BP_PUSHBUTTON) return {L::Box, 4.0f};
+				if (part == BP_CHECKBOX) return {L::Check};
+				if (part == BP_RADIOBUTTON) return {L::Radio};
+			} else if (cls == L"TOOLBAR") {
+				if (part == TP_BUTTON) return {L::Box, 4.0f};
+			} else if (cls == L"TRACKBAR") {
+				if (part == TKP_TRACK) return {L::Groove, 0.0f, true};
+				if (part == TKP_TRACKVERT) return {L::Groove, 0.0f, false};
+				if (part == TKP_THUMB || part == TKP_THUMBVERT) return {L::Box, 3.0f};
+			} else if (cls == L"SCROLLBAR") {
+				if (part == SBP_THUMBBTNHORZ || part == SBP_THUMBBTNVERT) return {L::Box, 3.0f};
+				if (part == SBP_LOWERTRACKHORZ || part == SBP_UPPERTRACKHORZ || part == SBP_LOWERTRACKVERT || part == SBP_UPPERTRACKVERT) return {L::Box};
+				if (part == SBP_ARROWBTN) return {L::Arrow, 2.0f};
+			} else if (cls == L"PROGRESS") {
+				if (part == PP_BAR || part == PP_BARVERT || part == PP_FILL || part == PP_FILLVERT) return {L::Box, 3.0f};
+			} else if (cls == L"TAB") {
+				if (part == TABP_TABITEM || part == TABP_TABITEMLEFTEDGE || part == TABP_TABITEMRIGHTEDGE || part == TABP_TABITEMBOTHEDGE ||
+					part == TABP_TOPTABITEM || part == TABP_TOPTABITEMLEFTEDGE || part == TABP_TOPTABITEMRIGHTEDGE || part == TABP_TOPTABITEMBOTHEDGE) return {L::Box, 3.0f};
+				if (part == TABP_PANE) return {L::Box};
+			} else if (cls == L"EDIT") {
+				if (part == EP_EDITTEXT) return {L::Box, 4.0f};
+			} else if (cls == L"LISTVIEW") {
+				if (part == LVP_LISTITEM) return {L::Box, 2.0f};
+			} else if (cls == L"TREEVIEW") {
+				if (part == TVP_TREEITEM) return {L::Box, 2.0f};
+				if (part == TVP_GLYPH) return {L::Triangle};
+			} else if (cls == L"HEADER") {
+				if (part == HP_HEADERITEM) return {L::Box};
+				if (part == HP_HEADERSORTARROW) return {L::Triangle};
+			} else if (cls == L"SPIN") {
+				if (part == SPNP_UP || part == SPNP_DOWN) return {L::Arrow, 2.0f};
+			} else if (cls == L"MENU") {
+				if (part == MENU_BARITEM || part == MENU_BARBACKGROUND) return {L::Box};
+			} else if (cls == L"TOOLTIP") {
+				if (part == TTP_STANDARD) return {L::Box, 3.0f};
+			}
+			return {};
+		}
+
+		// Fills a triangle pointing the given way (0 up, 1 down, 2 left, 3 right), centred in a square of `extent`.
+		void fillTriangle(BLContext& ctx, float cx, float cy, float extent, int direction) {
+			const float h = extent * 0.5f;
+			BLPath path;
+			switch (direction) {
+				case 0: path.move_to(cx - h, cy + h * 0.5f); path.line_to(cx + h, cy + h * 0.5f); path.line_to(cx, cy - h * 0.5f); break;
+				case 1: path.move_to(cx - h, cy - h * 0.5f); path.line_to(cx + h, cy - h * 0.5f); path.line_to(cx, cy + h * 0.5f); break;
+				case 2: path.move_to(cx + h * 0.5f, cy - h); path.line_to(cx + h * 0.5f, cy + h); path.line_to(cx - h * 0.5f, cy); break;
+				default: path.move_to(cx - h * 0.5f, cy - h); path.line_to(cx - h * 0.5f, cy + h); path.line_to(cx + h * 0.5f, cy); break;
+			}
+			path.close();
+			ctx.fill_path(path);
+		}
+
+	}
+
 	bool ThemedViewStyle::paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const {
 		if (!ThemeData::instance().isLoaded()) {
 			return false;
 		}
+		// The explorer-style list and tree skins are recorded in the theme file under their plain class names.
+		std::wstring cls = themeClassName_;
+		if (cls == L"Explorer::ListView") cls = L"LISTVIEW";
+		else if (cls == L"Explorer::TreeView") cls = L"TREEVIEW";
+
 		const int part = partId();
 		const int state = stateId(highlighted);
-		const bool button = themeClassName_ == L"BUTTON";
-		const bool pushButton = button && part == BP_PUSHBUTTON;
-		const bool toolbarButton = themeClassName_ == L"TOOLBAR" && part == TP_BUTTON;
-		const bool checkBox = button && part == BP_CHECKBOX;
-		const bool radioButton = button && part == BP_RADIOBUTTON;
-		if (!pushButton && !toolbarButton && !checkBox && !radioButton) {
+		const PartInfo info = partInfo(cls, part);
+		if (info.look == PartLook::None) {
 			return false;
 		}
-		const ThemePartData* data = ThemeData::instance().tryPartData(themeClassName_, part, state);
+		const ThemePartData* data = ThemeData::instance().tryPartData(cls, part, state);
 		if (data == nullptr || !(data->fillColor || data->edgeFillColor || data->borderColor)) {
 			return false;
 		}
@@ -1128,28 +1198,49 @@ namespace newui {
 
 		const float minDim = size.width < size.height ? size.width : size.height;
 		BLPath path;
-		if (radioButton) {
-			path.add_ellipse(BLEllipse(size.width * 0.5f, size.height * 0.5f, minDim * 0.5f - 0.5f, minDim * 0.5f - 0.5f));
-		} else {
-			const float radius = (checkBox || pushButton || toolbarButton) ? (checkBox ? minDim * 0.2f : 4.0f) : 0.0f;
-			path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, radius));
+		switch (info.look) {
+			case PartLook::Radio:
+				path.add_ellipse(BLEllipse(size.width * 0.5f, size.height * 0.5f, minDim * 0.5f - 0.5f, minDim * 0.5f - 0.5f));
+				break;
+			case PartLook::Groove: {
+				// A thin pill centred in the room the part is given, like a native track's groove.
+				const float thickness = 4.0f;
+				if (info.horizontal) {
+					const float t = thickness < size.height ? thickness : size.height;
+					path.add_round_rect(BLRoundRect(0.0f, (size.height - t) * 0.5f, size.width, t, t * 0.5f));
+				} else {
+					const float t = thickness < size.width ? thickness : size.width;
+					path.add_round_rect(BLRoundRect((size.width - t) * 0.5f, 0.0f, t, size.height, t * 0.5f));
+				}
+				break;
+			}
+			case PartLook::Triangle:
+				break;
+			case PartLook::Check:
+				path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, minDim * 0.2f));
+				break;
+			default:
+				path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, info.radius));
+				break;
 		}
-		if (fill && fill->a > 0.0f) {
-			ctx.set_fill_style(fill->toBLRgba32());
-			ctx.fill_path(path);
-		}
-		if (data->borderColor && data->borderColor->a > 0.0f) {
-			ctx.set_stroke_style(data->borderColor->toBLRgba32());
-			ctx.set_stroke_width(1.0f);
-			ctx.stroke_path(path);
+		if (info.look != PartLook::Triangle) {
+			if (fill && fill->a > 0.0f) {
+				ctx.set_fill_style(fill->toBLRgba32());
+				ctx.fill_path(path);
+			}
+			if (data->borderColor && data->borderColor->a > 0.0f) {
+				ctx.set_stroke_style(data->borderColor->toBLRgba32());
+				ctx.set_stroke_width(1.0f);
+				ctx.stroke_path(path);
+			}
 		}
 
-		// The mark of a checked box / selected radio, in the part's text colour; both state families run 5..8 for checked.
-		const bool checked = (checkBox || radioButton) && state >= CBS_CHECKEDNORMAL && state <= CBS_CHECKEDDISABLED;
+		// Check mark and radio dot: both state families run 5..8 for checked.
+		const bool checked = (info.look == PartLook::Check || info.look == PartLook::Radio) && state >= CBS_CHECKEDNORMAL && state <= CBS_CHECKEDDISABLED;
 		if (checked) {
 			ctx.set_fill_style(mark.toBLRgba32());
 			ctx.set_stroke_style(mark.toBLRgba32());
-			if (radioButton) {
+			if (info.look == PartLook::Radio) {
 				ctx.fill_circle(BLCircle(size.width * 0.5f, size.height * 0.5f, minDim * 0.22f));
 			} else {
 				BLPath tick;
@@ -1161,6 +1252,17 @@ namespace newui {
 				ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
 				ctx.stroke_path(tick);
 			}
+		}
+
+		// Glyphs: scrollbar and spin arrows (direction from the part and state ids), tree expanders and header sort arrows.
+		if (info.look == PartLook::Arrow || info.look == PartLook::Triangle) {
+			int direction = 0;
+			if (cls == L"SCROLLBAR") direction = state >= 17 ? (state - 17) % 4 : (state - 1) / 4;  // up, down, left, right
+			else if (cls == L"SPIN") direction = part == SPNP_UP ? 0 : 1;
+			else if (cls == L"TREEVIEW") direction = state == GLPS_OPENED ? 1 : 3;
+			else if (cls == L"HEADER") direction = state == HSAS_SORTEDUP ? 0 : 1;
+			ctx.set_fill_style(mark.toBLRgba32());
+			fillTriangle(ctx, size.width * 0.5f, size.height * 0.5f, minDim * 0.45f, direction);
 		}
 		ctx.restore();
 		return true;
