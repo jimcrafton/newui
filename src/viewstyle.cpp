@@ -1104,7 +1104,7 @@ namespace newui {
 	namespace {
 
 		// How a themed part is drawn from ThemeData colours. Arrow and Triangle parts draw their glyph in the part's text colour.
-		enum class PartLook { None, Box, Check, Radio, Groove, Arrow, Triangle };
+		enum class PartLook { None, Box, Frame, Check, Radio, Groove, Arrow, Triangle };
 
 		struct PartInfo {
 			PartLook look = PartLook::None;
@@ -1118,9 +1118,12 @@ namespace newui {
 				if (part == BP_PUSHBUTTON) return {L::Box, 4.0f};
 				if (part == BP_CHECKBOX) return {L::Check};
 				if (part == BP_RADIOBUTTON) return {L::Radio};
+				if (part == BP_GROUPBOX) return {L::Frame, 4.0f};
 			} else if (cls == L"TOOLBAR") {
-				if (part == TP_BUTTON) return {L::Box, 4.0f};
+				if (part == TP_BUTTON || part == TP_SPLITBUTTON) return {L::Box, 4.0f};
+				if (part == TP_SPLITBUTTONDROPDOWN) return {L::Arrow, 4.0f};
 			} else if (cls == L"TRACKBAR") {
+				if (part == TKP_TICS || part == TKP_TICSVERT) return {L::Box};
 				if (part == TKP_TRACK) return {L::Groove, 0.0f, true};
 				if (part == TKP_TRACKVERT) return {L::Groove, 0.0f, false};
 				if (part == TKP_THUMB || part == TKP_THUMBVERT) return {L::Box, 3.0f};
@@ -1148,6 +1151,11 @@ namespace newui {
 				if (part == SPNP_UP || part == SPNP_DOWN) return {L::Arrow, 2.0f};
 			} else if (cls == L"MENU") {
 				if (part == MENU_BARITEM || part == MENU_BARBACKGROUND) return {L::Box};
+			} else if (cls == L"STATUS") {
+			if (part == SP_PANE) return {L::Box};
+			} else if (cls == L"REBAR") {
+			if (part == RP_BAND) return {L::Box};
+			if (part == RP_CHEVRON || part == RP_CHEVRONVERT) return {L::Arrow, 2.0f};
 			} else if (cls == L"TOOLTIP") {
 				if (part == TTP_STANDARD) return {L::Box, 3.0f};
 			}
@@ -1224,7 +1232,7 @@ namespace newui {
 				break;
 		}
 		if (info.look != PartLook::Triangle) {
-			if (fill && fill->a > 0.0f) {
+			if (info.look != PartLook::Frame && fill && fill->a > 0.0f) {
 				ctx.set_fill_style(fill->toBLRgba32());
 				ctx.fill_path(path);
 			}
@@ -1259,6 +1267,8 @@ namespace newui {
 			int direction = 0;
 			if (cls == L"SCROLLBAR") direction = state >= 17 ? (state - 17) % 4 : (state - 1) / 4;  // up, down, left, right
 			else if (cls == L"SPIN") direction = part == SPNP_UP ? 0 : 1;
+			else if (cls == L"TOOLBAR") direction = 1;
+			else if (cls == L"REBAR") direction = part == RP_CHEVRON ? 3 : 1;
 			else if (cls == L"TREEVIEW") direction = state == GLPS_OPENED ? 1 : 3;
 			else if (cls == L"HEADER") direction = state == HSAS_SORTEDUP ? 0 : 1;
 			ctx.set_fill_style(mark.toBLRgba32());
