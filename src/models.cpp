@@ -126,6 +126,13 @@ namespace newui {
         Model::setValue(newValue, key);
     }
 
+    Model::~Model() {
+        // Views that outlive the model must not call back into it from their onDestroyed.
+        for (std::size_t i = 0; i < views_.size(); ++i) {
+            views_[i]->onDestroyed.remove(viewDestroyedConnections_[i]);
+        }
+    }
+
     void Model::addView(View* view) {
         if (view == nullptr) {
             return;
