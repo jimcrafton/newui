@@ -62,3 +62,5 @@ At the moment we don't have support for different text styles
 Clipboard
 Drag n Drop (within the framework)
 Drag n Drop (external, needs COM support)
+
+Disabled look: Image has none - a disabled Image should look greyed out (desaturate and/or lower opacity); pick an approach (grey-scale filter at draw time vs. opacity only). Progress fades to 40% opacity when disabled.

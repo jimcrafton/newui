@@ -74,27 +74,21 @@ namespace newui {
         StateChangedDelegate onStateChanged;
         ClickDelegate onClick;
 
+        // Disabling a Control disables every Control inside it too (isEnabled() is false while any ancestor Control is
+        // disabled); enabling it restores each child to its own setting.
         void setEnabled(bool v) {
             state_.setEnabled(v);
-            if (!v) {
-                // A press already in progress when this Control becomes
-                // disabled shouldn't still produce a click on release -
-                // matches UIControl, which never sends actions while
-                // isEnabled is false.
-                tracking_ = false;
+            enabledChanged();
+            for (SubView* child : childViews()) {
+                notifyEnabled(*child);
             }
-            onStateChanged(*this);
         }
 
-        bool isEnabled() const { return state_.isEnabled(); }
+        bool isEnabled() const { return state_.isEnabled() && !insideDisabledControl(); }
 
-        // A disabled Control is never a valid focus target - by mouse
-        // click (UIInputManager::resolveClickFocusTarget()) or by Tab
-        // (UIInputManager::moveFocus()) - even if acceptsFocus() is true,
-        // matching how a real disabled Win32 control is skipped in tab
-        // order. View::canBecomeFocused() already covers acceptsFocus()/
-        // isDesignTime(); this only adds the isEnabled() gate on top.
+        // A disabled Control is never a valid focus target - by mouse click or by Tab - even if acceptsFocus() is true.
         bool canBecomeFocused() const override { return View::canBecomeFocused() && isEnabled(); }
+
 
         // Non-owning - see Action's own class comment. Setting this does
         // not by itself wire this Control's onClick to action's
@@ -111,6 +105,11 @@ namespace newui {
         Control();
 
     private:
+        // This Control (or an ancestor) was enabled or disabled: a disabled one gives up focus and abandons a pending click.
+        void enabledChanged();
+        static void notifyEnabled(View& view);
+        bool insideDisabledControl() const;
+        void releaseFocus();
         State state_;
         bool tracking_ = false;
         Action* action_ = nullptr;

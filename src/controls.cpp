@@ -21,6 +21,38 @@
 
 namespace newui {
 
+    void Control::releaseFocus() {
+        if (RootView* root = rootView(); root != nullptr && root->focusedSubView() == this) {
+            root->setFocusedSubView(nullptr);
+        }
+    }
+
+    void Control::enabledChanged() {
+        if (!isEnabled()) {
+            tracking_ = false;   // a press in progress never clicks
+            releaseFocus();
+        }
+        onStateChanged(*this);
+    }
+
+    void Control::notifyEnabled(View& view) {
+        if (Control* control = dynamic_cast<Control*>(&view)) {
+            control->enabledChanged();
+        }
+        for (SubView* child : view.childViews()) {
+            notifyEnabled(*child);
+        }
+    }
+
+    bool Control::insideDisabledControl() const {
+        for (const View* up = parent(); up != nullptr; up = up->parent()) {
+            if (const Control* control = dynamic_cast<const Control*>(up); control != nullptr && !control->state_.isEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     Control::Control() {
         onMouseDown.add(this, &Control::handleTrackingMouseDown);
         onMouseUp.add(this, &Control::handleTrackingMouseUp);
@@ -71,6 +103,14 @@ namespace newui {
         addChild(fill_);
 
         onSizeChanged.add(this, &Progress::handleSizeChanged);
+        // No themed disabled look exists for a progress bar, so a disabled one fades into its surroundings.
+        onStateChanged.add([this](Control&) {
+            const float opacity = isEnabled() ? 1.0f : 0.4f;
+            style().setOpacity(opacity);
+            fill_->style().setOpacity(opacity);
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
     }
 
     void Progress::setValue(float newValue) {
@@ -3317,6 +3357,11 @@ namespace newui {
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onGotFocus.add(this, &TextField::handleGotFocus);
         onLostFocus.add(this, &TextField::handleLostFocus);
         onMouseDown.add(this, &TextField::handleMouseDown);
@@ -3344,16 +3389,23 @@ namespace newui {
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
-        controller_->drawSelection(ctx);
+        // A disabled field shows no selection or caret and draws in the disabled colour.
+        const bool live = isEnabled();
+        if (live) {
+            controller_->drawSelection(ctx);
+        }
         if (controller_->model().text().empty() && !placeholder_.empty()) {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
                 utf8ToWide(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
                 0.0f, /*wordWrap=*/false);
         } else {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-                controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+                controller_->layoutEngine(), live ? controller_->textColor() : UIColorManager::colorFor(UIColorRole::DisabledText),
+                controller_->scrollOffsetY(), live ? controller_->colorRuns() : std::vector<text::TextColorRun>());
         }
-        controller_->drawCaret(ctx);
+        if (live) {
+            controller_->drawCaret(ctx);
+        }
         ctx.restore();
     }
 
@@ -3372,6 +3424,11 @@ namespace newui {
         controller_->setMultiline(true);
         setWantsTabKey(true);   // a multi-line editor: Tab types a tab; Ctrl+Tab still moves focus
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onGotFocus.add(this, &TextControl::handleGotFocus);
         onLostFocus.add(this, &TextControl::handleLostFocus);
         onMouseDown.add(this, &TextControl::handleMouseDown);
@@ -3439,14 +3496,20 @@ namespace newui {
         controller_->drawCurrentLineHighlight(ctx);
         controller_->drawLineBackgrounds(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
-        controller_->drawSelection(ctx);
+        const bool live = isEnabled();
+        if (live) {
+            controller_->drawSelection(ctx);
+        }
         renderer_.render(ctx, static_cast<int>(clientBounds.width() + controller_->scrollOffsetX()),
             static_cast<int>(clientBounds.height()),
-            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+            controller_->layoutEngine(), live ? controller_->textColor() : UIColorManager::colorFor(UIColorRole::DisabledText),
+            controller_->scrollOffsetY(), live ? controller_->colorRuns() : std::vector<text::TextColorRun>());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
         controller_->drawLineAnnotations(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawWhitespace(ctx, clientBounds.height());
-        controller_->drawCaret(ctx);
+        if (live) {
+            controller_->drawCaret(ctx);
+        }
         ctx.restore();
     }
 
@@ -5097,6 +5160,11 @@ namespace newui {
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onMouseDown.add(this, &DropDownList::handleMouseDown);
         onKeyDown.add(this, &DropDownList::handleKeyDown);
         onGotFocus.add(this, &DropDownList::handleGotFocus);
@@ -5215,7 +5283,7 @@ namespace newui {
                     double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
                     ctx.save();
-                    ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+                    ctx.set_fill_style(UIColorManager::colorFor(isEnabled() ? UIColorRole::ControlText : UIColorRole::DisabledText).toBLRgba32());
                     ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
                     ctx.restore();
                 }
@@ -5244,7 +5312,7 @@ namespace newui {
         path.close();
 
         ctx.save();
-        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+        ctx.set_fill_style(UIColorManager::colorFor(isEnabled() ? UIColorRole::ControlText : UIColorRole::DisabledText).toBLRgba32());
         ctx.fill_path(path);
         ctx.restore();
     }
@@ -5606,8 +5674,8 @@ public:
         float textHeight = tm.ascent + tm.descent;
         float baselineY = bounds.top() + (bounds.size().height - textHeight) * 0.5f + tm.ascent;
 
-        COLORREF textColor = ::GetSysColor(COLOR_WINDOWTEXT);
-        ctx.set_fill_style(BLRgba32(GetRValue(textColor), GetGValue(textColor), GetBValue(textColor), 255));
+        const bool live = owner == nullptr || owner->isEnabled();
+        ctx.set_fill_style(newui::UIColorManager::colorFor(live ? newui::UIColorRole::ControlText : newui::UIColorRole::DisabledText).toBLRgba32());
         ctx.fill_utf8_text(BLPoint(x, baselineY), *blFont, text.c_str());
     }
 };
@@ -5653,6 +5721,17 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
     // has focus is a job for arrow keys, not Tab (see handleKeyDown()
     // below), matching native tab control behavior.
     setAcceptsFocus(true);
+    onStateChanged.add([this](Control&) {
+        if (stripRow_ != nullptr) {
+            for (SubView* button : stripRow_->childViews()) {
+                if (auto* style = dynamic_cast<ThemedTabItemStyle*>(&button->style())) {
+                    style->enabled = isEnabled();
+                    button->style().markDirty();
+                }
+            }
+        }
+        return SyncReturn::Handled;
+    });
     onKeyDown.add(this, &TabControl::handleKeyDown);
     setStyle(std::make_unique<ThemedTabPaneStyle>());
 
@@ -5724,6 +5803,7 @@ void TabControl::pageAdded(SubView* page) {
     button->tabIndex = stripRow_->childViews().size();
     button->setStyle(std::make_unique<ThemedTabItemStyle>());
     static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
+    static_cast<ThemedTabItemStyle&>(button->style()).enabled = isEnabled();
     ApplyButtonText(*button, text, stripHorizontal);
 
     button->onMouseDown.add(&TabItemButtonClicked);
