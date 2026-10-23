@@ -1588,7 +1588,7 @@ namespace newui {
 
 	RootView* RootView::fromWindow(HWND hwnd)
 	{
-		if (hwnd == nullptr || !::IsWindow(hwnd) || ::GetWindowLongPtr(hwnd, GWLP_WNDPROC) != reinterpret_cast<LONG_PTR>(&RootView::WndProc)) {
+		if (hwnd == nullptr || !::IsWindow(hwnd) || ::GetWindowLongPtrA(hwnd, GWLP_WNDPROC) != reinterpret_cast<LONG_PTR>(&RootView::WndProc)) {
 			return nullptr;
 		}
 		return reinterpret_cast<RootView*>(::GetWindowLongPtr(hwnd, GWLP_USERDATA));
