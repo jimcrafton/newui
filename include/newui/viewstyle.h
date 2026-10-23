@@ -812,6 +812,7 @@ namespace newui {
 
         bool pressed = false;
         bool enabled = true;
+        bool defaulted = false;   // the window's default button (Control::isDefaultControl()): drawn emphasised until hovered or pressed
 
 
     protected:
@@ -821,6 +822,7 @@ namespace newui {
             if (!enabled) return PBS_DISABLED;
             if (pressed) return PBS_PRESSED;
             if (highlighted) return PBS_HOT;
+            if (defaulted) return PBS_DEFAULTED;
             return PBS_NORMAL;
         }
     };

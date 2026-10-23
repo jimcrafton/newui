@@ -101,8 +101,34 @@ namespace newui {
         Action* action() { return action_; }
         const Action* action() const { return action_; }
 
+        // The Control Return clicks when nothing in the window handles the key itself, and the one Escape
+        // clicks (WPF's IsDefault/IsCancel, AppKit's defaultButtonCell): see UIInputManager::routeDialogKeyDown().
+        // The first visible, enabled one in the tree wins.
+        bool isDefaultControl() const { return defaultControl_; }
+        void setDefaultControl(bool value) {
+            if (defaultControl_ != value) {
+                defaultControl_ = value;
+                defaultControlChanged();
+            }
+        }
+        bool isCancelControl() const { return cancelControl_; }
+        void setCancelControl(bool value) { cancelControl_ = value; }
+
+        // Whether this key, while this Control has focus, clicks it (a push button: Return and Space).
+        virtual bool activatedByKey(std::uint32_t /*VKeyCode*/) const { return false; }
+
+        // Fires onClick() as a completed click would; nothing while disabled.
+        void click() {
+            if (isEnabled()) {
+                onClick(*this);
+            }
+        }
+
     protected:
         Control();
+
+        // isDefaultControl() just changed: a control that draws the difference (Button) updates its look.
+        virtual void defaultControlChanged() {}
 
     private:
         // This Control (or an ancestor) was enabled or disabled: a disabled one gives up focus and abandons a pending click.
@@ -112,6 +138,8 @@ namespace newui {
         void releaseFocus();
         State state_;
         bool tracking_ = false;
+        bool defaultControl_ = false;
+        bool cancelControl_ = false;
         Action* action_ = nullptr;
 
         SyncReturn handleTrackingMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -168,7 +196,12 @@ namespace newui {
         // completed toggle click and from a direct setChecked() call.
         CheckedChangedDelegate onCheckedChanged;
 
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkReturn || VKeyCode == vkSpaceBar; }
+
         void paint(BLContext& ctx) override;
+
+    protected:
+        void defaultControlChanged() override { updatePressedVisual(); }
 
     private:
         void updatePressedVisual();
@@ -237,6 +270,8 @@ namespace newui {
         // completed click and from a direct setChecked() call (same
         // "fires either way" shape as Button::onCheckedChanged).
         CheckedChangedDelegate onCheckedChanged;
+
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkSpaceBar; }
 
     private:
         // Replaces style() with a fresh instance of whichever concrete
@@ -1240,6 +1275,8 @@ namespace newui {
         // Fired whenever isChecked() actually changes - both from a
         // completed toggle click and from a direct setChecked() call.
         CheckedChangedDelegate onCheckedChanged;
+
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkReturn || VKeyCode == vkSpaceBar; }
 
         void paint(BLContext& ctx) override;
 

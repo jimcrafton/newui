@@ -238,11 +238,13 @@ namespace newui {
 
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
         bool wantEnabled = isEnabled();
-        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled) {
+        bool wantDefaulted = isDefaultControl();
+        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled && buttonStyle.defaulted == wantDefaulted) {
             return;
         }
         buttonStyle.pressed = wantPressed;
         buttonStyle.enabled = wantEnabled;
+        buttonStyle.defaulted = wantDefaulted;
         style().markDirty();
     }
 
@@ -3374,8 +3376,8 @@ namespace newui {
 
     SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
         if (VKeyCode == vkReturn) {
-            onReturnPressed(*this);
-            return SyncReturn::Handled;
+            // A listener that returns Ignored lets the key go on to the window's default button.
+            return onReturnPressed.syncCallFirst(*this);
         }
         return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
     }

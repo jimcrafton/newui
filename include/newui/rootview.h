@@ -660,6 +660,12 @@ namespace newui {
 
         static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+    public:
+        // The RootView whose window is hwnd, or nullptr if hwnd is not a RootView's window (a Frame, a native control).
+        static RootView* fromWindow(HWND hwnd);
+
+    private:
+
 
         void viewCreated();
     };

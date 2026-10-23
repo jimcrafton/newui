@@ -1096,6 +1096,11 @@ namespace newui {
 			break;
 		}
 
+		// Dispatches to focusedSubView_ itself too; a click may close this window, so nothing touches it afterwards.
+		if (eventType == keKeyDown && UIInputManager::instance().routeDialogKeyDown(*this, keyMask, keyCharVal, repeatCount, VKeyCode)) {
+			return;
+		}
+
 		if (focusedSubView_ == nullptr) {
 			return;
 		}
@@ -1579,6 +1584,14 @@ namespace newui {
 		}
 
 		return result;
+	}
+
+	RootView* RootView::fromWindow(HWND hwnd)
+	{
+		if (hwnd == nullptr || !::IsWindow(hwnd) || ::GetWindowLongPtr(hwnd, GWLP_WNDPROC) != reinterpret_cast<LONG_PTR>(&RootView::WndProc)) {
+			return nullptr;
+		}
+		return reinterpret_cast<RootView*>(::GetWindowLongPtr(hwnd, GWLP_USERDATA));
 	}
 
 	LRESULT CALLBACK RootView::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)

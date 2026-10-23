@@ -166,6 +166,15 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 		}
 		break;
 
+		// The frame itself never reads keys: whatever focuses it (a modal loop showing a dialog, a click on the title bar) hands the focus to the root view.
+		case WM_SETFOCUS: {
+			if (rootView_ != nullptr && rootView_->windowHandle() != nullptr && ::IsWindow(rootView_->windowHandle())) {
+				::SetFocus(rootView_->windowHandle());
+				result = true;
+			}
+		}
+		break;
+
 		case WM_CLOSE: {
 			bool canClose = true;
 			onClosing(*this, canClose);

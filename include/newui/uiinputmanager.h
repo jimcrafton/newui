@@ -255,6 +255,14 @@ namespace newui {
         // all. Returns true if focus actually moved.
         bool moveFocusSpatially(RootView& root, SpatialDirection direction) const;
 
+        // Return and Escape on key-down, called by RootView::keyEvent(). A focused Control that activatedByKey() is clicked by
+        // Return or Space. Otherwise the key goes to root's focusedSubView() first, and only if that did not
+        // handle it does Return click the first visible, enabled default Control in root and Escape the
+        // first cancel Control (Control::isDefaultControl()/isCancelControl()). Returns whether the key was
+        // consumed; Alt/Ctrl combinations are never touched. A click may close root's window, so the
+        // caller must not touch root afterwards.
+        bool routeDialogKeyDown(RootView& root, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) const;
+
     private:
         UIInputManager() = default;
         UIInputManager(const UIInputManager&) = delete;

@@ -1,6 +1,8 @@
 #include "newui/runloop.h"
 #include "newui/action.h"
 #include "newui/keyboard_constants.h"
+#include "newui/rootview.h"
+#include "newui/uiinputmanager.h"
 #include "newui/utils.h"
 #include <algorithm>
 #include <bitset>
@@ -445,7 +447,18 @@ namespace newui {
                     // actually goes through, for either trigger, instead
                     // of firing onModalEnding twice with two different
                     // ways to answer it.
-                    ::PostMessage(modalHandle, WM_CLOSE, 0, 0);
+                    //
+                    // The window's own views get the key first, though: a focused
+                    // control that uses Escape, or a Cancel button (Control::
+                    // isCancelControl()), takes it instead of the close request.
+                    std::uint32_t keyMask = 0;
+                    if (::GetKeyState(VK_CONTROL) < 0) keyMask |= kmCtrl;
+                    if (::GetKeyState(VK_MENU) < 0) keyMask |= kmAlt;
+                    if (::GetKeyState(VK_SHIFT) < 0) keyMask |= kmShift;
+                    RootView* target = RootView::fromWindow(msg.hwnd);
+                    if (target == nullptr || !UIInputManager::instance().routeDialogKeyDown(*target, keyMask, 0, 1, vkEscape)) {
+                        ::PostMessage(modalHandle, WM_CLOSE, 0, 0);
+                    }
                     doTranslateAndDispatch = false;
                 }
             }
