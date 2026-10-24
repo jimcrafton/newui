@@ -184,13 +184,6 @@ namespace newui {
 							}
 						}
 						break;
-
-						case WM_SYSCOMMAND: {
-							if (SC_CLOSE == msg.wParam) {
-								PostQuitMessage(0);
-							}
-						}
-						break;
 					}
 					if (doTranslateAndDispatch) {
 						if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg)) {
