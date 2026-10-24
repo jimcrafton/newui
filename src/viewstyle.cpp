@@ -913,7 +913,13 @@ namespace newui {
 			: std::vector<std::string>{ text() };
 
 		double totalTextHeight = lineHeight * static_cast<double>(lines.size());
-		double y = clientBounds.top() + (clientBounds.size().height - totalTextHeight) * 0.5 + fontMetrics.ascent;
+		double slack = clientBounds.size().height - totalTextHeight;
+		if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+			slack = 0.0;
+		} else if (verticalTextAlignment_ == VerticalTextAlignment::Middle) {
+			slack *= 0.5;
+		}
+		double y = clientBounds.top() + slack + fontMetrics.ascent;
 
 		ctx.save();
 		ctx.set_comp_op(toBLCompOp(compositingOp()));

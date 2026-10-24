@@ -530,6 +530,8 @@ namespace newui {
     // Set one only if you actually want that look.)
     // Where a Label's text sits across its width.
     enum class TextAlignment { Left, Center, Right };
+    // Where a Label's text block sits down its height. Middle is the original behaviour.
+    enum class VerticalTextAlignment { Top, Middle, Bottom };
 
     class LabelStyle : public ViewStyle {
     public:
@@ -554,6 +556,10 @@ namespace newui {
         TextAlignment textAlignment() const { return textAlignment_; }
         void setTextAlignment(TextAlignment value) { textAlignment_ = value; }
 
+        // Middle by default.
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; }
+
         LabelStyle() {
 			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
@@ -565,6 +571,7 @@ namespace newui {
         Color textColor_ = Color::null();
         bool wordWrap_ = false;
         TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),

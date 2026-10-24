@@ -614,3 +614,40 @@ TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
     folds[0].collapsed = false;
     apply("fold expanded");
 }
+
+// Top, middle and bottom put the text block at the top, the middle and the bottom of a Label's height.
+TEST(LabelAlignment, VerticalAlignmentPlacesTheTextBlock) {
+    auto firstInkRow = [](Label& label) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            label.paintStyle(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    return y;
+                }
+            }
+        }
+        return 60;
+    };
+    Label label;
+    label.setBounds(Rect(0, 0, 300, 60));
+    label.setText("Hxg");
+    label.setTextColor(BLRgba32(0xFF000000u));
+    EXPECT_EQ(label.verticalTextAlignment(), VerticalTextAlignment::Middle);
+    const int middle = firstInkRow(label);
+    label.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    const int top = firstInkRow(label);
+    label.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    const int bottom = firstInkRow(label);
+    EXPECT_LT(top, 10);
+    EXPECT_GT(middle, top + 10);
+    EXPECT_GT(bottom, middle + 10);
+}

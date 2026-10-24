@@ -337,6 +337,10 @@ namespace newui {
         TextAlignment textAlignment() const { return labelStyle_->textAlignment(); }
         void setTextAlignment(TextAlignment value) { labelStyle_->setTextAlignment(value); style().markDirty(); }
 
+        // Middle by default.
+        VerticalTextAlignment verticalTextAlignment() const { return labelStyle_->verticalTextAlignment(); }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { labelStyle_->setVerticalTextAlignment(value); style().markDirty(); }
+
         bool isHotLink() const { return hotLink_; }
         void setHotLink(bool value);
 
