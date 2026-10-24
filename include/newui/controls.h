@@ -175,6 +175,12 @@ namespace newui {
         // LabelStyle handles for a plain ViewStyle, viewstyle.h).
         void setTextColor(BLRgba32 color);
 
+        // Centered both ways by default. Left / Right and Top / Bottom keep the text a few pixels in from the edge.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; style().markDirty(); }
+
         // Momentary (default, a normal push button) vs. toggle mode. A
         // momentary Button's pressed look only follows the live mouse-
         // down-inside gesture. A toggle Button additionally flips
@@ -205,6 +211,9 @@ namespace newui {
 
     private:
         void updatePressedVisual();
+
+        TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
 
         // Separate from Control's own private tracking_ (click-gesture
         // detection, already correct - see Control::handleTrackingMouseUp())

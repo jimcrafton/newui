@@ -651,3 +651,46 @@ TEST(LabelAlignment, VerticalAlignmentPlacesTheTextBlock) {
     EXPECT_GT(middle, top + 10);
     EXPECT_GT(bottom, middle + 10);
 }
+
+// A Button's text follows its alignment both ways; centered is unchanged.
+TEST(LabelAlignment, ButtonTextAlignsBothWays) {
+    auto inkBox = [](Button& button, int& left, int& top) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            button.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 300;
+        top = 60;
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                }
+            }
+        }
+    };
+    Button button;
+    button.setBounds(Rect(0, 0, 300, 60));
+    button.setText("Hxg");
+    button.setTextColor(BLRgba32(0xFF000000u));
+    int centerLeft = 0, centerTop = 0, left = 0, top = 0;
+    inkBox(button, centerLeft, centerTop);
+    EXPECT_GT(centerLeft, 100);
+    button.setTextAlignment(TextAlignment::Left);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    inkBox(button, left, top);
+    EXPECT_LT(left, 12);
+    EXPECT_LT(top, centerTop - 10);
+    button.setTextAlignment(TextAlignment::Right);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkBox(button, left, top);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, centerTop + 10);
+}

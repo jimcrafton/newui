@@ -318,8 +318,20 @@ namespace newui {
         double textWidth = textMetrics.advance.x;
         double textHeight = fontMetrics.ascent + fontMetrics.descent;
 
+        constexpr double kEdgeInset = 6.0;
         double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+        if (textAlignment_ == TextAlignment::Left) {
+            x = clientBounds.left() + kEdgeInset;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            x = clientBounds.right() - kEdgeInset - textWidth;
+        }
+        double top = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5;
+        if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+            top = clientBounds.top() + kEdgeInset * 0.5;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            top = clientBounds.bottom() - kEdgeInset * 0.5 - textHeight;
+        }
+        double y = top + fontMetrics.ascent;
 
         // Same UIColorRole::DisabledText convention Label::handleStateChanged()
         // already uses - the native BUTTON chrome (ThemedButtonStyle::paint())
