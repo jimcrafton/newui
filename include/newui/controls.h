@@ -282,6 +282,15 @@ namespace newui {
 
         bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkSpaceBar; }
 
+        // A Toggle has no text: the glyph fills the view. Setting either alignment away from its default (Left, Middle) instead draws
+        // a square glyph, the view's shorter side, placed left / centre / right and top / middle / bottom of the view.
+        TextAlignment glyphAlignment() const { return glyphAlignment_; }
+        void setGlyphAlignment(TextAlignment value) { glyphAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalGlyphAlignment() const { return verticalGlyphAlignment_; }
+        void setVerticalGlyphAlignment(VerticalTextAlignment value) { verticalGlyphAlignment_ = value; style().markDirty(); }
+
+        void paintStyle(BLContext& ctx) override;
+
     private:
         // Replaces style() with a fresh instance of whichever concrete
         // type isRadioStyle() currently selects, carrying checked_/
@@ -295,6 +304,9 @@ namespace newui {
         // Control" reasoning Button::updatePressedVisual()'s own comment,
         // controls.cpp, gives).
         void updateStyleFields();
+
+        TextAlignment glyphAlignment_ = TextAlignment::Left;
+        VerticalTextAlignment verticalGlyphAlignment_ = VerticalTextAlignment::Middle;
 
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);

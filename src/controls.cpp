@@ -382,6 +382,35 @@ namespace newui {
         onCheckedChanged(*this);
     }
 
+    void Toggle::paintStyle(BLContext& ctx) {
+        if (glyphAlignment_ == TextAlignment::Left && verticalGlyphAlignment_ == VerticalTextAlignment::Middle) {
+            View::paintStyle(ctx);
+            return;
+        }
+        const Size full = bounds().size();
+        const float side = std::min(full.width, full.height);
+        if (side <= 0.0f) {
+            return;
+        }
+        float dx = 0.0f;
+        float dy = 0.0f;
+        if (glyphAlignment_ == TextAlignment::Center) {
+            dx = (full.width - side) * 0.5f;
+        } else if (glyphAlignment_ == TextAlignment::Right) {
+            dx = full.width - side;
+        }
+        if (verticalGlyphAlignment_ == VerticalTextAlignment::Middle) {
+            dy = (full.height - side) * 0.5f;
+        } else if (verticalGlyphAlignment_ == VerticalTextAlignment::Bottom) {
+            dy = full.height - side;
+        }
+        Rect clientBounds;
+        ctx.save();
+        ctx.translate(dx, dy);
+        style().paint(ctx, Size(side, side), isHighlighted(), clientBounds);
+        ctx.restore();
+    }
+
     void Toggle::rebuildStyle() {
         if (radioStyle_) {
             setStyle(std::make_unique<ThemedRadioButtonStyle>());

@@ -288,7 +288,7 @@ namespace newui {
         // the phases have to be genuinely separate calls the caller can
         // wrap independently.
         void prePaintStyle(BLContext& ctx);
-        void paintStyle(BLContext& ctx);
+        virtual void paintStyle(BLContext& ctx);
         void postPaintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)

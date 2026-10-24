@@ -766,3 +766,56 @@ TEST(LabelAlignment, TextFieldTextAlignsBothWays) {
     field.controller().handleMouseDown(Point(float(right) - 2.0f, float(top) + 4.0f), 1u, 0u);
     EXPECT_GT(field.controller().caret().position().offset(), size_t(0));
 }
+
+TEST(LabelAlignment, ToggleGlyphIsPlacedInsideTheView) {
+    auto paintedBox = [](Toggle& toggle, int& left, int& top, int& right, int& bottom) {
+        BLImage image(100, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            toggle.paintStyle(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 100;
+        top = 40;
+        right = -1;
+        bottom = -1;
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 0; x < 100; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if (row[x] != 0xFFFFFFFFu) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                    right = std::max(right, x);
+                    bottom = std::max(bottom, y);
+                }
+            }
+        }
+    };
+    Toggle toggle;
+    toggle.setStyle(std::make_unique<FluentCheckBoxStyle>());
+    toggle.setBounds(Rect(0, 0, 100, 40));
+    toggle.setChecked(true);
+    int left, top, right, bottom;
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(right - left, 90);   // unchanged: fills the whole view
+    toggle.setGlyphAlignment(TextAlignment::Left);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Top);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_LE(left, 2);
+    EXPECT_LE(top, 2);
+    EXPECT_LE(right, 42);
+    EXPECT_LE(bottom, 42);
+    toggle.setGlyphAlignment(TextAlignment::Right);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Bottom);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(left, 58);
+    EXPECT_GE(right, 97);
+    toggle.setGlyphAlignment(TextAlignment::Center);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Middle);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(left, 28);
+    EXPECT_LE(right, 72);
+}
