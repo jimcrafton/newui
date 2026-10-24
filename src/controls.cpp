@@ -2228,7 +2228,7 @@ namespace newui {
         // Icon + text painted as one centered block - assumes the icon
         // paints successfully (a missing icon file leaves a small,
         // accepted gap rather than re-centering after the fact).
-        double iconWidth = hasIcon ? (iconSize_ + kIconGap) : 0.0;
+        double iconWidth = hasIcon ? (iconSize_ + (hasText ? kIconGap : 0.0f)) : 0.0;
         constexpr double kEdgeInset = 6.0;
         const double blockWidth = iconWidth + textWidth;
         const double blockHeight = std::max(textHeight, hasIcon ? double(iconSize_) : 0.0);
