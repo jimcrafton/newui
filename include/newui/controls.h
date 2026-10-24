@@ -1278,6 +1278,12 @@ namespace newui {
         float iconSize() const { return iconSize_; }
         void setIconSize(float size);
 
+        // Where the icon and text sit as one block. Centered both ways by default; Left / Right and Top / Bottom keep it a few pixels in from the edge.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; style().markDirty(); }
+
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
 
@@ -1305,6 +1311,8 @@ namespace newui {
         BLVar textColor_;
         std::string icon_;
         float iconSize_ = kIconSize;
+        TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
@@ -1653,7 +1661,14 @@ namespace newui {
 
         // Where the text goes within the owner: its client bounds, less any margin a subclass
         // keeps (TextFoldingController's gutter). Layout, hit-testing and drawing all use it.
-        virtual Rect textArea() const { return owner_.getClientBounds(); }
+        virtual Rect textArea() const;
+
+        // Where a single-line text sits in the owner (a TextField): the area above shifts so the text block lands left / centre / right and
+        // top / middle / bottom of the client bounds. Top and Left, the defaults, change nothing. Multi-line text ignores both.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value);
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value);
 
         // The full height layoutEngine_'s current content actually needs
         // - see TextLayoutEngine::contentHeight()'s own doc comment
@@ -1872,6 +1887,8 @@ namespace newui {
         Control& owner_;
         bool multiline_ = false;
         bool wordWrap_ = true;
+        TextAlignment textAlignment_ = TextAlignment::Left;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Top;
         float scrollOffsetX_ = 0.0f;
 
         // This control's own current scroll position, in document
@@ -1987,6 +2004,12 @@ namespace newui {
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        // Where the text sits in the field. Left and Top by default (the field has always been top-left); the placeholder stays where it was.
+        TextAlignment textAlignment() const { return controller_->textAlignment(); }
+        void setTextAlignment(TextAlignment value) { controller_->setTextAlignment(value); }
+        VerticalTextAlignment verticalTextAlignment() const { return controller_->verticalTextAlignment(); }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { controller_->setVerticalTextAlignment(value); }
+
         bool canUndo() const { return controller_->canUndo(); }
         bool canRedo() const { return controller_->canRedo(); }
         bool undo() { return controller_->undo(); }

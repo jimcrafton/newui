@@ -2200,8 +2200,21 @@ namespace newui {
         // paints successfully (a missing icon file leaves a small,
         // accepted gap rather than re-centering after the fact).
         double iconWidth = hasIcon ? (iconSize_ + kIconGap) : 0.0;
-        double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
+        constexpr double kEdgeInset = 6.0;
+        const double blockWidth = iconWidth + textWidth;
+        const double blockHeight = std::max(textHeight, hasIcon ? double(iconSize_) : 0.0);
+        double x = clientBounds.left() + (clientBounds.size().width - blockWidth) * 0.5;
+        if (textAlignment_ == TextAlignment::Left) {
+            x = clientBounds.left() + kEdgeInset;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            x = clientBounds.right() - kEdgeInset - blockWidth;
+        }
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
+        if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+            centerY = clientBounds.top() + kEdgeInset * 0.5 + blockHeight * 0.5;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            centerY = clientBounds.bottom() - kEdgeInset * 0.5 - blockHeight * 0.5;
+        }
 
         // A flat toolbar button shows no visible border/fill at rest either
         // way (the style's own enabled field only changes the native
@@ -2471,10 +2484,50 @@ namespace newui {
         return Point(localPt.x - clientBounds.left() + scrollOffsetX_, localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
+    Rect TextController::textArea() const {
+        Rect client = owner_.getClientBounds();
+        if (multiline_ || (textAlignment_ == TextAlignment::Left && verticalTextAlignment_ == VerticalTextAlignment::Top)) {
+            return client;
+        }
+        // The text block's size comes from the last layout; a one-line, unwrapped block is the same size whatever width it is given.
+        const float keep = 4.0f;   // never squeeze the area to nothing: an empty field's caret still needs room
+        float dx = 0.0f;
+        float dy = 0.0f;
+        const float slackX = std::max(0.0f, client.width() - layoutEngine_.contentWidth() - keep);
+        const float slackY = std::max(0.0f, client.height() - layoutEngine_.contentHeight());
+        if (textAlignment_ == TextAlignment::Center) {
+            dx = slackX * 0.5f;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            dx = slackX;
+        }
+        if (verticalTextAlignment_ == VerticalTextAlignment::Middle) {
+            dy = slackY * 0.5f;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            dy = slackY;
+        }
+        return Rect(client.left() + dx, client.top() + dy, client.width() - dx, client.height() - dy);
+    }
+
+    void TextController::setTextAlignment(TextAlignment value) {
+        textAlignment_ = value;
+        owner_.style().markDirty();
+    }
+
+    void TextController::setVerticalTextAlignment(VerticalTextAlignment value) {
+        verticalTextAlignment_ = value;
+        owner_.style().markDirty();
+    }
+
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = textArea();
         layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
             multiline_ && wordWrap_, fontRuns_, layoutFolds(), tabWidth_);
+        if (!multiline_ && (textAlignment_ != TextAlignment::Left || verticalTextAlignment_ != VerticalTextAlignment::Top)) {
+            // The shift came from the previous layout; settle it on this one.
+            clientBounds = textArea();
+            layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
+                false, fontRuns_, layoutFolds(), tabWidth_);
+        }
     }
 
     void TextController::setWordWrap(bool wrap) {
@@ -3395,11 +3448,14 @@ namespace newui {
     }
 
     void TextField::paint(BLContext& ctx) {
-        Rect clientBounds = getClientBounds();
-        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+        if (getClientBounds().width() <= 0.0f || getClientBounds().height() <= 0.0f) {
             return;
         }
         controller_->ensureLayoutUpToDate();
+        const Rect clientBounds = controller_->textArea();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());

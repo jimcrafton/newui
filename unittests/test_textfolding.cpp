@@ -694,3 +694,75 @@ TEST(LabelAlignment, ButtonTextAlignsBothWays) {
     EXPECT_GT(left, 200);
     EXPECT_GT(top, centerTop + 10);
 }
+
+namespace {
+    template <typename Painted>
+    void inkOf(Painted& view, int& left, int& top, int& right) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            view.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 300;
+        top = 60;
+        right = -1;
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                    right = std::max(right, x);
+                }
+            }
+        }
+    }
+}
+
+TEST(LabelAlignment, ToolbarButtonTextAlignsBothWays) {
+    ToolbarButton button;
+    button.setBounds(Rect(0, 0, 300, 60));
+    button.setText("Hxg");
+    button.setTextColor(BLRgba32(0xFF000000u));
+    int centerLeft, centerTop, left, top, right;
+    inkOf(button, centerLeft, centerTop, right);
+    EXPECT_GT(centerLeft, 100);
+    button.setTextAlignment(TextAlignment::Left);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    inkOf(button, left, top, right);
+    EXPECT_LT(left, 12);
+    EXPECT_LT(top, centerTop - 10);
+    button.setTextAlignment(TextAlignment::Right);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkOf(button, left, top, right);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, centerTop + 10);
+}
+
+TEST(LabelAlignment, TextFieldTextAlignsBothWays) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 300, 60));
+    field.setText(L"Hxg");
+    int topLeft, topTop, left, top, right;
+    inkOf(field, topLeft, topTop, right);   // the default: top-left, as the field has always drawn
+    EXPECT_LT(topLeft, 12);
+    EXPECT_LT(topTop, 12);
+    field.setTextAlignment(TextAlignment::Center);
+    field.setVerticalTextAlignment(VerticalTextAlignment::Middle);
+    inkOf(field, left, top, right);
+    EXPECT_GT(left, 100);
+    EXPECT_LT(right, 200);
+    EXPECT_GT(top, topTop + 10);
+    field.setTextAlignment(TextAlignment::Right);
+    field.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkOf(field, left, top, right);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, 35);
+    // A click where the text now is lands in the text, not at its old place.
+    field.controller().handleMouseDown(Point(float(right) - 2.0f, float(top) + 4.0f), 1u, 0u);
+    EXPECT_GT(field.controller().caret().position().offset(), size_t(0));
+}
