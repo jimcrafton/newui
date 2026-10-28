@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace newui {
@@ -435,6 +436,52 @@ private:
     std::shared_ptr<const SlotList> slots_;
 };
 
+// Holds the connections an owner made to delegates it does not own, and removes them all when it goes away (or on clear()), newest first.
+// Every delegate added here must still exist when the Connections is cleared or destroyed - an observer has to be destroyed before the
+// subjects it observes (a Delegate cannot tell that a Connection to it has outlived it).
+class Connections {
+public:
+    Connections() = default;
+    ~Connections() { clear(); }
 
+    Connections(const Connections&) = delete;
+    Connections& operator=(const Connections&) = delete;
+
+    Connections(Connections&& other) noexcept : removers_(std::move(other.removers_)) {
+        other.removers_.clear();
+    }
+
+    Connections& operator=(Connections&& other) noexcept {
+        if (this != &other) {
+            clear();
+            removers_ = std::move(other.removers_);
+            other.removers_.clear();
+        }
+        return *this;
+    }
+
+    // Same as delegate.add(fn), remembering the connection.
+    template<typename DelegateT>
+    void add(DelegateT& delegate, typename DelegateT::Callback fn) {
+        Connection connection = delegate.add(std::move(fn));
+        removers_.push_back([&delegate, connection] { delegate.remove(connection); });
+    }
+
+    // Disconnects everything added so far.
+    void clear() {
+        while (!removers_.empty()) {
+            std::function<void()> remover = std::move(removers_.back());
+            removers_.pop_back();
+            remover();
+        }
+    }
+
+    std::size_t size() const {
+        return removers_.size();
+    }
+
+private:
+    std::vector<std::function<void()>> removers_;
+};
 
 }
