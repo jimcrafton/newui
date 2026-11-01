@@ -1118,26 +1118,42 @@ namespace newui {
     }
 
     void ScrollBar::useFluentStyle(bool fluent) {
-        if (fluent_ == fluent) {
-            return;
-        }
-        fluent_ = fluent;
-
         std::unique_ptr<ThemedScrollbarTrackStyle> track;
         if (fluent) {
             track = std::make_unique<FluentScrollbarTrackStyle>();
+        } else {
+            track = std::make_unique<ThemedScrollbarTrackStyle>();
+        }
+        setStyle(std::move(track));
+        syncPartStyles();
+    }
+
+    bool ScrollBar::usesFluentStyle() const {
+        return dynamic_cast<const FluentScrollbarTrackStyle*>(&style()) != nullptr;
+    }
+
+    // The thumb and arrows follow the track style (the bar's own `style` property): a Fluent track means Fluent
+    // parts. Runs from paint() and layout, so setting the style from a .newui file or from code is enough.
+    void ScrollBar::syncPartStyles() {
+        trackStyle_ = dynamic_cast<ThemedScrollbarTrackStyle*>(&style());
+        if (trackStyle_ != nullptr) {
+            trackStyle_->horizontal = horizontal_;
+        }
+        const bool fluent = usesFluentStyle();
+        if (fluent == partsFluent_) {
+            return;
+        }
+        partsFluent_ = fluent;
+
+        if (fluent) {
             upArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
             downArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
             thumbStyle_ = std::make_unique<FluentScrollbarThumbStyle>();
         } else {
-            track = std::make_unique<ThemedScrollbarTrackStyle>();
             upArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
             downArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
             thumbStyle_ = std::make_unique<ThemedScrollbarThumbStyle>();
         }
-        track->horizontal = horizontal_;
-        trackStyle_ = track.get();
-        setStyle(std::move(track));
 
         upArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Left
                                                 : ThemedScrollbarArrowStyle::Direction::Up;
@@ -1162,7 +1178,7 @@ namespace newui {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
+        if (trackStyle_ != nullptr) trackStyle_->horizontal = value;
         thumbStyle_->horizontal = value;
         upArrowStyle_->direction = value ? ThemedScrollbarArrowStyle::Direction::Left
                                           : ThemedScrollbarArrowStyle::Direction::Up;
@@ -1172,6 +1188,7 @@ namespace newui {
     }
 
     void ScrollBar::paint(BLContext& ctx) {
+        syncPartStyles();
         // isHighlighted() (View's own, driven by RootView's ordinary
         // hover tracking - "is the cursor anywhere over this ScrollBar")
         // passed to every sub-part uniformly - a real scrollbar
@@ -1276,6 +1293,7 @@ namespace newui {
     }
 
     void ScrollBar::updateChildBounds() {
+        syncPartStyles();
         Rect client = localRect();
         Size arrowSize = resolvedArrowSize();
         Rect track = trackRect();
