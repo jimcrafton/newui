@@ -3186,7 +3186,15 @@ namespace newui {
         typedef Delegate<TabControl, std::size_t> TabChangedDelegate;
         TabChangedDelegate onTabChanged;  // fires from selectTab() (including from a tab click)
 
+        // Swaps the pane and every tab (existing and future) between the uxtheme parts (default) and the
+        // role-colored Fluent ones.
+        void useFluentStyle(bool fluent);
+        bool usesFluentStyle() const { return fluent_; }
+
     private:
+        bool fluent_ = false;
+        std::unique_ptr<ThemedTabItemStyle> makeTabStyle() const;
+
         ThemedTabItemStyle::TabAlignment alignment_;
         friend class TabPage;
         friend class TabPageContainer;

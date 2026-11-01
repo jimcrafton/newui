@@ -1604,6 +1604,22 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return 0; }
     };
 
+    // Fluent tab strip item, painted from the role colors: a hover/pressed state layer and, on the selected tab, an
+    // accent bar along the edge that faces the content. position is ignored (no rounded outer corners).
+    // Opt in with TabControl::useFluentStyle().
+    class FluentTabItemStyle : public ThemedTabItemStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // The pane behind a Fluent tab control: a flat window-background fill.
+    class FluentTabPaneStyle : public ThemedTabPaneStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a trackbar/slider's track groove (TRACKBAR/
     // TKP_TRACK or TKP_TRACKVERT) - horizontal/vertical are two entirely
     // separate theme parts (same "orientation picks the part" shape as

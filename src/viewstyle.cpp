@@ -1806,6 +1806,58 @@ namespace newui {
 		ctx.restore();
 	}
 
+	void FluentTabItemStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		Color text = UIColorManager::colorFor(UIColorRole::WindowText);
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		if (enabled && !selected) {
+			float overlayAlpha = fluentStateOverlayAlpha(false, highlighted);
+			if (overlayAlpha > 0.0f) {
+				ctx.set_fill_style(Color(text.r, text.g, text.b, overlayAlpha).toBLRgba32());
+				ctx.fill_rect(BLRect(0.0, 0.0, size.width, size.height));
+			}
+		}
+
+		if (selected) {
+			constexpr float kBar = 2.0f;      // thickness of the accent bar
+			constexpr float kInset = 6.0f;    // keeps it short of the tab's ends
+			const float w = size.width;
+			const float h = size.height;
+			BLRect bar;
+			switch (alignment) {
+				case TabAlignment::Top: bar = BLRect(kInset, h - kBar, w - 2.0f * kInset, kBar); break;
+				case TabAlignment::Bottom: bar = BLRect(kInset, 0.0, w - 2.0f * kInset, kBar); break;
+				case TabAlignment::Left: bar = BLRect(w - kBar, kInset, kBar, h - 2.0f * kInset); break;
+				case TabAlignment::Right: bar = BLRect(0.0, kInset, kBar, h - 2.0f * kInset); break;
+			}
+			ctx.set_fill_style(UIColorManager::colorFor(enabled ? UIColorRole::HighlightBackground : UIColorRole::ControlBorder).toBLRgba32());
+			BLPath path;
+			path.add_round_rect(BLRoundRect(bar.x, bar.y, bar.w, bar.h, kBar * 0.5f));
+			ctx.fill_path(path);
+		}
+		ctx.restore();
+	}
+
+	void FluentTabPaneStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::WindowBackground).toBLRgba32());
+		ctx.fill_rect(BLRect(0.0, 0.0, size.width, size.height));
+		ctx.restore();
+	}
+
 	void FluentScrollbarTrackStyle::paint(BLContext& /*ctx*/, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
 		clientBounds = computeClientBounds(size);   // nothing drawn: the parent shows through
 	}

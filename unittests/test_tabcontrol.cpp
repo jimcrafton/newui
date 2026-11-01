@@ -50,6 +50,38 @@ TEST(TabControl, ConstructedVisibleWithThemedPaneStyle) {
     delete tabs;
 }
 
+TEST(TabControl, FluentStyleCoversExistingAndLaterTabsAndKeepsSelection) {
+    auto* tabs = new newui::TabControl();
+    tabs->addTab("First", MakePage("page1"));
+    tabs->addTab("Second", MakePage("page2"));
+    tabs->selectTab(1);
+
+    g_tabChangedCallCount = 0;
+    tabs->onTabChanged.add(&RecordTabChanged);
+    tabs->useFluentStyle(true);
+    EXPECT_TRUE(tabs->usesFluentStyle());
+    EXPECT_EQ(g_tabChangedCallCount, 0);   // restyling is not a selection change
+    EXPECT_NE(dynamic_cast<newui::FluentTabPaneStyle*>(&tabs->style()), nullptr);
+
+    tabs->addTab("Third", MakePage("page3"));
+    for (std::size_t i = 0; i < 3; ++i) {
+        auto* style = dynamic_cast<newui::FluentTabItemStyle*>(&tabs->tabButton(i)->style());
+        ASSERT_NE(style, nullptr) << i;
+        EXPECT_EQ(style->selected, i == 1) << i;
+    }
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+
+    tabs->useFluentStyle(false);
+    EXPECT_NE(dynamic_cast<newui::ThemedTabPaneStyle*>(&tabs->style()), nullptr);
+    EXPECT_EQ(dynamic_cast<newui::FluentTabItemStyle*>(&tabs->tabButton(0)->style()), nullptr);
+    auto* back = dynamic_cast<newui::ThemedTabItemStyle*>(&tabs->tabButton(1)->style());
+    ASSERT_NE(back, nullptr);
+    EXPECT_TRUE(back->selected);
+
+    tabs->destroy();
+    delete tabs;
+}
+
 TEST(TabControl, AddTabBuildsOneButtonAndOnePageEach) {
     auto* tabs = new newui::TabControl();
 

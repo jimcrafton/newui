@@ -5911,6 +5911,39 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
     }
 }
 
+std::unique_ptr<ThemedTabItemStyle> TabControl::makeTabStyle() const {
+    std::unique_ptr<ThemedTabItemStyle> style;
+    if (fluent_) {
+        style = std::make_unique<FluentTabItemStyle>();
+    } else {
+        style = std::make_unique<ThemedTabItemStyle>();
+    }
+    style->alignment = alignment_;
+    style->enabled = isEnabled();
+    return style;
+}
+
+void TabControl::useFluentStyle(bool fluent) {
+    if (fluent_ == fluent) {
+        return;
+    }
+    fluent_ = fluent;
+
+    if (fluent) {
+        setStyle(std::make_unique<FluentTabPaneStyle>());
+    } else {
+        setStyle(std::make_unique<ThemedTabPaneStyle>());
+    }
+    const auto& buttons = stripRow_->childViews();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        auto style = makeTabStyle();
+        style->selected = (i == selectedIndex_);
+        buttons[i]->setStyle(std::move(style));
+    }
+    updateTabPositions();
+    this->style().markDirty();
+}
+
 SubView* TabControl::addTab(const std::string& text, SubView* page) {
     if (auto* tabPage = dynamic_cast<TabPage*>(page)) {
         tabPage->title_ = text;
@@ -5940,9 +5973,7 @@ void TabControl::pageAdded(SubView* page) {
     button->setVisible(true);
     button->owner = this;
     button->tabIndex = stripRow_->childViews().size();
-    button->setStyle(std::make_unique<ThemedTabItemStyle>());
-    static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
-    static_cast<ThemedTabItemStyle&>(button->style()).enabled = isEnabled();
+    button->setStyle(makeTabStyle());
     ApplyButtonText(*button, text, stripHorizontal);
 
     button->onMouseDown.add(&TabItemButtonClicked);
