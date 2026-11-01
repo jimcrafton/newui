@@ -1117,6 +1117,46 @@ namespace newui {
         lineStep_ = lineStep > 0.0f ? lineStep : 0.0f;
     }
 
+    void ScrollBar::useFluentStyle(bool fluent) {
+        if (fluent_ == fluent) {
+            return;
+        }
+        fluent_ = fluent;
+
+        std::unique_ptr<ThemedScrollbarTrackStyle> track;
+        if (fluent) {
+            track = std::make_unique<FluentScrollbarTrackStyle>();
+            upArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
+            downArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
+            thumbStyle_ = std::make_unique<FluentScrollbarThumbStyle>();
+        } else {
+            track = std::make_unique<ThemedScrollbarTrackStyle>();
+            upArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+            downArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+            thumbStyle_ = std::make_unique<ThemedScrollbarThumbStyle>();
+        }
+        track->horizontal = horizontal_;
+        trackStyle_ = track.get();
+        setStyle(std::move(track));
+
+        upArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Left
+                                                : ThemedScrollbarArrowStyle::Direction::Up;
+        downArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Right
+                                                  : ThemedScrollbarArrowStyle::Direction::Down;
+        thumbStyle_->horizontal = horizontal_;
+        for (ViewStyle* s : { static_cast<ViewStyle*>(upArrowStyle_.get()), static_cast<ViewStyle*>(downArrowStyle_.get()),
+                              static_cast<ViewStyle*>(thumbStyle_.get()) }) {
+            s->setView(this);
+        }
+        const bool on = isEnabled();
+        upArrowStyle_->enabled = on;
+        downArrowStyle_->enabled = on;
+        thumbStyle_->enabled = on;
+
+        updateChildBounds();
+        style().markDirty();
+    }
+
     void ScrollBar::setHorizontal(bool value) {
         if (horizontal_ == value) {
             return;

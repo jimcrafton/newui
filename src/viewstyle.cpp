@@ -1806,6 +1806,81 @@ namespace newui {
 		ctx.restore();
 	}
 
+	void FluentScrollbarTrackStyle::paint(BLContext& /*ctx*/, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);   // nothing drawn: the parent shows through
+	}
+
+	void FluentScrollbarThumbStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		constexpr float kThickness = 6.0f;
+		constexpr float kInset = 1.0f;   // keeps the pill off the edge of the bar
+		BLPath path;
+		if (horizontal) {
+			float t = kThickness < size.height ? kThickness : size.height;
+			path.add_round_rect(BLRoundRect(kInset, (size.height - t) * 0.5f, size.width - 2.0f * kInset, t, t * 0.5f));
+		} else {
+			float t = kThickness < size.width ? kThickness : size.width;
+			path.add_round_rect(BLRoundRect((size.width - t) * 0.5f, kInset, t, size.height - 2.0f * kInset, t * 0.5f));
+		}
+
+		float alpha = !enabled ? 0.15f : (pressed ? 0.7f : (highlighted ? 0.55f : 0.35f));
+		Color base = UIColorManager::colorFor(UIColorRole::WindowText);
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+		ctx.set_fill_style(Color(base.r, base.g, base.b, alpha).toBLRgba32());
+		ctx.fill_path(path);
+		ctx.restore();
+	}
+
+	void FluentScrollbarArrowStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
+		clientBounds = computeClientBounds(size);
+		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		Color base = UIColorManager::colorFor(UIColorRole::WindowText);
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		if (enabled) {
+			float overlayAlpha = fluentStateOverlayAlpha(pressed, highlighted);
+			if (overlayAlpha > 0.0f) {
+				ctx.set_fill_style(Color(base.r, base.g, base.b, overlayAlpha).toBLRgba32());
+				ctx.fill_rect(BLRect(0.0, 0.0, size.width, size.height));
+			}
+		}
+
+		// A chevron pointing the way the arrow scrolls.
+		float cx = size.width * 0.5f;
+		float cy = size.height * 0.5f;
+		float half = (size.width < size.height ? size.width : size.height) * 0.16f;   // half the chevron's extent
+		float dx = 0.0f;
+		float dy = 0.0f;
+		switch (direction) {
+			case Direction::Up: dy = -1.0f; break;
+			case Direction::Down: dy = 1.0f; break;
+			case Direction::Left: dx = -1.0f; break;
+			case Direction::Right: dx = 1.0f; break;
+		}
+		// (dx,dy) is forward, (-dy,dx) across; the tip leads and the tails sit behind it
+		const float px = -dy;
+		const float py = dx;
+		BLPath chevron;
+		chevron.move_to(cx - dx * half + px * half * 2.0f, cy - dy * half + py * half * 2.0f);
+		chevron.line_to(cx + dx * half, cy + dy * half);
+		chevron.line_to(cx - dx * half - px * half * 2.0f, cy - dy * half - py * half * 2.0f);
+		ctx.set_stroke_style(Color(base.r, base.g, base.b, enabled ? 0.65f : 0.25f).toBLRgba32());
+		ctx.set_stroke_width(1.5f);
+		ctx.stroke_path(chevron);
+		ctx.restore();
+	}
+
 	void FluentProgressBarTrackStyle::paint(BLContext& ctx, const Size& size, bool /*highlighted*/, Rect& clientBounds) const {
 		clientBounds = computeClientBounds(size);
 

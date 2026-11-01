@@ -1923,6 +1923,29 @@ namespace newui {
         }
     };
 
+    // Fluent scrollbar parts, painted from the role colors (no uxtheme bitmaps), so a host palette reaches them.
+    // Subclasses of the Themed parts so ScrollBar can hold either; opt in with ScrollBar::useFluentStyle().
+    // Track: transparent, the parent shows through.
+    class FluentScrollbarTrackStyle : public ThemedScrollbarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // Thumb: a slim pill, stronger when hot or pressed.
+    class FluentScrollbarThumbStyle : public ThemedScrollbarThumbStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // Arrow: a chevron, with a state-layer square behind it when hot or pressed.
+    class FluentScrollbarArrowStyle : public ThemedScrollbarArrowStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus one top-level menu-bar entry's own chrome
     // (MENU/MENU_BARITEM) - used by MenuBar's own SubView-tree menu bar
     // (menus.h) instead of a native Win32 HMENU bar, whose row height is

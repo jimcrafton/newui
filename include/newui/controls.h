@@ -800,9 +800,14 @@ namespace newui {
         bool isHorizontal() const { return horizontal_; }
         void setHorizontal(bool value);
 
+        // Swaps the track, thumb and arrows between the uxtheme parts (default) and the role-colored Fluent ones.
+        void useFluentStyle(bool fluent);
+        bool usesFluentStyle() const { return fluent_; }
+
         void paint(BLContext& ctx) override;
 
     private:
+        bool fluent_ = false;
         enum class Region { None, UpArrow, DownArrow, Thumb, TrackBefore, TrackAfter };
 
         // Which of upArrowRect_/downArrowRect_/thumbRect_/neither a local
