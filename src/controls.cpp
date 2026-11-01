@@ -3394,7 +3394,12 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkHome: {
-                // The start of the *current visual line*, not the whole
+                // Ctrl+Home: the start of the document.
+                if ((keyMask & kmCtrl) != 0) {
+                    moveCaret(0, extend);
+                    return SyncReturn::Handled;
+                }
+                // Otherwise the start of the *current visual line*, not the whole
                 // document - correct unchanged for a single-line
                 // TextField too, since its one line's own lineRange()
                 // already starts at 0.
@@ -3403,6 +3408,11 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkEnd: {
+                // Ctrl+End: the end of the document.
+                if ((keyMask & kmCtrl) != 0) {
+                    moveCaret(model().length(), extend);
+                    return SyncReturn::Handled;
+                }
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
                 moveCaret(line.isValid() ? line.end() : model().length(), extend);
                 return SyncReturn::Handled;
