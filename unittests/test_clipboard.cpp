@@ -5,6 +5,23 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
+
+namespace {
+// Other processes (clipboard history, sync, watchers) briefly hold the clipboard open, so a bare
+// OpenClipboard() fails at random; retry like ClipboardScope does, but for longer.
+bool openClipboardWithRetry(HWND owner) {
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        if (::OpenClipboard(owner)) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+}
+
 
 TEST(ClipboardManager, SetTextThenGetTextRoundTripsUnicodeContent) {
     std::wstring written = L"Hello, 世界! éèê";
@@ -24,7 +41,7 @@ TEST(ClipboardManager, SetTextWithEmptyStringRoundTrips) {
 }
 
 TEST(ClipboardManager, GetTextReturnsFalseWhenClipboardHoldsNoText) {
-    ASSERT_TRUE(::OpenClipboard(nullptr));
+    ASSERT_TRUE(openClipboardWithRetry(nullptr));
     ::EmptyClipboard();
     ::CloseClipboard();
 
@@ -78,7 +95,7 @@ TEST(ClipboardManager, SetCustomDataWithEmptyDataSucceeds) {
 
 TEST(ClipboardManager, GetCustomDataReturnsFalseForAFormatNotOnTheClipboard) {
     UINT format = newui::ClipboardManager::registerCustomFormat(L"application/x-newui-test-custom-data-absent");
-    ASSERT_TRUE(::OpenClipboard(nullptr));
+    ASSERT_TRUE(openClipboardWithRetry(nullptr));
     ::EmptyClipboard();
     ::CloseClipboard();
 
@@ -122,7 +139,7 @@ TEST(ClipboardManager, DelayedRendererProducesDataOnlyWhenAskedFor) {
     // does - a unit test has no second real process available to
     // actually trigger the message, but WM_RENDERFORMAT's own contract
     // (clipboard already open) is easy to reproduce directly.
-    ASSERT_TRUE(::OpenClipboard(frame.rootView().windowHandle()));
+    ASSERT_TRUE(openClipboardWithRetry(frame.rootView().windowHandle()));
     newui::ClipboardManager::handleRenderFormat(format);
     ::CloseClipboard();
 
@@ -183,7 +200,7 @@ TEST(ClipboardManager, ClearDelayedRendererStopsItFromBeingInvoked) {
 
     newui::ClipboardManager::clearDelayedRenderer(format);
 
-    ASSERT_TRUE(::OpenClipboard(frame.rootView().windowHandle()));
+    ASSERT_TRUE(openClipboardWithRetry(frame.rootView().windowHandle()));
     newui::ClipboardManager::handleRenderFormat(format);
     ::CloseClipboard();
 
@@ -283,7 +300,7 @@ TEST(ClipboardManager, SetFileListWithEmptyListFails) {
 }
 
 TEST(ClipboardManager, GetFileListReturnsFalseWhenClipboardHasNoFileList) {
-    ASSERT_TRUE(::OpenClipboard(nullptr));
+    ASSERT_TRUE(openClipboardWithRetry(nullptr));
     ::EmptyClipboard();
     ::CloseClipboard();
 
@@ -292,7 +309,7 @@ TEST(ClipboardManager, GetFileListReturnsFalseWhenClipboardHasNoFileList) {
 }
 
 TEST(ClipboardManager, GetPreferredDropEffectDefaultsToCopyWhenAbsent) {
-    ASSERT_TRUE(::OpenClipboard(nullptr));
+    ASSERT_TRUE(openClipboardWithRetry(nullptr));
     ::EmptyClipboard();
     ::CloseClipboard();
 
@@ -338,7 +355,7 @@ TEST(ClipboardManager, SetImageWithAnEmptyImageFails) {
 }
 
 TEST(ClipboardManager, GetImageReturnsFalseWhenClipboardHasNoImage) {
-    ASSERT_TRUE(::OpenClipboard(nullptr));
+    ASSERT_TRUE(openClipboardWithRetry(nullptr));
     ::EmptyClipboard();
     ::CloseClipboard();
 
