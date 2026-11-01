@@ -64,3 +64,8 @@ Drag n Drop (within the framework)
 Drag n Drop (external, needs COM support)
 
 Disabled look: Image has none - a disabled Image should look greyed out (desaturate and/or lower opacity); pick an approach (grey-scale filter at draw time vs. opacity only). Progress fades to 40% opacity when disabled.
+
+DONE 2026-10-23 (Control::setDefaultControl/setCancelControl + UIInputManager::routeDialogKeyDown; hand-test pending): default and cancel buttons in dialogs (found 2026-10-21, curvy New Document dialog)
+  - Return does not click the dialog's Create button and Escape does not cancel; a focused Button does not react to Return/Space either.
+  - Nothing in UIInputManager, Dialog or Button supports it: UIInputManager only routes Tab and the arrow keys; only TextField (onReturnPressed), DropDownList popups and TextController handle Return/Escape themselves.
+  - Plan: Button::isDefault/setDefault and isCancel/setCancel; UIInputManager::routeDialogKeyDown(root, ...) called from RootView::keyEvent on key-down of Return/Escape (focused Button: click it; else dispatch to the focused view first, with a single-line TextField still falling through to the default button; multiline TextField keeps Return); click the visible, enabled default / cancel Button in the root. Then mark createButton default and cancelButton cancel in curvy/src/newdocumentdialog.cpp (and TraceDialog).
