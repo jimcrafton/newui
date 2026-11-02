@@ -1635,6 +1635,23 @@ TEST(TextLayoutEngine, AnEditRebuildsOnlyTheLinesItTouched) {
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 6u);
 }
 
+TEST(TextLayoutEngine, AResizeKeepsTheLayoutsWhenTheTextDoesNotWrap) {
+    TextLayoutEngine engine;
+    newui::Font font;
+    TextStorage storage(L"one\ntwo\nthree\nfour\nfive");
+    ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f, false));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 5u);
+
+    // Dragging a splitter changes the area every few milliseconds: nothing is laid out again.
+    ASSERT_TRUE(engine.update(storage, font, 400.0f, 150.0f, false));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 0u);
+    EXPECT_EQ(engine.lineCount(), 5u);
+
+    // Wrapping on does depend on the width.
+    ASSERT_TRUE(engine.update(storage, font, 400.0f, 150.0f, true));
+    EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 5u);
+}
+
 TEST(TextLayoutEngine, HitTestingMapsAcrossLines) {
     TextLayoutEngine engine;
     newui::Font font;

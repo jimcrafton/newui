@@ -1090,12 +1090,15 @@ namespace newui::text {
             return a.start != b.start ? a.start < b.start : a.length > b.length;
         });
 
+        // Without wrapping the layouts do not depend on the area's size (alignment is applied when drawing), so a
+        // resize - say, dragging a splitter - must not throw every line's DirectWrite layout away.
+        const bool sizeMatters = wordWrap;
         const bool sameShape = format == impl_->lastFormat
-            && lastMaxWidth_ == maxWidth
-            && lastMaxHeight_ == maxHeight
+            && (!sizeMatters || (lastMaxWidth_ == maxWidth && lastMaxHeight_ == maxHeight))
             && lastWordWrap_ == wordWrap
             && lastTabWidth_ == tabWidth;
         if (sameShape && !impl_->lines.empty() && snapshot.equals(lastText_) && lastFontRuns_ == fontRuns && lastFolds_ == collapsed) {
+            impl_->lastBuilt = 0;   // nothing was laid out this time
             return true;
         }
 
@@ -1233,6 +1236,8 @@ namespace newui::text {
 
         if (!edited) {
             std::vector<Impl::Line> fresh;
+            // Line's move is not noexcept (_com_ptr_t has none), so growing the vector would deep-copy every line.
+            fresh.reserve(storage.countLineBreaks(TextRange(0, textSize)) + 1);
             build(0, std::wstring::npos, fresh);
 
             // Keep the layouts of unchanged lines (same laid-out text and styling), matched from
