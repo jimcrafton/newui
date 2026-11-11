@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "newui/animation.h"
 #include "newui/application.h"
 #include "newui/dialogs.h"
+#include "newui/frame.h"
 #include "newui/items.h"
 #include "newui/reflection.h"
 #include "newui/runloop.h"
@@ -34,6 +36,60 @@ namespace newui
         if (model_ != nullptr) {
             modelChangedConnection_ = model_->onChanged.add(this, &Controller::modelChanged);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // FrameController
+    // ---------------------------------------------------------------------
+
+    FrameController::FrameController(Frame& frame) : frame_(frame) {
+        createdConnection_ = frame_.onCreated.add(this, &FrameController::handleCreated);
+        closingConnection_ = frame_.onClosing.add(this, &FrameController::handleClosing);
+        sizedConnection_ = frame_.onSizeChanged.add(this, &FrameController::handleSized);
+    }
+
+    // The Frame may outlive this controller and keeps calling whatever it was given, so unsubscribe (as Controller does from its Model).
+    FrameController::~FrameController() {
+        frame_.onCreated.remove(createdConnection_);
+        frame_.onClosing.remove(closingConnection_);
+        frame_.onSizeChanged.remove(sizedConnection_);
+    }
+
+    void FrameController::load() {
+        if (loaded_) {
+            return;
+        }
+        loaded_ = true;
+        // Normally runs inside WM_CREATE, and an exception must not unwind through the window procedure.
+        try {
+            frameDidLoad();
+        } catch (const std::exception& error) {
+            loadError_ = error.what();
+        }
+    }
+
+    SyncReturn FrameController::handleCreated(Frame&) {
+        load();
+        if (!loadError_.empty()) {
+            std::fprintf(stderr, "newui: frameDidLoad failed: %s\n", loadError_.c_str());
+            ::PostQuitMessage(1);
+        }
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn FrameController::handleClosing(Frame&, bool& canClose) {
+        frameShouldClose(canClose);
+        if (canClose) {
+            frameWillClose();
+        }
+        return SyncReturn::Ignored;
+    }
+
+    SyncReturn FrameController::handleSized(Frame&, const Size& size) {
+        if (loaded_) {
+            frameDidResize(size);
+        }
+        return SyncReturn::Ignored;
     }
 
     // ---------------------------------------------------------------------

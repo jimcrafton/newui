@@ -170,6 +170,7 @@ add_library(newui STATIC
     "include/newui/frameproxy.h" "src/frameproxy.cpp"
     "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
     "include/newui/splitter.h" "src/splitter.cpp"
+    "include/newui/toolframe.h" "src/toolframe.cpp"
     "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
     "include/newui/svgimage.h" "src/svgimage.cpp"
     "include/newui/uiinputmanager.h" "src/uiinputmanager.cpp"

@@ -1290,7 +1290,8 @@ namespace newui {
 			break;
 
 			case WM_LBUTTONDOWN: case WM_MBUTTONDOWN: case WM_RBUTTONDOWN: {
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				// Signed: a captured drag that leaves the window above or to the left reports negative coordinates.
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
 				
@@ -1336,7 +1337,7 @@ namespace newui {
 			break;
 
 			case WM_LBUTTONUP: case WM_MBUTTONUP: case WM_RBUTTONUP: {
-				Point pt(LOWORD(lParam),HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 
 				
 
@@ -1380,7 +1381,7 @@ namespace newui {
 			break;
 
 			case WM_MOUSEMOVE: {
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
@@ -1450,7 +1451,7 @@ namespace newui {
 
 			case WM_LBUTTONDBLCLK: case WM_MBUTTONDBLCLK: case WM_RBUTTONDBLCLK: {
 
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 				/*
 				Scrollable* scrollable = msg->control_->getScrollable();
 				if (NULL != scrollable) {
