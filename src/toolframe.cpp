@@ -33,7 +33,7 @@ namespace newui {
 
         const Rect& b = getBounds();
         HWND hwnd = ::CreateWindowExA(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            activatesOnClick_ ? WS_EX_TOOLWINDOW : (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE),
             className.c_str(), title_.c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
             b.left(), b.top(), b.size().width, b.size().height,
             owner_, NULL,
@@ -44,6 +44,16 @@ namespace newui {
             return false;
         }
         return true;
+    }
+
+    void ToolFrame::setActivatesOnClick(bool activates) {
+        activatesOnClick_ = activates;
+        if (frameHandle() == nullptr) {
+            return;
+        }
+        LONG_PTR style = ::GetWindowLongPtr(frameHandle(), GWL_EXSTYLE);
+        style = activates ? (style & ~LONG_PTR(WS_EX_NOACTIVATE)) : (style | WS_EX_NOACTIVATE);
+        ::SetWindowLongPtr(frameHandle(), GWL_EXSTYLE, style);
     }
 
     void ToolFrame::moveTo(const Rect& screenBounds) {
@@ -99,8 +109,11 @@ namespace newui {
                 return true;
             }
 
-            // Never activate on a click: the owner keeps the keyboard.
+            // Unless asked to, never activate on a click: the owner keeps the keyboard.
             case WM_MOUSEACTIVATE:
+                if (activatesOnClick_) {
+                    return Frame::handleMessage(message, wParam, lParam, outLRESULT);
+                }
                 outLRESULT = MA_NOACTIVATE;
                 return true;
 
