@@ -57,6 +57,9 @@ void Frame::setTitle(const std::string& title)
 	}
 	std::string oldTitle = title_;
 	title_ = title;
+	if (frameHandle_ != nullptr && ::IsWindow(frameHandle_)) {
+		::SetWindowTextA(frameHandle_, title_.c_str());
+	}
 	onTitleChanged.syncCall(*this, oldTitle, title);
 }
 

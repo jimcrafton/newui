@@ -1522,9 +1522,6 @@ namespace newui {
 						eventType = keKeyDown;
 
 						keyData.VKeyCode = translateVirtualKey(wParam,0);
-						printf("DEBUG WM_KEYDOWN wParam=%llu (0x%llx) -> VKeyCode=%u focusedSubView_=%p\n",
-							(unsigned long long)wParam, (unsigned long long)wParam, keyData.VKeyCode, (void*)focusedSubView_);
-						fflush(stdout);
 					}
 					break;
 
