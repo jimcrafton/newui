@@ -474,8 +474,20 @@ class Collector:
             class_def.ctors = []
         elif not any(c.kind == CursorKind.CONSTRUCTOR for c in cursor.get_children()):
             class_def.ctors.append(self.default_constructor(class_def))
+        if is_set(annotations, "readonly"):
+            self.make_readonly(class_def)
         self.drop_const_twins(class_def)
         return class_def
+
+    def make_readonly(self, class_def):
+        """For a class whose objects may be shared with something that must not see them change (a cached result handed out
+        as shared_ptr<const T>): only const and static methods, read-only fields and properties without a setter."""
+        class_def.methods = [m for m in class_def.methods if m.is_const or m.is_static]
+        for field in class_def.fields:
+            field.is_const = True
+        class_def.properties = [p for p in class_def.properties if p.getter.is_const]
+        for prop in class_def.properties:
+            prop.setter = None
 
     def drop_const_twins(self, class_def):
         """Python has no const: when a method exists as both a const and a non-const overload with the same

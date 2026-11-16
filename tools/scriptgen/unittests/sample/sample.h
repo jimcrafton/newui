@@ -18,6 +18,18 @@ public:
     int secret() const { return 7; }
 };
 
+// Only what cannot change the object is bound.
+// @scriptable readonly
+class Ledger {
+public:
+    int total() const { return total_; }
+    void add(int amount) { total_ += amount; }
+    int note = 0;
+
+private:
+    int total_ = 0;
+};
+
 // Never bound, and the members that name it are left out without a warning.
 // @scriptable ignore=true
 class Internal {};

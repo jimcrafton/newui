@@ -108,6 +108,12 @@ class SampleRunTest(unittest.TestCase):
         self.assertNotIn("outParameter", self.cpp)
         self.assertIn("outParameter' not bound", self.result.stderr)
 
+    def test_a_readonly_class_binds_only_what_cannot_change_it(self):
+        self.assertIn('.def("total", &demo::Ledger::total)', self.cpp)
+        self.assertNotIn("Ledger::add", self.cpp)
+        self.assertIn('.def_readonly("note", &demo::Ledger::note)', self.cpp)
+        self.assertNotIn("def_readwrite(\"note\"", self.cpp)
+
     def test_a_hidden_type_and_the_members_naming_it_are_left_out_silently(self):
         self.assertNotIn("Internal", self.cpp)
         self.assertNotIn("touch", self.cpp)
