@@ -1728,6 +1728,9 @@ namespace newui {
         // clientBounds top-left, matching what layoutEngine_'s own
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
+        // Whether the selection is on show: there is one, and the owner has the keyboard focus. An unfocused field keeps its selection (it is there again when
+        // the focus comes back, as in a native edit control) but does not highlight it, so only the field being typed into looks selected.
+        bool showsSelection() const;
         void drawCaret(BLContext& ctx) const;
         // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
         // text's own extent, which is what makes this a dedicated draw call rather than a
@@ -2029,6 +2032,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end - a field ready to type over (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -2183,6 +2188,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }

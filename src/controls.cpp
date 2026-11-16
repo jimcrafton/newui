@@ -2628,8 +2628,12 @@ namespace newui {
         ctx.restore();
     }
 
+    bool TextController::showsSelection() const {
+        return !selection_.isEmpty() && owner_.isFocused();
+    }
+
     void TextController::drawSelection(BLContext& ctx) const {
-        if (selection_.isEmpty()) {
+        if (!showsSelection()) {
             return;
         }
         // Plain BLContext fills (no intermediate D2D/WIC bitmap the way
