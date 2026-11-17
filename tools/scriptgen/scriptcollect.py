@@ -206,15 +206,22 @@ def python_type(clang_type, name_of):
 
 
 class Param:
-    def __init__(self, name, clang_type, has_default):
+    def __init__(self, name, clang_type, has_default, is_out=False):
         self.name = name  # as written in C++ (used for the lambda parameters)
         self.py_name = python_identifier(snake_case(name))  # the keyword name Python callers use
         self.type = clang_type
         self.has_default = has_default
+        # An output parameter ("out=" annotation): not an argument in Python, its value is returned after the result.
+        self.is_out = is_out
 
     @property
     def spelling(self):
         return spell(self.type)
+
+    @property
+    def value_type(self):
+        """For an output parameter, the type it holds (the reference's pointee)."""
+        return self.type.get_canonical().get_pointee()
 
 
 class Method:
@@ -229,6 +236,14 @@ class Method:
         self.release_gil = False
         self.policy = None  # explicit "policy=" annotation, a pybind11 return_value_policy name
         self.owner = None
+
+    @property
+    def out_params(self):
+        return [p for p in self.params if p.is_out]
+
+    @property
+    def returns_nothing(self):
+        return self.result is None or self.result.get_canonical().kind == TypeKind.VOID
 
     @property
     def default_count(self):
@@ -507,8 +522,14 @@ class Collector:
         constructor.owner = class_def
         return constructor
 
-    def signature_problem(self, cursor, is_constructor, refs, scope):
-        """Fills refs from the signature of cursor; returns why it cannot be bound, or None."""
+    def signature_problem(self, cursor, is_constructor, refs, scope, outs=frozenset()):
+        """Fills refs from the signature of cursor; returns why it cannot be bound, or None. `outs` are the names a
+        method's "out=" annotation marks as output parameters."""
+        if outs and is_constructor:
+            return "a constructor cannot have out parameters"
+        names = {argument.spelling for argument in cursor.get_arguments()}
+        for name in sorted(outs - names):
+            return f"'out' names '{name}', which is not a parameter"
         if not is_constructor:
             result = cursor.result_type.get_canonical()
             if result.kind != TypeKind.VOID:
@@ -520,6 +541,19 @@ class Collector:
                         return f"returns '{result.spelling}' by value and it cannot be copied"
         for argument in cursor.get_arguments():
             argument_type = argument.type.get_canonical()
+            if argument.spelling in outs:
+                if argument_type.kind != TypeKind.LVALUEREFERENCE or argument_type.get_pointee().is_const_qualified():
+                    return f"'{argument.spelling}' is marked out but is not a non-const reference"
+                if has_default_argument(argument):
+                    return f"out parameter '{argument.spelling}' has a default argument"
+                pointee = argument_type.get_pointee().get_canonical()
+                if pointee.kind == TypeKind.RECORD and not qualified_name(pointee.get_declaration()).startswith("std::"):
+                    if not is_copy_constructible(pointee):
+                        return f"out parameter '{argument.spelling}' is '{pointee.spelling}' and it cannot be copied"
+                why = type_refs(pointee, refs)
+                if why:
+                    return why
+                continue
             if argument_type.kind == TypeKind.RVALUEREFERENCE:
                 return "takes an rvalue reference"
             if argument_type.kind == TypeKind.LVALUEREFERENCE and not argument_type.get_pointee().is_const_qualified():
@@ -536,7 +570,8 @@ class Collector:
     def build_method(self, class_def, cursor, is_constructor):
         annotations = script_annotations(cursor)
         refs = []
-        why = self.signature_problem(cursor, is_constructor, refs, class_def.name)
+        outs = frozenset(name for name in annotations.get("out", "").split(",") if name)
+        why = self.signature_problem(cursor, is_constructor, refs, class_def.name, outs)
         label = f"{class_def.name}::{cursor.spelling}"
         if any(ref.name in self.hidden for ref in refs):
             return None
@@ -559,7 +594,7 @@ class Collector:
             method.result = cursor.result_type
         for index, argument in enumerate(cursor.get_arguments()):
             name = argument.spelling or f"arg{index}"
-            method.params.append(Param(name, argument.type, has_default_argument(argument)))
+            method.params.append(Param(name, argument.type, has_default_argument(argument), argument.spelling in outs))
         method.release_gil = is_set(annotations, "release_gil")
         method.policy = annotations.get("policy")
         class_def.refs.extend(refs)

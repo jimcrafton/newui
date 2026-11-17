@@ -74,9 +74,46 @@ def method_pointer(method):
     return f"static_cast<{result} ({owner}::*)({arguments}){const}>({target})"
 
 
+def emit_method_with_outs(method):
+    """A method with output parameters ("out=" annotation): Python passes only the other arguments, and the lambda returns the
+    result (when there is one) followed by the output values, as a tuple, or bare when that is a single value."""
+    lines = []
+    owner = method.owner.name
+    total = len(method.params)
+    for count in range(total, total - method.default_count - 1, -1):
+        used = method.params[:count]
+        visible = [p for p in used if not p.is_out]
+        outs = [p for p in used if p.is_out]
+        declared = ", ".join(f"{p.spelling} {p.name}" for p in visible)
+        passed = ", ".join(p.name for p in used)
+        locals_text = "".join(f"{spell(p.value_type)} {p.name}{{}}; " for p in outs)
+        values = [p.name for p in outs]
+        callee = f"{owner}::{method.name}" if method.is_static else f"self_.{method.name}"
+        if method.returns_nothing:
+            call = f"{callee}({passed});"
+        else:
+            call = f"auto result_ = {callee}({passed});"
+            values.insert(0, "std::move(result_)")
+        returned = values[0] if len(values) == 1 else f"std::make_tuple({', '.join(values)})"
+        body = f"{locals_text}{call} return {returned};"
+        parts = [f'py::arg("{p.py_name}")' for p in visible]
+        if method.release_gil:
+            parts.append("py::call_guard<py::gil_scoped_release>()")
+        extra = "".join(f", {part}" for part in parts)
+        if method.is_static:
+            lines.append(f'.def_static("{method.py_name}", []({declared}) {{ {body} }}{extra})')
+        else:
+            const = "const " if method.is_const else ""
+            separator = ", " if visible else ""
+            lines.append(f'.def("{method.py_name}", []({const}{owner}& self_{separator}{declared}) {{ {body} }}{extra})')
+    return lines
+
+
 def emit_method(method):
     """The .def(...) lines of one method: the full signature, then one lambda per shorter argument count
     that a default argument allows (so Python can leave those arguments out)."""
+    if method.out_params:
+        return emit_method_with_outs(method)
     lines = []
     lines.append(f'.def{"_static" if method.is_static else ""}("{method.py_name}", {method_pointer(method)}{extras(method, method.params)})')
     owner = method.owner.name
@@ -210,9 +247,21 @@ def stub_signature(method, collector):
     if not method.is_static:
         parts.append("self")
     for param in method.params:
+        if param.is_out:
+            continue
         default = " = ..." if param.has_default else ""
         parts.append(f"{param.py_name}: {python_type(param.type, collector.py_name_of)}{default}")
     return ", ".join(parts)
+
+
+def stub_result(method, collector):
+    if not method.out_params:
+        return python_type(method.result, collector.py_name_of)
+    types = []
+    if not method.returns_nothing:
+        types.append(python_type(method.result, collector.py_name_of))
+    types.extend(python_type(p.value_type, collector.py_name_of) for p in method.out_params)
+    return types[0] if len(types) == 1 else f"tuple[{', '.join(types)}]"
 
 
 def emit_stub_methods(class_def, collector):
@@ -235,7 +284,7 @@ def emit_stub_methods(class_def, collector):
                 else:
                     out.append(f"    def __init__({stub_signature(method, collector)}) -> None: ...")
                 continue
-            result = python_type(method.result, collector.py_name_of)
+            result = stub_result(method, collector)
             out.append(f"    def {name}({stub_signature(method, collector)}) -> {result}: ...")
     return out
 

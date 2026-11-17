@@ -108,6 +108,27 @@ class SampleRunTest(unittest.TestCase):
         self.assertNotIn("outParameter", self.cpp)
         self.assertIn("outParameter' not bound", self.result.stderr)
 
+    def test_an_out_parameter_is_returned_after_the_result(self):
+        self.assertIn('.def("range", [](const demo::Circle& self_, const std::basic_string<char> & key) '
+                      '{ float low{}; float high{}; auto result_ = self_.range(key, low, high); '
+                      'return std::make_tuple(std::move(result_), low, high); }, py::arg("key"))', self.cpp)
+        self.assertIn("def range(self, key: str) -> tuple[bool, float, float]: ...", self.stub)
+
+    def test_a_lone_out_parameter_of_a_void_method_is_returned_bare(self):
+        self.assertIn("{ int total{}; self_.sum(a, total, b); return total; }", self.cpp)
+        self.assertIn("{ int total{}; self_.sum(a, total); return total; }", self.cpp)
+        self.assertIn("def sum(self, a: int, b: int = ...) -> int: ...", self.stub)
+
+    def test_a_static_method_can_have_an_out_parameter(self):
+        self.assertIn('.def_static("lookup", [](int id) { std::basic_string<char> name{}; '
+                      'auto result_ = demo::Circle::lookup(id, name); return std::make_tuple(std::move(result_), name); }, py::arg("id"))', self.cpp)
+        self.assertIn("def lookup(id: int) -> tuple[int, str]: ...", self.stub)
+
+    def test_an_unmarked_reference_is_still_refused(self):
+        self.assertNotIn("appendTo", self.cpp)
+        self.assertIn("appendTo' not bound: takes a non-const reference", self.result.stderr)
+        self.assertNotIn("range' not bound", self.result.stderr)
+
     def test_a_readonly_class_binds_only_what_cannot_change_it(self):
         self.assertIn('.def("total", &demo::Ledger::total)', self.cpp)
         self.assertNotIn("Ledger::add", self.cpp)

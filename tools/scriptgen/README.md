@@ -108,6 +108,7 @@ Markers are ordinary comments directly above the declaration, in the same style 
 | `// @scriptable readonly` | class | Bind only the const and static methods, make every field read-only and drop property setters. For a class whose objects Python receives shared with something that must not see them change (a cached result handed out as `shared_ptr<const T>`): Python has no `const`, so without this a script could call any mutating method on the shared object. |
 | `// @scriptable release_gil` | method | Call it with the Python GIL released (long running work, or work that calls back into Python from other threads). |
 | `// @scriptable policy=reference` | method | A pybind11 `return_value_policy` instead of the automatic one. |
+| `// @scriptable out=lo,hi` | method | The named parameters (non-const references) are output parameters: Python does not pass them, and the call returns the result (if the method is not `void`) followed by their values, in signature order, as a tuple (a single value is returned bare). `bool range(const std::string& key, float& lo, float& hi)` becomes `ok, lo, hi = obj.range(key)`. They start value-initialised, so use it only for parameters the method fills in without reading. Not for constructors; an output parameter cannot have a default argument. |
 | `// @scriptable property=name setter=setX` | getter method | Expose a Python property; the two methods are then not also exposed as methods. `setter=` is optional. |
 
 A class is bound only if it is marked (or something marked needs it, see below). Everything else in your headers is ignored.
@@ -151,6 +152,7 @@ scriptgen does not link pybind11 or Python: it only writes source text. The gene
 | constructor | `.def(py::init<Args...>(), py::arg("x"), ...)`; none for an abstract class |
 | method | `.def("snake_name", &T::method, py::arg(...))`, static ones with `.def_static` |
 | overloaded method | the member pointer is cast to its own signature: `static_cast<R (T::*)(A) const>(&T::method)` |
+| `out=` parameters | a lambda without them: `[](const T& self_, A a) { float lo{}; auto result_ = self_.m(a, lo); return std::make_tuple(std::move(result_), lo); }` |
 | default arguments | one extra overload per shorter argument count, as a lambda that calls the C++ method (`[](const T& self_, int a) -> decltype(auto) { return self_.add(a); }`), so Python can leave the trailing arguments out |
 | public field / static field | `.def_readwrite` / `.def_readonly` (const), and the `_static` forms |
 | marked getter (and setter) | `.def_property("name", &T::get, &T::set)` or `.def_property_readonly` |
@@ -226,8 +228,14 @@ What scriptgen does **not** do, and what happens instead:
 * **Only public members of marked classes.** Private and protected members are never bound.
 * **No operators, templates or conversion functions.** Methods named `operator...`, function templates and members of class
   templates are skipped silently. Bind them by hand if you need them.
+* **Output parameters need `out=`.** C++ cannot say whether a non-const reference is read, written or both (a `std::vector<int>&`
+  that is appended to carries a value in), and Python cannot pass an `int` by reference, so scriptgen does not guess: mark the
+  ones that are pure outputs with `// @scriptable out=name,...` (see the annotation table). Other generators return outputs the same
+  way (a tuple, result first) and differ only in whether they guess: semiwrap treats non-const references to fundamental types as
+  outputs unless told otherwise, SWIG has `OUTPUT` and `INOUT` typemaps, Py++ requires a per-argument transformation. An
+  input-and-output (`INOUT`) parameter is not supported yet.
 * **Parameters it cannot pass are skipped with a warning:** rvalue references; non-const references to non-class types
-  (out parameters, `int&`, `std::vector<float>&`); raw pointers to pointers, to `void` and to numbers (`float*`); by-value classes
+  that are not marked `out=` (`int&`, `std::vector<float>&`); raw pointers to pointers, to `void` and to numbers (`float*`); by-value classes
   that cannot be copied; `std` types pybind11 does not convert (`std::span`, `std::atomic`, ...); and any signature that names a
   class or enum that is not in the parsed headers. The message names the member and the reason; `--strict` turns these into failures.
 * **Default argument values are not copied.** They are reproduced by calling the shorter C++ overload, so the Python signature

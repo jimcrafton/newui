@@ -87,6 +87,22 @@ public:
     }
 
     void outParameter(int& result) const { result = 1; }
+
+    // @scriptable out=low,high
+    bool range(const std::string& key, float& low, float& high) const {
+        low = 1.0f;
+        high = key.empty() ? 1.0f : 2.0f;
+        return !key.empty();
+    }
+    // @scriptable out=total
+    void sum(int a, int& total, int b = 5) const { total = a + b; }
+    // @scriptable out=name
+    static int lookup(int id, std::string& name) {
+        name = "n";
+        return id;
+    }
+    // Not marked: a non-const reference may carry a value in as well as out, so it is refused with a warning.
+    void appendTo(std::vector<int>& list) const { list.push_back(1); }
     void touch(Internal& internal) const { (void)internal; }
     Internal* internals() const { return nullptr; }
 
