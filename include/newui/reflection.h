@@ -1879,13 +1879,20 @@ namespace newui::reflection {
                             reader->endElement(idx, std::any());
                             return;
                         }
+                        // Only free it if the owner really let go of it: a ScrollView keeps its own viewport and bars
+                        // whatever it is asked, and freeing one of those here would leave the owner pointing at it.
+                        // The saved element is then simply added beside the one that stayed (a ScrollView puts it
+                        // into its viewport).
+                        const std::size_t countBefore = countFn_(*static_cast<SourceT*>(instance));
                         if (removeFn_) {
                             removeFn_(*static_cast<SourceT*>(instance), existing);
                         }
-                        if constexpr (detail::has_destroy_method_v<PointeeT>) {
-                            existing->destroy();
+                        if (countFn_(*static_cast<SourceT*>(instance)) < countBefore) {
+                            if constexpr (detail::has_destroy_method_v<PointeeT>) {
+                                existing->destroy();
+                            }
+                            delete existing;
                         }
-                        delete existing;
                     }
                 }
             }
