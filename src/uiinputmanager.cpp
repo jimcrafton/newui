@@ -1,4 +1,5 @@
 #include "newui/uiinputmanager.h"
+#include "newui/controls.h"
 #include "newui/keyboard_constants.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
@@ -196,6 +197,53 @@ namespace newui {
                 return false;
         }
         return moveFocusSpatially(root, direction);
+    }
+
+    bool UIInputManager::routeDialogKeyDown(RootView& root, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) const {
+        if ((keyMask & (kmAlt | kmCtrl)) != 0) {
+            return false;
+        }
+        const bool isReturn = VKeyCode == vkReturn;
+        if (!isReturn && VKeyCode != vkEscape && VKeyCode != vkSpaceBar) {
+            return false;
+        }
+
+        SubView* focused = root.focusedSubView();
+        if (focused != nullptr) {
+            if (auto* control = dynamic_cast<Control*>(focused); control != nullptr && control->activatedByKey(VKeyCode)) {
+                control->click();
+                return true;
+            }
+            if (focused->onKeyDown.syncCallFirst(*focused, keyMask, keyCharVal, repeatCount, VKeyCode).handled()) {
+                return true;
+            }
+        }
+        if (VKeyCode == vkSpaceBar) {
+            return false;
+        }
+
+        Control* target = nullptr;
+        const auto search = [&](auto&& self, SubView* node) -> void {
+            if (target != nullptr || node == nullptr || !node->isVisible()) {
+                return;
+            }
+            if (auto* control = dynamic_cast<Control*>(node);
+                control != nullptr && control->isEnabled() && (isReturn ? control->isDefaultControl() : control->isCancelControl())) {
+                target = control;
+                return;
+            }
+            for (SubView* child : node->childViews()) {
+                self(self, child);
+            }
+        };
+        for (SubView* child : root.childViews()) {
+            search(search, child);
+        }
+        if (target == nullptr) {
+            return false;
+        }
+        target->click();
+        return true;
     }
 
     bool UIInputManager::moveFocusSpatially(RootView& root, SpatialDirection direction) const {

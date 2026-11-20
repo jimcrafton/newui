@@ -38,7 +38,7 @@ namespace newui {
         //returns bool, takes key, value, and outResult
         //using ValidatorFuncPtr = bool(*)(const std::any&, const std::any&, std::any& );
 
-        virtual ~Model() = default;
+        virtual ~Model();
 
         ModelDelegate onChanged;
         ModelDelegate onCleared;

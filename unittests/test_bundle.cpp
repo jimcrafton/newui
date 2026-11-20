@@ -1047,6 +1047,42 @@ TEST_F(NewuiFileFixture, WriteFrameThenLoadFrameRoundTripsAnAnimationTargetingAR
     newui::PropertyManager::clear();
 }
 
+// Real, reproduced crash: a ScrollView's own constructor builds its viewport and bars before any reading starts, so reading a saved
+// "childViews" matches each saved child to the existing one at the same position. A saved ListView in the first slot does not match the
+// viewport (a plain SubView), and the reader used to remove the viewport through ScrollView::removeChild(), free it, and then add the
+// ListView to a ScrollView whose viewport_ was null. The ScrollView keeps its chrome now and the saved child goes into the viewport.
+TEST_F(NewuiFileFixture, LoadViewPutsAListViewSavedInsideAScrollViewIntoItsViewport) {
+    writeFile("BundleScrollViewListPanel", R"({
+        type: "SubView",
+        name: "panel",
+        childViews: [
+            {
+                type: "ScrollView",
+                name: "scroll",
+                childViews: [
+                    { type: "ListView", name: "list" },
+                ],
+            },
+        ],
+    })");
+
+    newui::View* loaded = newui::Bundle::instance().loadView("BundleScrollViewListPanel");
+    ASSERT_NE(loaded, nullptr);
+    auto* scroll = dynamic_cast<newui::ScrollView*>(loaded->findView("scroll"));
+    ASSERT_NE(scroll, nullptr);
+    auto* list = dynamic_cast<newui::ListView*>(loaded->findView("list"));
+    ASSERT_NE(list, nullptr);
+
+    // The viewport and both bars are still there, and the list is inside the viewport rather than beside it.
+    EXPECT_EQ(scroll->childViews().size(), 3u);
+    ASSERT_NE(list->parent(), nullptr);
+    EXPECT_EQ(list->parent()->parent(), scroll);
+    (void)scroll->contentOrigin();   // used viewport_ unconditionally
+
+    loaded->destroy();
+    delete loaded;
+}
+
 TEST(Bundle, AppNameFallsBackToApplicationNameWithoutInfoJson) {
     newui::Application::instance().setName("bundle-test-app");
     EXPECT_EQ(newui::Bundle::instance().appName(), "bundle-test-app");

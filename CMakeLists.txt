@@ -102,6 +102,7 @@ add_library(newui STATIC
     src/application.cpp
     src/frame.cpp
     "src/rootview.cpp"
+    "include/newui/pen.h" "src/pen.cpp"
     "include/newui/presentsurface.h"
     "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
     "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
@@ -143,6 +144,7 @@ add_library(newui STATIC
     "include/newui/models.h" "src/models.cpp"
     "include/newui/items.h" "src/items.cpp"
     "include/newui/controllers.h" "src/controllers.cpp"
+    "include/newui/groupedlist.h" "src/groupedlist.cpp"
     "include/newui/rootcontroller.h"
     "include/newui/controls.h" "src/controls.cpp"
     "include/newui/shapes.h" "src/shapes.cpp"
@@ -169,6 +171,7 @@ add_library(newui STATIC
     "include/newui/frameproxy.h" "src/frameproxy.cpp"
     "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
     "include/newui/splitter.h" "src/splitter.cpp"
+    "include/newui/toolframe.h" "src/toolframe.cpp"
     "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
     "include/newui/svgimage.h" "src/svgimage.cpp"
     "include/newui/uiinputmanager.h" "src/uiinputmanager.cpp"

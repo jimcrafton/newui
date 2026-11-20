@@ -614,3 +614,208 @@ TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
     folds[0].collapsed = false;
     apply("fold expanded");
 }
+
+// Top, middle and bottom put the text block at the top, the middle and the bottom of a Label's height.
+TEST(LabelAlignment, VerticalAlignmentPlacesTheTextBlock) {
+    auto firstInkRow = [](Label& label) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            label.paintStyle(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    return y;
+                }
+            }
+        }
+        return 60;
+    };
+    Label label;
+    label.setBounds(Rect(0, 0, 300, 60));
+    label.setText("Hxg");
+    label.setTextColor(BLRgba32(0xFF000000u));
+    EXPECT_EQ(label.verticalTextAlignment(), VerticalTextAlignment::Middle);
+    const int middle = firstInkRow(label);
+    label.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    const int top = firstInkRow(label);
+    label.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    const int bottom = firstInkRow(label);
+    EXPECT_LT(top, 10);
+    EXPECT_GT(middle, top + 10);
+    EXPECT_GT(bottom, middle + 10);
+}
+
+// A Button's text follows its alignment both ways; centered is unchanged.
+TEST(LabelAlignment, ButtonTextAlignsBothWays) {
+    auto inkBox = [](Button& button, int& left, int& top) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            button.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 300;
+        top = 60;
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                }
+            }
+        }
+    };
+    Button button;
+    button.setBounds(Rect(0, 0, 300, 60));
+    button.setText("Hxg");
+    button.setTextColor(BLRgba32(0xFF000000u));
+    int centerLeft = 0, centerTop = 0, left = 0, top = 0;
+    inkBox(button, centerLeft, centerTop);
+    EXPECT_GT(centerLeft, 100);
+    button.setTextAlignment(TextAlignment::Left);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    inkBox(button, left, top);
+    EXPECT_LT(left, 12);
+    EXPECT_LT(top, centerTop - 10);
+    button.setTextAlignment(TextAlignment::Right);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkBox(button, left, top);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, centerTop + 10);
+}
+
+namespace {
+    template <typename Painted>
+    void inkOf(Painted& view, int& left, int& top, int& right) {
+        BLImage image(300, 60, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            view.paint(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 300;
+        top = 60;
+        right = -1;
+        for (int y = 0; y < 60; ++y) {
+            for (int x = 0; x < 300; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if ((row[x] & 0xFF) < 128) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                    right = std::max(right, x);
+                }
+            }
+        }
+    }
+}
+
+TEST(LabelAlignment, ToolbarButtonTextAlignsBothWays) {
+    ToolbarButton button;
+    button.setBounds(Rect(0, 0, 300, 60));
+    button.setText("Hxg");
+    button.setTextColor(BLRgba32(0xFF000000u));
+    int centerLeft, centerTop, left, top, right;
+    inkOf(button, centerLeft, centerTop, right);
+    EXPECT_GT(centerLeft, 100);
+    button.setTextAlignment(TextAlignment::Left);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Top);
+    inkOf(button, left, top, right);
+    EXPECT_LT(left, 12);
+    EXPECT_LT(top, centerTop - 10);
+    button.setTextAlignment(TextAlignment::Right);
+    button.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkOf(button, left, top, right);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, centerTop + 10);
+}
+
+TEST(LabelAlignment, TextFieldTextAlignsBothWays) {
+    TextField field;
+    field.setBounds(Rect(0, 0, 300, 60));
+    field.setText(L"Hxg");
+    int topLeft, topTop, left, top, right;
+    inkOf(field, topLeft, topTop, right);   // the default: top-left, as the field has always drawn
+    EXPECT_LT(topLeft, 12);
+    EXPECT_LT(topTop, 12);
+    field.setTextAlignment(TextAlignment::Center);
+    field.setVerticalTextAlignment(VerticalTextAlignment::Middle);
+    inkOf(field, left, top, right);
+    EXPECT_GT(left, 100);
+    EXPECT_LT(right, 200);
+    EXPECT_GT(top, topTop + 10);
+    field.setTextAlignment(TextAlignment::Right);
+    field.setVerticalTextAlignment(VerticalTextAlignment::Bottom);
+    inkOf(field, left, top, right);
+    EXPECT_GT(left, 200);
+    EXPECT_GT(top, 35);
+    // A click where the text now is lands in the text, not at its old place.
+    field.controller().handleMouseDown(Point(float(right) - 2.0f, float(top) + 4.0f), 1u, 0u);
+    EXPECT_GT(field.controller().caret().position().offset(), size_t(0));
+}
+
+TEST(LabelAlignment, ToggleGlyphIsPlacedInsideTheView) {
+    auto paintedBox = [](Toggle& toggle, int& left, int& top, int& right, int& bottom) {
+        BLImage image(100, 40, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.fill_all(BLRgba32(0xFFFFFFFFu));
+            toggle.paintStyle(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        left = 100;
+        top = 40;
+        right = -1;
+        bottom = -1;
+        for (int y = 0; y < 40; ++y) {
+            for (int x = 0; x < 100; ++x) {
+                const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+                if (row[x] != 0xFFFFFFFFu) {
+                    left = std::min(left, x);
+                    top = std::min(top, y);
+                    right = std::max(right, x);
+                    bottom = std::max(bottom, y);
+                }
+            }
+        }
+    };
+    Toggle toggle;
+    toggle.setStyle(std::make_unique<FluentCheckBoxStyle>());
+    toggle.setBounds(Rect(0, 0, 100, 40));
+    toggle.setChecked(true);
+    int left, top, right, bottom;
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(right - left, 90);   // unchanged: fills the whole view
+    toggle.setGlyphAlignment(TextAlignment::Left);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Top);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_LE(left, 2);
+    EXPECT_LE(top, 2);
+    EXPECT_LE(right, 42);
+    EXPECT_LE(bottom, 42);
+    toggle.setGlyphAlignment(TextAlignment::Right);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Bottom);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(left, 58);
+    EXPECT_GE(right, 97);
+    toggle.setGlyphAlignment(TextAlignment::Center);
+    toggle.setVerticalGlyphAlignment(VerticalTextAlignment::Middle);
+    paintedBox(toggle, left, top, right, bottom);
+    EXPECT_GE(left, 28);
+    EXPECT_LE(right, 72);
+}

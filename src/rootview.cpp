@@ -1096,6 +1096,11 @@ namespace newui {
 			break;
 		}
 
+		// Dispatches to focusedSubView_ itself too; a click may close this window, so nothing touches it afterwards.
+		if (eventType == keKeyDown && UIInputManager::instance().routeDialogKeyDown(*this, keyMask, keyCharVal, repeatCount, VKeyCode)) {
+			return;
+		}
+
 		if (focusedSubView_ == nullptr) {
 			return;
 		}
@@ -1136,6 +1141,32 @@ namespace newui {
 			}
 			break;
 		}
+	}
+
+	void RootView::updatePenState(WPARAM wParam)
+	{
+		const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
+		POINTER_INPUT_TYPE type = PT_POINTER;
+		POINTER_PEN_INFO penInfo = {};
+		if (!::GetPointerType(pointerId, &type) || type != PT_PEN || !::GetPointerPenInfo(pointerId, &penInfo)) {
+			if (type != PT_PEN) {
+				penState_ = PenState();
+			}
+			return;
+		}
+
+		POINT client = penInfo.pointerInfo.ptPixelLocation;
+		::ScreenToClient(viewHwnd_, &client);
+
+		PenInfo info;
+		info.pointerFlags = penInfo.pointerInfo.pointerFlags;
+		info.penFlags = penInfo.penFlags;
+		info.penMask = penInfo.penMask;
+		info.pressure = penInfo.pressure;
+		info.rotation = penInfo.rotation;
+		info.tiltX = penInfo.tiltX;
+		info.tiltY = penInfo.tiltY;
+		penState_ = penStateFrom(info, Point(float(client.x), float(client.y)));
 	}
 
 	bool RootView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT)
@@ -1250,8 +1281,17 @@ namespace newui {
 			}
 			break;
 
+			case WM_POINTERENTER: case WM_POINTERUPDATE: case WM_POINTERDOWN: case WM_POINTERUP: case WM_POINTERLEAVE: {
+				updatePenState(wParam);
+				// Left unhandled on purpose: the default procedure turns a pen's pointer messages into the mouse
+				// messages the rest of this handler already routes.
+				result = false;
+			}
+			break;
+
 			case WM_LBUTTONDOWN: case WM_MBUTTONDOWN: case WM_RBUTTONDOWN: {
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				// Signed: a captured drag that leaves the window above or to the left reports negative coordinates.
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
 				
@@ -1297,7 +1337,7 @@ namespace newui {
 			break;
 
 			case WM_LBUTTONUP: case WM_MBUTTONUP: case WM_RBUTTONUP: {
-				Point pt(LOWORD(lParam),HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 
 				
 
@@ -1341,7 +1381,7 @@ namespace newui {
 			break;
 
 			case WM_MOUSEMOVE: {
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
@@ -1411,7 +1451,7 @@ namespace newui {
 
 			case WM_LBUTTONDBLCLK: case WM_MBUTTONDBLCLK: case WM_RBUTTONDBLCLK: {
 
-				Point pt(LOWORD(lParam), HIWORD(lParam));
+				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 				/*
 				Scrollable* scrollable = msg->control_->getScrollable();
 				if (NULL != scrollable) {
@@ -1482,9 +1522,6 @@ namespace newui {
 						eventType = keKeyDown;
 
 						keyData.VKeyCode = translateVirtualKey(wParam,0);
-						printf("DEBUG WM_KEYDOWN wParam=%llu (0x%llx) -> VKeyCode=%u focusedSubView_=%p\n",
-							(unsigned long long)wParam, (unsigned long long)wParam, keyData.VKeyCode, (void*)focusedSubView_);
-						fflush(stdout);
 					}
 					break;
 
@@ -1545,6 +1582,14 @@ namespace newui {
 		}
 
 		return result;
+	}
+
+	RootView* RootView::fromWindow(HWND hwnd)
+	{
+		if (hwnd == nullptr || !::IsWindow(hwnd) || ::GetWindowLongPtrA(hwnd, GWLP_WNDPROC) != reinterpret_cast<LONG_PTR>(&RootView::WndProc)) {
+			return nullptr;
+		}
+		return reinterpret_cast<RootView*>(::GetWindowLongPtr(hwnd, GWLP_USERDATA));
 	}
 
 	LRESULT CALLBACK RootView::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1705,6 +1750,8 @@ namespace newui {
 
 	void RootView::destroy() {
 		View::destroy();
+		// RootView declares its own onDestroyed (hiding View's, which View::destroy() fires), so this one needs firing here.
+		onDestroyed(*this);
 		releaseWindow();
 	}
 

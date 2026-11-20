@@ -57,6 +57,9 @@ void Frame::setTitle(const std::string& title)
 	}
 	std::string oldTitle = title_;
 	title_ = title;
+	if (frameHandle_ != nullptr && ::IsWindow(frameHandle_)) {
+		::SetWindowTextA(frameHandle_, title_.c_str());
+	}
 	onTitleChanged.syncCall(*this, oldTitle, title);
 }
 
@@ -163,6 +166,15 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			Point pt(LOWORD(lParam),HIWORD(lParam));
 			onPosChanged(*this, pt);
 			result = true;
+		}
+		break;
+
+		// The frame itself never reads keys: whatever focuses it (a modal loop showing a dialog, a click on the title bar) hands the focus to the root view.
+		case WM_SETFOCUS: {
+			if (rootView_ != nullptr && rootView_->windowHandle() != nullptr && ::IsWindow(rootView_->windowHandle())) {
+				::SetFocus(rootView_->windowHandle());
+				result = true;
+			}
 		}
 		break;
 

@@ -913,7 +913,13 @@ namespace newui {
 			: std::vector<std::string>{ text() };
 
 		double totalTextHeight = lineHeight * static_cast<double>(lines.size());
-		double y = clientBounds.top() + (clientBounds.size().height - totalTextHeight) * 0.5 + fontMetrics.ascent;
+		double slack = clientBounds.size().height - totalTextHeight;
+		if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+			slack = 0.0;
+		} else if (verticalTextAlignment_ == VerticalTextAlignment::Middle) {
+			slack *= 0.5;
+		}
+		double y = clientBounds.top() + slack + fontMetrics.ascent;
 
 		ctx.save();
 		ctx.set_comp_op(toBLCompOp(compositingOp()));
@@ -1101,10 +1107,191 @@ namespace newui {
 		return Size(static_cast<float>(sz.cx), static_cast<float>(sz.cy));
 	}
 
+	namespace {
+
+		// How a themed part is drawn from ThemeData colours. Arrow and Triangle parts draw their glyph in the part's text colour.
+		enum class PartLook { None, Box, Frame, Check, Radio, Groove, Arrow, Triangle };
+
+		struct PartInfo {
+			PartLook look = PartLook::None;
+			float radius = 0.0f;
+			bool horizontal = true;  // Groove
+		};
+
+		PartInfo partInfo(const std::wstring& cls, int part) {
+			using L = PartLook;
+			if (cls == L"BUTTON") {
+				if (part == BP_PUSHBUTTON) return {L::Box, 4.0f};
+				if (part == BP_CHECKBOX) return {L::Check};
+				if (part == BP_RADIOBUTTON) return {L::Radio};
+				if (part == BP_GROUPBOX) return {L::Frame, 4.0f};
+			} else if (cls == L"TOOLBAR") {
+				if (part == TP_BUTTON || part == TP_SPLITBUTTON) return {L::Box, 4.0f};
+				if (part == TP_SPLITBUTTONDROPDOWN) return {L::Arrow, 4.0f};
+			} else if (cls == L"TRACKBAR") {
+				if (part == TKP_TICS || part == TKP_TICSVERT) return {L::Box};
+				if (part == TKP_TRACK) return {L::Groove, 0.0f, true};
+				if (part == TKP_TRACKVERT) return {L::Groove, 0.0f, false};
+				if (part == TKP_THUMB || part == TKP_THUMBVERT) return {L::Box, 3.0f};
+			} else if (cls == L"SCROLLBAR") {
+				if (part == SBP_THUMBBTNHORZ || part == SBP_THUMBBTNVERT) return {L::Box, 3.0f};
+				if (part == SBP_LOWERTRACKHORZ || part == SBP_UPPERTRACKHORZ || part == SBP_LOWERTRACKVERT || part == SBP_UPPERTRACKVERT) return {L::Box};
+				if (part == SBP_ARROWBTN) return {L::Arrow, 2.0f};
+			} else if (cls == L"PROGRESS") {
+				if (part == PP_BAR || part == PP_BARVERT || part == PP_FILL || part == PP_FILLVERT) return {L::Box, 3.0f};
+			} else if (cls == L"TAB") {
+				if (part == TABP_TABITEM || part == TABP_TABITEMLEFTEDGE || part == TABP_TABITEMRIGHTEDGE || part == TABP_TABITEMBOTHEDGE ||
+					part == TABP_TOPTABITEM || part == TABP_TOPTABITEMLEFTEDGE || part == TABP_TOPTABITEMRIGHTEDGE || part == TABP_TOPTABITEMBOTHEDGE) return {L::Box, 3.0f};
+				if (part == TABP_PANE) return {L::Box};
+			} else if (cls == L"EDIT") {
+				if (part == EP_EDITTEXT) return {L::Box, 4.0f};
+			} else if (cls == L"LISTVIEW") {
+				if (part == LVP_LISTITEM) return {L::Box, 2.0f};
+			} else if (cls == L"TREEVIEW") {
+				if (part == TVP_TREEITEM) return {L::Box, 2.0f};
+				if (part == TVP_GLYPH) return {L::Triangle};
+			} else if (cls == L"HEADER") {
+				if (part == HP_HEADERITEM) return {L::Box};
+				if (part == HP_HEADERSORTARROW) return {L::Triangle};
+			} else if (cls == L"SPIN") {
+				if (part == SPNP_UP || part == SPNP_DOWN) return {L::Arrow, 2.0f};
+			} else if (cls == L"MENU") {
+				if (part == MENU_BARITEM || part == MENU_BARBACKGROUND) return {L::Box};
+			} else if (cls == L"STATUS") {
+			if (part == SP_PANE) return {L::Box};
+			} else if (cls == L"REBAR") {
+			if (part == RP_BAND) return {L::Box};
+			if (part == RP_CHEVRON || part == RP_CHEVRONVERT) return {L::Arrow, 2.0f};
+			} else if (cls == L"TOOLTIP") {
+				if (part == TTP_STANDARD) return {L::Box, 3.0f};
+			}
+			return {};
+		}
+
+		// Fills a triangle pointing the given way (0 up, 1 down, 2 left, 3 right), centred in a square of `extent`.
+		void fillTriangle(BLContext& ctx, float cx, float cy, float extent, int direction) {
+			const float h = extent * 0.5f;
+			BLPath path;
+			switch (direction) {
+				case 0: path.move_to(cx - h, cy + h * 0.5f); path.line_to(cx + h, cy + h * 0.5f); path.line_to(cx, cy - h * 0.5f); break;
+				case 1: path.move_to(cx - h, cy - h * 0.5f); path.line_to(cx + h, cy - h * 0.5f); path.line_to(cx, cy + h * 0.5f); break;
+				case 2: path.move_to(cx + h * 0.5f, cy - h); path.line_to(cx + h * 0.5f, cy + h); path.line_to(cx - h * 0.5f, cy); break;
+				default: path.move_to(cx - h * 0.5f, cy - h); path.line_to(cx - h * 0.5f, cy + h); path.line_to(cx + h * 0.5f, cy); break;
+			}
+			path.close();
+			ctx.fill_path(path);
+		}
+
+	}
+
+	bool ThemedViewStyle::paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const {
+		if (!ThemeData::instance().isLoaded()) {
+			return false;
+		}
+		// The explorer-style list and tree skins are recorded in the theme file under their plain class names.
+		std::wstring cls = themeClassName_;
+		if (cls == L"Explorer::ListView") cls = L"LISTVIEW";
+		else if (cls == L"Explorer::TreeView") cls = L"TREEVIEW";
+
+		const int part = partId();
+		const int state = stateId(highlighted);
+		const PartInfo info = partInfo(cls, part);
+		if (info.look == PartLook::None) {
+			return false;
+		}
+		const ThemePartData* data = ThemeData::instance().tryPartData(cls, part, state);
+		if (data == nullptr || !(data->fillColor || data->edgeFillColor || data->borderColor)) {
+			return false;
+		}
+		const std::optional<Color> fill = data->fillColor ? data->fillColor : data->edgeFillColor;
+		const Color mark = data->textColor ? *data->textColor : UIColorManager::colorFor(UIColorRole::ControlText);
+
+		ctx.save();
+		ctx.set_comp_op(toBLCompOp(compositingOp()));
+		ctx.set_fill_alpha(opacity());
+
+		const float minDim = size.width < size.height ? size.width : size.height;
+		BLPath path;
+		switch (info.look) {
+			case PartLook::Radio:
+				path.add_ellipse(BLEllipse(size.width * 0.5f, size.height * 0.5f, minDim * 0.5f - 0.5f, minDim * 0.5f - 0.5f));
+				break;
+			case PartLook::Groove: {
+				// A thin pill centred in the room the part is given, like a native track's groove.
+				const float thickness = 4.0f;
+				if (info.horizontal) {
+					const float t = thickness < size.height ? thickness : size.height;
+					path.add_round_rect(BLRoundRect(0.0f, (size.height - t) * 0.5f, size.width, t, t * 0.5f));
+				} else {
+					const float t = thickness < size.width ? thickness : size.width;
+					path.add_round_rect(BLRoundRect((size.width - t) * 0.5f, 0.0f, t, size.height, t * 0.5f));
+				}
+				break;
+			}
+			case PartLook::Triangle:
+				break;
+			case PartLook::Check:
+				path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, minDim * 0.2f));
+				break;
+			default:
+				path.add_round_rect(BLRoundRect(0.5f, 0.5f, size.width - 1.0f, size.height - 1.0f, info.radius));
+				break;
+		}
+		if (info.look != PartLook::Triangle) {
+			if (info.look != PartLook::Frame && fill && fill->a > 0.0f) {
+				ctx.set_fill_style(fill->toBLRgba32());
+				ctx.fill_path(path);
+			}
+			if (data->borderColor && data->borderColor->a > 0.0f) {
+				ctx.set_stroke_style(data->borderColor->toBLRgba32());
+				ctx.set_stroke_width(1.0f);
+				ctx.stroke_path(path);
+			}
+		}
+
+		// Check mark and radio dot: both state families run 5..8 for checked.
+		const bool checked = (info.look == PartLook::Check || info.look == PartLook::Radio) && state >= CBS_CHECKEDNORMAL && state <= CBS_CHECKEDDISABLED;
+		if (checked) {
+			ctx.set_fill_style(mark.toBLRgba32());
+			ctx.set_stroke_style(mark.toBLRgba32());
+			if (info.look == PartLook::Radio) {
+				ctx.fill_circle(BLCircle(size.width * 0.5f, size.height * 0.5f, minDim * 0.22f));
+			} else {
+				BLPath tick;
+				tick.move_to(size.width * 0.25f, size.height * 0.52f);
+				tick.line_to(size.width * 0.43f, size.height * 0.70f);
+				tick.line_to(size.width * 0.76f, size.height * 0.30f);
+				ctx.set_stroke_width(minDim * 0.12f);
+				ctx.set_stroke_caps(BL_STROKE_CAP_ROUND);
+				ctx.set_stroke_join(BL_STROKE_JOIN_ROUND);
+				ctx.stroke_path(tick);
+			}
+		}
+
+		// Glyphs: scrollbar and spin arrows (direction from the part and state ids), tree expanders and header sort arrows.
+		if (info.look == PartLook::Arrow || info.look == PartLook::Triangle) {
+			int direction = 0;
+			if (cls == L"SCROLLBAR") direction = state >= 17 ? (state - 17) % 4 : (state - 1) / 4;  // up, down, left, right
+			else if (cls == L"SPIN") direction = part == SPNP_UP ? 0 : 1;
+			else if (cls == L"TOOLBAR") direction = 1;
+			else if (cls == L"REBAR") direction = part == RP_CHEVRON ? 3 : 1;
+			else if (cls == L"TREEVIEW") direction = state == GLPS_OPENED ? 1 : 3;
+			else if (cls == L"HEADER") direction = state == HSAS_SORTEDUP ? 0 : 1;
+			ctx.set_fill_style(mark.toBLRgba32());
+			fillTriangle(ctx, size.width * 0.5f, size.height * 0.5f, minDim * 0.45f, direction);
+		}
+		ctx.restore();
+		return true;
+	}
+
 	void ThemedViewStyle::paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 
@@ -1177,7 +1364,10 @@ namespace newui {
 			                          // width/height, which are just rect's.
 			if (SUCCEEDED(::GetBufferedPaintBits(paintBuffer, &bits, &rowWidthPixels)) && bits != nullptr) {
 				if (newui::UIColorManager::isDarkMode()) {
-					invertLightnessInPlace(bits, width, height, rowWidthPixels, highlighted,
+					// The hover gamma only applies to a part that really draws differently when hot; a track (always its normal state) would
+					// otherwise change brightness whenever the pointer wandered on or off it, e.g. during a thumb drag.
+					const bool hotLook = highlighted && stateId(true) != stateId(false);
+					invertLightnessInPlace(bits, width, height, rowWidthPixels, hotLook,
 											   newui::UIColorManager::colorOverride(newui::UIColorRole::ControlBackground));
 				}
 
@@ -1203,6 +1393,11 @@ namespace newui {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 
@@ -1247,6 +1442,11 @@ namespace newui {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 
@@ -1314,6 +1514,11 @@ namespace newui {
 			return;
 		}
 
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
+			return;
+		}
+
 		float minDim = size.width < size.height ? size.width : size.height;
 		float cx = size.width * 0.5f;
 		float cy = size.height * 0.5f;
@@ -1369,6 +1574,11 @@ namespace newui {
 		clientBounds = computeClientBounds(size);
 
 		if (size.width <= 0.0f || size.height <= 0.0f) {
+			return;
+		}
+
+		// A loaded theme file's colours for this part and state win; the role-based look below is the fallback.
+		if (paintFromThemeData(ctx, size, highlighted)) {
 			return;
 		}
 

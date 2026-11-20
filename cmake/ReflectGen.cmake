@@ -39,6 +39,7 @@
 # full walkthrough.
 
 set(NEWUI_REFLECTGEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen)
+set(NEWUI_REFLECTGEN_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen_lib)
 set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/Scripts/python.exe)
 
 if(NOT EXISTS ${NEWUI_REFLECTGEN_PYTHON})
@@ -190,6 +191,8 @@ function(newui_add_reflectgen_output target)
             ${NEWUI_REFLECTGEN_DIR}/generate_reflection.py
             ${NEWUI_REFLECTGEN_DIR}/discover_reflectable.py
             ${NEWUI_REFLECTGEN_DIR}/reflectgen.py
+            ${NEWUI_REFLECTGEN_LIB_DIR}/parser.py
+            ${NEWUI_REFLECTGEN_LIB_DIR}/driver.py
             reflectgen_sizeof_probe
         COMMENT "reflectgen: discovering + regenerating ${output}"
         VERBATIM
