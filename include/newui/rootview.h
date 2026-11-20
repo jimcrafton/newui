@@ -12,6 +12,7 @@
 #include <newui/namemanager.h>
 #include <newui/overlay.h>
 #include <newui/presentsurface.h>
+#include <newui/dxgipresentsurface.h>  // GpuDeviceHook/GpuCompositeHook/GpuResizeHook, taken by value below
 
 namespace newui {
     class Frame;
@@ -233,6 +234,16 @@ namespace newui {
         // that was Dxgi and this machine couldn't do it.
         //@reflect ignore=true
         PresentBackend presentBackend() const;
+
+        // Forward to this RootView's surface when it's a DxgiPresentSurface (see dxgipresentsurface.h for what
+        // each hook means). Return false - and register nothing - under the Gdi backend, where no hook would
+        // ever fire. setPresentBackend() replaces the surface and so drops registered hooks: register after it.
+        //@reflect ignore=true
+        bool setGpuDeviceHook(GpuDeviceHook hook);
+        //@reflect ignore=true
+        bool setGpuCompositeHook(GpuCompositeHook hook);
+        //@reflect ignore=true
+        bool setGpuResizeHook(GpuResizeHook hook);
 
         // How much repaint() re-renders - see RepaintMode.
         //@reflect ignore=true

@@ -255,3 +255,11 @@ add_custom_command(TARGET popuptool1 POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/popup-card.svg"
         "$<TARGET_FILE_DIR:popuptool1>/Resources/popup-card.svg"
 )
+
+# Logging harness for DxgiPresentSurface's three GPU hooks (device / composite
+# / resize) - walks the validation checklist, see the file's header comment.
+add_executable(gpuhooks1
+    gpuhooks1.cpp
+)
+
+target_link_libraries(gpuhooks1 PRIVATE newui)

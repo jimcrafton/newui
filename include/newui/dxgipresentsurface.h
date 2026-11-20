@@ -3,10 +3,47 @@
 #include <memory>
 #include <string>
 
+#include <functional>
+
 #include <newui/gdipresentsurface.h>
 #include <newui/presentsurface.h>
 
+// D3D11's interfaces live in the global namespace - these have to be declared
+// here, not inside namespace newui, or they'd be unrelated newui::ID3D11*
+// types that no real D3D pointer converts to.
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct ID3D11RenderTargetView;
+
 namespace newui {
+
+    // Fires when the D3D11 device is created or recreated (first
+    // ensureGpu(), a device-loss rebuild, a swap chain made for a new
+    // window), and when it's about to go away: a null device/context and
+    // 0x0 size, called *before* the old device is destroyed so the receiver
+    // can release its own resources against it. A GDI fallback, release()
+    // and a minimize-to-nothing resize all end up there. width/height are
+    // the presentable size the new device's texture was built at - the
+    // resize hook does not fire for that size, so this is where a canvas
+    // learns it.
+    using GpuDeviceHook = std::function<void(ID3D11Device*, ID3D11DeviceContext*, UINT width, UINT height)>;
+
+    // Fires once per present() that reaches Present1(), after the CPU
+    // buffer has been copied into the back buffer and before Present1().
+    // The render target is only valid for this call and is unbound
+    // afterward. present() returns early on an empty or out-of-buffer dirty
+    // rect, before this runs - a canvas-only change still needs a non-empty
+    // RootView::invalidate(view, &rect). The draw lands on top of everything
+    // Blend2D painted, including popups/overlays over the same area.
+    using GpuCompositeHook = std::function<void(ID3D11DeviceContext*, ID3D11RenderTargetView*)>;
+
+    // Fires at the end of a resize() that left a device in place (never
+    // under GDI, and not while there's no window/device yet). May repeat
+    // the size a device hook just delivered.
+    using GpuResizeHook = std::function<void(UINT width, UINT height)>;
+
+    // Hooks must not throw: exceptions are caught and dropped at the call
+    // site, so they can't unwind through present()/resize().
 
     // Presents through a DXGI flip-model swap chain instead of WM_PAINT/BitBlt.
     // Blend2D still renders on the CPU, into a plain image() exactly like
@@ -58,6 +95,14 @@ namespace newui {
             return fallbackReason_;
         }
 
+        // Fires immediately if a device already exists. Replaces any
+        // previous hook. See the hook typedefs above.
+        void setGpuDeviceHook(GpuDeviceHook hook);
+        void setGpuCompositeHook(GpuCompositeHook hook);
+        // Unlike the device hook, does not fire on registration - read the
+        // size from the device hook instead.
+        void setGpuResizeHook(GpuResizeHook hook);
+
     private:
         struct Gpu;  // D3D11 device/context/swap chain/texture - keeps d3d11.h out of this header
 
@@ -81,6 +126,9 @@ namespace newui {
         bool recoveringFromLoss_ = false;
         BLFormat format_ = BL_FORMAT_XRGB32;
         std::string fallbackReason_;
+        GpuDeviceHook gpuDeviceHook_;
+        GpuCompositeHook gpuCompositeHook_;
+        GpuResizeHook gpuResizeHook_;
     };
 
 }
