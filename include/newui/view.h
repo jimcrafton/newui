@@ -288,7 +288,7 @@ namespace newui {
         // the phases have to be genuinely separate calls the caller can
         // wrap independently.
         void prePaintStyle(BLContext& ctx);
-        void paintStyle(BLContext& ctx);
+        virtual void paintStyle(BLContext& ctx);
         void postPaintStyle(BLContext& ctx);
 
         // The rect (local to this view, same coordinates paint() draws in)
@@ -402,6 +402,21 @@ namespace newui {
         //@reflect ignore=true
         void setOrigin(const Point& origin) {
             origin_ = origin;
+        }
+
+        // True when visibleRegion() is meaningful, i.e. this view is being painted through a parent's
+        // paintChildren() (or the root's paintTree()).
+        //@reflect ignore=true
+        bool hasVisibleRegion() const {
+            return hasVisibleRegion_;
+        }
+
+        // The part of this view's local space that is actually being repainted (the dirty region on a
+        // pruned repaint, the window otherwise), clipped to this view and its ancestors. A paint() that is
+        // expensive can skip drawing anything that lies outside it; ignoring it is always correct.
+        //@reflect ignore=true
+        const Rect& visibleRegion() const {
+            return visibleRegion_;
         }
 
         // Draws this view's own content. Default is a no-op; SubView

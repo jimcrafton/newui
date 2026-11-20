@@ -403,3 +403,83 @@ TEST(Delegate, RemovingADescribedListenerDropsItFromDescribedListeners) {
 
     EXPECT_TRUE(delegate.describedListeners().empty());
 }
+
+TEST(Connections, DestructorRemovesEveryListener) {
+    ResetRecorder();
+    newui::Delegate<int> first;
+    newui::Delegate<int> second;
+    {
+        newui::Connections connections;
+        connections.add(first, [](int&) { ++g_callCount; return newui::SyncReturn::Handled; });
+        connections.add(first, [](int&) { ++g_callCount; return newui::SyncReturn::Handled; });
+        connections.add(second, [](int&) { ++g_callCount; return newui::SyncReturn::Handled; });
+        EXPECT_EQ(connections.size(), 3u);
+    }
+    int sender = 0;
+    first.syncCall(sender);
+    second.syncCall(sender);
+
+    EXPECT_EQ(g_callCount, 0);
+    EXPECT_TRUE(first.empty());
+    EXPECT_TRUE(second.empty());
+}
+
+TEST(Connections, ListenersStayConnectedWhileTheOwnerLives) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    newui::Connections connections;
+    connections.add(delegate, [](int&) { ++g_callCount; return newui::SyncReturn::Handled; });
+    int sender = 0;
+    delegate.syncCall(sender);
+
+    EXPECT_EQ(g_callCount, 1);
+}
+
+TEST(Connections, ClearLeavesListenersOfOtherOwnersAlone) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    delegate.add(&IncrementCount);
+    newui::Connections connections;
+    connections.add(delegate, [](int&) { g_callCount += 10; return newui::SyncReturn::Handled; });
+    connections.clear();
+    int sender = 0;
+    delegate.syncCall(sender);
+
+    EXPECT_EQ(connections.size(), 0u);
+    EXPECT_EQ(g_callCount, 1);
+}
+
+TEST(Connections, MovedFromOwnerNoLongerRemoves) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    newui::Connections moved;
+    {
+        newui::Connections original;
+        original.add(delegate, [](int&) { ++g_callCount; return newui::SyncReturn::Handled; });
+        moved = std::move(original);
+        EXPECT_EQ(original.size(), 0u);
+    }
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(g_callCount, 1);
+
+    moved.clear();
+    delegate.syncCall(sender);
+    EXPECT_EQ(g_callCount, 1);
+}
+
+TEST(Connections, ListenerCanBeRemovedWhileItIsRunning) {
+    ResetRecorder();
+    newui::Delegate<int> delegate;
+    newui::Connections connections;
+    connections.add(delegate, [&connections](int&) {
+        ++g_callCount;
+        connections.clear();
+        return newui::SyncReturn::Handled;
+    });
+    int sender = 0;
+    delegate.syncCall(sender);
+    delegate.syncCall(sender);
+
+    EXPECT_EQ(g_callCount, 1);
+}

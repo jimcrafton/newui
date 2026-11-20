@@ -41,6 +41,21 @@ bool contains(const std::string& text, const std::string& part) {
 
 }
 
+TEST(AutomationRegistry, ADestroyedRootIsForgottenSoItsViewsAreNotLookedUpAfterwards) {
+    RootView* root = new RootView(nullptr, Rect(0, 0, 200, 100), "goneRoot");
+    TextControl* child = new TextControl();
+    child->setName("goneChild");
+    child->setBounds(Rect(0, 0, 50, 20));
+    root->addChild(child);
+    Automation::expose(*root);
+    EXPECT_TRUE(contains(Automation::handle("{\"cmd\":\"findView\",\"name\":\"goneChild\"}"), "\"ok\":true"));
+
+    root->destroy();
+    delete root;
+    const std::string answer = Automation::handle("{\"cmd\":\"findView\",\"name\":\"goneChild\"}");
+    EXPECT_TRUE(contains(answer, "\"ok\":false")) << answer;
+}
+
 TEST_F(AutomationFixture, HelloReportsTheProtocolAndEchoesTheId) {
     std::string answer = Automation::handle("{\"id\":7,\"cmd\":\"hello\"}");
     EXPECT_TRUE(contains(answer, "\"id\":7"));

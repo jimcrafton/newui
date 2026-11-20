@@ -404,9 +404,19 @@ namespace newui {
             return activeIndex_;
         }
 
+        // Insets the shown card from the container's client area on every side (the same name and meaning as FlexLayout's padding()).
+        float padding() const {
+            return padding_;
+        }
+
+        void setPadding(float padding) {
+            padding_ = padding;
+        }
+
     private:
         std::size_t activeIndex_ = 0;
         View* container_ = nullptr;
+        float padding_ = 0.0f;
     };
 
     // How one GridLayout row/column track is sized. Fixed and Star mirror

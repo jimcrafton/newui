@@ -74,27 +74,21 @@ namespace newui {
         StateChangedDelegate onStateChanged;
         ClickDelegate onClick;
 
+        // Disabling a Control disables every Control inside it too (isEnabled() is false while any ancestor Control is
+        // disabled); enabling it restores each child to its own setting.
         void setEnabled(bool v) {
             state_.setEnabled(v);
-            if (!v) {
-                // A press already in progress when this Control becomes
-                // disabled shouldn't still produce a click on release -
-                // matches UIControl, which never sends actions while
-                // isEnabled is false.
-                tracking_ = false;
+            enabledChanged();
+            for (SubView* child : childViews()) {
+                notifyEnabled(*child);
             }
-            onStateChanged(*this);
         }
 
-        bool isEnabled() const { return state_.isEnabled(); }
+        bool isEnabled() const { return state_.isEnabled() && !insideDisabledControl(); }
 
-        // A disabled Control is never a valid focus target - by mouse
-        // click (UIInputManager::resolveClickFocusTarget()) or by Tab
-        // (UIInputManager::moveFocus()) - even if acceptsFocus() is true,
-        // matching how a real disabled Win32 control is skipped in tab
-        // order. View::canBecomeFocused() already covers acceptsFocus()/
-        // isDesignTime(); this only adds the isEnabled() gate on top.
+        // A disabled Control is never a valid focus target - by mouse click or by Tab - even if acceptsFocus() is true.
         bool canBecomeFocused() const override { return View::canBecomeFocused() && isEnabled(); }
+
 
         // Non-owning - see Action's own class comment. Setting this does
         // not by itself wire this Control's onClick to action's
@@ -107,12 +101,45 @@ namespace newui {
         Action* action() { return action_; }
         const Action* action() const { return action_; }
 
+        // The Control Return clicks when nothing in the window handles the key itself, and the one Escape
+        // clicks (WPF's IsDefault/IsCancel, AppKit's defaultButtonCell): see UIInputManager::routeDialogKeyDown().
+        // The first visible, enabled one in the tree wins.
+        bool isDefaultControl() const { return defaultControl_; }
+        void setDefaultControl(bool value) {
+            if (defaultControl_ != value) {
+                defaultControl_ = value;
+                defaultControlChanged();
+            }
+        }
+        bool isCancelControl() const { return cancelControl_; }
+        void setCancelControl(bool value) { cancelControl_ = value; }
+
+        // Whether this key, while this Control has focus, clicks it (a push button: Return and Space).
+        virtual bool activatedByKey(std::uint32_t /*VKeyCode*/) const { return false; }
+
+        // Fires onClick() as a completed click would; nothing while disabled.
+        void click() {
+            if (isEnabled()) {
+                onClick(*this);
+            }
+        }
+
     protected:
         Control();
 
+        // isDefaultControl() just changed: a control that draws the difference (Button) updates its look.
+        virtual void defaultControlChanged() {}
+
     private:
+        // This Control (or an ancestor) was enabled or disabled: a disabled one gives up focus and abandons a pending click.
+        void enabledChanged();
+        static void notifyEnabled(View& view);
+        bool insideDisabledControl() const;
+        void releaseFocus();
         State state_;
         bool tracking_ = false;
+        bool defaultControl_ = false;
+        bool cancelControl_ = false;
         Action* action_ = nullptr;
 
         SyncReturn handleTrackingMouseDown(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -148,6 +175,12 @@ namespace newui {
         // LabelStyle handles for a plain ViewStyle, viewstyle.h).
         void setTextColor(BLRgba32 color);
 
+        // Centered both ways by default. Left / Right and Top / Bottom keep the text a few pixels in from the edge.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; style().markDirty(); }
+
         // Momentary (default, a normal push button) vs. toggle mode. A
         // momentary Button's pressed look only follows the live mouse-
         // down-inside gesture. A toggle Button additionally flips
@@ -169,10 +202,18 @@ namespace newui {
         // completed toggle click and from a direct setChecked() call.
         CheckedChangedDelegate onCheckedChanged;
 
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkReturn || VKeyCode == vkSpaceBar; }
+
         void paint(BLContext& ctx) override;
+
+    protected:
+        void defaultControlChanged() override { updatePressedVisual(); }
 
     private:
         void updatePressedVisual();
+
+        TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
 
         // Separate from Control's own private tracking_ (click-gesture
         // detection, already correct - see Control::handleTrackingMouseUp())
@@ -239,6 +280,17 @@ namespace newui {
         // "fires either way" shape as Button::onCheckedChanged).
         CheckedChangedDelegate onCheckedChanged;
 
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkSpaceBar; }
+
+        // A Toggle has no text: the glyph fills the view. Setting either alignment away from its default (Left, Middle) instead draws
+        // a square glyph, the view's shorter side, placed left / centre / right and top / middle / bottom of the view.
+        TextAlignment glyphAlignment() const { return glyphAlignment_; }
+        void setGlyphAlignment(TextAlignment value) { glyphAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalGlyphAlignment() const { return verticalGlyphAlignment_; }
+        void setVerticalGlyphAlignment(VerticalTextAlignment value) { verticalGlyphAlignment_ = value; style().markDirty(); }
+
+        void paintStyle(BLContext& ctx) override;
+
     private:
         // Replaces style() with a fresh instance of whichever concrete
         // type isRadioStyle() currently selects, carrying checked_/
@@ -252,6 +304,9 @@ namespace newui {
         // Control" reasoning Button::updatePressedVisual()'s own comment,
         // controls.cpp, gives).
         void updateStyleFields();
+
+        TextAlignment glyphAlignment_ = TextAlignment::Left;
+        VerticalTextAlignment verticalGlyphAlignment_ = VerticalTextAlignment::Middle;
 
         SyncReturn handlePressStart(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
@@ -302,6 +357,10 @@ namespace newui {
         // Centered by default.
         TextAlignment textAlignment() const { return labelStyle_->textAlignment(); }
         void setTextAlignment(TextAlignment value) { labelStyle_->setTextAlignment(value); style().markDirty(); }
+
+        // Middle by default.
+        VerticalTextAlignment verticalTextAlignment() const { return labelStyle_->verticalTextAlignment(); }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { labelStyle_->setVerticalTextAlignment(value); style().markDirty(); }
 
         bool isHotLink() const { return hotLink_; }
         void setHotLink(bool value);
@@ -1231,6 +1290,12 @@ namespace newui {
         float iconSize() const { return iconSize_; }
         void setIconSize(float size);
 
+        // Where the icon and text sit as one block. Centered both ways by default; Left / Right and Top / Bottom keep it a few pixels in from the edge.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value) { textAlignment_ = value; style().markDirty(); }
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; style().markDirty(); }
+
         bool isToggleButton() const { return isToggleButton_; }
         void setToggleButton(bool value) { isToggleButton_ = value; }
 
@@ -1241,6 +1306,8 @@ namespace newui {
         // Fired whenever isChecked() actually changes - both from a
         // completed toggle click and from a direct setChecked() call.
         CheckedChangedDelegate onCheckedChanged;
+
+        bool activatedByKey(std::uint32_t VKeyCode) const override { return VKeyCode == vkReturn || VKeyCode == vkSpaceBar; }
 
         void paint(BLContext& ctx) override;
 
@@ -1256,6 +1323,8 @@ namespace newui {
         BLVar textColor_;
         std::string icon_;
         float iconSize_ = kIconSize;
+        TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
@@ -1604,7 +1673,14 @@ namespace newui {
 
         // Where the text goes within the owner: its client bounds, less any margin a subclass
         // keeps (TextFoldingController's gutter). Layout, hit-testing and drawing all use it.
-        virtual Rect textArea() const { return owner_.getClientBounds(); }
+        virtual Rect textArea() const;
+
+        // Where a single-line text sits in the owner (a TextField): the area above shifts so the text block lands left / centre / right and
+        // top / middle / bottom of the client bounds. Top and Left, the defaults, change nothing. Multi-line text ignores both.
+        TextAlignment textAlignment() const { return textAlignment_; }
+        void setTextAlignment(TextAlignment value);
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value);
 
         // The full height layoutEngine_'s current content actually needs
         // - see TextLayoutEngine::contentHeight()'s own doc comment
@@ -1652,6 +1728,9 @@ namespace newui {
         // clientBounds top-left, matching what layoutEngine_'s own
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
+        // Whether the selection is on show: there is one, and the owner has the keyboard focus. An unfocused field keeps its selection (it is there again when
+        // the focus comes back, as in a native edit control) but does not highlight it, so only the field being typed into looks selected.
+        bool showsSelection() const;
         void drawCaret(BLContext& ctx) const;
         // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
         // text's own extent, which is what makes this a dedicated draw call rather than a
@@ -1823,6 +1902,8 @@ namespace newui {
         Control& owner_;
         bool multiline_ = false;
         bool wordWrap_ = true;
+        TextAlignment textAlignment_ = TextAlignment::Left;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Top;
         float scrollOffsetX_ = 0.0f;
 
         // This control's own current scroll position, in document
@@ -1938,6 +2019,12 @@ namespace newui {
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
         const std::wstring& text() const { return controller_->model().text(); }
         void setText(const std::wstring& text) { controller_->model().setText(text); }
+        // Where the text sits in the field. Left and Top by default (the field has always been top-left); the placeholder stays where it was.
+        TextAlignment textAlignment() const { return controller_->textAlignment(); }
+        void setTextAlignment(TextAlignment value) { controller_->setTextAlignment(value); }
+        VerticalTextAlignment verticalTextAlignment() const { return controller_->verticalTextAlignment(); }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { controller_->setVerticalTextAlignment(value); }
+
         bool canUndo() const { return controller_->canUndo(); }
         bool canRedo() const { return controller_->canRedo(); }
         bool undo() { return controller_->undo(); }
@@ -1945,6 +2032,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end - a field ready to type over (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -2099,6 +2188,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }

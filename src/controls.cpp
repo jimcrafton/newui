@@ -21,6 +21,38 @@
 
 namespace newui {
 
+    void Control::releaseFocus() {
+        if (RootView* root = rootView(); root != nullptr && root->focusedSubView() == this) {
+            root->setFocusedSubView(nullptr);
+        }
+    }
+
+    void Control::enabledChanged() {
+        if (!isEnabled()) {
+            tracking_ = false;   // a press in progress never clicks
+            releaseFocus();
+        }
+        onStateChanged(*this);
+    }
+
+    void Control::notifyEnabled(View& view) {
+        if (Control* control = dynamic_cast<Control*>(&view)) {
+            control->enabledChanged();
+        }
+        for (SubView* child : view.childViews()) {
+            notifyEnabled(*child);
+        }
+    }
+
+    bool Control::insideDisabledControl() const {
+        for (const View* up = parent(); up != nullptr; up = up->parent()) {
+            if (const Control* control = dynamic_cast<const Control*>(up); control != nullptr && !control->state_.isEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     Control::Control() {
         onMouseDown.add(this, &Control::handleTrackingMouseDown);
         onMouseUp.add(this, &Control::handleTrackingMouseUp);
@@ -71,6 +103,14 @@ namespace newui {
         addChild(fill_);
 
         onSizeChanged.add(this, &Progress::handleSizeChanged);
+        // No themed disabled look exists for a progress bar, so a disabled one fades into its surroundings.
+        onStateChanged.add([this](Control&) {
+            const float opacity = isEnabled() ? 1.0f : 0.4f;
+            style().setOpacity(opacity);
+            fill_->style().setOpacity(opacity);
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
     }
 
     void Progress::setValue(float newValue) {
@@ -198,11 +238,13 @@ namespace newui {
 
         bool wantPressed = pressing_ || (isToggleButton_ && checked_);
         bool wantEnabled = isEnabled();
-        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled) {
+        bool wantDefaulted = isDefaultControl();
+        if (buttonStyle.pressed == wantPressed && buttonStyle.enabled == wantEnabled && buttonStyle.defaulted == wantDefaulted) {
             return;
         }
         buttonStyle.pressed = wantPressed;
         buttonStyle.enabled = wantEnabled;
+        buttonStyle.defaulted = wantDefaulted;
         style().markDirty();
     }
 
@@ -276,8 +318,20 @@ namespace newui {
         double textWidth = textMetrics.advance.x;
         double textHeight = fontMetrics.ascent + fontMetrics.descent;
 
+        constexpr double kEdgeInset = 6.0;
         double x = clientBounds.left() + (clientBounds.size().width - textWidth) * 0.5;
-        double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
+        if (textAlignment_ == TextAlignment::Left) {
+            x = clientBounds.left() + kEdgeInset;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            x = clientBounds.right() - kEdgeInset - textWidth;
+        }
+        double top = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5;
+        if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+            top = clientBounds.top() + kEdgeInset * 0.5;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            top = clientBounds.bottom() - kEdgeInset * 0.5 - textHeight;
+        }
+        double y = top + fontMetrics.ascent;
 
         // Same UIColorRole::DisabledText convention Label::handleStateChanged()
         // already uses - the native BUTTON chrome (ThemedButtonStyle::paint())
@@ -326,6 +380,35 @@ namespace newui {
         checked_ = value;
         updateStyleFields();
         onCheckedChanged(*this);
+    }
+
+    void Toggle::paintStyle(BLContext& ctx) {
+        if (glyphAlignment_ == TextAlignment::Left && verticalGlyphAlignment_ == VerticalTextAlignment::Middle) {
+            View::paintStyle(ctx);
+            return;
+        }
+        const Size full = bounds().size();
+        const float side = std::min(full.width, full.height);
+        if (side <= 0.0f) {
+            return;
+        }
+        float dx = 0.0f;
+        float dy = 0.0f;
+        if (glyphAlignment_ == TextAlignment::Center) {
+            dx = (full.width - side) * 0.5f;
+        } else if (glyphAlignment_ == TextAlignment::Right) {
+            dx = full.width - side;
+        }
+        if (verticalGlyphAlignment_ == VerticalTextAlignment::Middle) {
+            dy = (full.height - side) * 0.5f;
+        } else if (verticalGlyphAlignment_ == VerticalTextAlignment::Bottom) {
+            dy = full.height - side;
+        }
+        Rect clientBounds;
+        ctx.save();
+        ctx.translate(dx, dy);
+        style().paint(ctx, Size(side, side), isHighlighted(), clientBounds);
+        ctx.restore();
     }
 
     void Toggle::rebuildStyle() {
@@ -1665,7 +1748,13 @@ namespace newui {
         // (ScrollView.BarsHiddenWhenContentFitsViewport et al., all
         // called destroy() and crashed before this fix).
         if (child == viewport_ || child == vBar_ || child == hBar_) {
-            // Chrome only leaves during destroy(); clear it first so the virtual updateLayout()
+            // Chrome only leaves during destroy(). Anything else asking (the reflection reader replacing a saved
+            // child that did not match the one at its position, say) is refused: this ScrollView could not work
+            // without its viewport, and a caller that frees what it removed would leave viewport_ dangling.
+            if (!child->isDestroying()) {
+                return;
+            }
+            // Clear it first so the virtual updateLayout()
             // SubView::removeChild() triggers sees it gone rather than touching a dying view.
             if (child == viewport_) { viewport_ = nullptr; }
             if (child == vBar_) { vBar_ = nullptr; }
@@ -2145,9 +2234,22 @@ namespace newui {
         // Icon + text painted as one centered block - assumes the icon
         // paints successfully (a missing icon file leaves a small,
         // accepted gap rather than re-centering after the fact).
-        double iconWidth = hasIcon ? (iconSize_ + kIconGap) : 0.0;
-        double x = clientBounds.left() + (clientBounds.size().width - iconWidth - textWidth) * 0.5;
+        double iconWidth = hasIcon ? (iconSize_ + (hasText ? kIconGap : 0.0f)) : 0.0;
+        constexpr double kEdgeInset = 6.0;
+        const double blockWidth = iconWidth + textWidth;
+        const double blockHeight = std::max(textHeight, hasIcon ? double(iconSize_) : 0.0);
+        double x = clientBounds.left() + (clientBounds.size().width - blockWidth) * 0.5;
+        if (textAlignment_ == TextAlignment::Left) {
+            x = clientBounds.left() + kEdgeInset;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            x = clientBounds.right() - kEdgeInset - blockWidth;
+        }
         double centerY = clientBounds.top() + clientBounds.size().height * 0.5;
+        if (verticalTextAlignment_ == VerticalTextAlignment::Top) {
+            centerY = clientBounds.top() + kEdgeInset * 0.5 + blockHeight * 0.5;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            centerY = clientBounds.bottom() - kEdgeInset * 0.5 - blockHeight * 0.5;
+        }
 
         // A flat toolbar button shows no visible border/fill at rest either
         // way (the style's own enabled field only changes the native
@@ -2417,10 +2519,50 @@ namespace newui {
         return Point(localPt.x - clientBounds.left() + scrollOffsetX_, localPt.y - clientBounds.top() + scrollOffsetY_);
     }
 
+    Rect TextController::textArea() const {
+        Rect client = owner_.getClientBounds();
+        if (multiline_ || (textAlignment_ == TextAlignment::Left && verticalTextAlignment_ == VerticalTextAlignment::Top)) {
+            return client;
+        }
+        // The text block's size comes from the last layout; a one-line, unwrapped block is the same size whatever width it is given.
+        const float keep = 4.0f;   // never squeeze the area to nothing: an empty field's caret still needs room
+        float dx = 0.0f;
+        float dy = 0.0f;
+        const float slackX = std::max(0.0f, client.width() - layoutEngine_.contentWidth() - keep);
+        const float slackY = std::max(0.0f, client.height() - layoutEngine_.contentHeight());
+        if (textAlignment_ == TextAlignment::Center) {
+            dx = slackX * 0.5f;
+        } else if (textAlignment_ == TextAlignment::Right) {
+            dx = slackX;
+        }
+        if (verticalTextAlignment_ == VerticalTextAlignment::Middle) {
+            dy = slackY * 0.5f;
+        } else if (verticalTextAlignment_ == VerticalTextAlignment::Bottom) {
+            dy = slackY;
+        }
+        return Rect(client.left() + dx, client.top() + dy, client.width() - dx, client.height() - dy);
+    }
+
+    void TextController::setTextAlignment(TextAlignment value) {
+        textAlignment_ = value;
+        owner_.style().markDirty();
+    }
+
+    void TextController::setVerticalTextAlignment(VerticalTextAlignment value) {
+        verticalTextAlignment_ = value;
+        owner_.style().markDirty();
+    }
+
     void TextController::ensureLayoutUpToDate() {
         Rect clientBounds = textArea();
         layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
             multiline_ && wordWrap_, fontRuns_, layoutFolds(), tabWidth_);
+        if (!multiline_ && (textAlignment_ != TextAlignment::Left || verticalTextAlignment_ != VerticalTextAlignment::Top)) {
+            // The shift came from the previous layout; settle it on this one.
+            clientBounds = textArea();
+            layoutEngine_.update(model().storage(), font_, clientBounds.width(), clientBounds.height(),
+                false, fontRuns_, layoutFolds(), tabWidth_);
+        }
     }
 
     void TextController::setWordWrap(bool wrap) {
@@ -2492,8 +2634,12 @@ namespace newui {
         ctx.restore();
     }
 
+    bool TextController::showsSelection() const {
+        return !selection_.isEmpty() && owner_.isFocused();
+    }
+
     void TextController::drawSelection(BLContext& ctx) const {
-        if (selection_.isEmpty()) {
+        if (!showsSelection()) {
             return;
         }
         // Plain BLContext fills (no intermediate D2D/WIC bitmap the way
@@ -3317,6 +3463,11 @@ namespace newui {
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onGotFocus.add(this, &TextField::handleGotFocus);
         onLostFocus.add(this, &TextField::handleLostFocus);
         onMouseDown.add(this, &TextField::handleMouseDown);
@@ -3329,31 +3480,41 @@ namespace newui {
 
     SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
         if (VKeyCode == vkReturn) {
-            onReturnPressed(*this);
-            return SyncReturn::Handled;
+            // A listener that returns Ignored lets the key go on to the window's default button.
+            return onReturnPressed.syncCallFirst(*this);
         }
         return controller_->handleKeyDown(keyMask, keyCharVal, repeatCount, VKeyCode);
     }
 
     void TextField::paint(BLContext& ctx) {
-        Rect clientBounds = getClientBounds();
-        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+        if (getClientBounds().width() <= 0.0f || getClientBounds().height() <= 0.0f) {
             return;
         }
         controller_->ensureLayoutUpToDate();
+        const Rect clientBounds = controller_->textArea();
+        if (clientBounds.width() <= 0.0f || clientBounds.height() <= 0.0f) {
+            return;
+        }
 
         ctx.save();
         ctx.translate(clientBounds.left(), clientBounds.top());
-        controller_->drawSelection(ctx);
+        // A disabled field shows no selection or caret and draws in the disabled colour.
+        const bool live = isEnabled();
+        if (live) {
+            controller_->drawSelection(ctx);
+        }
         if (controller_->model().text().empty() && !placeholder_.empty()) {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
                 utf8ToWide(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
                 0.0f, /*wordWrap=*/false);
         } else {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-                controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+                controller_->layoutEngine(), live ? controller_->textColor() : UIColorManager::colorFor(UIColorRole::DisabledText),
+                controller_->scrollOffsetY(), live ? controller_->colorRuns() : std::vector<text::TextColorRun>());
         }
-        controller_->drawCaret(ctx);
+        if (live) {
+            controller_->drawCaret(ctx);
+        }
         ctx.restore();
     }
 
@@ -3372,6 +3533,11 @@ namespace newui {
         controller_->setMultiline(true);
         setWantsTabKey(true);   // a multi-line editor: Tab types a tab; Ctrl+Tab still moves focus
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onGotFocus.add(this, &TextControl::handleGotFocus);
         onLostFocus.add(this, &TextControl::handleLostFocus);
         onMouseDown.add(this, &TextControl::handleMouseDown);
@@ -3439,14 +3605,20 @@ namespace newui {
         controller_->drawCurrentLineHighlight(ctx);
         controller_->drawLineBackgrounds(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawDecorations(ctx, /*backgrounds=*/true);
-        controller_->drawSelection(ctx);
+        const bool live = isEnabled();
+        if (live) {
+            controller_->drawSelection(ctx);
+        }
         renderer_.render(ctx, static_cast<int>(clientBounds.width() + controller_->scrollOffsetX()),
             static_cast<int>(clientBounds.height()),
-            controller_->layoutEngine(), controller_->textColor(), controller_->scrollOffsetY(), controller_->colorRuns());
+            controller_->layoutEngine(), live ? controller_->textColor() : UIColorManager::colorFor(UIColorRole::DisabledText),
+            controller_->scrollOffsetY(), live ? controller_->colorRuns() : std::vector<text::TextColorRun>());
         controller_->drawDecorations(ctx, /*backgrounds=*/false);
         controller_->drawLineAnnotations(ctx, clientBounds.width(), clientBounds.height());
         controller_->drawWhitespace(ctx, clientBounds.height());
-        controller_->drawCaret(ctx);
+        if (live) {
+            controller_->drawCaret(ctx);
+        }
         ctx.restore();
     }
 
@@ -5097,6 +5269,11 @@ namespace newui {
         editStyle_ = editStyle.get();
         setStyle(std::move(editStyle));
 
+        onStateChanged.add([this](Control&) {
+            editStyle_->enabled = isEnabled();
+            style().markDirty();
+            return SyncReturn::Handled;
+        });
         onMouseDown.add(this, &DropDownList::handleMouseDown);
         onKeyDown.add(this, &DropDownList::handleKeyDown);
         onGotFocus.add(this, &DropDownList::handleGotFocus);
@@ -5215,7 +5392,7 @@ namespace newui {
                     double y = clientBounds.top() + (clientBounds.size().height - textHeight) * 0.5 + fontMetrics.ascent;
 
                     ctx.save();
-                    ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+                    ctx.set_fill_style(UIColorManager::colorFor(isEnabled() ? UIColorRole::ControlText : UIColorRole::DisabledText).toBLRgba32());
                     ctx.fill_utf8_text(BLPoint(x, y), *blFont, text.c_str(), text.size());
                     ctx.restore();
                 }
@@ -5244,7 +5421,7 @@ namespace newui {
         path.close();
 
         ctx.save();
-        ctx.set_fill_style(UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32());
+        ctx.set_fill_style(UIColorManager::colorFor(isEnabled() ? UIColorRole::ControlText : UIColorRole::DisabledText).toBLRgba32());
         ctx.fill_path(path);
         ctx.restore();
     }
@@ -5606,8 +5783,8 @@ public:
         float textHeight = tm.ascent + tm.descent;
         float baselineY = bounds.top() + (bounds.size().height - textHeight) * 0.5f + tm.ascent;
 
-        COLORREF textColor = ::GetSysColor(COLOR_WINDOWTEXT);
-        ctx.set_fill_style(BLRgba32(GetRValue(textColor), GetGValue(textColor), GetBValue(textColor), 255));
+        const bool live = owner == nullptr || owner->isEnabled();
+        ctx.set_fill_style(newui::UIColorManager::colorFor(live ? newui::UIColorRole::ControlText : newui::UIColorRole::DisabledText).toBLRgba32());
         ctx.fill_utf8_text(BLPoint(x, baselineY), *blFont, text.c_str());
     }
 };
@@ -5653,6 +5830,17 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
     // has focus is a job for arrow keys, not Tab (see handleKeyDown()
     // below), matching native tab control behavior.
     setAcceptsFocus(true);
+    onStateChanged.add([this](Control&) {
+        if (stripRow_ != nullptr) {
+            for (SubView* button : stripRow_->childViews()) {
+                if (auto* style = dynamic_cast<ThemedTabItemStyle*>(&button->style())) {
+                    style->enabled = isEnabled();
+                    button->style().markDirty();
+                }
+            }
+        }
+        return SyncReturn::Handled;
+    });
     onKeyDown.add(this, &TabControl::handleKeyDown);
     setStyle(std::make_unique<ThemedTabPaneStyle>());
 
@@ -5724,6 +5912,7 @@ void TabControl::pageAdded(SubView* page) {
     button->tabIndex = stripRow_->childViews().size();
     button->setStyle(std::make_unique<ThemedTabItemStyle>());
     static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
+    static_cast<ThemedTabItemStyle&>(button->style()).enabled = isEnabled();
     ApplyButtonText(*button, text, stripHorizontal);
 
     button->onMouseDown.add(&TabItemButtonClicked);

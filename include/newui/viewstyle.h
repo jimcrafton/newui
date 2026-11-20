@@ -530,6 +530,8 @@ namespace newui {
     // Set one only if you actually want that look.)
     // Where a Label's text sits across its width.
     enum class TextAlignment { Left, Center, Right };
+    // Where a Label's text block sits down its height. Middle is the original behaviour.
+    enum class VerticalTextAlignment { Top, Middle, Bottom };
 
     class LabelStyle : public ViewStyle {
     public:
@@ -554,6 +556,10 @@ namespace newui {
         TextAlignment textAlignment() const { return textAlignment_; }
         void setTextAlignment(TextAlignment value) { textAlignment_ = value; }
 
+        // Middle by default.
+        VerticalTextAlignment verticalTextAlignment() const { return verticalTextAlignment_; }
+        void setVerticalTextAlignment(VerticalTextAlignment value) { verticalTextAlignment_ = value; }
+
         LabelStyle() {
 			setFont(FontManager::getSystemFont(SystemUIFont::Message));
         }
@@ -565,6 +571,7 @@ namespace newui {
         Color textColor_ = Color::null();
         bool wordWrap_ = false;
         TextAlignment textAlignment_ = TextAlignment::Center;
+        VerticalTextAlignment verticalTextAlignment_ = VerticalTextAlignment::Middle;
     };
 
     // ViewStyle plus a small sunken-look box (classic checkbox chrome),
@@ -789,6 +796,12 @@ namespace newui {
         virtual int partId() const = 0;
         virtual int stateId(bool highlighted) const = 0;
 
+        // Draws this part from the loaded ThemeData's colours (fill/edgeFill, border, text) for its exact state instead of asking
+        // uxtheme - what makes an app's theme file win over Windows' own look. Covers push buttons, toolbar buttons, check boxes and
+        // radio buttons; returns false (and paint() goes native) for any other part, or when no theme is loaded or it has no colours
+        // for this part and state.
+        virtual bool paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const;
+
     private:
         std::wstring themeClassName_;
         mutable HTHEME theme_ = nullptr;
@@ -806,6 +819,7 @@ namespace newui {
 
         bool pressed = false;
         bool enabled = true;
+        bool defaulted = false;   // the window's default button (Control::isDefaultControl()): drawn emphasised until hovered or pressed
 
 
     protected:
@@ -815,6 +829,7 @@ namespace newui {
             if (!enabled) return PBS_DISABLED;
             if (pressed) return PBS_PRESSED;
             if (highlighted) return PBS_HOT;
+            if (defaulted) return PBS_DEFAULTED;
             return PBS_NORMAL;
         }
     };

@@ -11,9 +11,11 @@
 
 #include "newui/newui.h"
 #include "newui/component.h"
+#include "newui/geometry.h"
 #include "newui/models.h"
 
 namespace newui {
+    class Frame;
     class View;
     class SubView;
     class Animation;
@@ -61,6 +63,57 @@ namespace newui {
     private:
         std::unique_ptr<Model> model_;
         Connection modelChangedConnection_;
+    };
+
+    // Drives one Frame (a top-level window) over its lifetime, modeled on AppKit's NSWindowController: the Frame is made and loaded first,
+    // but the native window - and with it the root view, the HWND other windows must be owned by, and everything that needs a live window -
+    // only exists once the application creates it. This controller waits for that (Frame::onCreated) and then calls frameDidLoad() once, so a
+    // subclass's constructor does nothing but store what it was given, and everything that needs the window is built in frameDidLoad().
+    //
+    // The other window events are forwarded the same way (frameShouldClose / frameWillClose / frameDidResize), so a subclass overrides what it
+    // needs and never subscribes to the Frame itself. It does not own the Frame: the Frame must outlive the controller, or be destroyed after
+    // the controller is (the destructor unsubscribes).
+    //
+    // A base constructor cannot reach a subclass override, so a controller made for a Frame whose window already exists calls load() itself
+    // once it is fully constructed; load() is a no-op after the first call and is also what a caller uses to run frameDidLoad() for a Frame
+    // that will never get a native window.
+    class FrameController : public Controller {
+    public:
+        explicit FrameController(Frame& frame);
+        ~FrameController() override;
+
+        FrameController(const FrameController&) = delete;
+        FrameController& operator=(const FrameController&) = delete;
+
+        Frame& frame() const { return frame_; }
+        // True once frameDidLoad() has run.
+        bool isLoaded() const { return loaded_; }
+        // Runs frameDidLoad() if it has not run yet. Called by Frame::onCreated. An exception from frameDidLoad() is caught (it would unwind
+        // through the window procedure) and kept in loadError(); created by the application, a failed load also quits the loop.
+        void load();
+        // The message of the exception frameDidLoad() ended with; empty when it succeeded.
+        const std::string& loadError() const { return loadError_; }
+
+    protected:
+        // The window and its root view exist (Frame::frameHandle() is valid). Build everything that needs them here.
+        virtual void frameDidLoad() {}
+        // The user asked to close (title bar X, Alt+F4); set canClose to false to keep the window open.
+        virtual void frameShouldClose(bool& canClose) { (void)canClose; }
+        // The close was not vetoed; the window is about to go.
+        virtual void frameWillClose() {}
+        virtual void frameDidResize(const Size& size) { (void)size; }
+
+    private:
+        SyncReturn handleCreated(Frame&);
+        SyncReturn handleClosing(Frame&, bool& canClose);
+        SyncReturn handleSized(Frame&, const Size& size);
+
+        Frame& frame_;
+        bool loaded_ = false;
+        std::string loadError_;
+        Connection createdConnection_;
+        Connection closingConnection_;
+        Connection sizedConnection_;
     };
 
     // The VC in MVC - owns exactly one root SubView (view()), lazily built
