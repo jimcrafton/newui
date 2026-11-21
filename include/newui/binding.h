@@ -144,7 +144,7 @@ namespace newui {
     // ---- Validation rules ----------------------------------------------------------------------
     // A rule checks the value a binding is about to write to its source (after conversion, so a number is
     // a number, not the text the user typed). Rules are plain-data Components declared in a Binding's
-    // "rules" list, e.g.  rules: [ { type: "RangeRule", min: 0, max: 100, message: "Pick 0 to 100" } ].
+    // "rules" list, e.g.  rules: [ { type: "RangeRule", minValue: 0, maxValue: 100, message: "Pick 0 to 100" } ].
     // All of a binding's rules must pass (AND); use AnyOfRule for OR.
 
     class Rule : public Component {
@@ -180,8 +180,8 @@ namespace newui {
     class MinRule : public Rule {
     public:
         MinRule() = default;
-        double min() const { return min_; }
-        void setMin(double min) { min_ = min; }
+        double minValue() const { return min_; }
+        void setMinValue(double v) { min_ = v; }
         // @reflect ignore=true
         bool validate(const std::any& value, std::string& error) const override;
     private:
@@ -192,8 +192,8 @@ namespace newui {
     class MaxRule : public Rule {
     public:
         MaxRule() = default;
-        double max() const { return max_; }
-        void setMax(double max) { max_ = max; }
+        double maxValue() const { return max_; }
+        void setMaxValue(double v) { max_ = v; }
         // @reflect ignore=true
         bool validate(const std::any& value, std::string& error) const override;
     private:
@@ -204,10 +204,10 @@ namespace newui {
     class RangeRule : public Rule {
     public:
         RangeRule() = default;
-        double min() const { return min_; }
-        void setMin(double min) { min_ = min; }
-        double max() const { return max_; }
-        void setMax(double max) { max_ = max; }
+        double minValue() const { return min_; }
+        void setMinValue(double v) { min_ = v; }
+        double maxValue() const { return max_; }
+        void setMaxValue(double v) { max_ = v; }
         // @reflect ignore=true
         bool validate(const std::any& value, std::string& error) const override;
     private:

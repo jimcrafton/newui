@@ -293,19 +293,19 @@ std::string failure(const Rule& rule, const std::any& value) {
 
 TEST(Rules, NumericRules) {
     MinRule min;
-    min.setMin(5);
+    min.setMinValue(5);
     EXPECT_TRUE(failure(min, 5).empty());
     EXPECT_FALSE(failure(min, 4.5).empty());
     EXPECT_FALSE(failure(min, std::string("abc")).empty());
 
     MaxRule max;
-    max.setMax(5);
+    max.setMaxValue(5);
     EXPECT_TRUE(failure(max, std::string("5")).empty());
     EXPECT_FALSE(failure(max, 6).empty());
 
     RangeRule range;
-    range.setMin(0);
-    range.setMax(1);
+    range.setMinValue(0);
+    range.setMaxValue(1);
     range.setMessage("custom");
     EXPECT_TRUE(failure(range, 0.5).empty());
     EXPECT_EQ(failure(range, 2), "custom");
@@ -342,9 +342,9 @@ TEST(Rules, RegexOneOfAnyOfAndCustom) {
     AnyOfRule any;
     EXPECT_TRUE(failure(any, 1).empty());  // no rules: passes
     auto* lo = new MaxRule();
-    lo->setMax(0);
+    lo->setMaxValue(0);
     auto* hi = new MinRule();
-    hi->setMin(100);
+    hi->setMinValue(100);
     any.addRule(lo);
     any.addRule(hi);
     EXPECT_TRUE(failure(any, -3).empty());
@@ -375,8 +375,8 @@ TEST(Binding, RulesGateTheCommitAndAreDeclaredInNewui) {
         bindings: [
             { type: "Binding", name: "ageBinding", target: "age", property: "text", source: "person", key: "age",
               converter: "int", trigger: "OnChange",
-              rules: [ { type: "RangeRule", min: 0, max: 120, message: "Age must be 0 to 120" },
-                       { type: "AnyOfRule", rules: [ { type: "MinRule", min: 18 }, { type: "MaxRule", max: 10 } ] } ] },
+              rules: [ { type: "RangeRule", minValue: 0, maxValue: 120, message: "Age must be 0 to 120" },
+                       { type: "AnyOfRule", rules: [ { type: "MinRule", minValue: 18 }, { type: "MaxRule", maxValue: 10 } ] } ] },
         ],
     })"));
     ASSERT_EQ(frame.bindings().size(), 1u);
@@ -401,8 +401,8 @@ TEST(Binding, PipelineReportsConversionAndValidationSeparately) {
     binding->setSource("m");
     binding->setKey("n");
     auto* range = new RangeRule();
-    range->setMin(0);
-    range->setMax(10);
+    range->setMinValue(0);
+    range->setMaxValue(10);
     binding->addRule(range);
     frame.addBinding(binding);
     ASSERT_TRUE(frame.resolveBindings()) << binding->lastError();
@@ -570,8 +570,8 @@ struct FocusForm {
         binding->setKey("n");
         binding->setTrigger(BindingTrigger::OnCommit);
         auto* range = new RangeRule();
-        range->setMin(0);
-        range->setMax(10);
+        range->setMinValue(0);
+        range->setMaxValue(10);
         binding->addRule(range);
         frame.addBinding(binding);
         return frame.resolveBindings();
@@ -632,8 +632,8 @@ TEST(BindingFocus, EnterCommitsATextFieldAndPassesOnWhenValid) {
     binding->setKey("n");
     binding->setTrigger(BindingTrigger::OnCommit);
     auto* range = new RangeRule();
-    range->setMin(0);
-    range->setMax(10);
+    range->setMinValue(0);
+    range->setMaxValue(10);
     binding->addRule(range);
     frame.addBinding(binding);
     ASSERT_TRUE(frame.resolveBindings()) << binding->lastError();

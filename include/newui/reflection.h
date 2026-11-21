@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -26,6 +27,7 @@ namespace newui::reflection {
 
 
     class Class;
+    class DefaultSnapshot;
     class Property;
 
 
@@ -90,6 +92,13 @@ namespace newui::reflection {
         // non-design-time output), same "default no-op, only a real
         // implementation overrides" shape as enterInstance() above.
         virtual bool isDesignMode() const { return false; }
+
+        // True when TypedClass<T>::write() should skip any property still at
+        // its default (see Class::isDefaultValue()) instead of writing it.
+        // Default false - a ClassWriter that doesn't know about defaults
+        // keeps writing everything; ObjectWriter (reflectionio.h) is the one
+        // real implementation that turns it on, unless setWriteDefaults(true).
+        virtual bool omitDefaults() const { return false; }
     };
 
 
@@ -401,6 +410,24 @@ namespace newui::reflection {
         template<typename T>
         inline constexpr bool is_reflectable_collection_v = is_reflectable_collection<T>::value;
 
+        // True when `const T == const T` is a valid expression returning something
+        // convertible to bool (C++17 detection idiom - std::equality_comparable is C++20).
+        template<typename T, typename = void>
+        struct is_equality_comparable : std::false_type {};
+        template<typename T>
+        struct is_equality_comparable<T, std::void_t<decltype(static_cast<bool>(
+            std::declval<const T&>() == std::declval<const T&>()))>> : std::true_type {};
+        // std::optional/std::pair declare an operator== for any T and only fail once it is
+        // instantiated, so the expression check above says "yes" for a non-comparable payload -
+        // look through them instead.
+        template<typename T>
+        struct is_equality_comparable<std::optional<T>, void> : is_equality_comparable<T> {};
+        template<typename A, typename B>
+        struct is_equality_comparable<std::pair<A, B>, void>
+            : std::bool_constant<is_equality_comparable<A>::value && is_equality_comparable<B>::value> {};
+        template<typename T>
+        inline constexpr bool is_equality_comparable_v = is_equality_comparable<T>::value;
+
         // Detects whether container_traits<ContainerT>::add(ContainerT&,
         // const ElementT&) exists (see std::vector's specialization above) -
         // SFINAE, not a flag on container_traits itself, so std::array/
@@ -580,6 +607,10 @@ namespace newui::reflection {
             defaultVal_ = val;
         }
 
+        // Same pair as Property::canCompareValues()/valuesEqual() - see there. Only
+        // TypedMemberField overrides them.
+        virtual bool canCompareValues() const { return false; }
+        virtual bool valuesEqual(const std::any& a, const std::any& b) const { return false; }
 
         // Base defaults are no-ops (same "every method has a do-nothing
         // default" idiom Property/PropertyCollection already use) -
@@ -665,6 +696,19 @@ namespace newui::reflection {
         }
         void set(void* instance, const std::any& value) const override {
             static_cast<SourceT*>(instance)->*member_ = std::any_cast<ValueT>(value);
+        }
+
+        static constexpr bool kComparable = std::is_copy_constructible_v<ValueT> &&
+            !std::is_pointer_v<ValueT> && detail::is_equality_comparable_v<ValueT>;
+        bool canCompareValues() const override { return kComparable; }
+        bool valuesEqual(const std::any& a, const std::any& b) const override {
+            if constexpr (kComparable) {
+                const ValueT* x = std::any_cast<ValueT>(&a);
+                const ValueT* y = std::any_cast<ValueT>(&b);
+                return x != nullptr && y != nullptr && *x == *y;
+            } else {
+                return false;
+            }
         }
 
         // Real write()/read() (unlike Field's own no-op defaults) - a
@@ -849,9 +893,32 @@ namespace newui::reflection {
         virtual std::any get(void* instance) const = 0;
         virtual void set(void* instance, const std::any& value) const = 0;
 
-        virtual std::any defaultVal() const = 0;
+        // An explicit default for this property, or an empty std::any
+        // when none was given (the usual case). When set, a write skips the
+        // property whenever its current value equals this (see
+        // Class::isDefaultValue(), which consults it first). When empty,
+        // Class::isDefaultValue() falls back to comparing against a
+        // default-constructed instance of the *concrete* class being
+        // written - per class, not per property, because this Property is
+        // shared by every subclass and a subclass constructor can change
+        // the default (View::visible is false for a plain SubView, true
+        // for Control-derived widgets).
+        std::any defaultVal() const { return defaultVal_; }
+        void setDefaultVal(const std::any& val) { defaultVal_ = val; }
 
-        virtual void setDefaultVal(const std::any& val) = 0;
+        // True when valuesEqual() can meaningfully compare two boxed values
+        // of this property - TypedProperty overrides both for a ValueT that
+        // has operator== (and isn't a raw pointer, whose address compare
+        // would mean nothing across two instances). A property that can't
+        // compare is always written, never skipped.
+        virtual bool canCompareValues() const { return false; }
+        virtual bool valuesEqual(const std::any& a, const std::any& b) const { return false; }
+
+        // Where the value lives inside `boxed` (a result of get()), or nullptr when that doesn't
+        // apply (a pointer-typed or non-copyable property). Lets a by-value nested-object property -
+        // one with no live storage to take address() of - still be inspected property by property.
+        // `boxed` must outlive any use of the returned pointer.
+        virtual void* boxedValueAddress(std::any& boxed) const { return nullptr; }
 
         // false for a by-value getter/setter property - the only case
         // where address() throws rather than returning something real
@@ -935,6 +1002,7 @@ namespace newui::reflection {
         Scope scope_;
         PropertyFlags flags_;
         std::vector<std::string> tags_;
+        std::any defaultVal_;
         
     };
 
@@ -999,6 +1067,11 @@ namespace newui::reflection {
     class TypedProperty : public Property {
     public:
         static constexpr bool kCopyable = AssumeCopyable && std::is_copy_constructible_v<ValueT>;
+        // Has a usable operator== (see Property::canCompareValues()). Raw
+        // pointers are excluded on purpose - comparing two instances'
+        // addresses says nothing about whether their *values* match.
+        static constexpr bool kComparable = kCopyable && !std::is_pointer_v<ValueT> &&
+                                            detail::is_equality_comparable_v<ValueT>;
 
         using MemberPtr = ValueT SourceT::*;
         using RefGetter = std::function<ValueT&(SourceT&)>;
@@ -1205,12 +1278,26 @@ namespace newui::reflection {
         }
 
 
-        virtual std::any defaultVal() const {
-            return std::any();
+        // See Property::canCompareValues()'s own comment. kCopyable
+        // matters: get() only boxes a ValueT copy for a copyable ValueT.
+        bool canCompareValues() const override {
+            return kComparable;
         }
-
-        virtual void setDefaultVal(const std::any& val) {
-
+        void* boxedValueAddress(std::any& boxed) const override {
+            if constexpr (kCopyable && !std::is_pointer_v<ValueT>) {
+                return static_cast<void*>(std::any_cast<ValueT>(&boxed));
+            } else {
+                return nullptr;
+            }
+        }
+        bool valuesEqual(const std::any& a, const std::any& b) const override {
+            if constexpr (kComparable) {
+                const ValueT* x = std::any_cast<ValueT>(&a);
+                const ValueT* y = std::any_cast<ValueT>(&b);
+                return x != nullptr && y != nullptr && *x == *y;
+            } else {
+                return false;
+            }
         }
 
         // When type() resolves to another registered Class, this recurses
@@ -1724,14 +1811,6 @@ namespace newui::reflection {
             } else {
                 return nullptr;
             }
-        }
-
-        virtual std::any defaultVal() const {
-            return std::any();
-        }
-
-        virtual void setDefaultVal(const std::any& val) {
-
         }
 
         // boxedInstance is the whole container (built once by
@@ -2860,6 +2939,29 @@ namespace newui::reflection {
         // concrete type at the call site.
         std::any createInstance(void** outRaw) const;
 
+        // True when `property`'s current value on `instance` (a live object of exactly this Class)
+        // is still its default, so a writer can leave it out. The default is, in order:
+        //   1. the property's explicit defaultVal(), when it has one and can compare values;
+        //   2. otherwise the value on a default-constructed instance of this concrete class,
+        //      captured once and cached - so a subclass constructor that changes a base property's
+        //      default (View::visible on a Slider) is honoured.
+        // A collection is at its default only when it is empty here *and* on the default instance
+        // (a non-empty one is always written - its elements carry their own state). A nested object
+        // is at its default when every one of its own properties is. Anything that can't be
+        // compared (no operator==, a class with no default constructor, a Singleton, a class tagged
+        // "nodefaults", an object with delegate connections or public fields) is never at its default.
+        bool isDefaultValue(const Property* property, void* instance) const;
+
+        // The same question for one of this class's public Fields (Point/Size/Rect's x/y/width/...,
+        // or a style's plain bool members). A field that write() can't emit anyway (a delegate or
+        // pointer member) counts as default; a collection field never does.
+        bool isDefaultField(const Field* field, void* instance) const;
+
+        // Frees an object made by createInstance(&raw) on this class (a no-op for a T whose
+        // destructor isn't accessible). Only isDefaultValue() uses it, to discard the throwaway
+        // default instance - everything else follows "whoever receives the pointer owns it".
+        virtual void deleteInstance(void* instance) const {}
+
         // name is the key this object should attach itself under in
         // whatever the Writer is building - Writer::beginObject()/
         // endObject()'s own first argument, verbatim. Empty for the two
@@ -2983,6 +3085,12 @@ namespace newui::reflection {
         std::string proxyFor_;
         FromStringFn fromString_ = nullptr;
         ToStringFn toString_ = nullptr;
+
+        // Lazily built by isDefaultValue() (reflection.cpp) from one default-constructed instance of
+        // this class; defaultsTried_ stops a class that can't be built from being retried every call.
+        mutable std::shared_ptr<DefaultSnapshot> defaults_;
+        mutable bool defaultsTried_ = false;
+        void ensureDefaults() const;
     };
 
     // Every live pointer already reachable through one of `properties`' own
@@ -3069,6 +3177,12 @@ namespace newui::reflection {
         // Class::createInstance()'s comment) - a genuine type mismatch on a
         // matching-arity overload still throws std::bad_any_cast, same as
         // misusing createInstance() directly would.
+        void deleteInstance(void* instance) const override {
+            if constexpr (std::is_destructible_v<T>) {
+                delete static_cast<T*>(instance);
+            }
+        }
+
         T* createInstanceTyped() const {
             std::any result = createInstance();
             return result.has_value() ? std::any_cast<T*>(result) : nullptr;
@@ -3126,9 +3240,13 @@ namespace newui::reflection {
             // thumb(), also a real childViews entry) is skipped here rather
             // than written out a second time.
             std::set<void*> reachableElsewhere = collectionElementAddresses(instancePtr, ordered);
+            const bool omitDefaults = writer->omitDefaults();
             for (const Property* property : ordered) {
                 if (void* val = property->addressableValue(instancePtr);
                     val != nullptr && reachableElsewhere.count(val) != 0) {
+                    continue;
+                }
+                if (omitDefaults && isDefaultValue(property, instancePtr)) {
                     continue;
                 }
                 property->write(instancePtr, writer);
@@ -3149,7 +3267,8 @@ namespace newui::reflection {
             allFields(orderedFields);
 
             for (const Field* field : orderedFields) {
-                if (field->scope() == Scope::Public) {
+                if (field->scope() == Scope::Public &&
+                    !(omitDefaults && isDefaultField(field, instancePtr))) {
                     field->write(instancePtr, writer);
                 }
             }
@@ -3599,6 +3718,17 @@ namespace newui::reflection {
         ClassBuilder& field(std::string name, std::type_index type, Scope scope, void* address,
                             Field::GetFn get, Field::SetFn set, std::any defaultVal = std::any{}) {
             class_->fields_.push_back(new Field(std::move(name), type, scope, address, get, set, PropertyFlags::Static));
+            return *this;
+        }
+
+        // Gives the most recently added property an explicit default (Property::defaultVal()) -
+        // normally unnecessary, since a default-constructed instance supplies one, but it lets a
+        // value that differs from the constructor's be treated as the "unchanged" one.
+        ClassBuilder& defaultVal(std::any value) {
+            if (class_->properties_.empty()) {
+                throw std::runtime_error("ClassBuilder::defaultVal: no property registered yet");
+            }
+            class_->properties_.back()->setDefaultVal(value);
             return *this;
         }
 

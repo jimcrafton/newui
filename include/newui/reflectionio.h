@@ -79,6 +79,11 @@ namespace newui::reflection {
         void setDesignMode(bool value) { designMode_ = value; }
         bool isDesignMode() const override { return designMode_; }
 
+        // By default a property still at its default value is left out of the document (see
+        // Class::isDefaultValue()); pass true to write every property regardless.
+        void setWriteDefaults(bool value) { writeDefaults_ = value; }
+        bool omitDefaults() const override { return !writeDefaults_; }
+
         void beginObject(const std::string& name, const Class* clazz) override {
             builder.push_object();
 
@@ -185,8 +190,13 @@ namespace newui::reflection {
             attach(propertyName, builder.pop());
         }
 
+        // writeDefaults: false (the default) leaves out every property still at its default value
+        // (Class::isDefaultValue()); true forces every property to be written regardless.
         template <typename InstanceT>
-        void write(InstanceT* inst) {
+        void write(InstanceT* inst, bool writeDefaults = false) {
+            if (writeDefaults) {
+                writeDefaults_ = true;
+            }
             const Class* clazz = classinfo<InstanceT>();
             clazz->write(inst, this, std::string());
 
@@ -237,7 +247,10 @@ namespace newui::reflection {
         // more than one (see ObjectReader::readObjects(), the read-side
         // mirror of this). write<T>() itself is untouched - this is a
         // separate, additive entry point, not a replacement.
-        void writeObjects(const std::vector<NamedObject>& objects) {
+        void writeObjects(const std::vector<NamedObject>& objects, bool writeDefaults = false) {
+            if (writeDefaults) {
+                writeDefaults_ = true;
+            }
             builder.push_object();
             writeMeta();
             // Pretend a scope's already open at depth_ 1 (the "meta" one
@@ -296,6 +309,7 @@ namespace newui::reflection {
         int depth_ = 0;
         std::set<std::pair<const Class*, void*>> inProgress_;
         bool designMode_ = false;
+        bool writeDefaults_ = false;
     };
 
 

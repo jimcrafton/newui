@@ -8,10 +8,7 @@
 #include <algorithm>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include "newui/newui.h"
 #include <wincodec.h>
 #include <wrl/client.h>
 #endif

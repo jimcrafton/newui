@@ -1,6 +1,6 @@
 #pragma once
 
-#include <windows.h>
+#include "newui/newui.h"
 
 #include <blend2d/blend2d.h>
 

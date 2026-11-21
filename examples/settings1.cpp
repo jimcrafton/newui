@@ -53,6 +53,11 @@ int main(int argc, char** argv) {
 
     auto* splitter = new newui::Splitter(newui::Orientation::Horizontal);
     splitter->setSplitPosition(200.0f);  // default, used until a stored value exists
+    // The root needs a real Layout: without one the splitter keeps its 0x0 bounds and nothing shows.
+    auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
+    rootLayout->setPadding(8.0f);
+    root.setLayout(std::move(rootLayout));
+    splitter->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     root.addChild(splitter);
 
     auto* left = new newui::SubView();

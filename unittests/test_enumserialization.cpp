@@ -242,7 +242,10 @@ TEST(EnumSerialization, FlagsEnumWithNoFlagsSetWritesAnEmptyArray) {
     RegisterAndGetWidgetClass();
     Widget w;  // flags_ defaults to ButtonFlags::None
 
+    // A default value is normally left out of the document (see test_reflection_defaults.cpp), so ask
+    // for it explicitly: this test is about the *shape* an empty flag set is written in.
     ObjectWriter writer;
+    writer.setWriteDefaults(true);
     writer.write(&w);
 
     json5::value node = writer.doc["flags"];

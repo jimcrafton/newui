@@ -114,9 +114,13 @@ namespace {
         // (reflection.h) applies, for the same reason this function's own
         // header comment gives for the enterInstance() guard above.
         std::set<void*> reachableElsewhere = newui::reflection::collectionElementAddresses(instancePtr, properties);
+        const bool omitDefaults = writer.omitDefaults();
         for (const auto* property : properties) {
             void* val = property->addressableValue(instancePtr);
             if (val != nullptr && reachableElsewhere.count(val) != 0) {
+                continue;
+            }
+            if (omitDefaults && clazz->isDefaultValue(property, instancePtr)) {
                 continue;
             }
             property->write(instancePtr, &writer);
@@ -125,7 +129,8 @@ namespace {
         std::vector<const newui::reflection::Field*> fields;
         clazz->allFields(fields);
         for (const auto* field : fields) {
-            if (field->scope() == newui::reflection::Scope::Public) {
+            if (field->scope() == newui::reflection::Scope::Public &&
+                !(omitDefaults && clazz->isDefaultField(field, instancePtr))) {
                 field->write(instancePtr, &writer);
             }
         }
@@ -807,7 +812,7 @@ namespace newui {
         return bool(file);
     }
 
-    bool Bundle::writeFrame(Frame& frame) const {
+    bool Bundle::writeFrame(Frame& frame, bool writeDefaults) const {
         if (frame.getName().empty()) {
             return false;
         }
@@ -818,6 +823,7 @@ namespace newui {
         }
 
         reflection::ObjectWriter writer;
+        writer.setWriteDefaults(writeDefaults);
 
         //writer.write(&frame);
         
@@ -835,8 +841,8 @@ namespace newui {
         return writeTextFile(frame.getName() + ".newui", json5::to_string(writer.doc));
     }
 
-    bool Bundle::writeDialog(Dialog& dialog) const {
-        return writeFrame(dialog);
+    bool Bundle::writeDialog(Dialog& dialog, bool writeDefaults) const {
+        return writeFrame(dialog, writeDefaults);
     }
 
     namespace {
@@ -878,7 +884,7 @@ namespace newui {
         }
     }
 
-    bool Bundle::writeView(View& view, const std::string& name) const {
+    bool Bundle::writeView(View& view, const std::string& name, bool writeDefaults) const {
         if (name.empty()) {
             return false;
         }
@@ -889,13 +895,14 @@ namespace newui {
         }
 
         reflection::ObjectWriter writer;
+        writer.setWriteDefaults(writeDefaults);
         clazz->write(&view, &writer, std::string());
 
         return writeTextFile(name + ".newui", json5::to_string(writer.doc));
     }
 
     template<typename T>
-    bool Bundle::writeRootView(T& target, const std::string& bundleName, bool designMode) const {
+    bool Bundle::writeRootView(T& target, const std::string& bundleName, bool designMode, bool writeDefaults) const {
         if (bundleName.empty()) {
             return false;
         }
@@ -906,6 +913,7 @@ namespace newui {
 
         reflection::ObjectWriter writer;
         writer.setDesignMode(designMode);
+        writer.setWriteDefaults(writeDefaults);
         writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
 
         if (hasExisting) {
@@ -923,30 +931,31 @@ namespace newui {
         return writeTextFile(bundleName + ".newui", json5::to_string(writer.doc));
     }
 
-    template bool Bundle::writeRootView<RootView>(RootView&, const std::string&, bool) const;
-    template bool Bundle::writeRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+    template bool Bundle::writeRootView<RootView>(RootView&, const std::string&, bool, bool) const;
+    template bool Bundle::writeRootView<RootViewProxy>(RootViewProxy&, const std::string&, bool, bool) const;
 
     template<typename T>
-    bool Bundle::writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode) const {
+    bool Bundle::writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode, bool writeDefaults) const {
         if (absolutePath.empty()) {
             return false;
         }
 
         std::string existingText;
         readTextFileAtPath(absolutePath, existingText);
-        return writeTextFileAtPath(absolutePath, writeRootViewToText(target, existingText, designMode));
+        return writeTextFileAtPath(absolutePath, writeRootViewToText(target, existingText, designMode, writeDefaults));
     }
 
-    template bool Bundle::writeRootViewToFile<RootView>(RootView&, const std::string&, bool) const;
-    template bool Bundle::writeRootViewToFile<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+    template bool Bundle::writeRootViewToFile<RootView>(RootView&, const std::string&, bool, bool) const;
+    template bool Bundle::writeRootViewToFile<RootViewProxy>(RootViewProxy&, const std::string&, bool, bool) const;
 
     template<typename T>
-    std::string Bundle::writeRootViewToText(T& target, const std::string& existingText, bool designMode) const {
+    std::string Bundle::writeRootViewToText(T& target, const std::string& existingText, bool designMode, bool writeDefaults) const {
         json5::document existingDoc;
         bool hasExisting = !existingText.empty() && !json5::from_string(existingText, existingDoc);
 
         reflection::ObjectWriter writer;
         writer.setDesignMode(designMode);
+        writer.setWriteDefaults(writeDefaults);
         writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
 
         if (hasExisting) {
@@ -963,8 +972,8 @@ namespace newui {
         return json5::to_string(writer.doc);
     }
 
-    template std::string Bundle::writeRootViewToText<RootView>(RootView&, const std::string&, bool) const;
-    template std::string Bundle::writeRootViewToText<RootViewProxy>(RootViewProxy&, const std::string&, bool) const;
+    template std::string Bundle::writeRootViewToText<RootView>(RootView&, const std::string&, bool, bool) const;
+    template std::string Bundle::writeRootViewToText<RootViewProxy>(RootViewProxy&, const std::string&, bool, bool) const;
 
     void Bundle::ensureInfoLoaded() const {
         if (infoLoaded_) {

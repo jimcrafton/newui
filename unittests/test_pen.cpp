@@ -2,7 +2,7 @@
 
 #include <newui/pen.h>
 
-#include <windows.h>
+#include "newui/newui.h"
 
 using namespace newui;
 

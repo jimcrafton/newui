@@ -2,9 +2,224 @@
 #include "newui/utils.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <map>
+#include <memory>
 #include <set>
 
 namespace newui::reflection {
+
+    // What a default-constructed instance of one concrete Class looked like - see
+    // Class::isDefaultValue(). Built once per class and then only read.
+    class DefaultSnapshot {
+    public:
+        // Nested objects deeper than this are treated as "can't tell", i.e. always written - a guard
+        // against a getter graph that loops back on itself.
+        static constexpr int kMaxDepth = 8;
+
+        static std::shared_ptr<DefaultSnapshot> capture(const Class* clazz, void* instance, int depth) {
+            auto snap = std::make_shared<DefaultSnapshot>();
+            snap->clazz_ = clazz;
+
+            std::vector<const Field*> fields;
+            clazz->allFields(fields);
+            for (const Field* f : fields) {
+                try {
+                    snap->captureField(f, instance, depth);
+                } catch (...) {
+                    // Left untracked; fieldMatches() then reports "not default" for it.
+                    snap->brokenFields_.insert(f->name());
+                }
+            }
+
+            std::vector<const Property*> props;
+            clazz->allProperties(props);
+            for (const Property* p : props) {
+                try {
+                    snap->captureProperty(p, instance, depth);
+                } catch (...) {
+                    // Left untracked, so the property is simply always written.
+                }
+            }
+            return snap;
+        }
+
+        bool propertyMatches(const Property* p, void* instance) const {
+            try {
+                const std::string& name = p->name();
+                if (auto it = counts_.find(name); it != counts_.end()) {
+                    const auto* pc = dynamic_cast<const PropertyCollection*>(p);
+                    std::any boxed = p->get(instance);
+                    return pc != nullptr && it->second == 0 && pc->count(boxed) == 0;
+                }
+                if (auto it = leaves_.find(name); it != leaves_.end()) {
+                    return p->valuesEqual(p->get(instance), it->second);
+                }
+                if (nulls_.count(name) != 0) {
+                    return p->isAddressable() && p->address(instance) == nullptr;
+                }
+                if (auto it = nested_.find(name); it != nested_.end()) {
+                    if (!p->isAddressable()) {
+                        std::any boxed = p->get(instance);
+                        void* addr = boxed.has_value() ? p->boxedValueAddress(boxed) : nullptr;
+                        return addr != nullptr && it->second->matches(addr);
+                    }
+                    void* addr = p->address(instance);
+                    return addr != nullptr && p->getClass(instance) == it->second->clazz_ &&
+                           it->second->matches(addr);
+                }
+            } catch (...) {
+            }
+            return false;
+        }
+
+        bool fieldMatches(const Field* f, void* instance) const {
+            try {
+                if (f->isCollection() || brokenFields_.count(f->name()) != 0) {
+                    return false;
+                }
+                const std::string key = "f:" + f->name();
+                if (auto it = leaves_.find(key); it != leaves_.end()) {
+                    return f->valuesEqual(f->get(instance), it->second);
+                }
+                if (auto it = nested_.find(key); it != nested_.end()) {
+                    void* addr = f->address(instance);
+                    return addr != nullptr && it->second->matches(addr);
+                }
+                // Nothing tracked: a member write() can't emit (a delegate/pointer member), so
+                // there is nothing to differ.
+                return true;
+            } catch (...) {
+            }
+            return false;
+        }
+
+        // True when every property and public field of the object at `instance` is still at its default.
+        bool matches(void* instance) const {
+            std::vector<const Delegate*> delegates;
+            clazz_->allDelegates(delegates);
+            for (const Delegate* d : delegates) {
+                if (!d->describedListeners(instance).empty()) {
+                    return false;
+                }
+            }
+            std::vector<const Field*> fields;
+            clazz_->allFields(fields);
+            for (const Field* f : fields) {
+                if (f->scope() == Scope::Public && !fieldMatches(f, instance)) {
+                    return false;
+                }
+            }
+            std::vector<const Property*> props;
+            clazz_->allProperties(props);
+            for (const Property* p : props) {
+                if (!propertyMatches(p, instance)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+    private:
+        void captureField(const Field* f, void* instance, int depth) {
+            if (f->scope() != Scope::Public || f->isCollection()) {
+                return;
+            }
+            const std::string key = "f:" + f->name();
+            if (f->canCompareValues()) {
+                if (std::any v = f->get(instance); v.has_value()) {
+                    leaves_[key] = std::move(v);
+                }
+            } else if (depth < kMaxDepth && !f->isStatic() && classinfo(f->type()) != nullptr) {
+                if (void* addr = f->address(instance)) {
+                    nested_[key] = capture(classinfo(f->type()), addr, depth + 1);
+                }
+            }
+        }
+
+        void captureProperty(const Property* p, void* instance, int depth) {
+            const std::string& name = p->name();
+            if (const auto* pc = dynamic_cast<const PropertyCollection*>(p)) {
+                std::any boxed = p->get(instance);
+                counts_[name] = pc->count(boxed);
+            } else if (p->canCompareValues()) {
+                if (std::any v = p->get(instance); v.has_value()) {
+                    leaves_[name] = std::move(v);
+                }
+            } else if (depth < kMaxDepth && classinfo(p->type()) != nullptr) {
+                if (p->isAddressable()) {
+                    void* addr = p->address(instance);
+                    if (addr == nullptr) {
+                        nulls_.insert(name);
+                    } else if (const Class* rc = p->getClass(instance); rc != nullptr) {
+                        nested_[name] = capture(rc, addr, depth + 1);
+                    }
+                } else {
+                    // By-value getter: inspect the returned copy (alive until this returns).
+                    std::any boxed = p->get(instance);
+                    if (void* addr = boxed.has_value() ? p->boxedValueAddress(boxed) : nullptr) {
+                        nested_[name] = capture(classinfo(p->type()), addr, depth + 1);
+                    }
+                }
+            }
+        }
+
+        const Class* clazz_ = nullptr;
+        std::set<std::string> brokenFields_;
+        std::map<std::string, std::any> leaves_;
+        std::map<std::string, std::size_t> counts_;
+        std::set<std::string> nulls_;
+        std::map<std::string, std::shared_ptr<DefaultSnapshot>> nested_;
+    };
+
+    bool Class::isDefaultValue(const Property* property, void* instance) const {
+        try {
+            if (property->canCompareValues() && property->defaultVal().has_value()) {
+                return property->valuesEqual(property->get(instance), property->defaultVal());
+            }
+            ensureDefaults();
+            return defaults_ != nullptr && defaults_->propertyMatches(property, instance);
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool Class::isDefaultField(const Field* field, void* instance) const {
+        try {
+            if (field->canCompareValues() && field->defaultVal().has_value()) {
+                return field->valuesEqual(field->get(instance), field->defaultVal());
+            }
+            ensureDefaults();
+            return defaults_ != nullptr && defaults_->fieldMatches(field, instance);
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void Class::ensureDefaults() const {
+        if (defaultsTried_) {
+            return;
+        }
+        defaultsTried_ = true;
+        const bool excluded = isSingleton() || isAbstract() ||
+            std::find(tags_.begin(), tags_.end(), "nodefaults") != tags_.end();
+        void* raw = nullptr;
+        if (!excluded) {
+            createInstance(&raw);
+        }
+        if (raw == nullptr) {
+            return;
+        }
+        try {
+            defaults_ = DefaultSnapshot::capture(this, raw, 0);
+        } catch (...) {
+        }
+        // A View's destroy() releases its subtree; everything else just needs deleting.
+        if (const Method* m = method("destroy"); m != nullptr) {
+            m->invoke(raw, {});
+        }
+        deleteInstance(raw);
+    }
 
     // Reads back a "0x..." hex token - the fallback Property::writeValue()
     // (below) emits for a value/leftover bits nothing in the Enum's own

@@ -244,10 +244,14 @@ namespace newui {
         // comment for why that link needs writeNested() rather than an
         // ordinary registered property. Returns false if frame.getName()
         // is empty or the file couldn't be written.
-        bool writeFrame(Frame& frame) const;
+        bool writeFrame(Frame& frame, bool writeDefaults = false) const;
+
+        // Every write*() below takes a trailing writeDefaults (default false): false leaves out each
+        // property still at its default value, so the file only carries what was changed; true writes
+        // every property regardless (see ObjectWriter::setWriteDefaults()).
 
         // Delegates to writeFrame(dialog.frame()) - see Dialog::frame().
-        bool writeDialog(Dialog& dialog) const;
+        bool writeDialog(Dialog& dialog, bool writeDefaults = false) const;
 
         // Writes "<name>.newui" under resourcesDir() from view - the
         // written "type" tag (and full property set) comes from view's
@@ -257,7 +261,7 @@ namespace newui {
         // loadView()'s own polymorphic reconstruction. Returns false if
         // name is empty, view's runtime class isn't registered, or the
         // file couldn't be written.
-        bool writeView(View& view, const std::string& name) const;
+        bool writeView(View& view, const std::string& name, bool writeDefaults = false) const;
 
         // Write-side counterpart to loadRootView(T&, bundleName) - for a
         // standalone RootView (or registered proxy - see loadRootView()'s
@@ -282,14 +286,14 @@ namespace newui {
         // all. Defaults to false, same reasoning as loadRootView()'s own
         // designMode parameter.
         template<typename T>
-        bool writeRootView(T& target, const std::string& bundleName, bool designMode = false) const;
+        bool writeRootView(T& target, const std::string& bundleName, bool designMode = false, bool writeDefaults = false) const;
 
         // Write-side counterpart to loadRootViewFromFile(). Same
         // preserve-other-keys behavior as writeRootView(), resolved
         // directly against absolutePath. Doesn't create the containing
         // directory - the document is expected to already live there.
         template<typename T>
-        bool writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode = false) const;
+        bool writeRootViewToFile(T& target, const std::string& absolutePath, bool designMode = false, bool writeDefaults = false) const;
 
         // Text counterparts of the *FromFile/*ToFile functions above - the same document format,
         // for an editor that shows or edits a document's text (a designer's Source view). The file
@@ -298,7 +302,7 @@ namespace newui {
         // writeRootViewToText(): target's tree as document text, keeping every other top-level key
         // of existingText (e.g. the frame's title) as it is - existingText may be empty.
         template<typename T>
-        std::string writeRootViewToText(T& target, const std::string& existingText, bool designMode = false) const;
+        std::string writeRootViewToText(T& target, const std::string& existingText, bool designMode = false, bool writeDefaults = false) const;
         // loadRootViewFromText(): reads text's "rootView" into target. False - with a message such
         // as "line 3, column 5: ..." in *error, if given - when text doesn't parse or has no
         // "rootView" object; target is untouched then.

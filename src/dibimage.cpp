@@ -1,6 +1,6 @@
 #include "newui/dibimage.h"
 
-#include <windows.h>
+#include "newui/newui.h"
 
 #include <cstring>
 

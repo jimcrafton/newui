@@ -2,7 +2,7 @@
 
 // Shared by test_gdipresentsurface.cpp / test_dxgipresentsurface.cpp.
 
-#include <windows.h>
+#include "newui/newui.h"
 
 namespace presenttest {
 

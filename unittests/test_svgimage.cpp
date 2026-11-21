@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include <windows.h>
+#include "newui/newui.h"
 
 #include <fstream>
 

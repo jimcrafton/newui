@@ -1,6 +1,6 @@
 #include <newui/pen.h>
 
-#include <windows.h>
+#include "newui/newui.h"
 
 namespace newui {
 

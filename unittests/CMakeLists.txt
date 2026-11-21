@@ -33,6 +33,7 @@ add_executable(newui_tests
     test_utils.cpp
     test_reflection.cpp
     test_reflectionio.cpp
+    test_reflection_defaults.cpp
     test_delegateserialization.cpp
     test_enumserialization.cpp
     test_dialogs.cpp

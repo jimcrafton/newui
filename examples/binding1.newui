@@ -61,7 +61,7 @@
 
     { type: "Binding", name: "age", group: "form", target: "ageField", errorTarget: "ageError", property: "text", source: "form", key: "age",
       converter: "integer", trigger: "OnCommit",
-      rules: [ { type: "RangeRule", min: 0, max: 120, message: "Age must be 0 to 120" } ] },
+      rules: [ { type: "RangeRule", minValue: 0, maxValue: 120, message: "Age must be 0 to 120" } ] },
 
     { type: "Binding", name: "password", group: "form", target: "pwField", errorTarget: "pwError", property: "text", source: "form", key: "password",
       trigger: "OnCommit", rules: [ { type: "LengthRule", minLength: 4, message: "Password needs 4+ characters" } ] },
