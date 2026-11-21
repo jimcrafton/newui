@@ -112,6 +112,35 @@ the current user. Requests are one JSON object per line (`hello`, `findView`, `f
 `screenshot`, `idle`). See [automation.md](automation.md) for the full protocol, security notes and
 limits.
 
+## Component settings
+
+A `Component` can persist some of its reflected properties between runs. Mark a property as a
+setting, register the component with the application's `SettingsManager`, and the stored value is
+applied immediately and written back when the frame closes:
+
+```cpp
+splitter->assignSetting("splitPosition");                              // per user (default)
+slider->assignSetting("value", newui::SettingScope::Machine);          // shared by all users
+
+auto& settings = newui::Application::instance().settings();
+settings.registerComponent(*splitter, "mainSplitter");                 // key must be stable and unique
+settings.registerComponent(*slider, "slider");
+settings.setAutosaveInterval(std::chrono::seconds(5));                 // optional: also store periodically
+```
+
+- The property must be reflected, have a getter and setter, and be a `bool`, integer, `float`/`double`
+  or `std::string`.
+- Values live in JSON5 files: `%APPDATA%\<company>\<app>\settings.json` (user) and
+  `%PROGRAMDATA%\<company>\<app>\settings.json` (machine). Company and app come from the bundle's
+  `Info.json` (`"company"`, `"name"`) or can be set with `setCompanyName()`/`setAppName()`.
+- Settings that aren't a single property (restored window state, recent-files lists) can override
+  `Component::loadSettings()`/`storeSettings()` and read/write through `SettingsAccess`.
+- A registered component must outlive the manager's `storeAll()`, or be unregistered first.
+
+See [examples/settings1.cpp](examples/settings1.cpp) for a runnable demo (`settings1.exe --reset`
+clears the stored files) and [include/newui/componentsettings.h](include/newui/componentsettings.h)
+for the full API.
+
 ## Project layout
 
 ```

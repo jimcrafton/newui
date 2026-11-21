@@ -255,3 +255,9 @@ add_custom_command(TARGET popuptool1 POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/popup-card.svg"
         "$<TARGET_FILE_DIR:popuptool1>/Resources/popup-card.svg"
 )
+
+add_executable(settings1
+    settings1.cpp
+)
+
+target_link_libraries(settings1 PRIVATE newui)
