@@ -649,6 +649,7 @@ namespace newui {
             // reaches the file's "rootView" node on its own; reading it a second time would duplicate every child.
             reader.read(&frame);
             animations(frame, reader);
+            frame.resolveBindings();
             return true;
         }
     }
@@ -681,6 +682,7 @@ namespace newui {
 
         reader.read(&frame);
         readAnimations(frame, reader);
+        frame.resolveBindings();
         return true;
     }
 
@@ -977,6 +979,12 @@ namespace newui {
 
         appName_ = doc["name"].get_c_str("");
         appVersion_ = doc["version"].get_c_str("");
+        company_ = doc["company"].get_c_str("");
+    }
+
+    const std::string& Bundle::company() const {
+        ensureInfoLoaded();
+        return company_;
     }
 
     const std::string& Bundle::appName() const {

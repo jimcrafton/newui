@@ -39,6 +39,18 @@ namespace newui {
 
         void clear();
 
+        // How many steps can be undone. Take it before a group of edits, then hand it to mergeSince() after them.
+        std::size_t depth() const { return undoStack_.size(); }
+
+        // Makes the steps pushed since depth() was `mark` into one step named `description` (undo reverses them last to first, redo runs them
+        // first to last). Does nothing when none were pushed; a single one is only renamed. A `mark` beyond the current depth (the stack was
+        // cleared or undone in between) does nothing.
+        void mergeSince(std::size_t mark, const std::string& description);
+
+        // Undoes the steps pushed since depth() was `mark` and forgets them (they cannot be redone). A `mark` at or beyond the current
+        // depth does nothing.
+        void rollbackTo(std::size_t mark);
+
         // description() of the action undo()/redo() would act on next, or
         // empty if canUndo()/canRedo() is false.
         const std::string& undoDescription() const;

@@ -818,7 +818,8 @@ namespace newui {
 		// unconditionally every paint pass now (see this method's own
 		// doc comment, viewstyle.h), so a future override drawing some
 		// other unclipped effect stays free to run regardless of focus.
-		if (view() == nullptr || !view()->isFocused()) {
+		const bool hasError = view() != nullptr && !view()->errorText().empty();
+		if (view() == nullptr || (!hasError && !view()->isFocused())) {
 			return;
 		}
 
@@ -864,7 +865,14 @@ namespace newui {
 
 		ctx.save();
 		ctx.set_comp_op(BL_COMP_OP_SRC_OVER);
-		ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+		// A control a Binding rejected the value of gets the same ring in error red (Fluent's
+		// system-critical red), whether or not it is focused.
+		if (hasError) {
+			ctx.set_stroke_style(BLRgba32(0xFFD13438u));
+		}
+		else {
+			ctx.set_stroke_style(UIColorManager::colorFor(UIColorRole::HighlightBackground).toBLRgba32());
+		}
 		ctx.set_stroke_width(1.0f);
 
 		// A solid rounded-rect outline in the accent color - not the

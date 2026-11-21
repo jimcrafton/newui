@@ -1,0 +1,74 @@
+// Data binding declared entirely in the file (see binding.h): which control shows which value, how it is
+// converted, what makes it valid. The C++ side only registers the "form" model and wires OK/Cancel.
+{
+  type: "Frame",
+  title: "Binding 1 - TextControls bind on lost focus, OK commits the group",
+  name: "binding1",
+  bounds: { type: "Rect", pos: { type: "Point", x: 40, y: 40 }, size: { type: "Size", width: 420, height: 520 } },
+  rootView: {
+    type: "RootView",
+    name: "rootview",
+    visible: true,
+    layout: { type: "FlexLayout", orientation: "Vertical", mainAxisAlignment: "Start", crossAxisAlignment: "Stretch", spacing: 4, padding: 16 },
+    childViews: [
+      // Each field is followed by a Label that its binding fills with the error message (errorTarget).
+      // The label keeps its space when empty, so nothing jumps around.
+      { type: "Label", name: "nameCaption", text: "Name (required, 2-20 characters)", visible: true, desiredSize: { type: "Size", width: 0, height: 20 } },
+      { type: "TextField", name: "nameField", visible: true, desiredSize: { type: "Size", width: 0, height: 26 } },
+      { type: "Label", name: "nameError", text: "", visible: true, desiredSize: { type: "Size", width: 0, height: 18 } },
+
+      { type: "Label", name: "ageCaption", text: "Age (0 to 120)", visible: true, desiredSize: { type: "Size", width: 0, height: 20 } },
+      { type: "TextField", name: "ageField", visible: true, desiredSize: { type: "Size", width: 0, height: 26 } },
+      { type: "Label", name: "ageError", text: "", visible: true, desiredSize: { type: "Size", width: 0, height: 18 } },
+
+      { type: "Label", name: "pwCaption", text: "Password / repeat (4+ characters, must match)", visible: true, desiredSize: { type: "Size", width: 0, height: 20 } },
+      { type: "TextField", name: "pwField", visible: true, desiredSize: { type: "Size", width: 0, height: 26 } },
+      { type: "Label", name: "pwError", text: "", visible: true, desiredSize: { type: "Size", width: 0, height: 18 } },
+      { type: "TextField", name: "pw2Field", visible: true, desiredSize: { type: "Size", width: 0, height: 26 } },
+      { type: "Label", name: "pw2Error", text: "", visible: true, desiredSize: { type: "Size", width: 0, height: 18 } },
+
+      // Control to control, no code and no group: the label follows the slider immediately.
+      { type: "Label", name: "volumeLabel", visible: true, desiredSize: { type: "Size", width: 0, height: 20 } },
+      { type: "Slider", name: "volume", visible: true, minValue: 0, maxValue: 100, value: 40, desiredSize: { type: "Size", width: 0, height: 24 } },
+
+      { type: "Label", name: "status", text: "", visible: true, desiredSize: { type: "Size", width: 0, height: 40 } },
+      {
+        type: "SubView", name: "buttonRow", visible: true, desiredSize: { type: "Size", width: 0, height: 32 },
+        layout: { type: "FlexLayout", orientation: "Horizontal", mainAxisAlignment: "End", crossAxisAlignment: "Stretch", spacing: 12, padding: 0 },
+        childViews: [
+          { type: "Button", name: "okButton", text: "OK", defaultControl: true, visible: true, desiredSize: { type: "Size", width: 90, height: 28 } },
+          { type: "Button", name: "cancelButton", text: "Revert", visible: true, desiredSize: { type: "Size", width: 90, height: 28 } },
+        ],
+      },
+    ],
+  },
+
+  converters: [
+    { type: "NumberTextConverter", name: "integer", decimals: 0 },
+    { type: "NumberTextConverter", name: "percent", decimals: 0, prefix: "Volume: ", suffix: "%" },
+  ],
+
+  groups: [
+    { type: "BindingGroup", name: "form",
+      rules: [ { type: "CompareRule", left: "password", right: "repeat", op: "Equal", message: "The passwords do not match" } ] },
+  ],
+
+  bindings: [
+    { type: "Binding", name: "name", group: "form", target: "nameField", errorTarget: "nameError", property: "text", source: "form", key: "name",
+      trigger: "OnCommit",
+      rules: [ { type: "RequiredRule", message: "Name is required" },
+               { type: "LengthRule", minLength: 2, maxLength: 20, message: "Name must be 2 to 20 characters" } ] },
+
+    { type: "Binding", name: "age", group: "form", target: "ageField", errorTarget: "ageError", property: "text", source: "form", key: "age",
+      converter: "integer", trigger: "OnCommit",
+      rules: [ { type: "RangeRule", min: 0, max: 120, message: "Age must be 0 to 120" } ] },
+
+    { type: "Binding", name: "password", group: "form", target: "pwField", errorTarget: "pwError", property: "text", source: "form", key: "password",
+      trigger: "OnCommit", rules: [ { type: "LengthRule", minLength: 4, message: "Password needs 4+ characters" } ] },
+    { type: "Binding", name: "repeat", group: "form", target: "pw2Field", errorTarget: "pw2Error", property: "text", mode: "ValidateOnly",
+      trigger: "OnCommit" },
+
+    { type: "Binding", name: "volumeText", target: "volumeLabel", property: "text", source: "volume", key: "value",
+      converter: "percent", mode: "OneWay" },
+  ],
+}

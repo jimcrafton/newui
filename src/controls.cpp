@@ -380,6 +380,7 @@ namespace newui {
         checked_ = value;
         updateStyleFields();
         onCheckedChanged(*this);
+        notifyPropertyChanged("checked");
     }
 
     void Toggle::paintStyle(BLContext& ctx) {
@@ -764,6 +765,7 @@ namespace newui {
         value_ = value;
         updateThumbBounds();
         onValueChanged(*this);
+        notifyPropertyChanged("value");
     }
 
     void Slider::updateTickCount() {
@@ -1806,7 +1808,13 @@ namespace newui {
         // (ScrollView.BarsHiddenWhenContentFitsViewport et al., all
         // called destroy() and crashed before this fix).
         if (child == viewport_ || child == vBar_ || child == hBar_) {
-            // Chrome only leaves during destroy(); clear it first so the virtual updateLayout()
+            // Chrome only leaves during destroy(). Anything else asking (the reflection reader replacing a saved
+            // child that did not match the one at its position, say) is refused: this ScrollView could not work
+            // without its viewport, and a caller that frees what it removed would leave viewport_ dangling.
+            if (!child->isDestroying()) {
+                return;
+            }
+            // Clear it first so the virtual updateLayout()
             // SubView::removeChild() triggers sees it gone rather than touching a dying view.
             if (child == viewport_) { viewport_ = nullptr; }
             if (child == vBar_) { vBar_ = nullptr; }
@@ -2686,8 +2694,12 @@ namespace newui {
         ctx.restore();
     }
 
+    bool TextController::showsSelection() const {
+        return !selection_.isEmpty() && owner_.isFocused();
+    }
+
     void TextController::drawSelection(BLContext& ctx) const {
-        if (selection_.isEmpty()) {
+        if (!showsSelection()) {
             return;
         }
         // Plain BLContext fills (no intermediate D2D/WIC bitmap the way
@@ -3534,6 +3546,12 @@ namespace newui {
         onMouseDblClick.add(this, &TextField::handleMouseDblClick);
         onKeyPress.add(this, &TextField::handleKeyPress);
         onKeyDown.add(this, &TextField::handleKeyDown);
+        controller_->model().onChanged.add(this, &TextField::handleModelChanged);
+    }
+
+    SyncReturn TextField::handleModelChanged(Model& /*sender*/) {
+        notifyPropertyChanged("text");
+        return SyncReturn::Handled;
     }
 
     SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
@@ -3702,6 +3720,7 @@ namespace newui {
 
     SyncReturn TextControl::handleModelChanged(Model& /*sender*/) {
         onContentSizeChanged(*this);
+        notifyPropertyChanged("text");
         return SyncReturn::Handled;
     }
 

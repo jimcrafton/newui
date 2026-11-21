@@ -1,5 +1,10 @@
 # reflectgen (v1)
 
+The header parsing (libclang setup, annotations, `ClassInfo`/`EnumInfo` collection, the combined
+translation unit) lives in the sibling package `tools/reflectgen_lib` (`parser.py`, `driver.py`),
+shared with the scriptgen tool; `reflectgen.py` is the registration-code generator on top of it and
+re-exports the library's names, so `import reflectgen as rg` still works.
+
 Scans a C++ header/source file with libclang and emits a `.cpp` that
 registers each class it finds against `newui::reflection` (see
 `include/newui/reflection.h`) - the same shape of code

@@ -1736,6 +1736,9 @@ namespace newui {
         // clientBounds top-left, matching what layoutEngine_'s own
         // coordinates assume.
         void drawSelection(BLContext& ctx) const;
+        // Whether the selection is on show: there is one, and the owner has the keyboard focus. An unfocused field keeps its selection (it is there again when
+        // the focus comes back, as in a native edit control) but does not highlight it, so only the field being typed into looks selected.
+        bool showsSelection() const;
         void drawCaret(BLContext& ctx) const;
         // The caret's own line, tinted faintly across the FULL width of textArea() - not just the
         // text's own extent, which is what makes this a dedicated draw call rather than a
@@ -2006,6 +2009,7 @@ namespace newui {
                 return;
             }
             controller_ = std::move(controller);
+            controller_->model().onChanged.add(this, &TextField::handleModelChanged);
             style().markDirty();
         }
 
@@ -2015,8 +2019,16 @@ namespace newui {
         // Swaps in a different TextModel (e.g. a custom subclass) - see
         // TextController::setModel()'s own doc comment (a no-op for
         // nullptr; tears down/rewires the old and new model's
-        // registration and subscriptions for you).
-        void setModel(std::unique_ptr<text::TextModel> model) { controller_->setModel(std::move(model)); }
+        // registration and subscriptions for you). Also re-subscribes
+        // handleModelChanged() (which reports "text" to onPropertyChanged,
+        // so the text can be bound) to the new model.
+        void setModel(std::unique_ptr<text::TextModel> model) {
+            if (model == nullptr) {
+                return;
+            }
+            controller_->setModel(std::move(model));
+            controller_->model().onChanged.add(this, &TextField::handleModelChanged);
+        }
 
         // Convenience forwarders to model() - text()/setText() are the
         // common case; reach model() directly for insert()/remove()/
@@ -2037,6 +2049,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end - a field ready to type over (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }
@@ -2098,6 +2112,7 @@ namespace newui {
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+        SyncReturn handleModelChanged(Model& sender);
 
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;
@@ -2191,6 +2206,8 @@ namespace newui {
         bool copy() { return controller_->copy(); }
         bool cut() { return controller_->cut(); }
         bool paste() { return controller_->paste(); }
+        // Selects the whole text with the caret at the end (what a triple click does; see TextController::selectAll()).
+        void selectAll() { controller_->selectAll(); }
 
         text::TextSelection& selection() { return controller_->selection(); }
         const text::TextSelection& selection() const { return controller_->selection(); }

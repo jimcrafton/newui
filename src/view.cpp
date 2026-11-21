@@ -459,6 +459,16 @@ namespace newui {
 		return rootView_ != nullptr && rootView_->focusedSubView() == dynamic_cast<const SubView*>(this);
 	}
 
+	void View::setErrorText(const std::string& text) {
+		if (text == errorText_) {
+			return;
+		}
+		errorText_ = text;
+		if (style_) {
+			style_->markDirty();
+		}
+	}
+
 	void View::prePaintStyle(BLContext& ctx) {
 		if (style_) {
 			style_->prePaint(ctx, bounds_.size(), highlighted_);

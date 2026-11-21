@@ -270,6 +270,14 @@ namespace newui {
         // acceptsFocus() - without being a Control at all).
         bool isFocused() const;
 
+        // Why the value in this control is not acceptable (set by a Binding whose conversion or rules
+        // rejected it, cleared when it is fine again). While non-empty the control is outlined in red.
+        // Runtime state only - never saved to a .newui file.
+        // @reflect ignore=true
+        const std::string& errorText() const { return errorText_; }
+        // @reflect ignore=true
+        void setErrorText(const std::string& text);
+
         // The three-phase style paint sequence - see ViewStyle::
         // prePaint()/paint()/postPaint() (viewstyle.h) for what each
         // phase is for. All three are called automatically by whatever's
@@ -402,6 +410,21 @@ namespace newui {
         //@reflect ignore=true
         void setOrigin(const Point& origin) {
             origin_ = origin;
+        }
+
+        // True when visibleRegion() is meaningful, i.e. this view is being painted through a parent's
+        // paintChildren() (or the root's paintTree()).
+        //@reflect ignore=true
+        bool hasVisibleRegion() const {
+            return hasVisibleRegion_;
+        }
+
+        // The part of this view's local space that is actually being repainted (the dirty region on a
+        // pruned repaint, the window otherwise), clipped to this view and its ancestors. A paint() that is
+        // expensive can skip drawing anything that lies outside it; ignoring it is always correct.
+        //@reflect ignore=true
+        const Rect& visibleRegion() const {
+            return visibleRegion_;
         }
 
         // Draws this view's own content. Default is a no-op; SubView
@@ -803,6 +826,9 @@ namespace newui {
         // setWantsTabKey() above.
         bool isFocusScope_ = false;
         bool wantsTabKey_ = false;
+
+        // Backs errorText()/setErrorText() above.
+        std::string errorText_;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for

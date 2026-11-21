@@ -348,7 +348,7 @@ namespace newui {
             activeIndex_ = children.size() - 1;
         }
 
-        const Rect bounds = container.getClientBounds();
+        const Rect bounds = container.getClientBounds().deflate(padding_);
 
         for (std::size_t i = 0; i < children.size(); ++i) {
             SubView* child = children[i];

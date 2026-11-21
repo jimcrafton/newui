@@ -195,6 +195,13 @@ LRESULT CALLBACK Application::DummyWndProc(HWND hWnd, UINT message, WPARAM wPara
     return result;
 }
 
+// Fired from WM_CLOSE before the window is destroyed, so registered components are all still alive.
+SyncReturn FrameClosed(Frame& frame) {
+	Application::instance().settings().storeAll();
+
+	return SyncReturn::Handled;
+}
+
 SyncReturn FrameDestroyed(Frame& frame) {
 	
     DestroyWindow(Application::instance().dummyWindowHandle());
@@ -296,6 +303,7 @@ void Application::run() {
 		}
 
 		frame_->onDestroyed += FrameDestroyed;
+		frame_->onClosed += FrameClosed;
 
 
 		onStartup(*this);

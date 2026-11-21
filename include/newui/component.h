@@ -2,6 +2,10 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
+
+#include "newui/componentsettings.h"
+#include "newui/delegate.h"
 
 namespace newui {
 
@@ -132,6 +136,48 @@ namespace newui {
             return result;
         }
 
+        // ---- Property change notification --------------------------------------------------------
+        // Fired, with the property's reflected name, when a property that data binding (binding.h) can
+        // watch changes its value - Slider "value", Toggle "checked", TextControl "text", Splitter
+        // "splitPosition". A component opts a property in by calling notifyPropertyChanged() from its
+        // setter, after the value actually changed; most properties don't, and are only ever read.
+        typedef Delegate<Component, const std::string&> PropertyChangedDelegate;
+        PropertyChangedDelegate onPropertyChanged;
+
+        //@reflect ignore=true
+        void notifyPropertyChanged(const std::string& propertyName) { onPropertyChanged(*this, propertyName); }
+
+        // ---- Settings (see componentsettings.h) -------------------------------------------------
+        // A setting persists one reflected property of this component between runs. Nothing is stored
+        // until the component is registered with a SettingsManager (Application::settings()).
+
+        // Marks propertyName - which must be a reflected property with a getter and setter, of a type
+        // SettingValue can hold (bool, integers, float/double, std::string) - as a setting. key is the
+        // name it is stored under (default: propertyName). Calling this again for the same key updates
+        // that setting rather than adding a second one. Returns the setting.
+        //@reflect ignore=true
+        ComponentSetting& assignSetting(const std::string& propertyName,
+                                        SettingScope scope = SettingScope::User,
+                                        const std::string& key = std::string());
+
+        //@reflect ignore=true
+        const std::vector<ComponentSetting>& settings() const { return settings_; }
+
+        // nullptr if no setting has this key.
+        //@reflect ignore=true
+        const ComponentSetting* findSetting(const std::string& key) const;
+
+        //@reflect ignore=true
+        bool removeSetting(const std::string& key);
+
+        // Hooks for settings that aren't just a reflected property (a window's restored state, a recent
+        // files list, ...). loadSettings() runs after the property-backed settings were applied;
+        // storeSettings() runs before they are collected. Defaults do nothing.
+        //@reflect ignore=true
+        virtual void loadSettings(SettingsAccess& /*access*/) {}
+        //@reflect ignore=true
+        virtual void storeSettings(SettingsAccess& /*access*/) {}
+
     protected:
         // The standard place to wire this object's own delegates to handler methods (e.g.
         // saveButton_->onClick.add(this, &MyDialog::onSaveButtonClicked);) - guaranteed to run
@@ -147,6 +193,7 @@ namespace newui {
         std::string name_;
         DesignTimeFlags designTimeFlags_ = DesignTimeFlags::None;
         ComponentState componentState_ = ComponentState::None;
+        std::vector<ComponentSetting> settings_;
     };
 
 }

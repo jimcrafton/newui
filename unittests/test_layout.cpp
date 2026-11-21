@@ -552,6 +552,24 @@ TEST(CardLayout, OnlyActiveChildIsVisibleAndFillsContainer) {
     delete container;
 }
 
+TEST(CardLayout, PaddingInsetsTheShownCardOnEverySide) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 200, 100));
+
+    auto* childA = NewChild(container, newui::Rect(0, 0, 10, 10));
+    auto* childB = NewChild(container, newui::Rect(0, 0, 10, 10));
+
+    auto cards = std::make_unique<newui::CardLayout>();
+    cards->setPadding(8.0f);
+    container->setLayout(std::move(cards));
+
+    EXPECT_EQ(childA->bounds(), newui::Rect(8.0f, 8.0f, 184.0f, 84.0f));
+
+    delete childA;
+    delete childB;
+    delete container;
+}
+
 TEST(CardLayout, ShowByIndexSwitchesImmediately) {
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 200, 100));
