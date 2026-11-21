@@ -29,7 +29,7 @@ TEST(Bundle, ExecutableDirAndResourcesDirAreSane) {
     const newui::Bundle& bundle = newui::Bundle::instance();
 
     EXPECT_FALSE(bundle.executableDir().empty());
-    EXPECT_EQ(bundle.resourcesDir(), bundle.executableDir() + "\\Resources");
+    EXPECT_EQ(bundle.resourcesDir(), bundle.executableDir() + "/Resources");
 }
 
 // Bundle is a shared singleton - every test here that calls
@@ -42,7 +42,7 @@ TEST(Bundle, ExecutableDirOverrideChangesResourcesDirToo) {
 
     bundle.setExecutableDirOverride("C:\\SomeOverriddenRoot");
     EXPECT_EQ(bundle.executableDir(), "C:\\SomeOverriddenRoot");
-    EXPECT_EQ(bundle.resourcesDir(), "C:\\SomeOverriddenRoot\\Resources");
+    EXPECT_EQ(bundle.resourcesDir(), "C:\\SomeOverriddenRoot/Resources");
 
     bundle.setExecutableDirOverride("");
     EXPECT_EQ(bundle.executableDir(), realExecutableDir);

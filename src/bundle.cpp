@@ -539,12 +539,12 @@ namespace newui {
 
     Bundle::Bundle() {
         executableDir_ = directoryOf(getExecutablePath());
-        resourcesDir_ = executableDir_ + "\\Resources";
+        resourcesDir_ = executableDir_ + "/Resources";
     }
 
     void Bundle::setExecutableDirOverride(const std::string& dir) {
         executableDir_ = dir.empty() ? directoryOf(getExecutablePath()) : dir;
-        resourcesDir_ = executableDir_ + "\\Resources";
+        resourcesDir_ = executableDir_ + "/Resources";
         infoLoaded_ = false;  // Info.json now resolves against the new root too
     }
 
@@ -554,12 +554,12 @@ namespace newui {
     }
 
     std::string Bundle::resourcePath(const std::string& relativePath) const {
-        std::string path = resourcesDir_ + "\\" + relativePath;
+        std::string path = resourcesDir_ + "/" + relativePath;
         return fileExists(path) ? path : std::string();
     }
 
     std::size_t Bundle::loadFonts(const std::string& relativeDir) const {
-        const std::string directory = resourcesDir_ + "\\" + relativeDir;
+        const std::string directory = resourcesDir_ + "/" + relativeDir;
         const DWORD attrs = ::GetFileAttributesA(directory.c_str());
         if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
             return 0;
@@ -804,7 +804,7 @@ namespace newui {
     bool Bundle::writeTextFile(const std::string& relativePath, const std::string& contents) const {
         ::CreateDirectoryA(resourcesDir_.c_str(), nullptr);  // idempotent - already-exists is fine, checked next via the actual write
 
-        std::ofstream file(resourcesDir_ + "\\" + relativePath, std::ios::binary | std::ios::trunc);
+        std::ofstream file(resourcesDir_ + "/" + relativePath, std::ios::binary | std::ios::trunc);
         if (!file) {
             return false;
         }
@@ -978,7 +978,7 @@ namespace newui {
         infoLoaded_ = true;
 
         json5::document doc;
-        if (json5::from_file(executableDir_ + "\\Info.json", doc)) {
+        if (json5::from_file(executableDir_ + "/Info.json", doc)) {
             return;  // missing or unparseable - appName_/appVersion_ stay ""
         }
 

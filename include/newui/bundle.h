@@ -66,18 +66,18 @@ namespace newui {
         // appVersion()), since that resolves against executableDir() too.
         void setExecutableDirOverride(const std::string& dir);
 
-        // executableDir() + "\Resources".
+        // executableDir() + "/Resources".
         const std::string& resourcesDir() const {
             return resourcesDir_;
         }
 
-        // resourcesDir() + "\" + relativePath, if that file exists - else
+        // resourcesDir() + "/" + relativePath, if that file exists - else
         // "". Fails fast rather than throwing, matching this codebase's
         // bool/empty-return error handling elsewhere rather than
         // exceptions.
         std::string resourcePath(const std::string& relativePath) const;
 
-        // Registers every .ttf / .otf under resourcesDir() + "\" + relativeDir (subfolders too) with
+        // Registers every .ttf / .otf under resourcesDir() + "/" + relativeDir (subfolders too) with
         // FontManager::addFontDirectory(), so text drawn by blend2d finds them by name - how an application
         // ships its own fonts. Returns how many it registered; 0 if the folder does not exist. Call it once at
         // startup, before text is drawn; see FontManager::addFontFile() for what sees them.
