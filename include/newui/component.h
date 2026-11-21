@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "newui/componentsettings.h"
+#include "newui/delegate.h"
 
 namespace newui {
 
@@ -134,6 +135,17 @@ namespace newui {
             componentState_ = result ? ComponentState::Initialized : ComponentState::None;
             return result;
         }
+
+        // ---- Property change notification --------------------------------------------------------
+        // Fired, with the property's reflected name, when a property that data binding (binding.h) can
+        // watch changes its value - Slider "value", Toggle "checked", TextControl "text", Splitter
+        // "splitPosition". A component opts a property in by calling notifyPropertyChanged() from its
+        // setter, after the value actually changed; most properties don't, and are only ever read.
+        typedef Delegate<Component, const std::string&> PropertyChangedDelegate;
+        PropertyChangedDelegate onPropertyChanged;
+
+        //@reflect ignore=true
+        void notifyPropertyChanged(const std::string& propertyName) { onPropertyChanged(*this, propertyName); }
 
         // ---- Settings (see componentsettings.h) -------------------------------------------------
         // A setting persists one reflected property of this component between runs. Nothing is stored

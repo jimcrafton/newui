@@ -649,6 +649,7 @@ namespace newui {
             // reaches the file's "rootView" node on its own; reading it a second time would duplicate every child.
             reader.read(&frame);
             animations(frame, reader);
+            frame.resolveBindings();
             return true;
         }
     }
@@ -681,6 +682,7 @@ namespace newui {
 
         reader.read(&frame);
         readAnimations(frame, reader);
+        frame.resolveBindings();
         return true;
     }
 

@@ -261,3 +261,18 @@ add_executable(settings1
 )
 
 target_link_libraries(settings1 PRIVATE newui)
+
+add_executable(binding1
+    binding1.cpp
+)
+
+target_link_libraries(binding1 PRIVATE newui)
+
+# binding1.newui (examples/) declares this example's controls, bindings, converters and rules, loaded via
+# Bundle::loadFrame() - same Resources/-relative post-build copy as loaddialog1.
+add_custom_command(TARGET binding1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:binding1>/Resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/binding1.newui"
+        "$<TARGET_FILE_DIR:binding1>/Resources/binding1.newui"
+)

@@ -1,4 +1,6 @@
 #include "newui/frame.h"
+#include <algorithm>
+#include <iostream>
 #include "newui/application.h"
 #include "newui/menus.h"
 #include "newui/themedata.h"
@@ -24,6 +26,20 @@ namespace newui {
 
 	Frame::~Frame()
 	{
+		// Before the views go: unbinding disconnects from the still-live controls.
+		for (Binding* binding : bindings_) {
+			delete binding;
+		}
+		bindings_.clear();
+		for (Converter* converter : converters_) {
+			delete converter;
+		}
+		converters_.clear();
+		for (BindingGroup* group : groups_) {
+			delete group;
+		}
+		groups_.clear();
+
 		if (nullptr != rootView_) {
 			if (nullptr != frameHandle_) {
 				// A live native window still exists and was never torn
@@ -451,4 +467,90 @@ std::tuple<Frame*, RootView*> Frame::getTarget(HWND hwnd)
 	return std::make_tuple(targetFrame, targetView);
 }
 
+
+void Frame::addBinding(Binding* binding) {
+	if (binding == nullptr || std::find(bindings_.begin(), bindings_.end(), binding) != bindings_.end()) {
+		return;
+	}
+	bindings_.push_back(binding);
+}
+
+void Frame::removeBinding(Binding* binding) {
+	auto it = std::find(bindings_.begin(), bindings_.end(), binding);
+	if (it != bindings_.end()) {
+		(*it)->unbind();
+		bindings_.erase(it);
+	}
+}
+
+void Frame::addGroup(BindingGroup* group) {
+	if (group == nullptr || std::find(groups_.begin(), groups_.end(), group) != groups_.end()) {
+		return;
+	}
+	group->setFrame(this);
+	groups_.push_back(group);
+}
+
+void Frame::removeGroup(BindingGroup* group) {
+	auto it = std::find(groups_.begin(), groups_.end(), group);
+	if (it != groups_.end()) {
+		(*it)->setFrame(nullptr);
+		groups_.erase(it);
+	}
+}
+
+BindingGroup& Frame::bindingGroup(const std::string& name) {
+	for (BindingGroup* group : groups_) {
+		if (group->name() == name) {
+			return *group;
+		}
+	}
+	auto* group = new BindingGroup();
+	group->setName(name);
+	addGroup(group);
+	return *group;
+}
+
+void Frame::addConverter(Converter* converter) {
+	if (converter == nullptr || std::find(converters_.begin(), converters_.end(), converter) != converters_.end()) {
+		return;
+	}
+	converters_.push_back(converter);
+}
+
+void Frame::removeConverter(Converter* converter) {
+	auto it = std::find(converters_.begin(), converters_.end(), converter);
+	if (it != converters_.end()) {
+		converters_.erase(it);
+	}
+}
+
+const Converter* Frame::findConverter(const std::string& name) const {
+	for (const Converter* converter : converters_) {
+		if (converter->name() == name) {
+			return converter;
+		}
+	}
+	return nullptr;
+}
+
+bool Frame::findBindingSource(const std::string& name, BindingSource& out) const {
+	auto it = bindingSources_.find(name);
+	if (it == bindingSources_.end()) {
+		return false;
+	}
+	out = it->second;
+	return true;
+}
+
+bool Frame::resolveBindings() {
+	bool all = true;
+	for (Binding* binding : bindings_) {
+		if (!binding->resolve(*this)) {
+			std::cerr << "Frame::resolveBindings(): " << binding->lastError() << std::endl;
+			all = false;
+		}
+	}
+	return all;
+}
 }

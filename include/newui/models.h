@@ -28,7 +28,6 @@ namespace newui {
     public:
         enum UpdateFlags {
             NoFlags = 0x00,
-            RequiresValidation = 0x001,
             DisplayErrorIfInvalid = 0x002,
         };
 

@@ -37,9 +37,13 @@ void Splitter::setFixedPane(SplitterFixedPane pane) {
 }
 
 void Splitter::setSplitPosition(float position) {
+    const float old = splitPosition_;
     splitPosition_ = clampSplitPosition(position);
     arrangePanes();
     redraw();
+    if (splitPosition_ != old) {
+        notifyPropertyChanged("splitPosition");
+    }
 }
 
 void Splitter::setDividerThickness(float thickness) {

@@ -380,6 +380,7 @@ namespace newui {
         checked_ = value;
         updateStyleFields();
         onCheckedChanged(*this);
+        notifyPropertyChanged("checked");
     }
 
     void Toggle::paintStyle(BLContext& ctx) {
@@ -764,6 +765,7 @@ namespace newui {
         value_ = value;
         updateThumbBounds();
         onValueChanged(*this);
+        notifyPropertyChanged("value");
     }
 
     void Slider::updateTickCount() {
@@ -3476,6 +3478,12 @@ namespace newui {
         onMouseDblClick.add(this, &TextField::handleMouseDblClick);
         onKeyPress.add(this, &TextField::handleKeyPress);
         onKeyDown.add(this, &TextField::handleKeyDown);
+        controller_->model().onChanged.add(this, &TextField::handleModelChanged);
+    }
+
+    SyncReturn TextField::handleModelChanged(Model& /*sender*/) {
+        notifyPropertyChanged("text");
+        return SyncReturn::Handled;
     }
 
     SyncReturn TextField::handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
@@ -3644,6 +3652,7 @@ namespace newui {
 
     SyncReturn TextControl::handleModelChanged(Model& /*sender*/) {
         onContentSizeChanged(*this);
+        notifyPropertyChanged("text");
         return SyncReturn::Handled;
     }
 

@@ -141,6 +141,51 @@ See [examples/settings1.cpp](examples/settings1.cpp) for a runnable demo (`setti
 clears the stored files) and [include/newui/componentsettings.h](include/newui/componentsettings.h)
 for the full API.
 
+## Data binding and validation
+
+A `Binding` connects one property of a control to one value of a source and keeps the two in step.
+Bindings, converters and validation rules are plain reflected objects declared in the frame's `.newui`
+file, so a form designer can edit them; C++ only supplies the data:
+
+```json5
+bindings: [
+  { type: "Binding", name: "age", group: "form", target: "ageField", property: "text",
+    source: "form", key: "age", converter: "integer", trigger: "OnCommit",
+    rules: [ { type: "RangeRule", min: 0, max: 120, message: "Age must be 0 to 120" } ] },
+  { type: "Binding", target: "volumeLabel", property: "text", source: "volume", key: "value",
+    converter: "percent", mode: "OneWay" },            // control to control, no code
+],
+converters: [ { type: "NumberTextConverter", name: "integer", decimals: 0 } ],
+groups: [ { type: "BindingGroup", name: "form",
+            rules: [ { type: "CompareRule", left: "password", right: "repeat", op: "Equal" } ] } ],
+```
+
+```cpp
+frame.setBindingSource("form", model);   // before Bundle::loadFrame(), which resolves the bindings
+auto& group = frame.bindingGroup("form");
+if (!group.commit()) { /* group.errors() */ }   // all or nothing
+```
+
+- **Sources:** a `Model` (addressed by `key`), any reflected object (`key` is a property name), or
+  another control found by name. Register them with `Frame::setBindingSource()`; they must outlive the frame.
+- **Mode:** `OneTime`, `OneWay`, `TwoWay` (default), `ValidateOnly` (no source or key: the control is
+  only checked, e.g. a "repeat password" box that a group's `CompareRule` compares with the real one). **Trigger** (for `TwoWay`): `OnChange` writes back at
+  every edit, `OnCommit` when the control loses focus or the group commits, `Manual` only on `commit()`.
+- **Pipeline:** read the control, convert to the source's type, run the rules, then write. A value that
+  fails conversion or a rule is never written, and the control is outlined in red until it is fixed. Set a binding's `errorTarget` to the name of a
+  `Label` (placed under or beside the field, its space reserved by the layout) to show the message there;
+  it is emptied again once the value is fine. Enter in a `TextField` commits an `OnCommit` binding too.
+- **Converters** (named, in the frame's `converters` list): `ScaleConverter`, `InvertConverter`,
+  `NumberTextConverter`; the default is a strict conversion between numbers, bool and text.
+- **Rules** (a binding's `rules`, all must pass): `RequiredRule`, `MinRule`, `MaxRule`, `RangeRule`,
+  `LengthRule`, `RegexRule`, `OneOfRule`, `AnyOfRule` (OR), `CustomRule` (a C++ check registered by name
+  with `registerValidator()`).
+- **Groups:** bindings naming the same `group` form one form: `load()`/`revert()`, `dirty()`, `validate()`,
+  `commit()`, `errors()`. Group rules (`CompareRule`, `CustomGroupRule`) check across fields.
+
+See [examples/binding1.cpp](examples/binding1.cpp) and [examples/binding1.newui](examples/binding1.newui),
+and [include/newui/binding.h](include/newui/binding.h) for the full API.
+
 ## Project layout
 
 ```

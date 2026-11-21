@@ -2001,6 +2001,7 @@ namespace newui {
                 return;
             }
             controller_ = std::move(controller);
+            controller_->model().onChanged.add(this, &TextField::handleModelChanged);
             style().markDirty();
         }
 
@@ -2010,8 +2011,16 @@ namespace newui {
         // Swaps in a different TextModel (e.g. a custom subclass) - see
         // TextController::setModel()'s own doc comment (a no-op for
         // nullptr; tears down/rewires the old and new model's
-        // registration and subscriptions for you).
-        void setModel(std::unique_ptr<text::TextModel> model) { controller_->setModel(std::move(model)); }
+        // registration and subscriptions for you). Also re-subscribes
+        // handleModelChanged() (which reports "text" to onPropertyChanged,
+        // so the text can be bound) to the new model.
+        void setModel(std::unique_ptr<text::TextModel> model) {
+            if (model == nullptr) {
+                return;
+            }
+            controller_->setModel(std::move(model));
+            controller_->model().onChanged.add(this, &TextField::handleModelChanged);
+        }
 
         // Convenience forwarders to model() - text()/setText() are the
         // common case; reach model() directly for insert()/remove()/
@@ -2095,6 +2104,7 @@ namespace newui {
         SyncReturn handleMouseDblClick(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask) { return controller_->handleMouseDblClick(pt, btnMask, keyMask); }
         SyncReturn handleKeyPress(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) { return controller_->handleKeyPress(keyMask, keyCharVal, repeatCount, VKeyCode); }
         SyncReturn handleKeyDown(View& sender, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+        SyncReturn handleModelChanged(Model& sender);
 
         std::unique_ptr<TextController> controller_;
         text::TextRenderer renderer_;

@@ -167,6 +167,7 @@ add_library(newui STATIC
     "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
     "include/newui/component.h"
     "include/newui/componentsettings.h" "src/componentsettings.cpp"
+    "include/newui/binding.h" "src/binding.cpp"
     "include/newui/undostack.h" "src/undostack.cpp"
     "include/newui/viewbuilder.h"
     "include/newui/frameproxy.h" "src/frameproxy.cpp"
