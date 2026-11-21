@@ -17,6 +17,16 @@
 // Windows-registry-only storage: the user/machine distinction VCF made with HKCU vs HKLM is kept here
 // as SettingScope, but the backing store is a plain file (see SettingsStore) so it is easy to inspect,
 // reset and test.
+//
+// Troubleshooting - "my settings are never saved / restored":
+//   Settings are read and written through the component's *reflected* properties. If the reflection
+//   registry is empty, classinfo() returns null and every setting is skipped silently - no error, no
+//   file. A standalone exe must therefore call registerReflectionData() once at the top of main():
+//       extern void registerReflectionData();
+//       int main() { registerReflectionData(); ... }
+//   Other causes of the same symptom: the property name passed to assignSetting() isn't a reflected
+//   property of the component's most-derived class; the component is registered under a different key
+//   between runs; or the app name is empty (no folder to name the settings file after).
 
 namespace newui {
 

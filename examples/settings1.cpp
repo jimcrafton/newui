@@ -27,7 +27,12 @@
 #include <memory>
 #include <string>
 
+// Settings are read/written through reflected properties, so the registry must be populated first.
+extern void registerReflectionData();
+
 int main(int argc, char** argv) {
+    registerReflectionData();
+
     newui::Frame frame;
     newui::Application& app = newui::Application::instance();
     app.setName("settings1");
