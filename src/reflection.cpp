@@ -2,12 +2,36 @@
 #include "newui/utils.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <map>
 #include <memory>
 #include <set>
 
 namespace newui::reflection {
+
+    namespace {
+        // True for a type Property::writeValue() can actually emit: a registered Class or Enum, a
+        // string, bool, or an arithmetic type it has a case for. Anything else (a raw BLFont, ...) is
+        // never written, so it can never make a value differ from its default.
+        bool isWritableType(const std::type_index& t) {
+            if (classinfo(t) != nullptr || ReflectionRegistry::getEnum(t) != nullptr) {
+                return true;
+            }
+            for (const std::type_index& known : {
+                     std::type_index(typeid(std::string)), std::type_index(typeid(std::wstring)),
+                     std::type_index(typeid(bool)), std::type_index(typeid(float)),
+                     std::type_index(typeid(double)), std::type_index(typeid(std::uint8_t)),
+                     std::type_index(typeid(std::int8_t)), std::type_index(typeid(char)),
+                     std::type_index(typeid(std::uint16_t)), std::type_index(typeid(std::int16_t)),
+                     std::type_index(typeid(std::uint32_t)), std::type_index(typeid(std::int32_t)),
+                     std::type_index(typeid(std::uint64_t)), std::type_index(typeid(std::int64_t)),
+                     std::type_index(typeid(unsigned long long)), std::type_index(typeid(long long))}) {
+                if (t == known) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     // What a default-constructed instance of one concrete Class looked like - see
     // Class::isDefaultValue(). Built once per class and then only read.
@@ -50,13 +74,35 @@ namespace newui::reflection {
                 if (auto it = counts_.find(name); it != counts_.end()) {
                     const auto* pc = dynamic_cast<const PropertyCollection*>(p);
                     std::any boxed = p->get(instance);
-                    return pc != nullptr && it->second == 0 && pc->count(boxed) == 0;
+                    if (pc == nullptr || pc->count(boxed) != it->second) {
+                        return false;
+                    }
+                    if (it->second == 0) {
+                        return true;
+                    }
+                    // Same non-zero count as a default instance (constructor-built children, like a
+                    // Slider's thumb): default only if every element is itself still at its default.
+                    auto el = elements_.find(name);
+                    if (el == elements_.end() || el->second.size() != it->second) {
+                        return false;
+                    }
+                    for (std::size_t i = 0; i < it->second; ++i) {
+                        void* addr = pc->elementAddress(boxed, i);
+                        if (addr == nullptr || pc->elementRuntimeClass(boxed, i) != el->second[i]->clazz_ ||
+                            !el->second[i]->matches(addr)) {
+                            return false;
+                        }
+                    }
+                    return true;
                 }
                 if (auto it = leaves_.find(name); it != leaves_.end()) {
                     return p->valuesEqual(p->get(instance), it->second);
                 }
                 if (nulls_.count(name) != 0) {
                     return p->isAddressable() && p->address(instance) == nullptr;
+                }
+                if (opaque_.count(name) != 0) {
+                    return true;
                 }
                 if (auto it = nested_.find(name); it != nested_.end()) {
                     if (!p->isAddressable()) {
@@ -141,12 +187,32 @@ namespace newui::reflection {
             const std::string& name = p->name();
             if (const auto* pc = dynamic_cast<const PropertyCollection*>(p)) {
                 std::any boxed = p->get(instance);
-                counts_[name] = pc->count(boxed);
+                const std::size_t n = pc->count(boxed);
+                counts_[name] = n;
+                if (depth < kMaxDepth) {
+                    std::vector<std::shared_ptr<DefaultSnapshot>> elems;
+                    for (std::size_t i = 0; i < n; ++i) {
+                        void* addr = pc->elementAddress(boxed, i);
+                        const Class* rc = pc->elementRuntimeClass(boxed, i);
+                        if (addr == nullptr || rc == nullptr) {
+                            elems.clear();
+                            break;
+                        }
+                        elems.push_back(capture(rc, addr, depth + 1));
+                    }
+                    if (elems.size() == n && n != 0) {
+                        elements_[name] = std::move(elems);
+                    }
+                }
+            } else if (!isWritableType(p->type())) {
+                // A type Property::writeValue() has no case for (e.g. a raw BLFont): nothing is
+                // ever written for it, so there is nothing that could differ from the default.
+                opaque_.insert(name);
             } else if (p->canCompareValues()) {
                 if (std::any v = p->get(instance); v.has_value()) {
                     leaves_[name] = std::move(v);
                 }
-            } else if (depth < kMaxDepth && classinfo(p->type()) != nullptr) {
+            } else if (depth < kMaxDepth) {
                 if (p->isAddressable()) {
                     void* addr = p->address(instance);
                     if (addr == nullptr) {
@@ -169,6 +235,8 @@ namespace newui::reflection {
         std::map<std::string, std::any> leaves_;
         std::map<std::string, std::size_t> counts_;
         std::set<std::string> nulls_;
+        std::map<std::string, std::vector<std::shared_ptr<DefaultSnapshot>>> elements_;
+        std::set<std::string> opaque_;
         std::map<std::string, std::shared_ptr<DefaultSnapshot>> nested_;
     };
 

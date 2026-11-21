@@ -1543,6 +1543,11 @@ namespace newui::reflection {
         // real when its own ElementT is a pointer.
         virtual void* elementAddress(std::any& boxedInstance, std::size_t index) const { return nullptr; }
 
+        // The registered Class of the element at index by its *runtime* type (typeid of the pointee),
+        // or nullptr - non-pointer elements, an out-of-range index, an unregistered type. What
+        // writeItem() resolves internally; exposed so a default-value check can compare elements.
+        virtual const Class* elementRuntimeClass(std::any& boxedInstance, std::size_t index) const { return nullptr; }
+
         // Calls the *owning* object's real add/remove method directly
         // (e.g. View::addChild()/removeChild()) - never a copy of the
         // collection's current contents the way count()/get(std::any&,...)
@@ -1825,6 +1830,18 @@ namespace newui::reflection {
         // this codebase relies on (see examples/reflection2.cpp's own
         // resolveNestedClass()). A non-pointer element has no such
         // question - elementType() is already its real (and only) type.
+        const Class* elementRuntimeClass(std::any& boxedInstance, std::size_t index) const override {
+            if constexpr (std::is_pointer_v<ElementT>) {
+                if (index >= count(boxedInstance)) {
+                    return nullptr;
+                }
+                ElementT elementPtr = std::any_cast<ElementT>(get(boxedInstance, index));
+                return elementPtr != nullptr ? classinfo(typeid(*elementPtr)) : nullptr;
+            } else {
+                return nullptr;
+            }
+        }
+
         void writeItem(std::any& boxedInstance, std::size_t index, ClassWriter* writer) const override {
             std::any elementVal = get(boxedInstance, index);
             std::any idx(index);
