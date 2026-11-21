@@ -5,6 +5,12 @@
 #include <newui/geometry.h>
 #include <newui/rootview.h>
 #include <tuple>
+#include <map>
+#include <string>
+#include <type_traits>
+#include <vector>
+#include <newui/binding.h>
+#include <newui/models.h>
 
 
 namespace newui {
@@ -43,6 +49,66 @@ public:
 	}
 
 	virtual bool initialize();
+
+	// ---- Data binding (binding.h) -------------------------------------------------------------
+	// A Frame owns its bindings and converters; both lists are saved to and loaded from the .newui file
+	// ("bindings": [...], "converters": [...]). Bundle::loadFrame() calls resolveBindings() once the whole
+	// tree is built, so register any sources first.
+
+	// @reflect collection add=addBinding remove=removeBinding
+	const std::vector<Binding*>& bindings() const { return bindings_; }
+	// Takes ownership. Not resolved until the next resolveBindings() (or Binding::resolve()).
+	void addBinding(Binding* binding);
+	// Unbinds and detaches without deleting - the caller owns binding again.
+	void removeBinding(Binding* binding);
+
+	// @reflect collection add=addConverter remove=removeConverter
+	const std::vector<Converter*>& converters() const { return converters_; }
+	void addConverter(Converter* converter);
+	void removeConverter(Converter* converter);
+
+	// Groups declared in the file ("groups": [...]) - only needed for group-level rules.
+	// @reflect collection add=addGroup remove=removeGroup
+	const std::vector<BindingGroup*>& groups() const { return groups_; }
+	// Takes ownership.
+	void addGroup(BindingGroup* group);
+	// The caller owns group again.
+	void removeGroup(BindingGroup* group);
+
+	// The group named name (the bindings whose Binding::group() is name; "" is the default group). Made
+	// on demand if the file didn't declare it. Owned by the Frame.
+	//@reflect ignore=true
+	BindingGroup& bindingGroup(const std::string& name = std::string());
+
+	// The converter whose name() is name; nullptr if none.
+	//@reflect ignore=true
+	const Converter* findConverter(const std::string& name) const;
+
+	// Makes object available to bindings as source name. object is not owned and must outlive the
+	// bindings that use it (or the Frame). A Model is bound by key; anything else by reflected property.
+	//@reflect ignore=true
+	template<typename T>
+	void setBindingSource(const std::string& name, T& object) {
+		BindingSource source;
+		source.object = const_cast<void*>(static_cast<const void*>(&object));
+		source.type = std::type_index(typeid(T));
+		if constexpr (std::is_polymorphic<T>::value) {
+			source.object = dynamic_cast<void*>(&object);
+			source.type = std::type_index(typeid(object));
+			source.component = dynamic_cast<Component*>(&object);
+			source.model = dynamic_cast<Model*>(&object);
+		}
+		bindingSources_[name] = source;
+	}
+	//@reflect ignore=true
+	void removeBindingSource(const std::string& name) { bindingSources_.erase(name); }
+	//@reflect ignore=true
+	bool findBindingSource(const std::string& name, BindingSource& out) const;
+
+	// Resolves every binding (Binding::resolve()), reporting the ones that fail on stderr and leaving
+	// them unconnected. Safe to call again, e.g. after registering a late source. True if all resolved.
+	//@reflect ignore=true
+	bool resolveBindings();
 
 	void setBounds(const Rect& bounds);
 
@@ -130,6 +196,11 @@ public:
 
 
 	RootView* rootView_ = nullptr;
+
+	std::vector<Binding*> bindings_;
+	std::vector<BindingGroup*> groups_;
+	std::vector<Converter*> converters_;
+	std::map<std::string, BindingSource> bindingSources_;
 
 	HWND frameHandle_ = nullptr;
 	WNDPROC defaultWndProc_ = nullptr;

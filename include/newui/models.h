@@ -26,12 +26,6 @@ namespace newui {
     // real data rather than just its own visual state.
     class Model : public Component {
     public:
-        enum UpdateFlags {
-            NoFlags = 0x00,
-            RequiresValidation = 0x001,
-            DisplayErrorIfInvalid = 0x002,
-        };
-
         typedef Delegate<Model> ModelDelegate;
         typedef Delegate<Model, const std::any&, const std::any&> ModelKeyValueDelegate;
 
@@ -111,7 +105,6 @@ namespace newui {
         // onDestroyed for the rest of its life.
         std::vector<View*> views_;
         std::vector<Connection> viewDestroyedConnections_;
-        std::uint32_t updateFlags_ = UpdateFlags::NoFlags;
     };
 
     // A Model that's flat and 0-based-indexed - the shape ListController/

@@ -270,6 +270,14 @@ namespace newui {
         // acceptsFocus() - without being a Control at all).
         bool isFocused() const;
 
+        // Why the value in this control is not acceptable (set by a Binding whose conversion or rules
+        // rejected it, cleared when it is fine again). While non-empty the control is outlined in red.
+        // Runtime state only - never saved to a .newui file.
+        // @reflect ignore=true
+        const std::string& errorText() const { return errorText_; }
+        // @reflect ignore=true
+        void setErrorText(const std::string& text);
+
         // The three-phase style paint sequence - see ViewStyle::
         // prePaint()/paint()/postPaint() (viewstyle.h) for what each
         // phase is for. All three are called automatically by whatever's
@@ -818,6 +826,9 @@ namespace newui {
         // setWantsTabKey() above.
         bool isFocusScope_ = false;
         bool wantsTabKey_ = false;
+
+        // Backs errorText()/setErrorText() above.
+        std::string errorText_;
 
         // Owns/frees any custom HCURSOR it loaded itself (RAII, see
         // cursor.h) - no explicit cleanup needed anywhere in View for
