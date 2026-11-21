@@ -800,9 +800,17 @@ namespace newui {
         bool isHorizontal() const { return horizontal_; }
         void setHorizontal(bool value);
 
+        // The bar's own `style` (a FluentScrollbarTrackStyle or the default Themed one) picks the look; the
+        // thumb and arrows follow it. These two are conveniences for setting that style from code.
+        void useFluentStyle(bool fluent);
+        bool usesFluentStyle() const;
+
         void paint(BLContext& ctx) override;
 
     private:
+        // Rebuilds the thumb/arrow styles to match style() when it changed.
+        void syncPartStyles();
+        bool partsFluent_ = false;
         enum class Region { None, UpArrow, DownArrow, Thumb, TrackBefore, TrackAfter };
 
         // Which of upArrowRect_/downArrowRect_/thumbRect_/neither a local
@@ -3198,7 +3206,15 @@ namespace newui {
         typedef Delegate<TabControl, std::size_t> TabChangedDelegate;
         TabChangedDelegate onTabChanged;  // fires from selectTab() (including from a tab click)
 
+        // Swaps the pane and every tab (existing and future) between the uxtheme parts (default) and the
+        // role-colored Fluent ones.
+        void useFluentStyle(bool fluent);
+        bool usesFluentStyle() const { return fluent_; }
+
     private:
+        bool fluent_ = false;
+        std::unique_ptr<ThemedTabItemStyle> makeTabStyle() const;
+
         ThemedTabItemStyle::TabAlignment alignment_;
         friend class TabPage;
         friend class TabPageContainer;

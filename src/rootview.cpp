@@ -1053,6 +1053,16 @@ namespace newui {
 
 	void RootView::keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode)
 	{
+		// Unfold a repeat count (see keyEvent()'s doc comment, rootview.h) into that many single events.
+		if (repeatCount > 1 && eventType != keKeyUp) {
+			const int repeats = repeatCount < kMaxKeyRepeats ? repeatCount : kMaxKeyRepeats;
+			std::shared_ptr<bool> alive = aliveFlag_;
+			for (int i = 0; i < repeats && *alive; ++i) {
+				keyEvent(eventType, keyMask, keyCharVal, 1, VKeyCode);
+			}
+			return;
+		}
+
 		// Tab is reserved for UIInputManager's focus navigation, never
 		// forwarded to onKeyDown/onKeyPress/onKeyUp - this RootView's own
 		// or focusedSubView_'s - the same way a real dialog's tab order

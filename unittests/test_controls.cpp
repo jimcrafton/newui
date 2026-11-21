@@ -60,6 +60,25 @@ TEST(ScrollBar, DefaultsAreSaneRangeAndStep) {
     delete bar;
 }
 
+TEST(ScrollBar, FluentStyleSwapsPartsAndKeepsOrientation) {
+    auto* bar = new ScrollBar();
+    bar->setHorizontal(true);
+    EXPECT_FALSE(bar->usesFluentStyle());
+
+    bar->useFluentStyle(true);
+    EXPECT_TRUE(bar->usesFluentStyle());
+    EXPECT_NE(dynamic_cast<FluentScrollbarTrackStyle*>(&bar->style()), nullptr);
+    EXPECT_TRUE(bar->isHorizontal());
+    EXPECT_FLOAT_EQ(bar->maxValue(), 100.0f);
+
+    bar->useFluentStyle(false);
+    EXPECT_EQ(dynamic_cast<FluentScrollbarTrackStyle*>(&bar->style()), nullptr);
+    EXPECT_NE(dynamic_cast<ThemedScrollbarTrackStyle*>(&bar->style()), nullptr);
+
+    bar->destroy();
+    delete bar;
+}
+
 TEST(ScrollBar, SetValueClampsToEffectiveRange) {
     auto* bar = new ScrollBar();
     bar->setRange(0.0f, 100.0f);

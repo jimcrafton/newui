@@ -1119,12 +1119,68 @@ namespace newui {
         lineStep_ = lineStep > 0.0f ? lineStep : 0.0f;
     }
 
+    void ScrollBar::useFluentStyle(bool fluent) {
+        std::unique_ptr<ThemedScrollbarTrackStyle> track;
+        if (fluent) {
+            track = std::make_unique<FluentScrollbarTrackStyle>();
+        } else {
+            track = std::make_unique<ThemedScrollbarTrackStyle>();
+        }
+        setStyle(std::move(track));
+        syncPartStyles();
+    }
+
+    bool ScrollBar::usesFluentStyle() const {
+        return dynamic_cast<const FluentScrollbarTrackStyle*>(&style()) != nullptr;
+    }
+
+    // The thumb and arrows follow the track style (the bar's own `style` property): a Fluent track means Fluent
+    // parts. Runs from paint() and layout, so setting the style from a .newui file or from code is enough.
+    void ScrollBar::syncPartStyles() {
+        trackStyle_ = dynamic_cast<ThemedScrollbarTrackStyle*>(&style());
+        if (trackStyle_ != nullptr) {
+            trackStyle_->horizontal = horizontal_;
+        }
+        const bool fluent = usesFluentStyle();
+        if (fluent == partsFluent_) {
+            return;
+        }
+        partsFluent_ = fluent;
+
+        if (fluent) {
+            upArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
+            downArrowStyle_ = std::make_unique<FluentScrollbarArrowStyle>();
+            thumbStyle_ = std::make_unique<FluentScrollbarThumbStyle>();
+        } else {
+            upArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+            downArrowStyle_ = std::make_unique<ThemedScrollbarArrowStyle>();
+            thumbStyle_ = std::make_unique<ThemedScrollbarThumbStyle>();
+        }
+
+        upArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Left
+                                                : ThemedScrollbarArrowStyle::Direction::Up;
+        downArrowStyle_->direction = horizontal_ ? ThemedScrollbarArrowStyle::Direction::Right
+                                                  : ThemedScrollbarArrowStyle::Direction::Down;
+        thumbStyle_->horizontal = horizontal_;
+        for (ViewStyle* s : { static_cast<ViewStyle*>(upArrowStyle_.get()), static_cast<ViewStyle*>(downArrowStyle_.get()),
+                              static_cast<ViewStyle*>(thumbStyle_.get()) }) {
+            s->setView(this);
+        }
+        const bool on = isEnabled();
+        upArrowStyle_->enabled = on;
+        downArrowStyle_->enabled = on;
+        thumbStyle_->enabled = on;
+
+        updateChildBounds();
+        style().markDirty();
+    }
+
     void ScrollBar::setHorizontal(bool value) {
         if (horizontal_ == value) {
             return;
         }
         horizontal_ = value;
-        trackStyle_->horizontal = value;
+        if (trackStyle_ != nullptr) trackStyle_->horizontal = value;
         thumbStyle_->horizontal = value;
         upArrowStyle_->direction = value ? ThemedScrollbarArrowStyle::Direction::Left
                                           : ThemedScrollbarArrowStyle::Direction::Up;
@@ -1134,6 +1190,7 @@ namespace newui {
     }
 
     void ScrollBar::paint(BLContext& ctx) {
+        syncPartStyles();
         // isHighlighted() (View's own, driven by RootView's ordinary
         // hover tracking - "is the cursor anywhere over this ScrollBar")
         // passed to every sub-part uniformly - a real scrollbar
@@ -1238,6 +1295,7 @@ namespace newui {
     }
 
     void ScrollBar::updateChildBounds() {
+        syncPartStyles();
         Rect client = localRect();
         Size arrowSize = resolvedArrowSize();
         Rect track = trackRect();
@@ -3348,7 +3406,12 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkHome: {
-                // The start of the *current visual line*, not the whole
+                // Ctrl+Home: the start of the document.
+                if ((keyMask & kmCtrl) != 0) {
+                    moveCaret(0, extend);
+                    return SyncReturn::Handled;
+                }
+                // Otherwise the start of the *current visual line*, not the whole
                 // document - correct unchanged for a single-line
                 // TextField too, since its one line's own lineRange()
                 // already starts at 0.
@@ -3357,6 +3420,11 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             case vkEnd: {
+                // Ctrl+End: the end of the document.
+                if ((keyMask & kmCtrl) != 0) {
+                    moveCaret(model().length(), extend);
+                    return SyncReturn::Handled;
+                }
                 text::TextRange line = layoutEngine_.lineRange(caret_.position());
                 moveCaret(line.isValid() ? line.end() : model().length(), extend);
                 return SyncReturn::Handled;
@@ -5890,6 +5958,39 @@ TabControl::TabControl(ThemedTabItemStyle::TabAlignment alignment) : alignment_(
     }
 }
 
+std::unique_ptr<ThemedTabItemStyle> TabControl::makeTabStyle() const {
+    std::unique_ptr<ThemedTabItemStyle> style;
+    if (fluent_) {
+        style = std::make_unique<FluentTabItemStyle>();
+    } else {
+        style = std::make_unique<ThemedTabItemStyle>();
+    }
+    style->alignment = alignment_;
+    style->enabled = isEnabled();
+    return style;
+}
+
+void TabControl::useFluentStyle(bool fluent) {
+    if (fluent_ == fluent) {
+        return;
+    }
+    fluent_ = fluent;
+
+    if (fluent) {
+        setStyle(std::make_unique<FluentTabPaneStyle>());
+    } else {
+        setStyle(std::make_unique<ThemedTabPaneStyle>());
+    }
+    const auto& buttons = stripRow_->childViews();
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        auto style = makeTabStyle();
+        style->selected = (i == selectedIndex_);
+        buttons[i]->setStyle(std::move(style));
+    }
+    updateTabPositions();
+    this->style().markDirty();
+}
+
 SubView* TabControl::addTab(const std::string& text, SubView* page) {
     if (auto* tabPage = dynamic_cast<TabPage*>(page)) {
         tabPage->title_ = text;
@@ -5919,9 +6020,7 @@ void TabControl::pageAdded(SubView* page) {
     button->setVisible(true);
     button->owner = this;
     button->tabIndex = stripRow_->childViews().size();
-    button->setStyle(std::make_unique<ThemedTabItemStyle>());
-    static_cast<ThemedTabItemStyle&>(button->style()).alignment = alignment_;
-    static_cast<ThemedTabItemStyle&>(button->style()).enabled = isEnabled();
+    button->setStyle(makeTabStyle());
     ApplyButtonText(*button, text, stripHorizontal);
 
     button->onMouseDown.add(&TabItemButtonClicked);

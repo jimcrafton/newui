@@ -35,6 +35,8 @@ namespace newui {
         constexpr float kMarkerSize = 9.0f;
         constexpr float kMarkerGap = 8.0f;       // markers to text, the gutter's edge between
         constexpr float kEdgeInset = 3.0f;       // markers to the edge
+        constexpr float kMarkColumnWidth = 16.0f;   // the optional breakpoint / arrow column, left of the numbers
+        constexpr float kMarkGlyphSize = 10.0f;
 
         std::size_t digitCount(std::size_t value) {
             std::size_t digits = 1;
@@ -53,10 +55,23 @@ namespace newui {
         }
     }
 
+    void TextFoldingController::setMarkColumnVisible(bool visible) {
+        if (markColumnVisible_ != visible) {
+            markColumnVisible_ = visible;
+            foldsChanged();
+        }
+    }
+
+    void TextFoldingController::setGutterMarks(std::vector<GutterMark> marks) {
+        marks_ = std::move(marks);
+        owner().style().markDirty();
+    }
+
     TextFoldingController::GutterColumns TextFoldingController::gutterColumns() const {
         const std::size_t digits = digitCount(textLineCount_) < 2 ? 2 : digitCount(textLineCount_);
         GutterColumns columns;
-        columns.numbersRight = owner().getClientBounds().left() + kGutterPad
+        columns.markLeft = owner().getClientBounds().left();
+        columns.numbersRight = owner().getClientBounds().left() + (markColumnVisible_ ? kMarkColumnWidth : 0.0f) + kGutterPad
             + static_cast<float>(digits) * font().measureText("0").width;
         columns.markerLeft = columns.numbersRight + kNumbersGap;
         return columns;
@@ -93,6 +108,49 @@ namespace newui {
             }
         }
         return kNoFold;
+    }
+
+    // The marks on text line `textLine`, centred in the mark column on the line's first row.
+    // No theme role is a breakpoint red / current-line yellow, so these are fixed colors.
+    void TextFoldingController::drawMarks(BLContext& ctx, std::size_t textLine, float columnLeft, float top, float baseline,
+                                          float descent) const {
+        const double cx = columnLeft + kMarkColumnWidth * 0.5;
+        const double cy = (top + baseline + descent) * 0.5;
+        const double half = kMarkGlyphSize * 0.5;
+        for (const GutterMark& mark : marks_) {
+            if (mark.line != textLine) {
+                continue;
+            }
+            switch (mark.kind) {
+                case GutterMarkKind::Breakpoint:
+                    ctx.set_fill_style(BLRgba32(0xFFD13438u));
+                    ctx.fill_circle(cx, cy, half);
+                    break;
+                case GutterMarkKind::BreakpointDisabled:
+                    ctx.set_stroke_style(BLRgba32(0xFFD13438u));
+                    ctx.set_stroke_width(1.5);
+                    ctx.stroke_circle(cx, cy, half - 1.0);
+                    break;
+                case GutterMarkKind::CurrentLine: {
+                    // A right-pointing arrow: a shaft and a head.
+                    BLPath arrow;
+                    arrow.move_to(cx - half, cy - half * 0.4);
+                    arrow.line_to(cx, cy - half * 0.4);
+                    arrow.line_to(cx, cy - half);
+                    arrow.line_to(cx + half, cy);
+                    arrow.line_to(cx, cy + half);
+                    arrow.line_to(cx, cy + half * 0.4);
+                    arrow.line_to(cx - half, cy + half * 0.4);
+                    arrow.close();
+                    ctx.set_fill_style(BLRgba32(0xFFFFCC00u));
+                    ctx.fill_path(arrow);
+                    ctx.set_stroke_style(BLRgba32(0xFF5A4B00u));
+                    ctx.set_stroke_width(1.0);
+                    ctx.stroke_path(arrow);
+                    break;
+                }
+            }
+        }
     }
 
     void TextFoldingController::drawGutter(BLContext& ctx) const {
@@ -139,6 +197,14 @@ namespace newui {
             const std::string number = std::to_string(engine.lineNumber(line) + 1);
             ctx.fill_utf8_text(BLPoint(columns.numbersRight - font().measureText(number).width, baseline),
                 *blFont, number.c_str(), number.size());
+
+            if (markColumnVisible_) {
+                drawMarks(ctx, engine.lineNumber(line), columns.markLeft, top, baseline, descent);
+                // drawMarks changed the fill/stroke styles: put the gutter's back.
+                ctx.set_fill_style(color);
+                ctx.set_stroke_style(color);
+                ctx.set_stroke_width(1.0);
+            }
 
             const std::size_t fold = markerFold(line);
             if (fold == kNoFold) {
@@ -241,6 +307,10 @@ namespace newui {
                 return SyncReturn::Handled;
             }
             const std::size_t line = engine.lineAtY(toLayoutSpace(pt).y);
+            if (markColumnVisible_ && pt.x < gutterColumns().markLeft + kMarkColumnWidth) {
+                onMarginClicked(*this, engine.lineNumber(line));
+                return SyncReturn::Handled;
+            }
             const std::size_t fold = markerFold(line);
             if (fold != kNoFold && pt.x >= gutterColumns().markerLeft - 2.0f) {
                 setFoldCollapsed(fold, !folds_[fold].collapsed);
@@ -376,6 +446,29 @@ namespace newui {
     void TextFoldingControl::setGutterVisible(bool visible) {
         if (TextFoldingController* folding = foldingController()) {
             folding->setGutterVisible(visible);
+        }
+    }
+
+    bool TextFoldingControl::markColumnVisible() const {
+        const TextFoldingController* folding = foldingController();
+        return folding != nullptr && folding->markColumnVisible();
+    }
+
+    void TextFoldingControl::setMarkColumnVisible(bool visible) {
+        if (TextFoldingController* folding = foldingController()) {
+            folding->setMarkColumnVisible(visible);
+        }
+    }
+
+    const std::vector<GutterMark>& TextFoldingControl::gutterMarks() const {
+        static const std::vector<GutterMark> none;
+        const TextFoldingController* folding = foldingController();
+        return folding != nullptr ? folding->gutterMarks() : none;
+    }
+
+    void TextFoldingControl::setGutterMarks(std::vector<GutterMark> marks) {
+        if (TextFoldingController* folding = foldingController()) {
+            folding->setGutterMarks(std::move(marks));
         }
     }
 

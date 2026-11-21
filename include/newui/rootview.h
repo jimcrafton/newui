@@ -478,6 +478,12 @@ namespace newui {
         void gotFocus();
         void lostFocus();
 
+        // Windows folds auto-repeats the app hasn't drained yet into ONE message carrying a repeat
+        // count. keyEvent() undoes that: a key-down or key-press with repeatCount > 1 is dispatched
+        // that many times, each with repeatCount 1, so no control has to honor the count itself
+        // (a held arrow key moves the caret every repeat, not once per message). Stops early if a
+        // handler destroys this window. Key-up is never repeated.
+        static constexpr int kMaxKeyRepeats = 64;   // sanity cap on one folded message
         void keyEvent(int eventType, std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
         // Which View's cursor() should be shown for a mouse position pt

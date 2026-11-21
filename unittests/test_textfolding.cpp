@@ -819,3 +819,39 @@ TEST(LabelAlignment, ToggleGlyphIsPlacedInsideTheView) {
     EXPECT_GE(left, 28);
     EXPECT_LE(right, 72);
 }
+
+TEST(TextFoldingControl, TheMarkColumnWidensTheGutterAndIsOffByDefault) {
+    TextFoldingControl control;
+    setUp(control, false);
+    EXPECT_FALSE(control.markColumnVisible());
+    const float before = control.foldingController()->gutterWidth();
+    control.setMarkColumnVisible(true);
+    EXPECT_TRUE(control.markColumnVisible());
+    EXPECT_GT(control.foldingController()->gutterWidth(), before);
+    control.setMarkColumnVisible(false);
+    EXPECT_EQ(control.foldingController()->gutterWidth(), before);
+}
+
+TEST(TextFoldingControl, ClickingTheMarkColumnReportsTheTextLine) {
+    TextFoldingControl control;
+    setUp(control, false);
+    control.setMarkColumnVisible(true);
+    control.setGutterMarks({ { 1, GutterMarkKind::Breakpoint }, { 2, GutterMarkKind::CurrentLine } });
+    ASSERT_EQ(control.gutterMarks().size(), 2u);
+
+    std::vector<std::size_t> clicked;
+    control.foldingController()->onMarginClicked.add([&](TextFoldingController&, std::size_t line) {
+        clicked.push_back(line);
+        return SyncReturn::Handled;
+    });
+    control.controller().ensureLayoutUpToDate();
+    const text::TextLayoutEngine& engine = control.controller().layoutEngine();
+    const float y = engine.lineTop(2) + engine.lineHeight(2) * 0.5f;   // third line, "}"
+    control.controller().handleMouseDown(Point(4.0f, y), 1, 0);
+    ASSERT_EQ(clicked.size(), 1u);
+    EXPECT_EQ(clicked[0], 2u);
+
+    // Past the mark column (on the line numbers) it is a line selection, not a margin click.
+    control.controller().handleMouseDown(Point(30.0f, y), 1, 0);
+    EXPECT_EQ(clicked.size(), 1u);
+}

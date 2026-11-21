@@ -12,9 +12,31 @@ namespace newui {
     // all of it, drops it. The caret never rests inside a collapsed fold - Left/Right step over
     // one, Backspace/Delete against one expand it instead of deleting hidden text, and clicking
     // its placeholder expands it.
+    // A glyph drawn in the gutter's mark column beside a text line (a debugger's breakpoint dot,
+    // the current-line arrow). Generic: the host decides what the marks mean.
+    enum class GutterMarkKind { Breakpoint, BreakpointDisabled, CurrentLine };
+
+    struct GutterMark {
+        std::size_t line = 0;   // 0-based text line (what the line-number column shows)
+        GutterMarkKind kind = GutterMarkKind::Breakpoint;
+    };
+
     class TextFoldingController : public TextController {
     public:
         explicit TextFoldingController(Control& owner);
+
+        // The mark column: a strip left of the line numbers that shows the marks below and reports
+        // clicks on it. Off by default (the gutter is then as it was).
+        bool markColumnVisible() const { return markColumnVisible_; }
+        void setMarkColumnVisible(bool visible);
+        //@reflect ignore=true
+        const std::vector<GutterMark>& gutterMarks() const { return marks_; }
+        // Replaces the marks. Not moved by edits - the host re-sets them when its lines change.
+        //@reflect ignore=true
+        void setGutterMarks(std::vector<GutterMark> marks);
+        // Fires with the 0-based text line when the mark column is clicked.
+        typedef Delegate<TextFoldingController, std::size_t> MarginClickedDelegate;
+        MarginClickedDelegate onMarginClicked;
 
         // Sorted by start (outermost first where folds start together).
         //@reflect ignore=true
@@ -62,12 +84,16 @@ namespace newui {
 
         // x of the line numbers' right edge and the markers' column, in the owner's local space.
         struct GutterColumns {
+            float markLeft = 0.0f;
             float numbersRight = 0.0f;
             float markerLeft = 0.0f;
         };
         GutterColumns gutterColumns() const;
+        void drawMarks(BLContext& ctx, std::size_t textLine, float columnLeft, float top, float baseline, float descent) const;
 
         std::vector<text::TextFold> folds_;
+        std::vector<GutterMark> marks_;
+        bool markColumnVisible_ = false;
         bool gutterVisible_ = true;
         std::size_t textLineCount_ = 1;   // sizes the line-number column
     };
@@ -92,6 +118,15 @@ namespace newui {
         // See TextFoldingController::setGutterVisible().
         bool gutterVisible() const;
         void setGutterVisible(bool visible);
+
+        // See TextFoldingController::setMarkColumnVisible() / setGutterMarks().
+        bool markColumnVisible() const;
+        void setMarkColumnVisible(bool visible);
+        //@reflect ignore=true
+        const std::vector<GutterMark>& gutterMarks() const;
+        //@reflect ignore=true
+        void setGutterMarks(std::vector<GutterMark> marks);
+        // (The click event is foldingController()->onMarginClicked.)
 
         // TextControl's, then the placeholders' boxes and the gutter.
         void paint(BLContext& ctx) override;

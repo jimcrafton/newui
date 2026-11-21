@@ -1604,6 +1604,22 @@ namespace newui {
         int stateId(bool /*highlighted*/) const override { return 0; }
     };
 
+    // Fluent tab strip item, painted from the role colors: a hover/pressed state layer and, on the selected tab, an
+    // accent bar along the edge that faces the content. position is ignored (no rounded outer corners).
+    // Opt in with TabControl::useFluentStyle().
+    class FluentTabItemStyle : public ThemedTabItemStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // The pane behind a Fluent tab control: a flat window-background fill.
+    class FluentTabPaneStyle : public ThemedTabPaneStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
     // ThemedViewStyle plus a trackbar/slider's track groove (TRACKBAR/
     // TKP_TRACK or TKP_TRACKVERT) - horizontal/vertical are two entirely
     // separate theme parts (same "orientation picks the part" shape as
@@ -1921,6 +1937,29 @@ namespace newui {
             if (highlighted) return SCRBS_HOT;
             return SCRBS_NORMAL;
         }
+    };
+
+    // Fluent scrollbar parts, painted from the role colors (no uxtheme bitmaps), so a host palette reaches them.
+    // Subclasses of the Themed parts so ScrollBar can hold either; opt in with ScrollBar::useFluentStyle().
+    // Track: transparent, the parent shows through.
+    class FluentScrollbarTrackStyle : public ThemedScrollbarTrackStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // Thumb: a slim pill, stronger when hot or pressed.
+    class FluentScrollbarThumbStyle : public ThemedScrollbarThumbStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
+    };
+
+    // Arrow: a chevron, with a state-layer square behind it when hot or pressed.
+    class FluentScrollbarArrowStyle : public ThemedScrollbarArrowStyle {
+    public:
+        Rect computeClientBounds(const Size& size) const override { return ViewStyle::computeClientBounds(size); }
+        void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
     };
 
     // ThemedViewStyle plus one top-level menu-bar entry's own chrome
