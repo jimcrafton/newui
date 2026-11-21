@@ -25,6 +25,7 @@ add_executable(newui_tests
     test_dxgipresentsurface.cpp
     test_layout.cpp
     test_bundle.cpp
+    test_componentsettings.cpp
     test_viewpath.cpp
     test_namemanager.cpp
     test_filewatcher.cpp

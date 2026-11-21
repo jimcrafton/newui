@@ -977,6 +977,12 @@ namespace newui {
 
         appName_ = doc["name"].get_c_str("");
         appVersion_ = doc["version"].get_c_str("");
+        company_ = doc["company"].get_c_str("");
+    }
+
+    const std::string& Bundle::company() const {
+        ensureInfoLoaded();
+        return company_;
     }
 
     const std::string& Bundle::appName() const {

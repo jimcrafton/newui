@@ -7,6 +7,7 @@
 
 #include "newui/color.h"
 #include "newui/newui.h"
+#include "newui/componentsettings.h"
 #include "newui/delegate.h"
 #include "newui/runloop.h"
 
@@ -73,6 +74,14 @@ public:
     }
 
     void run();
+
+    // Component-level settings (componentsettings.h). Register components before run() -
+    //   Application::instance().settings().registerComponent(*splitter, "mainSplitter");
+    // - and their values are applied right away from the previous run's files, then stored again when
+    // the frame closes. Call settings().setAutosaveInterval(...) too to also store periodically.
+    SettingsManager& settings() {
+        return settings_;
+    }
 
     // The RunLoop run() pumps. Exposed so code that needs to hook into
     // idle time (e.g. AnimationManager::run()) can do so before calling
@@ -156,6 +165,7 @@ private:
 
     mutable std::mutex mutex_;
     std::string name_;
+    SettingsManager settings_;
     Frame* frame_ = nullptr;
 	HWND dummyWindowHandle_ = nullptr;
     HINSTANCE instanceHandle_ = nullptr;

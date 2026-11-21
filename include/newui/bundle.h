@@ -321,6 +321,10 @@ namespace newui {
         const std::string& appName() const;
         const std::string& appVersion() const;
 
+        // Info.json's optional "company" key - "" if the file or the key is absent. Used by
+        // SettingsManager to pick the settings folder (<root>\<company>\<app>); no fallback.
+        const std::string& company() const;
+
     private:
         Bundle();
 
@@ -340,6 +344,7 @@ namespace newui {
         mutable bool infoLoaded_ = false;
         mutable std::string appName_;      // from Info.json only ("" if absent) - never overwritten by the fallback
         mutable std::string appVersion_;
+        mutable std::string company_;
         mutable std::string resolvedAppName_;  // scratch buffer for appName()'s live Application fallback
 
         // loadCachedImage()'s own cache - keyed by "<relativePath>@<width>x<height>"

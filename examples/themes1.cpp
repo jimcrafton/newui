@@ -676,11 +676,11 @@ int main() {
     // since its weight is double theirs.
     auto* content1 = MakePanel("content1", "lightcoral", "darkred");
     content1->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    // View::cursor().setPath() demo - a real 32x32 PNG with alpha,
+    // View::cursor().loadPath() demo - a real 32x32 PNG with alpha,
     // generated at runtime by WriteDotCursorPNG() above (see its comment).
     WriteDotCursorPNG("themes1_dot_cursor.png");
-    if (!content1->cursor().setPath("themes1_dot_cursor.png")) {
-        std::cerr << "cursor().setPath() failed for content1's cursor\n";
+    if (!content1->cursor().loadPath("themes1_dot_cursor.png")) {
+        std::cerr << "cursor().loadPath() failed for content1's cursor\n";
     }
     mainRow->addChild(content1);
 
