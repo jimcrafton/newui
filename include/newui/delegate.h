@@ -332,7 +332,12 @@ public:
     // no thread is spawned. The returned AsyncReturn can be waited on for
     // that task to finish; its result() is the same as syncCall's early-out
     // semantics would produce (last SyncReturn, or the one that errored).
-    AsyncReturn postCall(RunLoop& runLoop, SenderPtrT sender, Args... args) const {
+    //
+    // RunLoopT is always RunLoop; it is a template parameter only so that
+    // runLoop.post() is looked up at instantiation (RunLoop is incomplete here,
+    // and Clang/GCC reject member access on an incomplete non-dependent type).
+    template<typename RunLoopT = RunLoop>
+    AsyncReturn postCall(RunLoopT& runLoop, SenderPtrT sender, Args... args) const {
         std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
         AsyncReturn asyncReturn;
         runLoop.post([snapshot, asyncReturn, sender, args...]() {

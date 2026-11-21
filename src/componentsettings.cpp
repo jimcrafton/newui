@@ -73,8 +73,9 @@ namespace newui {
             return true;
         }
 
-        std::wstring widePath(const std::string& path) {
-            return utf8ToWide(path);
+        // UTF-8 string -> native filesystem path (wide on Windows, UTF-8 elsewhere).
+        std::filesystem::path fsPath(const std::string& path) {
+            return std::filesystem::u8path(path);
         }
 
         void createParentDirectories(const std::string& filePath) {
@@ -83,7 +84,7 @@ namespace newui {
                 return;
             }
             std::error_code ec;
-            std::filesystem::create_directories(std::filesystem::path(widePath(filePath.substr(0, slash))), ec);
+            std::filesystem::create_directories(fsPath(filePath.substr(0, slash)), ec);
         }
 
     }  // namespace
@@ -96,7 +97,7 @@ namespace newui {
             return false;
         }
 
-        std::ifstream file(widePath(filePath_), std::ios::binary);
+        std::ifstream file(fsPath(filePath_), std::ios::binary);
         if (!file) {
             return false;
         }
@@ -173,8 +174,9 @@ namespace newui {
 
         createParentDirectories(filePath_);
 
-        const std::wstring target = widePath(filePath_);
-        const std::wstring temp = target + L".tmp";
+        const std::filesystem::path target = fsPath(filePath_);
+        std::filesystem::path temp = target;
+        temp += ".tmp";
         {
             std::ofstream file(temp, std::ios::binary | std::ios::trunc);
             if (!file) {
@@ -186,8 +188,12 @@ namespace newui {
                 return false;
             }
         }
-        if (!::MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-            ::DeleteFileW(temp.c_str());
+        // rename() replaces an existing target on both Windows (MoveFileEx
+        // with MOVEFILE_REPLACE_EXISTING) and POSIX.
+        std::error_code renameEc;
+        std::filesystem::rename(temp, target, renameEc);
+        if (renameEc) {
+            std::filesystem::remove(temp, renameEc);
             return false;
         }
 

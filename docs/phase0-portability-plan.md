@@ -182,7 +182,7 @@ After Step 4, Phase 1 of the main plan (NSWindow, NSView, present, RunLoop) star
 | 1.1 CRT calls | done in working tree | no | needs Windows build |
 | 1.2 `classinfo` order | not started | | |
 | 1.3 `RunLoop` incomplete | not started | | |
-| 1.4 Wide-path streams | not started | | |
+| 1.4 Wide-path streams | done in working tree (`componentsettings.cpp`); Windows build+test pending | | |
 | 1.5 Path separators | not started | | |
 | 1.6 svgandme include | not started | | |
 | 1.7 Type names | not started | | |
