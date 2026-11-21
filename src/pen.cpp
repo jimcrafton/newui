@@ -1,5 +1,6 @@
 #include <newui/pen.h>
 
+#define NOMINMAX
 #include <windows.h>
 
 namespace newui {

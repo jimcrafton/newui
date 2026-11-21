@@ -1,5 +1,6 @@
 #include "newui/dibimage.h"
 
+#define NOMINMAX
 #include <windows.h>
 
 #include <cstring>
