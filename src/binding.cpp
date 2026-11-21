@@ -541,12 +541,15 @@ namespace newui {
         converterRef_ = nullptr;
         resolved_ = false;
         dirty_ = false;
+        frame_ = nullptr;
+        groupError_.clear();
     }
 
     bool Binding::resolve(Frame& frame) {
         unbind();
         lastError_.clear();
         errorKind_ = BindingErrorKind::None;
+        frame_ = &frame;
         const std::string label = name().empty() ? ("binding " + target_ + "." + property_) : name();
 
         const bool validateOnly = mode_ == BindingMode::ValidateOnly;
@@ -780,6 +783,7 @@ namespace newui {
         }
         if (mode_ == BindingMode::ValidateOnly) {
             dirty_ = false;  // checked, and there is nowhere to write it
+            succeeded();
             return true;
         }
         updating_ = true;
@@ -787,6 +791,7 @@ namespace newui {
         updating_ = false;
         if (wrote) {
             dirty_ = false;
+            succeeded();
         }
         return wrote;
     }
@@ -844,9 +849,21 @@ namespace newui {
     // user-correctable problems show; a missing property or source is a setup error, not the user's.
     void Binding::showError() {
         if (targetView_ != nullptr) {
-            const std::string text = isValid() ? std::string() : lastError_;
+            const std::string text = isValid() ? groupError_ : lastError_;
             targetView_->setErrorText(text);
             setErrorLabel(text);
+        }
+    }
+
+    void Binding::setGroupError(const std::string& text) {
+        groupError_ = text;
+        showError();
+    }
+
+    // After a commit that worked: the value is fine on its own, so let the group's rules judge it with the others.
+    void Binding::succeeded() {
+        if (frame_ != nullptr) {
+            frame_->bindingGroup(group_).checkRules();
         }
     }
 
@@ -980,6 +997,9 @@ namespace newui {
     }
 
     bool BindingGroup::load() {
+        for (Binding* binding : bindings()) {
+            binding->setGroupError(std::string());
+        }
         bool all = true;
         for (Binding* binding : bindings()) {
             if (binding->isResolved() && !binding->refresh()) {
@@ -1008,20 +1028,45 @@ namespace newui {
         }
         // Cross-field rules only make sense once every field is individually fine.
         if (errors_.empty()) {
-            for (const GroupRule* rule : rules_) {
-                std::string error;
-                if (!rule->validate(*this, error)) {
-                    errors_.push_back(error);
-                }
-            }
+            runRules();
         }
         return errors_.empty();
+    }
+
+    // Runs the rules, adding failures to errors_ and showing each on the binding it blames.
+    bool BindingGroup::runRules() {
+        for (Binding* binding : bindings()) {
+            binding->setGroupError(std::string());
+        }
+        bool ok = true;
+        for (const GroupRule* rule : rules_) {
+            std::string error;
+            if (rule->validate(*this, error)) {
+                continue;
+            }
+            ok = false;
+            errors_.push_back(error);
+            const std::string blame = rule->target().empty() ? rule->defaultTarget() : rule->target();
+            if (Binding* binding = this->binding(blame)) {
+                binding->setGroupError(error);
+            }
+        }
+        return ok;
+    }
+
+    bool BindingGroup::checkRules() {
+        if (committing_ || rules_.empty()) {
+            return true;
+        }
+        errors_.clear();
+        return runRules();
     }
 
     bool BindingGroup::commit() {
         if (!validate()) {
             return false;
         }
+        committing_ = true;
         bool all = true;
         for (Binding* binding : bindings()) {
             if (binding->isResolved() && binding->dirty() && !binding->commit()) {
@@ -1029,6 +1074,7 @@ namespace newui {
                 all = false;
             }
         }
+        committing_ = false;
         return all;
     }
 

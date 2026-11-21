@@ -701,3 +701,26 @@ TEST(BindingGroup, ValidateOnlyNeverWritesAndStillTakesPartInGroupRules) {
     EXPECT_EQ(f.pw2->text(), L"newpass");  // and never overwritten by a refresh
     EXPECT_FALSE(group.dirty());
 }
+
+TEST(BindingGroup, GroupRuleFailureShowsOnTheBlamedFieldAsSoonAsAFieldCommits) {
+    GroupForm f;
+    ASSERT_TRUE(f.build());
+    Binding* first = f.frame.bindings()[0];
+    Binding* second = f.frame.bindings()[1];
+
+    f.pw->setText(L"newpass");
+    EXPECT_TRUE(first->commit());  // fine alone, but pw2 still holds "secret": the rule blames pw2 (right side)
+    EXPECT_EQ(f.pw2->errorText(), "Passwords differ");
+    EXPECT_TRUE(f.pw->errorText().empty());
+    EXPECT_EQ(f.stored("pw"), "newpass");  // a field that is valid on its own is still written
+
+    f.pw2->setText(L"newpass");
+    EXPECT_TRUE(second->commit());  // now they match: the message goes away
+    EXPECT_TRUE(f.pw2->errorText().empty());
+
+    f.pw2->setText(L"zzzzzz");
+    EXPECT_TRUE(second->commit());
+    EXPECT_EQ(f.pw2->errorText(), "Passwords differ");
+    EXPECT_TRUE(f.frame.bindingGroup("account").load());  // revert clears it
+    EXPECT_TRUE(f.pw2->errorText().empty());
+}

@@ -383,6 +383,11 @@ namespace newui {
         // @reflect ignore=true
         bool dirty() const { return dirty_; }
 
+        // A problem a group rule found with this binding's value, shown like its own error (red outline,
+        // errorTarget label) while the binding itself is valid. Empty clears it. Set by BindingGroup.
+        // @reflect ignore=true
+        void setGroupError(const std::string& text);
+
         // The converted value commit() would write, after the rules have passed; false (with
         // lastError()) if conversion or a rule fails. Writes nothing.
         // @reflect ignore=true
@@ -460,6 +465,10 @@ namespace newui {
         std::vector<Rule*> rules_;
 
         void setErrorLabel(const std::string& text);
+        void succeeded();
+
+        Frame* frame_ = nullptr;
+        std::string groupError_;
 
         View* errorView_ = nullptr;
         const reflection::Property* errorProperty_ = nullptr;
@@ -500,15 +509,25 @@ namespace newui {
         std::string message() const { return message_; }
         void setMessage(const std::string& message) { message_ = message; }
 
+        // Name of the group's binding the failure is shown on (its control is outlined and its
+        // errorTarget label filled). Empty: the rule's own choice (a CompareRule blames its right side).
+        std::string target() const { return target_; }
+        void setTarget(const std::string& target) { target_ = target; }
+
         // True if the group passes. Otherwise false, with the reason in error.
         // @reflect ignore=true
         virtual bool validate(BindingGroup& group, std::string& error) const = 0;
+
+        // The binding to show a failure on when target() is empty.
+        // @reflect ignore=true
+        virtual std::string defaultTarget() const { return std::string(); }
 
     protected:
         bool reject(std::string& error, const std::string& fallback) const;
 
     private:
         std::string message_;
+        std::string target_;
     };
 
     enum class CompareOp { Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual };
@@ -528,6 +547,8 @@ namespace newui {
 
         // @reflect ignore=true
         bool validate(BindingGroup& group, std::string& error) const override;
+        // @reflect ignore=true
+        std::string defaultTarget() const override { return right_; }
     private:
         std::string left_;
         std::string right_;
@@ -605,7 +626,17 @@ namespace newui {
         // @reflect ignore=true
         const std::vector<std::string>& errors() const { return errors_; }
 
+        // Runs only the group's rules and shows each failure on the binding it blames (see
+        // GroupRule::target()), clearing the ones that now pass. A member binding does this itself after
+        // each successful commit(), so a mismatch shows up as soon as the user leaves a field. Does nothing
+        // while commit() is running. True if every rule passes.
+        // @reflect ignore=true
+        bool checkRules();
+
     private:
+        bool runRules();
+
+        bool committing_ = false;
         Frame* frame_ = nullptr;
         std::vector<GroupRule*> rules_;
         std::vector<std::string> errors_;
