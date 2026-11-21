@@ -16,7 +16,9 @@
 #include <json5/json5_input.hpp>
 #include <json5/json5_output.hpp>
 
+#include <algorithm>
 #include <any>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -576,7 +578,10 @@ namespace newui {
         }
 
         const size_t extLen = std::strlen(".svg");
-        const bool isSvg = path.size() >= extLen && _stricmp(path.c_str() + (path.size() - extLen), ".svg") == 0;
+        // ASCII case-insensitive suffix match (portable - no _stricmp).
+        const bool isSvg = path.size() >= extLen && std::equal(path.end() - extLen, path.end(), ".svg", [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+        });
         if (isSvg) {
             return renderSvgFile(path, width, height, outImage);
         }

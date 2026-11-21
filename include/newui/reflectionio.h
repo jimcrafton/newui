@@ -43,14 +43,18 @@ namespace newui::reflection {
     };
 
     // "YYYY-MM-DD", the local date ObjectWriter::write() is running at -
-    // localtime_s (not localtime()) since MSVC deprecates/warns on the
-    // latter as not thread-safe (it writes through a single static
-    // buffer); std::strftime still needs a real broken-down std::tm to
-    // format from either way.
+    // The thread-safe reentrant form (not localtime(), which writes
+    // through a single static buffer): localtime_s on Windows (its
+    // argument order is reversed from POSIX), localtime_r elsewhere.
+    // std::strftime still needs a real broken-down std::tm either way.
     inline std::string currentDateString() {
         std::time_t now = std::time(nullptr);
         std::tm local{};
+#ifdef _WIN32
         localtime_s(&local, &now);
+#else
+        localtime_r(&now, &local);
+#endif
 
         char buf[11];  // "YYYY-MM-DD\0"
         std::strftime(buf, sizeof(buf), "%Y-%m-%d", &local);

@@ -1,6 +1,8 @@
 #include "newui/graphics.h"
 #include "newui/svgimage.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -12,7 +14,10 @@ bool hasExtension(const std::string& path, const char* ext) {
     if (path.size() < extLen) {
         return false;
     }
-    return _stricmp(path.c_str() + (path.size() - extLen), ext) == 0;
+    // ASCII case-insensitive suffix match (portable - no _stricmp).
+    return std::equal(path.end() - extLen, path.end(), ext, [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+    });
 }
 
 }

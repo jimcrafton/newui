@@ -28,6 +28,24 @@ namespace newui::reflection {
     class Class;
     class Property;
 
+    // Forward declarations: templates below call these with dependent
+    // arguments, and two-phase lookup (Clang/GCC, and MSVC in /permissive-)
+    // only finds names declared before the template definition. The
+    // definitions are near the end of this file.
+    inline const Class* classinfo(std::type_index type);
+    inline const Class* classinfo(const std::string& name);
+
+    // Makes a type dependent on a template parameter so member access on it
+    // is checked at instantiation, not at template definition. Class and
+    // Property are only forward-declared where the field/property templates
+    // are defined; MSVC (without /permissive-) tolerates calling their members
+    // there, Clang/GCC do not.
+    namespace detail {
+        template<typename Tag, typename T> struct DependentHelper { using type = T; };
+    }
+    template<typename Tag, typename T>
+    using DependentOn = typename detail::DependentHelper<Tag, T>::type;
+
 
 
     class ClassWriter {
@@ -677,20 +695,20 @@ namespace newui::reflection {
         // readValue()'s scalar path otherwise - same two-way split
         // TypedProperty::write()/read() already use for the same reason.
         void write(void* instancePtr, ClassWriter* writer) const override {
-            if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
+            if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
                 nestedClazz->write(address(instancePtr), writer, name());
                 return;
             }
-            Property::writeValue(name(), typeid(ValueT), get(instancePtr), instancePtr, writer);
+            DependentOn<SourceT, Property>::writeValue(name(), typeid(ValueT), get(instancePtr), instancePtr, writer);
         }
 
         void read(void* instancePtr, ClassReader* reader) const override {
-            if (const Class* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
+            if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(typeid(ValueT)); nestedClazz != nullptr) {
                 void* nestedPtr = address(instancePtr);
                 if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
                     return;
                 }
-                const Class* resolvedClazz = reader->beginObject(name());
+                const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject(name());
                 if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                     bool onHeap = false;
                     reader->readInto(resolvedClazz, nestedPtr, onHeap);
@@ -699,7 +717,7 @@ namespace newui::reflection {
                 return;
             }
             std::any val;
-            Property::readValue(name(), typeid(ValueT), val, instancePtr, reader);
+            DependentOn<SourceT, Property>::readValue(name(), typeid(ValueT), val, instancePtr, reader);
             // val stays empty when ValueT is a type readValue() has no
             // case for at all (not a registered Class/Enum, not one of
             // its known scalar leaf types - e.g. a Delegate<> field
@@ -1227,7 +1245,7 @@ namespace newui::reflection {
         // value, just no live storage location backing it to take the
         // address of.
         void write(void* instancePtr, ClassWriter* writer) const override {
-            if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
+            if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
                 if (isAddressable()) {
                     if (void* nestedPtr = address(instancePtr); nestedPtr != nullptr) {
                         // Resolve the *actual* runtime Class of whatever's
@@ -1251,7 +1269,7 @@ namespace newui::reflection {
                         // came from. Falls back to nestedClazz itself if
                         // the pointee's real runtime type was never
                         // registered.
-                        const Class* runtimeClazz = classinfo(typeid(*static_cast<ValueT*>(nestedPtr)));
+                        const DependentOn<SourceT, Class>* runtimeClazz = classinfo(typeid(*static_cast<ValueT*>(nestedPtr)));
                         (runtimeClazz != nullptr ? runtimeClazz : nestedClazz)->write(nestedPtr, writer, this->name());
                     }
                 } else if constexpr (kCopyable) {
@@ -1288,7 +1306,7 @@ namespace newui::reflection {
         //     heap involved), then hand the finished value to the real
         //     setter by copy.
         void read(void* instancePtr, ClassReader* reader) const override {
-            if (const Class* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
+            if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(type()); nestedClazz != nullptr) {
                 // Unlike get()/set()/write()'s by-value branches, neither of
                 // these first two cases ever copy-constructs a ValueT - both
                 // only ever box a ValueT* (always copy-constructible
@@ -1328,7 +1346,7 @@ namespace newui::reflection {
                     //     type change has to replace the object, nothing
                     //     else can safely have been relying on the old
                     //     one's identity anyway.
-                    const Class* resolvedClazz = reader->beginObject(name());
+                    const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject(name());
                     if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                         void* existingPtr = address(instancePtr);
                         bool sameType = existingPtr != nullptr &&
@@ -1349,7 +1367,7 @@ namespace newui::reflection {
                         if (tryReadStringValue(nestedClazz, nestedPtr, name(), reader)) {
                             return;
                         }
-                        const Class* resolvedClazz = reader->beginObject(name());
+                        const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject(name());
                         if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                             bool onHeap = false;
                             reader->readInto(resolvedClazz, nestedPtr, onHeap);
@@ -1368,7 +1386,7 @@ namespace newui::reflection {
                         set(instancePtr, std::any(temp));
                         return;
                     }
-                    const Class* resolvedClazz = reader->beginObject(name());
+                    const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject(name());
                     if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                         void* tempPtr = &temp;
                         bool onHeap = false;
@@ -1865,10 +1883,10 @@ namespace newui::reflection {
                         // own childViews_ loop) before falling through to
                         // construct a proper replacement.
                         const Class* peekedClazz = reader->peekElementType();
-                        const Class* existingClazz = classinfo(typeid(*existing));
+                        const DependentOn<SourceT, Class>* existingClazz = classinfo(typeid(*existing));
                         if (peekedClazz == nullptr || peekedClazz == existingClazz) {
-                            if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                                const Class* resolvedClazz = reader->beginObject("");
+                            if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
+                                const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject("");
                                 if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                                     void* existingPtr = existing;
                                     bool onHeap = false;
@@ -1940,8 +1958,8 @@ namespace newui::reflection {
                 // (same assumption writeItem()'s own runtime-type lookup
                 // above already relies on for the write side).
                 using PointeeT = std::remove_pointer_t<ElementT>;
-                if (const Class* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
-                    const Class* resolvedClazz = reader->beginObject("");
+                if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(typeid(PointeeT)); nestedClazz != nullptr) {
+                    const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject("");
                     void* raw = nullptr;
                     if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                         bool onHeap = false;
@@ -1953,10 +1971,10 @@ namespace newui::reflection {
                     }
                 }
                 return std::any();
-            } else if (const Class* nestedClazz = classinfo(elementType()); nestedClazz != nullptr) {
+            } else if (const DependentOn<SourceT, Class>* nestedClazz = classinfo(elementType()); nestedClazz != nullptr) {
                 if constexpr (std::is_default_constructible_v<ElementT> && std::is_copy_constructible_v<ElementT>) {
                     ElementT value{};
-                    const Class* resolvedClazz = reader->beginObject("");
+                    const DependentOn<SourceT, Class>* resolvedClazz = reader->beginObject("");
                     if (resolvedClazz != nullptr && resolvedClazz->isOrDerivesFrom(nestedClazz)) {
                         void* valuePtr = &value;
                         bool onHeap = false;
@@ -3307,7 +3325,7 @@ namespace newui::reflection {
             static_assert(std::is_base_of_v<BaseT, T>,
                 "ClassBuilder<T>::base<BaseT>(): BaseT must actually be a base class of T");
 
-            const Class* baseClass = ReflectionRegistry::getClass(std::type_index(typeid(BaseT)));
+            const Class* baseClass = classinfo(std::type_index(typeid(BaseT)));
             if (!baseClass) {
                 throw std::logic_error(
                     "ClassBuilder<" + demangleTypeName(typeid(T)) + ">::base<" + demangleTypeName(typeid(BaseT)) +

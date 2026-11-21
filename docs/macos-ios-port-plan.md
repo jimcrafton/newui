@@ -145,7 +145,9 @@ Do this on Windows first with `clang-cl`, then on macOS with Apple Clang. Known 
   * libclang: pip `libclang` wheel, or Xcode's
     `$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/libclang.dylib`.
   * It must parse headers with the target's flags (`-isysroot $(xcrun --sdk macosx|iphoneos --show-sdk-path)`,
-    target triple, the `NEWUI_PLATFORM_*` defines). Otherwise it parses the Windows branch.
+    `-isystem <SDK>/usr/include/c++/v1`, target triple). Platform macros come from the compiler itself
+    (`_WIN32`, `__APPLE__`, `TARGET_OS_*`), not CMake defines, so a correct target is enough to avoid parsing
+    the Windows branch. Verified: without the sysroot flags libclang can't find `<cstdint>`.
   * `reflectgen_sizeof_probe` is built and **run** at build time. That's impossible when
     cross-compiling for iOS. Darwin arm64 iOS and macOS share the LP64 ABI, so build the
     probe as a host macOS tool (`ExternalProject` or a separate host build), or emit sizes from
@@ -505,7 +507,7 @@ through the Windows registry into `BLFontFace` for Blend2D-drawn labels and `mea
 |---|---|---|---|
 | `Bundle` resources | `<exe dir>/Resources`, `Info.json` | `NSBundle.mainBundle.resourcePath` (`Contents/Resources`); name/version from `Info.plist` (`CFBundleName`, `CFBundleShortVersionString`), keep `Info.json` as fallback | bundle root |
 | Settings (User) | `%APPDATA%\company\app` | `~/Library/Application Support/<bundle id or company/app>` | app container `Library/Application Support` |
-| Settings (Machine) ⚠ | `%PROGRAMDATA%` | `/Library/Application Support` is **not writable** by normal users: read-only, or fall back to user scope with a warning | no machine scope: map to user |
+| Settings (Machine) | `%PROGRAMDATA%` | `/Users/Shared/<company>/<app>` (shared, writable; sandboxed apps fall back to user scope) | no machine scope: map to user |
 | `FileWatcher` | `ReadDirectoryChangesW` | FSEvents (`kFSEventStreamCreateFlagFileEvents`, latency ~0.1 s; events are coalesced, so tests that expect exact event sequences will need loosening) | `dispatch_source` `DISPATCH_SOURCE_TYPE_VNODE` per file/dir (no recursive watch) |
 | Temp/known folders | `GetTempPathW`, `SHGetKnownFolderPath` | `NSTemporaryDirectory`, `NSFileManager URLsForDirectory:` | same |
 | Paths | `\` separators, `C:` checks in `fontmanager.cpp` `isAbsolutePath` | use `std::filesystem` everywhere | same |
@@ -534,6 +536,8 @@ through the Windows registry into `BLFontFace` for Blend2D-drawn labels and `mea
 * Pixel and metric tests: per-platform expected values for text-heavy cases (see 4.4).
 
 ## 5. Phased roadmap
+
+Phase 0 is broken down step by step in [phase0-portability-plan.md](phase0-portability-plan.md).
 
 | Phase | Deliverable | Exit criteria |
 |---|---|---|
@@ -565,12 +569,17 @@ through the Windows registry into `BLFontFace` for Blend2D-drawn labels and `mea
 10. **Touch** (4.5): the input model is mouse-first; scrolling and hit-target sizes decide whether
     iOS is usable.
 
-## 7. Open decisions
+## 7. Decisions
 
-* Minimum OS versions (proposed macOS 12 / iOS 16).
-* Coordinate unit: device pixels (recommended, matches Windows) vs points.
-* Should closing the last Frame quit on macOS? (proposed: yes, configurable).
-* MenuBar on macOS: global menu bar only, or keep the in-window row as an option?
-* Settings storage: JSON5 files in Application Support (portable, recommended) vs `NSUserDefaults`.
-* Machine-scope settings on macOS: read-only or fall back to user scope?
-* reflectgen sizeof probe for iOS: host-built probe or compile-time tables?
+Decided (2026-11-20):
+
+* Minimum OS versions: **macOS 12, iOS 16**.
+* Coordinate unit: **device pixels** (same as Windows; `dpiScale` = backing scale factor).
+* Closing the last Frame **quits the app** on macOS.
+* macOS menu bar: **global menu bar only**. `MenuBar` mirrors into `NSApp.mainMenu` and the in-window row is hidden; no in-window option.
+
+* Settings storage: **JSON5 files in Application Support** (same format and API as Windows).
+* Machine-scope settings on macOS: **`/Users/Shared/<company>/<app>/settings.json`**, the closest match to `%PROGRAMDATA%` (shared by all users, writable). iOS and sandboxed macOS apps fall back to the user file.
+* reflectgen sizeof probe: **skipped when targeting iOS**. It only feeds an optional memory-footprint estimate in build output and doesn't affect generated code. Revisit with a host-built probe if the estimate is missed.
+
+Nothing is open now.
