@@ -155,3 +155,8 @@ Slice 2a verified on Windows. Slice 3 in tree, Windows build pending: `Frame::fr
 `enum_format_etc.h` moved to `include/newui/win32/`. `RootView::comDropTarget_` is a `std::shared_ptr<void>` holding a
 `DropTargetRegistration` (defined in `rootview.cpp`). Not yet done from 3.5: `ClipboardScope`/`clipboardmgr.h` (UINT, HWND, HGLOBAL
 types) and `MenuItem::bitmap()` (HBITMAP).
+
+3.5 OLE part verified on Windows. 3.5 clipboard + bitmap in tree, Windows build pending: `clipboardmgr.h` uses `ClipboardFormat`
+(`std::uint32_t`) instead of `UINT`, `handleRenderAllFormats(NativeWindowHandle)`; the `detail::` HGLOBAL/`ClipboardScope`/CF_HTML helpers moved to
+`include/newui/win32/clipboard_win32.h`; `MenuItem::bitmap()/setBitmap()` use new `NativeBitmapHandle` (`toNativeBitmap/toHBITMAP`).
+Then remaining before 3.3: 3.6 (peers, WndProc, `Application::instanceHandle()`, private HWND members, `getTarget(HWND)`), 3.7.

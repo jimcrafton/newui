@@ -1,5 +1,6 @@
 #include "newui/clipboardmgr.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/clipboard_win32.h"
 #include "newui/frame.h"
 #include "newui/rootview.h"
 

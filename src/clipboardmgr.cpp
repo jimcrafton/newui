@@ -1,5 +1,6 @@
 #include "newui/clipboardmgr.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/clipboard_win32.h"
 
 #include "newui/dibimage.h"
 #include "newui/rootview.h"
@@ -281,7 +282,8 @@ void ClipboardManager::handleRenderFormat(UINT format) {
     }
 }
 
-void ClipboardManager::handleRenderAllFormats(HWND owner) {
+void ClipboardManager::handleRenderAllFormats(NativeWindowHandle ownerNative) {
+    HWND owner = newui::win32::toHWND(ownerNative);
     auto& renderers = instance().delayedRenderers_;
     if (renderers.empty()) {
         return;

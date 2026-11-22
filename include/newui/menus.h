@@ -4,6 +4,7 @@
 #include "newui/action.h"
 #include "newui/delegate.h"
 #include "newui/geometry.h"
+#include "newui/platform.h"
 #include "newui/subview.h"
 
 #include <blend2d/blend2d.h>
@@ -171,9 +172,9 @@ namespace newui {
         // without MFT_OWNERDRAW's dark-mode caveat above. Not reflected:
         // a runtime handle can't be saved.
         //@reflect ignore=true
-        HBITMAP bitmap() const { return bitmap_; }
+        NativeBitmapHandle bitmap() const { return bitmap_; }
         //@reflect ignore=true
-        void setBitmap(HBITMAP bitmap) { bitmap_ = bitmap; }
+        void setBitmap(NativeBitmapHandle bitmap) { bitmap_ = bitmap; }
 
         // Fired from Frame's WM_MEASUREITEM (via DispatchMenuMeasureItem())
         // only when ownerDrawn is set. outSize arrives pre-filled with a
@@ -299,7 +300,7 @@ namespace newui {
         int radioGroup_ = -1;
         std::string shortcutText_;
         bool ownerDrawn_ = false;
-        HBITMAP bitmap_ = nullptr;
+        NativeBitmapHandle bitmap_ = nullptr;
     };
 
     // Builds a real, transient native Win32 popup menu (HMENU) from an

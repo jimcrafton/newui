@@ -39,5 +39,8 @@ namespace newui {
         inline NativeInstanceHandle toNativeInstance(HINSTANCE instance) { return static_cast<NativeInstanceHandle>(instance); }
         inline HINSTANCE toHINSTANCE(NativeInstanceHandle handle) { return static_cast<HINSTANCE>(handle); }
 
+        inline NativeBitmapHandle toNativeBitmap(HBITMAP bitmap) { return static_cast<NativeBitmapHandle>(bitmap); }
+        inline HBITMAP toHBITMAP(NativeBitmapHandle handle) { return static_cast<HBITMAP>(handle); }
+
     } // namespace win32
 } // namespace newui

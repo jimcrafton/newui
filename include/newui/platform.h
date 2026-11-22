@@ -50,4 +50,7 @@ namespace newui {
     // Opaque application/module instance: HINSTANCE on Windows. Other platforms have no equivalent; pass nullptr.
     using NativeInstanceHandle = void*;
 
+    // Opaque native bitmap handle: HBITMAP on Windows. Not owned by whoever holds it unless a class says so.
+    using NativeBitmapHandle = void*;
+
 } // namespace newui

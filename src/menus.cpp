@@ -315,7 +315,7 @@ void ContextMenu::buildMenuLevel(NativeMenuHandle hmenu, MenuItem& parentItem) {
 
                 if (item.bitmap() != nullptr) {
                     mii.fMask |= MIIM_BITMAP;
-                    mii.hbmpItem = item.bitmap();
+                    mii.hbmpItem = win32::toHBITMAP(item.bitmap());
                 }
             }
 

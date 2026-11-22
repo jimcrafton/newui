@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/platform.h>
 
 #include <blend2d/blend2d.h>
 
@@ -16,98 +17,12 @@
 
 namespace newui {
 
+// Platform clipboard format id (a registered CF_* value on Windows).
+using ClipboardFormat = std::uint32_t;
+
 class View;
 
-namespace detail {
 
-    // Deleter for a GlobalAlloc()'d HGLOBAL - GlobalFree() is the natural
-    // std::unique_ptr deleter for it, since HGLOBAL is itself already an
-    // opaque pointer type (DECLARE_HANDLE).
-    struct GlobalMemoryDeleter {
-        void operator()(HGLOBAL handle) const {
-            if (handle) {
-                ::GlobalFree(handle);
-            }
-        }
-    };
-
-    // Move-only RAII ownership of a GlobalAlloc()'d HGLOBAL - a plain
-    // std::unique_ptr alias rather than a hand-rolled class, since
-    // GlobalFree() is exactly a unique_ptr deleter shape already.
-    // release() (inherited from unique_ptr) is how a caller hands
-    // ownership off to something that takes over ownership itself, e.g.
-    // SetClipboardData().
-    using GlobalMemoryHandle = std::unique_ptr<std::remove_pointer_t<HGLOBAL>, GlobalMemoryDeleter>;
-
-    // Calls GlobalAlloc(flags, size). Throws std::runtime_error if the
-    // allocation fails.
-    GlobalMemoryHandle allocGlobalMemory(UINT flags, std::size_t size);
-
-    // Deleter for a GlobalLock()'d pointer. GlobalUnlock() takes the
-    // *handle*, not the locked pointer it returned - unlike
-    // GlobalMemoryDeleter above, this deleter has to carry that handle
-    // itself since std::unique_ptr's stored pointer alone isn't enough
-    // to call it.
-    class GlobalMemoryUnlocker {
-    public:
-        explicit GlobalMemoryUnlocker(HGLOBAL handle) : handle_(handle) {}
-
-        void operator()(void*) const { ::GlobalUnlock(handle_); }
-
-    private:
-        HGLOBAL handle_;
-    };
-
-    // Move-only RAII scope for a GlobalLock() taken on some HGLOBAL -
-    // does not own that handle itself, only the lock. get() returns the
-    // locked pointer; cast it to whatever type the caller is reading or
-    // writing through.
-    using GlobalMemoryLock = std::unique_ptr<void, GlobalMemoryUnlocker>;
-
-    // Calls GlobalLock(handle). Throws std::runtime_error if it returns
-    // nullptr.
-    GlobalMemoryLock lockGlobalMemory(HGLOBAL handle);
-
-    // CF_HTML's real payload isn't raw HTML - it's a fixed-field ASCII
-    // header (Version/StartHTML/EndHTML/StartFragment/EndFragment, each
-    // a 10-digit zero-padded byte offset into the *whole* payload)
-    // followed by the actual markup wrapped in <!--StartFragment-->/
-    // <!--EndFragment--> comments. Pure data transforms, no clipboard
-    // interaction - kept in detail:: (like the GlobalMemory* wrappers
-    // above) so they're directly unit-testable without touching a real
-    // clipboard.
-    std::vector<std::uint8_t> wrapCfHtml(const std::vector<std::uint8_t>& rawHtml);
-
-    // Reverse of wrapCfHtml() - extracts just the fragment between
-    // StartFragment/EndFragment's offsets. Returns cfHtmlBytes unchanged
-    // if the expected header tokens aren't found - a real defensive
-    // need, not speculative, since nothing guarantees another
-    // application's own "HTML Format" payload is well-formed.
-    std::vector<std::uint8_t> unwrapCfHtml(const std::vector<std::uint8_t>& cfHtmlBytes);
-
-    // RAII wrapper around OpenClipboard()/CloseClipboard(). The clipboard
-    // is a single, process-wide, briefly-lockable resource another
-    // process can be holding at the moment this is constructed - the
-    // constructor retries a few times with a short delay before giving
-    // up, since a competing OpenClipboard() is normally released almost
-    // immediately. Unlike the two wrappers above, there's no pointer-shaped
-    // resource here to hand off to std::unique_ptr - just a scope to
-    // close on exit - so this stays a plain RAII class.
-    class ClipboardScope {
-    public:
-        // Tries OpenClipboard(owner) up to maxAttempts times, waiting
-        // retryDelay between attempts. Throws std::runtime_error if every
-        // attempt fails.
-        explicit ClipboardScope(HWND owner = nullptr, unsigned maxAttempts = 5,
-            std::chrono::milliseconds retryDelay = std::chrono::milliseconds(10));
-
-        ~ClipboardScope();
-
-        ClipboardScope(const ClipboardScope&) = delete;
-        ClipboardScope& operator=(const ClipboardScope&) = delete;
-    };
-
-}
 
 // Public clipboard API - a static-method utility class (same call shape
 // as UIColorManager) built on the RAII wrappers in newui::detail above.
@@ -145,20 +60,20 @@ public:
     static bool getText(std::u16string& outText);
 
     // Thin wrapper over RegisterClipboardFormatW() - registers formatName
-    // (an arbitrary string, e.g. a MIME type) and returns its UINT atom,
+    // (an arbitrary string, e.g. a MIME type) and returns its ClipboardFormat atom,
     // or 0 on failure.
-    static UINT registerCustomFormat(const std::wstring& formatName);
+    static ClipboardFormat registerCustomFormat(const std::wstring& formatName);
 
     // Claims clipboard ownership and writes data under format (typically
     // one registerCustomFormat() returned) - same owner/EmptyClipboard()
     // semantics as setText(). Returns false if the clipboard couldn't be
     // opened or the allocation failed.
-    static bool setCustomData(UINT format, const std::vector<std::uint8_t>& data, View* owner = nullptr);
+    static bool setCustomData(ClipboardFormat format, const std::vector<std::uint8_t>& data, View* owner = nullptr);
 
     // Reads the raw bytes currently on the clipboard under format into
     // outData, leaving it unmodified and returning false if the
     // clipboard couldn't be opened or holds nothing under that format.
-    static bool getCustomData(UINT format, std::vector<std::uint8_t>& outData);
+    static bool getCustomData(ClipboardFormat format, std::vector<std::uint8_t>& outData);
 
     // Supplied to setDelayedRenderer() to produce format's real data only
     // once some other application actually asks for it, instead of
@@ -176,7 +91,7 @@ public:
     // never touches handleRenderFormat()/handleRenderAllFormats() below
     // directly - RootView::handleMessage() forwards the two Win32
     // messages there on this window's behalf.
-    static bool setDelayedRenderer(UINT format, DelayedRenderer renderer, View* owner);
+    static bool setDelayedRenderer(ClipboardFormat format, DelayedRenderer renderer, View* owner);
 
     // Removes format's registered DelayedRenderer, if any - e.g. once its
     // owning window is destroyed and the promised data can never
@@ -185,14 +100,14 @@ public:
     // renderer registered by code that's since gone away (e.g.
     // capturing state by reference) would sit here indefinitely, ready
     // to be invoked by a later, unrelated handleRenderAllFormats() call.
-    static void clearDelayedRenderer(UINT format);
+    static void clearDelayedRenderer(ClipboardFormat format);
 
     // RootView::handleMessage()'s WM_RENDERFORMAT case calls this with
     // wParam - renders format via its registered DelayedRenderer (a
     // no-op if none is registered) and hands the bytes straight to
     // SetClipboardData(), without opening the clipboard first - matching
     // WM_RENDERFORMAT's own documented contract.
-    static void handleRenderFormat(UINT format);
+    static void handleRenderFormat(ClipboardFormat format);
 
     // RootView::handleMessage()'s WM_RENDERALLFORMATS case calls this
     // with its own windowHandle() - opens the clipboard, renders every
@@ -200,7 +115,7 @@ public:
     // format is actually available once owner is destroyed (Win32's own
     // documented contract for this message). A no-op if nothing is
     // registered.
-    static void handleRenderAllFormats(HWND owner);
+    static void handleRenderAllFormats(NativeWindowHandle owner);
 
     // --- Phase 4: MIME type mapping layer ---
     // A MIME-string-shaped view of the clipboard ("text/html",
@@ -216,7 +131,7 @@ public:
     // second "text/html"-named registration) or a freshly
     // RegisterClipboardFormatW()'d one otherwise. Cached both directions
     // after the first call for a given mimeType.
-    static UINT getOrRegisterFormat(const std::wstring& mimeType);
+    static ClipboardFormat getOrRegisterFormat(const std::wstring& mimeType);
 
     // Reverse of getOrRegisterFormat() - the MIME string formatId was
     // registered/resolved under. Falls back to GetClipboardFormatNameW()
@@ -225,7 +140,7 @@ public:
     // clipboard), caching that result too. Returns "" if formatId has no
     // string name at all (a plain predefined numeric format, e.g.
     // CF_BITMAP).
-    static std::wstring formatName(UINT formatId);
+    static std::wstring formatName(ClipboardFormat formatId);
 
     // Every MIME type currently resolvable on the clipboard -
     // EnumClipboardFormats() resolved through formatName(), skipping any
@@ -312,13 +227,13 @@ private:
 
     // Backs setDelayedRenderer()/handleRenderFormat()/
     // handleRenderAllFormats() - see their own doc comments above.
-    std::unordered_map<UINT, DelayedRenderer> delayedRenderers_;
+    std::unordered_map<ClipboardFormat, DelayedRenderer> delayedRenderers_;
 
     // Backs getOrRegisterFormat()/formatName() - pre-seeded by
     // registerStandardMappings() at construction, grown lazily
     // afterward.
-    std::unordered_map<std::wstring, UINT> mimeToFormat_;
-    std::unordered_map<UINT, std::wstring> formatToMime_;
+    std::unordered_map<std::wstring, ClipboardFormat> mimeToFormat_;
+    std::unordered_map<ClipboardFormat, std::wstring> formatToMime_;
 };
 
 }
