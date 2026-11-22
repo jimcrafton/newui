@@ -477,9 +477,9 @@ TEST(TextControlUndo, APlainTextModelHasNoHistory) {
 
 namespace {
     std::u16string clipboardText() {
-        std::u16string out;
+        std::wstring out;   // ClipboardManager moves to u16string in step 2.4
         newui::ClipboardManager::getText(out);
-        return out;
+        return newui::fromWide(out);
     }
 }
 
@@ -510,7 +510,7 @@ TEST(TextControlClipboard, CutRemovesTheSelectionAndPlacesTheCaretWhereItWas) {
 TEST(TextControlClipboard, PasteReplacesTheSelectionOrInsertsAtTheCaretAndIsOneUndoStep) {
     newui::TextControl control;
     control.setModel(std::make_unique<HistoryTextModel>());
-    ASSERT_TRUE(newui::ClipboardManager::setText(u"XYZ"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(newui::toWideString(u"XYZ")));
     control.setText(u"abcdef");
     control.selection().setRange(TextRange(1, 2));
     ASSERT_TRUE(control.paste());
@@ -529,7 +529,7 @@ TEST(TextControlClipboard, PasteReplacesTheSelectionOrInsertsAtTheCaretAndIsOneU
 
 TEST(TextControlClipboard, PasteIntoASingleLineFieldTurnsLineBreaksIntoSpaces) {
     newui::TextField field;
-    ASSERT_TRUE(newui::ClipboardManager::setText(u"a\r\nb\nc\rd"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(newui::toWideString(u"a\r\nb\nc\rd")));
     ASSERT_TRUE(field.paste());
     EXPECT_EQ(field.text(), u"a b c d");
 }
@@ -537,7 +537,7 @@ TEST(TextControlClipboard, PasteIntoASingleLineFieldTurnsLineBreaksIntoSpaces) {
 TEST(TextControlClipboard, PasteWithNoTextOnTheClipboardDoesNothing) {
     newui::TextControl control;
     control.setText(u"abc");
-    ASSERT_TRUE(newui::ClipboardManager::setText(u""));
+    ASSERT_TRUE(newui::ClipboardManager::setText(newui::toWideString(u"")));
     EXPECT_FALSE(control.paste());
     EXPECT_EQ(control.text(), u"abc");
 }
@@ -546,7 +546,7 @@ TEST(TextControlClipboard, SecureEntryNeverCopiesAndReadOnlyNeverChanges) {
     newui::TextControl secret;
     secret.setText(u"hunter2");
     secret.selection().setRange(TextRange(0, 7));
-    ASSERT_TRUE(newui::ClipboardManager::setText(u"untouched"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(newui::toWideString(u"untouched")));
     secret.inputTraits().setSecureTextEntry(true);
     EXPECT_FALSE(secret.copy());
     EXPECT_FALSE(secret.cut());
