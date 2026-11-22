@@ -401,20 +401,11 @@ namespace newui::reflection {
                 val = str;
             }
             else if (valType == typeid(std::u16string)) {
-                // e.g. TextField::text() - UTF-8 in the file, UTF-16 in memory
+                // e.g. TextField::text() - the reader's/writer's string primitives are
+                // UTF-8-only, so a UTF-16 property is converted at this one boundary
                 std::string str;
                 reader->readString(valName, str);
                 val = utf8ToUtf16(str);
-            }
-            else if (valType == typeid(std::wstring)) {
-                // (legacy wide-string properties) e.g. TextField::text() - the reader's own readString()/
-                // writeString() are UTF-8-only, so a wide-string property
-                // round-trips through newui::utf8ToWide()/wideToUtf8()
-                // (utils.h) at this one boundary rather than needing its
-                // own reader/writer primitives.
-                std::string str;
-                reader->readString(valName, str);
-                val = utf8ToWide(str);
             }
             else if (valType == typeid(bool)) {
                 bool b;
@@ -486,9 +477,6 @@ namespace newui::reflection {
         }
         else if (valType == typeid(std::u16string)) {
             writer->writeString(valName, utf16ToUtf8(std::any_cast<std::u16string>(val)));
-        }
-        else if (valType == typeid(std::wstring)) {
-            writer->writeString(valName, wideToUtf8(std::any_cast<std::wstring>(val)));
         }
         else if (valType == typeid(bool)) {
             writer->writeBool(valName, std::any_cast<bool>(val));

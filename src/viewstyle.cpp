@@ -9,6 +9,7 @@
 #include "newui/rootview.h"
 #include "newui/color.h"
 #include "newui/themedata.h"
+#include "newui/utils.h"
 #include "newui/uicolormanager.h"
 
 #include "newui/shapes.h"
@@ -1126,51 +1127,51 @@ namespace newui {
 			bool horizontal = true;  // Groove
 		};
 
-		PartInfo partInfo(const std::wstring& cls, int part) {
+		PartInfo partInfo(const std::string& cls, int part) {
 			using L = PartLook;
-			if (cls == L"BUTTON") {
+			if (cls == "BUTTON") {
 				if (part == BP_PUSHBUTTON) return {L::Box, 4.0f};
 				if (part == BP_CHECKBOX) return {L::Check};
 				if (part == BP_RADIOBUTTON) return {L::Radio};
 				if (part == BP_GROUPBOX) return {L::Frame, 4.0f};
-			} else if (cls == L"TOOLBAR") {
+			} else if (cls == "TOOLBAR") {
 				if (part == TP_BUTTON || part == TP_SPLITBUTTON) return {L::Box, 4.0f};
 				if (part == TP_SPLITBUTTONDROPDOWN) return {L::Arrow, 4.0f};
-			} else if (cls == L"TRACKBAR") {
+			} else if (cls == "TRACKBAR") {
 				if (part == TKP_TICS || part == TKP_TICSVERT) return {L::Box};
 				if (part == TKP_TRACK) return {L::Groove, 0.0f, true};
 				if (part == TKP_TRACKVERT) return {L::Groove, 0.0f, false};
 				if (part == TKP_THUMB || part == TKP_THUMBVERT) return {L::Box, 3.0f};
-			} else if (cls == L"SCROLLBAR") {
+			} else if (cls == "SCROLLBAR") {
 				if (part == SBP_THUMBBTNHORZ || part == SBP_THUMBBTNVERT) return {L::Box, 3.0f};
 				if (part == SBP_LOWERTRACKHORZ || part == SBP_UPPERTRACKHORZ || part == SBP_LOWERTRACKVERT || part == SBP_UPPERTRACKVERT) return {L::Box};
 				if (part == SBP_ARROWBTN) return {L::Arrow, 2.0f};
-			} else if (cls == L"PROGRESS") {
+			} else if (cls == "PROGRESS") {
 				if (part == PP_BAR || part == PP_BARVERT || part == PP_FILL || part == PP_FILLVERT) return {L::Box, 3.0f};
-			} else if (cls == L"TAB") {
+			} else if (cls == "TAB") {
 				if (part == TABP_TABITEM || part == TABP_TABITEMLEFTEDGE || part == TABP_TABITEMRIGHTEDGE || part == TABP_TABITEMBOTHEDGE ||
 					part == TABP_TOPTABITEM || part == TABP_TOPTABITEMLEFTEDGE || part == TABP_TOPTABITEMRIGHTEDGE || part == TABP_TOPTABITEMBOTHEDGE) return {L::Box, 3.0f};
 				if (part == TABP_PANE) return {L::Box};
-			} else if (cls == L"EDIT") {
+			} else if (cls == "EDIT") {
 				if (part == EP_EDITTEXT) return {L::Box, 4.0f};
-			} else if (cls == L"LISTVIEW") {
+			} else if (cls == "LISTVIEW") {
 				if (part == LVP_LISTITEM) return {L::Box, 2.0f};
-			} else if (cls == L"TREEVIEW") {
+			} else if (cls == "TREEVIEW") {
 				if (part == TVP_TREEITEM) return {L::Box, 2.0f};
 				if (part == TVP_GLYPH) return {L::Triangle};
-			} else if (cls == L"HEADER") {
+			} else if (cls == "HEADER") {
 				if (part == HP_HEADERITEM) return {L::Box};
 				if (part == HP_HEADERSORTARROW) return {L::Triangle};
-			} else if (cls == L"SPIN") {
+			} else if (cls == "SPIN") {
 				if (part == SPNP_UP || part == SPNP_DOWN) return {L::Arrow, 2.0f};
-			} else if (cls == L"MENU") {
+			} else if (cls == "MENU") {
 				if (part == MENU_BARITEM || part == MENU_BARBACKGROUND) return {L::Box};
-			} else if (cls == L"STATUS") {
+			} else if (cls == "STATUS") {
 			if (part == SP_PANE) return {L::Box};
-			} else if (cls == L"REBAR") {
+			} else if (cls == "REBAR") {
 			if (part == RP_BAND) return {L::Box};
 			if (part == RP_CHEVRON || part == RP_CHEVRONVERT) return {L::Arrow, 2.0f};
-			} else if (cls == L"TOOLTIP") {
+			} else if (cls == "TOOLTIP") {
 				if (part == TTP_STANDARD) return {L::Box, 3.0f};
 			}
 			return {};
@@ -1197,9 +1198,9 @@ namespace newui {
 			return false;
 		}
 		// The explorer-style list and tree skins are recorded in the theme file under their plain class names.
-		std::wstring cls = themeClassName_;
-		if (cls == L"Explorer::ListView") cls = L"LISTVIEW";
-		else if (cls == L"Explorer::TreeView") cls = L"TREEVIEW";
+		std::string cls = themeClassName_;
+		if (cls == "Explorer::ListView") cls = "LISTVIEW";
+		else if (cls == "Explorer::TreeView") cls = "TREEVIEW";
 
 		const int part = partId();
 		const int state = stateId(highlighted);
@@ -1279,12 +1280,12 @@ namespace newui {
 		// Glyphs: scrollbar and spin arrows (direction from the part and state ids), tree expanders and header sort arrows.
 		if (info.look == PartLook::Arrow || info.look == PartLook::Triangle) {
 			int direction = 0;
-			if (cls == L"SCROLLBAR") direction = state >= 17 ? (state - 17) % 4 : (state - 1) / 4;  // up, down, left, right
-			else if (cls == L"SPIN") direction = part == SPNP_UP ? 0 : 1;
-			else if (cls == L"TOOLBAR") direction = 1;
-			else if (cls == L"REBAR") direction = part == RP_CHEVRON ? 3 : 1;
-			else if (cls == L"TREEVIEW") direction = state == GLPS_OPENED ? 1 : 3;
-			else if (cls == L"HEADER") direction = state == HSAS_SORTEDUP ? 0 : 1;
+			if (cls == "SCROLLBAR") direction = state >= 17 ? (state - 17) % 4 : (state - 1) / 4;  // up, down, left, right
+			else if (cls == "SPIN") direction = part == SPNP_UP ? 0 : 1;
+			else if (cls == "TOOLBAR") direction = 1;
+			else if (cls == "REBAR") direction = part == RP_CHEVRON ? 3 : 1;
+			else if (cls == "TREEVIEW") direction = state == GLPS_OPENED ? 1 : 3;
+			else if (cls == "HEADER") direction = state == HSAS_SORTEDUP ? 0 : 1;
 			ctx.set_fill_style(mark.toBLRgba32());
 			fillTriangle(ctx, size.width * 0.5f, size.height * 0.5f, minDim * 0.45f, direction);
 		}
@@ -1310,7 +1311,7 @@ namespace newui {
 		}
 
 		if (theme_ == nullptr) {
-			theme_ = ::OpenThemeData(hwnd, themeClassName_.c_str());
+			theme_ = ::OpenThemeData(hwnd, utf8ToWide(themeClassName_).c_str());
 			if (theme_ == nullptr) {
 				return;  // theming unavailable (no comctl32 v6 manifest, ...) - draw nothing rather than guess a fallback
 			}

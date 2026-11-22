@@ -41,7 +41,6 @@ namespace newui {
             if (a.type() == typeid(float)) { out = static_cast<double>(std::any_cast<float>(a)); return true; }
             if (a.type() == typeid(double)) { out = std::any_cast<double>(a); return true; }
             if (a.type() == typeid(std::string)) { out = std::any_cast<std::string>(a); return true; }
-            if (a.type() == typeid(std::wstring)) { out = wideToUtf8(std::any_cast<std::wstring>(a)); return true; }
             if (a.type() == typeid(std::u16string)) { out = utf16ToUtf8(std::any_cast<std::u16string>(a)); return true; }
             return readIntegral<int>(a, out) || readIntegral<unsigned int>(a, out)
                 || readIntegral<long>(a, out) || readIntegral<unsigned long>(a, out)
@@ -141,9 +140,6 @@ namespace newui {
             }
             else if (type == typeid(std::string)) {
                 out = asText(v);
-            }
-            else if (type == typeid(std::wstring)) {
-                out = utf8ToWide(asText(v));
             }
             else if (type == typeid(std::u16string)) {
                 out = utf8ToUtf16(asText(v));
@@ -315,9 +311,6 @@ namespace newui {
 
         std::size_t characterCount(const std::any& value, bool& ok) {
             ok = true;
-            if (const auto* w = std::any_cast<std::wstring>(&value)) {
-                return w->size();
-            }
             if (const auto* u = std::any_cast<std::u16string>(&value)) {
                 return u->size();
             }
@@ -326,7 +319,7 @@ namespace newui {
                 ok = false;
                 return 0;
             }
-            return utf8ToWide(text).size();
+            return utf8ToUtf16(text).size();
         }
 
     }
@@ -341,8 +334,7 @@ namespace newui {
             return reject(error, "A value is required");
         }
         std::string text;
-        if ((value.type() == typeid(std::string) || value.type() == typeid(std::wstring)
-            || value.type() == typeid(std::u16string))
+        if ((value.type() == typeid(std::string) || value.type() == typeid(std::u16string))
             && textOf(value, text) && trimmed(text).empty()) {
             return reject(error, "A value is required");
         }

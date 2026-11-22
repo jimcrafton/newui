@@ -46,7 +46,7 @@ TEST(ThemeData, StartsUnloadedAndEveryLookupMisses) {
 
     newui::Color color;
     EXPECT_FALSE(newui::ThemeData::instance().tryColorFor(newui::UIColorRole::WindowBackground, color));
-    EXPECT_EQ(newui::ThemeData::instance().tryPartData(L"BUTTON", 1, 1), nullptr);
+    EXPECT_EQ(newui::ThemeData::instance().tryPartData("BUTTON", 1, 1), nullptr);
 }
 
 TEST(ThemeData, LoadReturnsFalseAndStaysUnloadedForAMissingFile) {
@@ -93,7 +93,7 @@ TEST(ThemeData, LoadParsesRolesAndPartsAndReloadRepeatsTheSamePath) {
     // never resolvable.
     EXPECT_FALSE(newui::ThemeData::instance().tryColorFor(newui::UIColorRole::ControlBackground, color));
 
-    const newui::ThemePartData* buttonData = newui::ThemeData::instance().tryPartData(L"BUTTON", 1, 1);
+    const newui::ThemePartData* buttonData = newui::ThemeData::instance().tryPartData("BUTTON", 1, 1);
     ASSERT_NE(buttonData, nullptr);
     ASSERT_TRUE(buttonData->size.has_value());
     EXPECT_FLOAT_EQ(buttonData->size->width, 75.0f);
@@ -104,13 +104,13 @@ TEST(ThemeData, LoadParsesRolesAndPartsAndReloadRepeatsTheSamePath) {
     // The "0" state - parts with no real state enum (see themesgen.py's
     // own notes on STATUS/SP_PANE) - resolves via resolveSymbol()'s raw-
     // integer fallback, not a symbol-table entry.
-    const newui::ThemePartData* statusData = newui::ThemeData::instance().tryPartData(L"STATUS", 1, 0);
+    const newui::ThemePartData* statusData = newui::ThemeData::instance().tryPartData("STATUS", 1, 0);
     ASSERT_NE(statusData, nullptr);
     ASSERT_TRUE(statusData->size.has_value());
     EXPECT_FLOAT_EQ(statusData->size->width, 10.0f);
 
     // A triple this fixture never mentions still misses cleanly.
-    EXPECT_EQ(newui::ThemeData::instance().tryPartData(L"BUTTON", 3, 1), nullptr);
+    EXPECT_EQ(newui::ThemeData::instance().tryPartData("BUTTON", 3, 1), nullptr);
 
     // reload() repeats whatever path load() last used, without the
     // caller needing to remember it.

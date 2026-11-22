@@ -166,18 +166,6 @@ namespace {
 		return std::nullopt;
 	}
 
-	// Theme class names ("BUTTON", "SCROLLBAR", ...) are plain ASCII
-	// identifiers - a trivial per-character narrow is exact and doesn't
-	// need a real Unicode-aware conversion (WideCharToMultiByte etc.).
-	std::string narrow(const std::wstring& wide) {
-		std::string result;
-		result.reserve(wide.size());
-		for (wchar_t ch : wide) {
-			result.push_back(static_cast<char>(ch));
-		}
-		return result;
-	}
-
 	std::string buildPartKey(const std::string& themeClassName, int partId, int stateId) {
 		return themeClassName + ":" + std::to_string(partId) + ":" + std::to_string(stateId);
 	}
@@ -306,11 +294,11 @@ namespace newui {
 		return true;
 	}
 
-	const ThemePartData* ThemeData::tryPartData(const std::wstring& themeClassName, int partId, int stateId) const {
+	const ThemePartData* ThemeData::tryPartData(const std::string& themeClassName, int partId, int stateId) const {
 		if (!loaded_) {
 			return nullptr;
 		}
-		auto it = parts_.find(buildPartKey(narrow(themeClassName), partId, stateId));
+		auto it = parts_.find(buildPartKey(themeClassName, partId, stateId));
 		return it != parts_.end() ? &it->second : nullptr;
 	}
 

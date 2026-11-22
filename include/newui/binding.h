@@ -59,7 +59,7 @@ namespace newui {
         Manual,
     };
 
-    // Converts a value of any simple type (bool, integers, float, double, std::string, std::wstring) to
+    // Converts a value of any simple type (bool, integers, float, double, std::string, std::u16string) to
     // another, the way a Binding does when it has no converter: numbers widen and narrow, text is parsed
     // strictly ("12abc" is not a number), bool accepts "true"/"false"/"1"/"0". A value whose type already
     // equals toType passes through unchanged, so any other type (a Color, say) binds to its own kind.

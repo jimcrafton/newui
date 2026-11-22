@@ -63,10 +63,10 @@ TEST(ConvertValue, TextIsParsedStrictly) {
 TEST(ConvertValue, WideAndNarrowText) {
     std::any out;
     std::string error;
-    ASSERT_TRUE(convertValue(std::wstring(L"7"), typeid(int), out, error));
+    ASSERT_TRUE(convertValue(std::u16string(u"7"), typeid(int), out, error));
     EXPECT_EQ(std::any_cast<int>(out), 7);
-    ASSERT_TRUE(convertValue(7, typeid(std::wstring), out, error));
-    EXPECT_EQ(std::any_cast<std::wstring>(out), L"7");
+    ASSERT_TRUE(convertValue(7, typeid(std::u16string), out, error));
+    EXPECT_EQ(std::any_cast<std::u16string>(out), u"7");
 }
 
 TEST(PropertyChanged, SliderToggleAndTextControlNotify) {
@@ -322,7 +322,7 @@ TEST(Rules, RequiredAndLength) {
     length.setMinLength(2);
     length.setMaxLength(4);
     EXPECT_FALSE(failure(length, std::string("a")).empty());
-    EXPECT_TRUE(failure(length, std::wstring(L"abcd")).empty());
+    EXPECT_TRUE(failure(length, std::u16string(u"abcd")).empty());
     EXPECT_FALSE(failure(length, std::string("abcde")).empty());
 }
 

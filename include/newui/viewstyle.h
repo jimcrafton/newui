@@ -742,7 +742,7 @@ namespace newui {
     // set_fill_alpha()-equivalent global-alpha knob, and a native control
     // faded via alpha isn't an obviously-wanted look; out of scope for v1.
     //
-    // A subclass names the theme "class" (themeClassName, e.g. L"BUTTON",
+    // A subclass names the theme "class" (themeClassName, e.g. "BUTTON",
     // passed to the constructor) and which part/state to draw
     // (partId()/stateId(), pure virtual - each concrete widget knows its
     // own vssym32.h constants and how highlighted/its own state fields map
@@ -756,7 +756,7 @@ namespace newui {
     // Non-copyable: owns a Win32 HTHEME handle.
     class ThemedViewStyle : public ViewStyle {
     public:
-        explicit ThemedViewStyle(std::wstring themeClassName) : themeClassName_(std::move(themeClassName)) {}
+        explicit ThemedViewStyle(std::string themeClassName) : themeClassName_(std::move(themeClassName)) {}
         ~ThemedViewStyle() override;
 
         ThemedViewStyle(const ThemedViewStyle&) = delete;
@@ -803,7 +803,7 @@ namespace newui {
         virtual bool paintFromThemeData(BLContext& ctx, const Size& size, bool highlighted) const;
 
     private:
-        std::wstring themeClassName_;
+        std::string themeClassName_;
         mutable HTHEME theme_ = nullptr;
     };
 
@@ -815,7 +815,7 @@ namespace newui {
     // (passed into paint()) already covers hover/focus.
     class ThemedButtonStyle : public ThemedViewStyle {
     public:
-        ThemedButtonStyle() : ThemedViewStyle(L"BUTTON") {}
+        ThemedButtonStyle() : ThemedViewStyle("BUTTON") {}
 
         bool pressed = false;
         bool enabled = true;
@@ -880,7 +880,7 @@ namespace newui {
     // ThemedViewStyle plus a native checkbox (BUTTON/BP_CHECKBOX).
     class ThemedCheckBoxStyle : public ThemedViewStyle {
     public:
-        ThemedCheckBoxStyle() : ThemedViewStyle(L"BUTTON") {}
+        ThemedCheckBoxStyle() : ThemedViewStyle("BUTTON") {}
 
         bool checked = false;
         bool pressed = false;
@@ -930,7 +930,7 @@ namespace newui {
     // different part.
     class ThemedRadioButtonStyle : public ThemedViewStyle {
     public:
-        ThemedRadioButtonStyle() : ThemedViewStyle(L"BUTTON") {}
+        ThemedRadioButtonStyle() : ThemedViewStyle("BUTTON") {}
 
         bool checked = false;
         bool pressed = false;
@@ -971,7 +971,7 @@ namespace newui {
     // thickness regardless.
     class ThemedGroupBoxStyle : public ThemedViewStyle {
     public:
-        ThemedGroupBoxStyle() : ThemedViewStyle(L"BUTTON") {}
+        ThemedGroupBoxStyle() : ThemedViewStyle("BUTTON") {}
 
         bool enabled = true;
 
@@ -1042,7 +1042,7 @@ namespace newui {
     // "mouse currently down on this button right now" state).
     class ThemedToolbarButtonStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarButtonStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarButtonStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool checked = false;
         bool pressed = false;
@@ -1087,7 +1087,7 @@ namespace newui {
     // precedence as ThemedToolbarButtonStyle above, just a different part.
     class ThemedToolbarDropDownButtonStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarDropDownButtonStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarDropDownButtonStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool checked = false;
         bool pressed = false;
@@ -1113,7 +1113,7 @@ namespace newui {
     // shares the same TOOLBARSTYLESTATES enum, so same fields/precedence.
     class ThemedToolbarDropDownButtonGlyphStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarDropDownButtonGlyphStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarDropDownButtonGlyphStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool pressed = false;
         bool enabled = true;
@@ -1137,7 +1137,7 @@ namespace newui {
     // division as the plain drop-down button's chrome/glyph split above).
     class ThemedToolbarSplitButtonStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarSplitButtonStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarSplitButtonStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool checked = false;
         bool pressed = false;
@@ -1161,7 +1161,7 @@ namespace newui {
     // ThemedToolbarSplitButtonStyle above.
     class ThemedToolbarSplitButtonDropDownStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarSplitButtonDropDownStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarSplitButtonDropDownStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool checked = false;
         bool pressed = false;
@@ -1191,7 +1191,7 @@ namespace newui {
     // the one sensible value" shape as ThemedTabPaneStyle.
     class ThemedToolbarSeparatorStyle : public ThemedViewStyle {
     public:
-        ThemedToolbarSeparatorStyle() : ThemedViewStyle(L"TOOLBAR") {}
+        ThemedToolbarSeparatorStyle() : ThemedViewStyle("TOOLBAR") {}
 
         bool horizontal = true;
 
@@ -1217,7 +1217,7 @@ namespace newui {
     // side by side in a real strip.
     class ThemedStatusPaneStyle : public ThemedViewStyle {
     public:
-        ThemedStatusPaneStyle() : ThemedViewStyle(L"STATUS") {}
+        ThemedStatusPaneStyle() : ThemedViewStyle("STATUS") {}
 
     protected:
         int partId() const override { return SP_PANE; }
@@ -1230,7 +1230,7 @@ namespace newui {
     // shape).
     class ThemedRebarBandStyle : public ThemedViewStyle {
     public:
-        ThemedRebarBandStyle() : ThemedViewStyle(L"REBAR") {}
+        ThemedRebarBandStyle() : ThemedViewStyle("REBAR") {}
 
     protected:
         int partId() const override { return RP_BAND; }
@@ -1248,7 +1248,7 @@ namespace newui {
     // button styles above.
     class ThemedRebarChevronStyle : public ThemedViewStyle {
     public:
-        ThemedRebarChevronStyle() : ThemedViewStyle(L"REBAR") {}
+        ThemedRebarChevronStyle() : ThemedViewStyle("REBAR") {}
 
         bool horizontal = true;
         bool pressed = false;
@@ -1275,7 +1275,7 @@ namespace newui {
     // default (false, TTSS_NORMAL).
     class ThemedTooltipStyle : public ThemedViewStyle {
     public:
-        ThemedTooltipStyle() : ThemedViewStyle(L"TOOLTIP") {}
+        ThemedTooltipStyle() : ThemedViewStyle("TOOLTIP") {}
 
         bool linked = false;
 
@@ -1293,7 +1293,7 @@ namespace newui {
     // pairs two Views, one of each.
     class ThemedSpinButtonStyle : public ThemedViewStyle {
     public:
-        ThemedSpinButtonStyle() : ThemedViewStyle(L"SPIN") {}
+        ThemedSpinButtonStyle() : ThemedViewStyle("SPIN") {}
 
         bool isUpButton = true;
         bool pressed = false;
@@ -1325,7 +1325,7 @@ namespace newui {
     // into getClientBounds().
     class ThemedEditStyle : public ThemedViewStyle {
     public:
-        ThemedEditStyle() : ThemedViewStyle(L"EDIT") {}
+        ThemedEditStyle() : ThemedViewStyle("EDIT") {}
 
         bool focused = false;
         bool readOnly = false;
@@ -1404,7 +1404,7 @@ namespace newui {
     // highlighted when selected).
     class ThemedListItemStyle : public ThemedViewStyle {
     public:
-        ThemedListItemStyle() : ThemedViewStyle(L"Explorer::ListView") {}
+        ThemedListItemStyle() : ThemedViewStyle("Explorer::ListView") {}
 
         bool selected = false;
         bool enabled = true;
@@ -1429,7 +1429,7 @@ namespace newui {
     // header controls draw the two separately too).
     class ThemedHeaderItemStyle : public ThemedViewStyle {
     public:
-        ThemedHeaderItemStyle() : ThemedViewStyle(L"HEADER") {}
+        ThemedHeaderItemStyle() : ThemedViewStyle("HEADER") {}
 
         bool pressed = false;
         bool sorted = false;
@@ -1455,7 +1455,7 @@ namespace newui {
     // sortedAscending rather than by highlighted).
     class ThemedHeaderSortArrowStyle : public ThemedViewStyle {
     public:
-        ThemedHeaderSortArrowStyle() : ThemedViewStyle(L"HEADER") {}
+        ThemedHeaderSortArrowStyle() : ThemedViewStyle("HEADER") {}
 
         bool sortedAscending = true;
 
@@ -1475,7 +1475,7 @@ namespace newui {
     // its own doc comment.
     class ThemedTreeItemStyle : public ThemedViewStyle {
     public:
-        ThemedTreeItemStyle() : ThemedViewStyle(L"Explorer::TreeView") {}
+        ThemedTreeItemStyle() : ThemedViewStyle("Explorer::TreeView") {}
 
         bool selected = false;
         bool enabled = true;
@@ -1508,7 +1508,7 @@ namespace newui {
     // this file.
     class ThemedTreeGlyphStyle : public ThemedViewStyle {
     public:
-        ThemedTreeGlyphStyle() : ThemedViewStyle(L"TREEVIEW") {}
+        ThemedTreeGlyphStyle() : ThemedViewStyle("TREEVIEW") {}
 
         bool expanded = false;
 
@@ -1557,7 +1557,7 @@ namespace newui {
             Right
         };
 
-        ThemedTabItemStyle() : ThemedViewStyle(L"TAB") {}
+        ThemedTabItemStyle() : ThemedViewStyle("TAB") {}
 
         TabAlignment alignment = TabAlignment::Top;
         Position position = Position::Middle;
@@ -1597,7 +1597,7 @@ namespace newui {
     // ThemedRebarBandStyle.
     class ThemedTabPaneStyle : public ThemedViewStyle {
     public:
-        ThemedTabPaneStyle() : ThemedViewStyle(L"TAB") {}
+        ThemedTabPaneStyle() : ThemedViewStyle("TAB") {}
 
     protected:
         int partId() const override { return TABP_PANE; }
@@ -1613,7 +1613,7 @@ namespace newui {
     // "normal" value for whichever orientation.
     class ThemedTrackbarTrackStyle : public ThemedViewStyle {
     public:
-        ThemedTrackbarTrackStyle() : ThemedViewStyle(L"TRACKBAR") {}
+        ThemedTrackbarTrackStyle() : ThemedViewStyle("TRACKBAR") {}
 
         bool horizontal = true;
 
@@ -1654,7 +1654,7 @@ namespace newui {
     // thumb's own chrome wherever it's placed.
     class ThemedTrackbarThumbStyle : public ThemedViewStyle {
     public:
-        ThemedTrackbarThumbStyle() : ThemedViewStyle(L"TRACKBAR") {}
+        ThemedTrackbarThumbStyle() : ThemedViewStyle("TRACKBAR") {}
 
         bool horizontal = true;
         bool pressed = false;
@@ -1706,7 +1706,7 @@ namespace newui {
     // ThemedTrackbarThumbStyle's thumb positioning.
     class ThemedTrackbarTicksStyle : public ThemedViewStyle {
     public:
-        ThemedTrackbarTicksStyle() : ThemedViewStyle(L"TRACKBAR") {}
+        ThemedTrackbarTicksStyle() : ThemedViewStyle("TRACKBAR") {}
 
         bool horizontal = true;
 
@@ -1742,7 +1742,7 @@ namespace newui {
     // ThemedTabPaneStyle.
     class ThemedProgressBarTrackStyle : public ThemedViewStyle {
     public:
-        ThemedProgressBarTrackStyle() : ThemedViewStyle(L"PROGRESS") {}
+        ThemedProgressBarTrackStyle() : ThemedViewStyle("PROGRESS") {}
 
         bool horizontal = true;
 
@@ -1790,7 +1790,7 @@ namespace newui {
             Paused
         };
 
-        ThemedProgressBarFillStyle() : ThemedViewStyle(L"PROGRESS") {}
+        ThemedProgressBarFillStyle() : ThemedViewStyle("PROGRESS") {}
 
         bool horizontal = true;
         FillState state = FillState::Normal;
@@ -1836,7 +1836,7 @@ namespace newui {
     // ThemedTrackbarThumbStyle above, different theme class/parts.
     class ThemedScrollbarThumbStyle : public ThemedViewStyle {
     public:
-        ThemedScrollbarThumbStyle() : ThemedViewStyle(L"SCROLLBAR") {}
+        ThemedScrollbarThumbStyle() : ThemedViewStyle("SCROLLBAR") {}
 
         bool horizontal = true;
         bool pressed = false;
@@ -1866,7 +1866,7 @@ namespace newui {
     public:
         enum class Direction { Up, Down, Left, Right };
 
-        ThemedScrollbarArrowStyle() : ThemedViewStyle(L"SCROLLBAR") {}
+        ThemedScrollbarArrowStyle() : ThemedViewStyle("SCROLLBAR") {}
 
         Direction direction = Direction::Up;
         bool pressed = false;
@@ -1899,7 +1899,7 @@ namespace newui {
     public:
         enum class Position { Lower, Upper };
 
-        ThemedScrollbarTrackStyle() : ThemedViewStyle(L"SCROLLBAR") {}
+        ThemedScrollbarTrackStyle() : ThemedViewStyle("SCROLLBAR") {}
 
         bool horizontal = true;
         Position position = Position::Lower;
@@ -1935,7 +1935,7 @@ namespace newui {
     // practice as every other batch in this file.
     class ThemedMenuBarItemStyle : public ThemedViewStyle {
     public:
-        ThemedMenuBarItemStyle() : ThemedViewStyle(L"MENU") {}
+        ThemedMenuBarItemStyle() : ThemedViewStyle("MENU") {}
 
         bool pressed = false;
         bool enabled = true;
@@ -1970,7 +1970,7 @@ namespace newui {
     // ThemedTabPaneStyle/ThemedStatusPaneStyle.
     class ThemedMenuBarBackgroundStyle : public ThemedViewStyle {
     public:
-        ThemedMenuBarBackgroundStyle() : ThemedViewStyle(L"MENU") {}
+        ThemedMenuBarBackgroundStyle() : ThemedViewStyle("MENU") {}
 
         // Always the full rect - overrides ThemedViewStyle's own
         // computeClientBounds() rather than inheriting it. That base

@@ -253,7 +253,6 @@ std::string valueToJson(const std::any& value) {
     if (const float* v = std::any_cast<float>(&value)) return number(*v);
     if (const double* v = std::any_cast<double>(&value)) return number(*v);
     if (const std::string* v = std::any_cast<std::string>(&value)) return quote(*v);
-    if (const std::wstring* v = std::any_cast<std::wstring>(&value)) return quote(wideToUtf8(*v));
     if (const std::u16string* v = std::any_cast<std::u16string>(&value)) return quote(utf16ToUtf8(*v));
     return std::string();
 }

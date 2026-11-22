@@ -108,7 +108,7 @@ namespace newui {
         // already have in hand (themeClassName_/partId()/stateId(...)).
         // Returns nullptr if !isLoaded() or this exact triple isn't
         // present in the loaded file.
-        const ThemePartData* tryPartData(const std::wstring& themeClassName, int partId, int stateId) const;
+        const ThemePartData* tryPartData(const std::string& themeClassName, int partId, int stateId) const;
 
     private:
         ThemeData() = default;
