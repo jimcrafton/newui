@@ -255,7 +255,7 @@ TEST(CursorClass, MoveConstructorTransfersStateAndLeavesSourceAsDefault) {
 
     newui::Cursor source;
     ASSERT_TRUE(source.loadPath(path));
-    HCURSOR handle = source.handle();
+    newui::NativeCursorHandle handle = source.handle();
 
     newui::Cursor moved(std::move(source));
 
@@ -281,7 +281,7 @@ TEST(CursorClass, MoveAssignmentReleasesTheTargetsOwnedHandleFirst) {
 
     newui::Cursor b;
     ASSERT_TRUE(b.loadPath(path2));
-    HCURSOR bHandle = b.handle();
+    newui::NativeCursorHandle bHandle = b.handle();
 
     // a's originally-owned handle should be destroyed here, not leaked -
     // no directly observable side effect beyond "doesn't crash", same
