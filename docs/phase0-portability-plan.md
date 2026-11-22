@@ -186,7 +186,7 @@ After Step 4, Phase 1 of the main plan (NSWindow, NSView, present, RunLoop) star
 | 1.5 Path separators | `bundle.cpp`/`bundle.h` joins now use `/` (2 test expectations in `test_bundle.cpp` updated); `fontmanager.cpp` deliberately left (Windows registry code, replaced per platform in Step 4). Windows build+test pending | | |
 | 1.6 svgandme include | done in working tree (`src/svgimage.cpp`); Apple Clang syntax check of `svgimage.cpp` now has 0 errors (4+ without the fix); Windows build pending | | |
 | 1.7 Type names | done in working tree: new `readableTypeName()` in `utils.h` (`__cxa_demangle` on Clang/GCC), used by `demangleTypeName`, `extractNamespace`, `reflection.h` `qualifiedTypeName` and `automation.cpp` `typeName`; test `Reflection.TypeNameHelpers`; Windows build+test pending | | |
-| 1.8 Integer audit | not started | | |
+| 1.8 Integer audit | done in working tree. Audit found a real problem: `Property::readValue`/`writeValue` matched `uint64_t`/`unsigned long long` and then `any_cast<uint64_t>`, so `size_t` (`unsigned long` on Apple) and `long` were skipped or would throw; now matched by exact type in `reflection.cpp`; test `ReflectionIO.EveryIntegerTypeRoundTripsThroughObjectWriterAndReader`; Windows build+test pending | | |
 | 1.9 clang-cl (optional) | not started | | |
 | 2 UTF-16 | not started | | |
 | 3 Public headers | not started | | |

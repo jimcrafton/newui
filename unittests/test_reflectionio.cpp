@@ -30,6 +30,7 @@
 #include "newui/viewstyle.h"
 
 #include <any>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -749,4 +750,90 @@ TEST(ReflectionIO, ViewLayoutIgnoredIsARealPropertyThatRoundTripsAndDefaultsToFa
         v->destroy();
         delete v;
     }
+}
+
+// ---------------------------------------------------------------------
+// Integer properties are matched by exact type (reflection.cpp), because
+// std::size_t / std::uint64_t / long map to different built-in types on
+// Windows and Apple. Every integer type must round-trip through
+// ObjectWriter/ObjectReader (values stay inside int32 range: ClassReader
+// only has a 32-bit readInt()).
+// ---------------------------------------------------------------------
+namespace {
+
+struct IntegerBag {
+    std::size_t sizeValue = 0;
+    std::uint64_t u64Value = 0;
+    std::int64_t i64Value = 0;
+    long longValue = 0;
+    unsigned long ulongValue = 0;
+    long long llValue = 0;
+    unsigned long long ullValue = 0;
+    std::int16_t i16Value = 0;
+    std::uint8_t u8Value = 0;
+    int intValue = 0;
+    unsigned int uintValue = 0;
+};
+
+const Class* RegisterAndGetIntegerBagClass() {
+    static const Class* registered = [] {
+        ClassBuilder<IntegerBag> builder;
+        builder.clazz()
+            .field("sizeValue", Scope::Public, &IntegerBag::sizeValue)
+            .field("u64Value", Scope::Public, &IntegerBag::u64Value)
+            .field("i64Value", Scope::Public, &IntegerBag::i64Value)
+            .field("longValue", Scope::Public, &IntegerBag::longValue)
+            .field("ulongValue", Scope::Public, &IntegerBag::ulongValue)
+            .field("llValue", Scope::Public, &IntegerBag::llValue)
+            .field("ullValue", Scope::Public, &IntegerBag::ullValue)
+            .field("i16Value", Scope::Public, &IntegerBag::i16Value)
+            .field("u8Value", Scope::Public, &IntegerBag::u8Value)
+            .field("intValue", Scope::Public, &IntegerBag::intValue)
+            .field("uintValue", Scope::Public, &IntegerBag::uintValue)
+            .constructor<>();
+        ReflectionRegistry::registerClass(builder);
+        return classinfo(typeid(IntegerBag));
+    }();
+    return registered;
+}
+
+}  // namespace
+
+TEST(ReflectionIO, EveryIntegerTypeRoundTripsThroughObjectWriterAndReader) {
+    RegisterAndGetIntegerBagClass();
+
+    IntegerBag written;
+    written.sizeValue = 123456;
+    written.u64Value = 2000000000ull;
+    written.i64Value = -2000000000ll;
+    written.longValue = -77777;
+    written.ulongValue = 88888;
+    written.llValue = -99999;
+    written.ullValue = 111111;
+    written.i16Value = -1234;
+    written.u8Value = 200;
+    written.intValue = -42;
+    written.uintValue = 4242;
+
+    ObjectWriter writer;
+    writer.write(&written);
+
+    ObjectReader reader;
+    json5::error err = json5::from_string(json5::to_string(writer.doc), reader.doc);
+    ASSERT_FALSE(err);
+
+    IntegerBag fresh;
+    reader.read(&fresh);
+
+    EXPECT_EQ(fresh.sizeValue, written.sizeValue);
+    EXPECT_EQ(fresh.u64Value, written.u64Value);
+    EXPECT_EQ(fresh.i64Value, written.i64Value);
+    EXPECT_EQ(fresh.longValue, written.longValue);
+    EXPECT_EQ(fresh.ulongValue, written.ulongValue);
+    EXPECT_EQ(fresh.llValue, written.llValue);
+    EXPECT_EQ(fresh.ullValue, written.ullValue);
+    EXPECT_EQ(fresh.i16Value, written.i16Value);
+    EXPECT_EQ(fresh.u8Value, written.u8Value);
+    EXPECT_EQ(fresh.intValue, written.intValue);
+    EXPECT_EQ(fresh.uintValue, written.uintValue);
 }

@@ -3,8 +3,80 @@
 
 #include <algorithm>
 #include <set>
+#include <type_traits>
 
 namespace newui::reflection {
+
+    // Integer properties are matched by their *exact* type, not by width. The
+    // fixed-width typedefs map to different built-in types per platform
+    // (std::size_t is `unsigned long long` on Windows but `unsigned long` on
+    // Apple; `long` is 32-bit on Windows and 64-bit on Apple), so comparing
+    // against std::uint64_t etc. and then any_cast<std::uint64_t> would
+    // either skip the type or throw bad_any_cast on one platform. Here each
+    // built-in integer type is its own candidate and the value is cast to and
+    // from exactly that type.
+    namespace {
+        template<typename T>
+        bool writeIntegerAs(const std::type_index& type, const std::string& name, const std::any& val, ClassWriter* writer) {
+            if (type != typeid(T)) {
+                return false;
+            }
+            const T value = std::any_cast<T>(val);
+            constexpr bool isSigned = std::is_signed_v<T> || std::is_same_v<T, char>;
+            if constexpr (sizeof(T) == 1) {
+                writer->writeInt8(name, static_cast<std::uint8_t>(value), isSigned);
+            } else if constexpr (sizeof(T) == 2) {
+                writer->writeInt16(name, static_cast<std::uint16_t>(value), isSigned);
+            } else if constexpr (sizeof(T) == 4) {
+                writer->writeInt32(name, static_cast<std::uint32_t>(value), isSigned);
+            } else {
+                writer->writeInt64(name, static_cast<std::uint64_t>(value), isSigned);
+            }
+            return true;
+        }
+
+        bool writeIntegerValue(const std::type_index& type, const std::string& name, const std::any& val, ClassWriter* writer) {
+            return writeIntegerAs<char>(type, name, val, writer)
+                || writeIntegerAs<signed char>(type, name, val, writer)
+                || writeIntegerAs<unsigned char>(type, name, val, writer)
+                || writeIntegerAs<short>(type, name, val, writer)
+                || writeIntegerAs<unsigned short>(type, name, val, writer)
+                || writeIntegerAs<int>(type, name, val, writer)
+                || writeIntegerAs<unsigned int>(type, name, val, writer)
+                || writeIntegerAs<long>(type, name, val, writer)
+                || writeIntegerAs<unsigned long>(type, name, val, writer)
+                || writeIntegerAs<long long>(type, name, val, writer)
+                || writeIntegerAs<unsigned long long>(type, name, val, writer);
+        }
+
+        // ClassReader only has a 32-bit readInt(), so values are read as int32
+        // and cast to the target type (64-bit values beyond the int32 range
+        // don't survive a read - unchanged from before).
+        template<typename T>
+        bool readIntegerAs(const std::type_index& type, const std::string& name, std::any& val, ClassReader* reader) {
+            if (type != typeid(T)) {
+                return false;
+            }
+            std::int32_t i = 0;
+            reader->readInt(name, i);
+            val = static_cast<T>(i);
+            return true;
+        }
+
+        bool readIntegerValue(const std::type_index& type, const std::string& name, std::any& val, ClassReader* reader) {
+            return readIntegerAs<char>(type, name, val, reader)
+                || readIntegerAs<signed char>(type, name, val, reader)
+                || readIntegerAs<unsigned char>(type, name, val, reader)
+                || readIntegerAs<short>(type, name, val, reader)
+                || readIntegerAs<unsigned short>(type, name, val, reader)
+                || readIntegerAs<int>(type, name, val, reader)
+                || readIntegerAs<unsigned int>(type, name, val, reader)
+                || readIntegerAs<long>(type, name, val, reader)
+                || readIntegerAs<unsigned long>(type, name, val, reader)
+                || readIntegerAs<long long>(type, name, val, reader)
+                || readIntegerAs<unsigned long long>(type, name, val, reader);
+        }
+    }
 
     // Reads back a "0x..." hex token - the fallback Property::writeValue()
     // (below) emits for a value/leftover bits nothing in the Enum's own
@@ -353,45 +425,8 @@ namespace newui::reflection {
                 reader->readDouble(valName, d);
                 val = d;
             }
-            else if (valType == typeid(std::uint8_t) || valType == typeid(unsigned char)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::uint8_t)i;
-            }
-            else if (valType == typeid(std::int8_t) || valType == typeid(char)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::int8_t)i;
-            }
-            else if (valType == typeid(std::uint16_t) || valType == typeid(unsigned short)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::uint16_t)i;
-            }
-            else if (valType == typeid(std::int16_t) || valType == typeid(short)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::int16_t)i;
-            }
-            else if (valType == typeid(std::uint32_t) || valType == typeid(unsigned int)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::uint32_t)i;
-            }
-            else if (valType == typeid(std::int32_t) || valType == typeid(int)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::int32_t)i;
-            }
-            else if (valType == typeid(std::uint64_t) || valType == typeid(unsigned long long)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::uint64_t)i;
-            }
-            else if (valType == typeid(std::int64_t) || valType == typeid(long long)) {
-                std::int32_t i;
-                reader->readInt(valName, i);
-                val = (std::int64_t)i;
+            else if (readIntegerValue(valType, valName, val, reader)) {
+                // handled: every integer type, matched by exact type (see readIntegerValue)
             }
         }
     }
@@ -455,29 +490,8 @@ namespace newui::reflection {
         else if (valType == typeid(double)) {
             writer->writeDouble(valName, std::any_cast<double>(val));
         }
-        else if (valType == typeid(std::uint8_t) || valType == typeid(unsigned char)) {
-            writer->writeInt8(valName, std::any_cast<std::uint8_t>(val), false);
-        }
-        else if (valType == typeid(std::int8_t) || valType == typeid(char)) {
-            writer->writeInt8(valName, std::any_cast<std::int8_t>(val), true);
-        }
-        else if (valType == typeid(std::uint16_t) || valType == typeid(unsigned short)) {
-            writer->writeInt16(valName, std::any_cast<std::uint16_t>(val), false);
-        }
-        else if (valType == typeid(std::int16_t) || valType == typeid(short)) {
-            writer->writeInt16(valName, std::any_cast<std::int16_t>(val), true);
-        }
-        else if (valType == typeid(std::uint32_t) || valType == typeid(unsigned int)) {
-            writer->writeInt32(valName, std::any_cast<std::uint32_t>(val), false);
-        }
-        else if (valType == typeid(std::int32_t) || valType == typeid(int)) {
-            writer->writeInt32(valName, std::any_cast<std::int32_t>(val), true);
-        }
-        else if (valType == typeid(std::uint64_t) || valType == typeid(unsigned long long)) {
-            writer->writeInt64(valName, std::any_cast<std::uint64_t>(val), false);
-        }
-        else if (valType == typeid(std::int64_t) || valType == typeid(long long)) {
-            writer->writeInt64(valName, std::any_cast<std::int64_t>(val), true);
+        else if (writeIntegerValue(valType, valName, val, writer)) {
+            // handled: every integer type, matched by exact type (see writeIntegerValue)
         }
     }
 
