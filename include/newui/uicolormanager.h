@@ -2,6 +2,7 @@
 
 #include <newui/newui.h>
 #include <newui/color.h>
+#include <newui/platform.h>
 
 #include <optional>
 
