@@ -1225,8 +1225,8 @@ TEST(DirectWriteResources, FactoriesAreLiveAndUsable) {
 
     IDWriteFactory& dwrite = DirectWriteResources::dwriteFactory();
     IDWriteTextFormat* format = nullptr;
-    HRESULT hr = dwrite.CreateTextFormat(u"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, u"en-us", &format);
+    HRESULT hr = dwrite.CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"en-us", &format);
     EXPECT_TRUE(SUCCEEDED(hr));
     if (format != nullptr) {
         format->Release();
