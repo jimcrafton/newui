@@ -126,16 +126,20 @@ namespace newui::reflection {
         }
 
         void writeInt8(const std::string& propertyName, std::uint8_t value, bool signedVal) override {
-            attach(propertyName, json5::value(static_cast<double>(value)));
+            attach(propertyName, json5::value(signedVal ? static_cast<double>(static_cast<std::int8_t>(value))
+                                                         : static_cast<double>(value)));
         }
         void writeInt16(const std::string& propertyName, std::uint16_t value, bool signedVal) override {
-            attach(propertyName, json5::value(static_cast<double>(value)));
+            attach(propertyName, json5::value(signedVal ? static_cast<double>(static_cast<std::int16_t>(value))
+                                                         : static_cast<double>(value)));
         }
         void writeInt32(const std::string& propertyName, std::uint32_t value, bool signedVal) override {
-            attach(propertyName, json5::value(static_cast<double>(value)));
+            attach(propertyName, json5::value(signedVal ? static_cast<double>(static_cast<std::int32_t>(value))
+                                                         : static_cast<double>(value)));
         }
         void writeInt64(const std::string& propertyName, std::uint64_t value, bool signedVal) override {
-            attach(propertyName, json5::value(static_cast<double>(value)));
+            attach(propertyName, json5::value(signedVal ? static_cast<double>(static_cast<std::int64_t>(value))
+                                                         : static_cast<double>(value)));
         }
         void writeString(const std::string& propertyName, const std::string& value) override {
             attach(propertyName, builder.new_string(value));
