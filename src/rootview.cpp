@@ -867,7 +867,7 @@ namespace newui {
 		SubView* dispatchTarget = capturedSubView_ != nullptr ? capturedSubView_ : hoverTarget;
 		if (dispatchTarget != nullptr) {
 			
-			::SetCursor(dispatchTarget->cursor().handle());
+			::SetCursor(win32::toHCURSOR(dispatchTarget->cursor().handle()));
 
 			Point localPt = (dispatchTarget == hoverTarget) ? hoverLocalPt : (pt - accumulatedOffset(dispatchTarget));
 			if (!dispatchTarget->isDesignTime()) {
@@ -875,7 +875,7 @@ namespace newui {
 			}
 		}
 		else {
-			::SetCursor(this->cursor().handle());
+			::SetCursor(win32::toHCURSOR(this->cursor().handle()));
 		}
 		// Outgoing-drag gesture detection - only while a drag is actually
 		// armed (mouseDown() above set this on a View with a DropSource

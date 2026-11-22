@@ -494,7 +494,7 @@ namespace newui {
         }
 
         // Convenience for cursor().handle().
-        HCURSOR resolvedCursor() const {
+        NativeCursorHandle resolvedCursor() const {
             return cursor_.handle();
         }
 

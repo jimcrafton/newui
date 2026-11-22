@@ -1,10 +1,12 @@
 #pragma once
 
 #include "newui/newui.h"
+#include "newui/platform.h"
 #include "newui/custom_message_constants.h"
 #include "newui/delegate.h"
 
 #include <chrono>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -137,7 +139,7 @@ public:
     // Opaque handle to a still-running postDelayed() timer - accepted by
     // cancelDelayed(). kInvalidTimerHandle is never a real handle
     // postDelayed() itself returns.
-    using TimerHandle = UINT_PTR;
+    using TimerHandle = std::uintptr_t;
     static constexpr TimerHandle kInvalidTimerHandle = 0;
 
     // Like postIdle(), but task only actually runs once per interval has
@@ -148,6 +150,9 @@ public:
     // own - a no-op if handle is kInvalidTimerHandle or already
     // finished/cancelled. Same thread restriction as postDelayed() itself.
     void cancelDelayed(TimerHandle handle);
+
+    // Internal: called by the platform timer callback when a postDelayed() timer fires. Not for application code.
+    static void timerFired(TimerHandle idEvent);
 
     // Asks the loop to exit; run() returns once it processes this.
     void quit() {
@@ -168,7 +173,7 @@ public:
 
     // Runs a nested modal message loop directly on the calling thread -
     
-    bool runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone);
+    bool runModal(NativeWindowHandle modalHandle, NativeWindowHandle ownerHandle, std::function<bool()> isDone);
 
     // Fired right as run()'s own message pump starts/ends - see run().
     RunLoopDelegate onStart;
@@ -228,7 +233,6 @@ private:
     // as timerTasks_ above.
     std::vector<Action*> actions_;
     
-    static void CALLBACK TimerProc(HWND hwnd, UINT message, UINT_PTR idEvent, DWORD dwTime);
 
     void checkCalledFromLoopThread(const char* what);
 

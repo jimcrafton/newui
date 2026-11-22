@@ -40,4 +40,8 @@ namespace newui {
     // One type covers both windows and views; the compiler will not catch mixing them up.
     using NativeWindowHandle = void*;
 
+    // Opaque native cursor handle: HCURSOR on Windows (see newui/win32/nativehandles.h), NSCursor* on macOS.
+    // Null means "nothing to show".
+    using NativeCursorHandle = void*;
+
 } // namespace newui

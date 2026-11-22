@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/platform.h>
 
 #include <blend2d/blend2d.h>
 
@@ -171,7 +172,7 @@ namespace newui {
         // fix - handle() is called on every WM_SETCURSOR (RootView::handleMessage()), i.e.
         // potentially many times a second during a drag.
         //@reflect ignore=true
-        HCURSOR handle() const;
+        NativeCursorHandle handle() const;
 
         // True iff this Cursor has neither a loaded path() nor a
         // setImage()-built handle - i.e. it's carrying no Custom payload
@@ -227,7 +228,7 @@ namespace newui {
         // and ownsHandle() already gates the actual ::DestroyCursor() by kind_ == Custom, so a
         // cached system handle (never owned) is never mistakenly freed. mutable since handle()
         // is const but needs to populate this cache on a cache-miss read.
-        mutable HCURSOR handle_ = nullptr;
+        mutable NativeCursorHandle handle_ = nullptr;
     };
 
 }

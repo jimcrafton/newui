@@ -17,5 +17,8 @@ namespace newui {
         inline NativeWindowHandle toNativeHandle(HWND hwnd) { return static_cast<NativeWindowHandle>(hwnd); }
         inline HWND toHWND(NativeWindowHandle handle) { return static_cast<HWND>(handle); }
 
+        inline NativeCursorHandle toNativeCursor(HCURSOR cursor) { return static_cast<NativeCursorHandle>(cursor); }
+        inline HCURSOR toHCURSOR(NativeCursorHandle handle) { return static_cast<HCURSOR>(handle); }
+
     } // namespace win32
 } // namespace newui

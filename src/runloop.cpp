@@ -4,12 +4,20 @@
 #include "newui/rootview.h"
 #include "newui/uiinputmanager.h"
 #include "newui/utils.h"
+#include "newui/win32/nativehandles.h"
 #include <algorithm>
 #include <bitset>
 #include <unordered_map>
 
 
 namespace newui {
+
+    namespace {
+        // The ::SetTimer() callback: forwards to RunLoop::timerFired() so the public header needs no Win32 types.
+        void CALLBACK winTimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
+            RunLoop::timerFired(static_cast<RunLoop::TimerHandle>(idEvent));
+        }
+    }
 
     static_assert(kTaskMessage == WM_APP + 1, "kTaskMessage must equal WM_APP + 1");
     std::mutex g_runLoopMapMutex;
@@ -265,7 +273,7 @@ namespace newui {
         checkCalledFromLoopThread("postDelayed");
 
         UINT_PTR elapse = static_cast<UINT_PTR>(interval.count());
-        UINT_PTR handle = ::SetTimer(nullptr, 0, elapse, &RunLoop::TimerProc);
+        UINT_PTR handle = ::SetTimer(nullptr, 0, elapse, &winTimerProc);
         if (handle == 0) {
             throw std::runtime_error("newui::RunLoop::postDelayed: ::SetTimer failed");
         }
@@ -290,7 +298,7 @@ namespace newui {
         timerTasks_.erase(it);
     }
 
-    void CALLBACK RunLoop::TimerProc(HWND /*hwnd*/, UINT /*message*/, UINT_PTR idEvent, DWORD /*dwTime*/) {
+    void RunLoop::timerFired(TimerHandle idEvent) {
         auto& loop = RunLoop::current();
         if (!loop) {
             return;
@@ -344,9 +352,12 @@ namespace newui {
         ::PostThreadMessage(threadId_, WM_QUIT, 0, 0);
     }
 
-    bool RunLoop::runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone)
+    bool RunLoop::runModal(NativeWindowHandle modalNative, NativeWindowHandle ownerNative, std::function<bool()> isDone)
     {
         checkCalledFromLoopThread("runModal");
+
+        HWND modalHandle = win32::toHWND(modalNative);
+        HWND ownerHandle = win32::toHWND(ownerNative);
 
         onModalStart(*this);
 

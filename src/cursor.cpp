@@ -1,6 +1,7 @@
 #include "newui/cursor.h"
 #include "newui/bundle.h"
 #include "newui/svgimage.h"
+#include "newui/win32/nativehandles.h"
 
 #include <algorithm>
 #include <cstring>
@@ -200,7 +201,7 @@ namespace newui {
         }
         kind_ = CursorKind::Custom;
         path_ = path;
-        handle_ = loaded;
+        handle_ = win32::toNativeCursor(loaded);
         return true;
     }
 
@@ -228,25 +229,25 @@ namespace newui {
         }
         kind_ = CursorKind::Custom;
         path_.clear();
-        handle_ = loaded;
+        handle_ = win32::toNativeCursor(loaded);
         return true;
     }
 
-    HCURSOR Cursor::handle() const {
+    NativeCursorHandle Cursor::handle() const {
         // Custom already has its real handle sitting in handle_ - nothing to resolve/cache.
         // Otherwise, resolve once and cache into handle_ itself (see its own comment, cursor.h) -
         // a kind change (setCursorKind()/setPath()/setImage()) already clears handle_ via
         // releaseOwnedHandle(), so a stale cached shape can never survive past whatever change
         // would invalidate it.
         if (kind_ != CursorKind::Custom && handle_ == nullptr) {
-            handle_ = resolveCursor(kind_, nullptr);
+            handle_ = win32::toNativeCursor(resolveCursor(kind_, nullptr));
         }
         return handle_;
     }
 
     void Cursor::releaseOwnedHandle() {
         if (ownsHandle()) {
-            ::DestroyCursor(handle_);
+            ::DestroyCursor(win32::toHCURSOR(handle_));
         }
         handle_ = nullptr;
     }

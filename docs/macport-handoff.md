@@ -103,6 +103,15 @@ Step 1.1-1.8 and 2.1-2.4 are done and committed (2.4's Windows verification of e
 | 3 Win32 out of public headers | 3.1 done (`platform.h`, `win32/nativehandles.h`); 3.2 done in tree, Windows build pending (geometry already verified); 3.3 next |
 | 4 first Mac build | not started |
 
+## Step 3 order change (decided 2026-11-22)
+
+3.3 (drop `<windows.h>` from `newui.h`) moves to the END of Step 3: 31 public headers still use Win32 types, so do 3.4, 3.5, 3.6
+first, then 3.3. 3.2 is verified on Windows. 3.4 slice 1 (Cursor + RunLoop) is in the working tree, Windows build pending:
+`NativeCursorHandle` (`platform.h`, `toNativeCursor/toHCURSOR` in `win32/nativehandles.h`), `Cursor::handle()` and
+`View::resolvedCursor()` return it, `RunLoop::TimerHandle` is `std::uintptr_t`, `RunLoop::runModal` takes `NativeWindowHandle`,
+`TimerProc` replaced by a file-local `winTimerProc` calling public-but-internal `RunLoop::timerFired`.
+3.4 slices 2 (Dialog/ContextMenu/ClipboardScope/PopupTool) and 3 (Frame/RootView accessors) remain.
+
 ## Next actions, in order
 
 1. Ask the user to confirm all targets (examples and demos too) build after 2.4; fix any errors they paste.
