@@ -160,6 +160,7 @@ add_library(newui STATIC
     "include/newui/underlay.h" "src/underlay.cpp"
     "include/newui/popuptool.h" "src/popuptool.cpp"
     "include/newui/action.h"
+    "include/newui/actioncontext.h" "src/actioncontext.cpp"
     "include/newui/command.h" "src/command.cpp"
     "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
     "include/newui/dibimage.h" "src/dibimage.cpp"

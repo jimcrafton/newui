@@ -1,5 +1,6 @@
 #pragma once
 
+#include "newui/actioncontext.h"
 #include "newui/command.h"
 #include "newui/delegate.h"
 #include "newui/keyboard_constants.h"
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace newui {
 
@@ -95,6 +97,35 @@ public:
             && hotkeyMask_ == keyMask;
     }
 
+    // Context-scoped bindings in addition to hotkey()/hotkeyMask(), which
+    // stays the global one. See ActionContext (actioncontext.h).
+    //@reflect ignore=true
+    void addBinding(const ActionBinding& binding) {
+        if (binding.key == vkUndefined) {
+            return;
+        }
+        for (const ActionBinding& existing : extraBindings_) {
+            if (existing == binding) {
+                return;
+            }
+        }
+        extraBindings_.push_back(binding);
+    }
+
+    //@reflect ignore=true
+    void clearBindings() { extraBindings_.clear(); }
+
+    // hotkey() first (as a global binding) when set, then the added ones.
+    //@reflect ignore=true
+    std::vector<ActionBinding> bindings() const {
+        std::vector<ActionBinding> result;
+        if (hotkey_ != vkUndefined) {
+            result.push_back(ActionBinding{ActionContext::global(), hotkey_, hotkeyMask_});
+        }
+        result.insert(result.end(), extraBindings_.begin(), extraBindings_.end());
+        return result;
+    }
+
     // Which command this Action answers, if any - see CommandTable
     // (command.h). Not reflected directly (CommandId itself is
     // @reflect ignore=true, and has no default constructor) -
@@ -122,6 +153,7 @@ private:
     bool enabled_ = true;
     VirtualKeyCode hotkey_ = vkUndefined;
     std::uint32_t hotkeyMask_ = kmUndefined;
+    std::vector<ActionBinding> extraBindings_;
 };
 
 }

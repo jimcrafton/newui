@@ -171,11 +171,41 @@ namespace newui {
 
 							bool msgConsumed = false;
 
-							for (Action* action : actions_) {
-								if (action->matchesHotkey(static_cast<std::uint32_t>(keyData.VKeyCode), keyMask)) {
-									action->perform();
+							std::vector<ActionContext> activeContexts;
+							if (activeContextsProvider_) {
+								activeContexts = activeContextsProvider_();
+							}
+							const auto stroke = static_cast<std::uint32_t>(keyData.VKeyCode);
+							const bool modifierOnly = keyData.VKeyCode == vkCtrl || keyData.VKeyCode == vkShift || keyData.VKeyCode == vkAlt;
+							if (chordPending_) {
+								// The second stroke of a chord: a modifier alone keeps waiting; anything else ends the wait, and is swallowed
+								// whether or not it completed a chord, so Esc cancels and a wrong key does not leak into the view.
+								if (!modifierOnly) {
+									const std::uint32_t firstKey = chordKey_;
+									const std::uint32_t firstMask = chordMask_;
+									chordPending_ = false;
+									Action* chord = ActionMatcher::findChord(actions_, firstKey, firstMask, stroke, keyMask, contexts_, activeContexts);
+									if (onChordPending) {
+										onChordPending(false, firstKey, firstMask);
+									}
+									if (chord != nullptr) {
+										chord->perform();
+									}
+								}
+								msgConsumed = true;
+							} else {
+								Action* matched = ActionMatcher::find(actions_, stroke, keyMask, contexts_, activeContexts);
+								if (matched != nullptr) {
+									matched->perform();
 									msgConsumed = true;
-									break;
+								} else if (!modifierOnly && ActionMatcher::startsChord(actions_, stroke, keyMask, contexts_, activeContexts)) {
+									chordPending_ = true;
+									chordKey_ = stroke;
+									chordMask_ = keyMask;
+									if (onChordPending) {
+										onChordPending(true, stroke, keyMask);
+									}
+									msgConsumed = true;
 								}
 							}
 

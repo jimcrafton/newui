@@ -1,6 +1,7 @@
 #pragma once
 
 #include "newui/newui.h"
+#include "newui/actioncontext.h"
 #include "newui/custom_message_constants.h"
 #include "newui/delegate.h"
 
@@ -166,8 +167,23 @@ public:
     // registered (or is nullptr).
     void unregisterAction(Action* action);
 
+    // The context hierarchy (trace -> canvas -> global) that action
+    // bindings are matched against; see ActionContext.
+    ActionContextTree& contexts() { return contexts_; }
+
+    // Called on each keystroke for the contexts that are active right
+    // now (the most specific ones; their ancestors count too). Without a
+    // provider only global bindings match.
+    void setActiveContextsProvider(std::function<std::vector<ActionContext>()> provider) {
+        activeContextsProvider_ = std::move(provider);
+    }
+
+    // Called when the first stroke of a chord has been taken (pending true) and when the wait ends (pending false), with that first stroke;
+    // an app shows "Ctrl+K, ..." while it waits. A single-stroke binding that matches always wins over a chord that starts with the same stroke.
+    std::function<void(bool pending, std::uint32_t key, std::uint32_t mask)> onChordPending;
+
     // Runs a nested modal message loop directly on the calling thread -
-    
+
     bool runModal(HWND modalHandle, HWND ownerHandle, std::function<bool()> isDone);
 
     // Fired right as run()'s own message pump starts/ends - see run().
@@ -227,7 +243,12 @@ private:
     // comment. Only ever touched from this RunLoop's own thread, same
     // as timerTasks_ above.
     std::vector<Action*> actions_;
-    
+    ActionContextTree contexts_;
+    std::function<std::vector<ActionContext>()> activeContextsProvider_;
+    bool chordPending_ = false;
+    std::uint32_t chordKey_ = 0;
+    std::uint32_t chordMask_ = 0;
+
     static void CALLBACK TimerProc(HWND hwnd, UINT message, UINT_PTR idEvent, DWORD dwTime);
 
     void checkCalledFromLoopThread(const char* what);

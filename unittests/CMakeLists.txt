@@ -47,6 +47,7 @@ add_executable(newui_tests
     test_texthistory.cpp
     test_textfolding.cpp
     test_command.cpp
+    test_actioncontext.cpp
     test_clipboard.cpp
     test_dragndrop.cpp
     test_undostack.cpp
