@@ -12,21 +12,21 @@ namespace sketch {
 
     namespace {
         // 12.5 -> "12.5", 24 -> "24" (up to two decimals, trailing zeros dropped).
-        std::wstring numberText(double value) {
+        std::u16string numberText(double value) {
             char buffer[48];
             std::snprintf(buffer, sizeof(buffer), "%.2f", value);
             std::string text = buffer;
             while (!text.empty() && text.back() == '0') { text.pop_back(); }
             if (!text.empty() && text.back() == '.') { text.pop_back(); }
             if (text == "-0" || text.empty()) { text = "0"; }
-            return newui::utf8ToWide(text);
+            return newui::utf8ToUtf16(text);
         }
 
         bool parseNumber(const newui::TextField* field, double& value) {
             if (field == nullptr) {
                 return false;
             }
-            std::string narrow = newui::wideToUtf8(field->text());
+            std::string narrow = newui::utf16ToUtf8(field->text());
             char* end = nullptr;
             double parsed = std::strtod(narrow.c_str(), &end);
             if (end == narrow.c_str() || !std::isfinite(parsed)) {
@@ -129,11 +129,11 @@ namespace sketch {
         auto set = [](newui::TextField* field, bool enabled, double value) {
             if (field != nullptr) {
                 field->setEnabled(enabled);
-                field->setText(enabled ? numberText(value) : std::wstring());
+                field->setText(enabled ? numberText(value) : std::u16string());
             }
         };
         if (name_ != nullptr) {
-            name_->setText(def ? newui::utf8ToWide(def->name) : std::wstring());
+            name_->setText(def ? newui::utf8ToUtf16(def->name) : std::u16string());
             name_->setEnabled(def != nullptr);
         }
         set(angle_, nib, def ? def->angle : 0.0);
@@ -164,7 +164,7 @@ namespace sketch {
         std::shared_ptr<const BrushDef> def = document_.findBrush(document_.activeBrush());
         if (!updating_ && def) {
             BrushDef edited = *def;
-            edited.name = name_ != nullptr ? newui::wideToUtf8(name_->text()) : def->name;
+            edited.name = name_ != nullptr ? newui::utf16ToUtf8(name_->text()) : def->name;
             double value = 0.0;
             if (parseNumber(angle_, value)) { edited.angle = value; }
             if (parseNumber(roundness_, value)) { edited.roundness = value; }

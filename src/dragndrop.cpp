@@ -82,7 +82,7 @@ bool extractFilePaths(IDataObject* dataObject, std::vector<std::wstring>& outPat
     return true;
 }
 
-bool extractUnicodeText(IDataObject* dataObject, std::wstring& outText) {
+bool extractUnicodeText(IDataObject* dataObject, std::u16string& outText) {
     wil::unique_stg_medium medium;
     if (!getGlobalMedium(dataObject, CF_UNICODETEXT, medium)) {
         return false;
@@ -93,7 +93,7 @@ bool extractUnicodeText(IDataObject* dataObject, std::wstring& outText) {
         return false;
     }
 
-    outText = static_cast<const wchar_t*>(lock.get());
+    outText = static_cast<const char16_t*>(lock.get());
     return true;
 }
 
@@ -125,7 +125,7 @@ namespace {
 
 }
 
-TextDataObject::TextDataObject(std::wstring text) : text_(std::move(text)) {
+TextDataObject::TextDataObject(std::u16string text) : text_(std::move(text)) {
 }
 
 STDMETHODIMP TextDataObject::GetData(FORMATETC* formatEtcIn, STGMEDIUM* medium) {
@@ -136,7 +136,7 @@ STDMETHODIMP TextDataObject::GetData(FORMATETC* formatEtcIn, STGMEDIUM* medium) 
         return DV_E_FORMATETC;
     }
 
-    std::size_t byteCount = (text_.size() + 1) * sizeof(wchar_t);
+    std::size_t byteCount = (text_.size() + 1) * sizeof(char16_t);   // CF_UNICODETEXT is UTF-16
     wil::unique_hglobal handle(::GlobalAlloc(GMEM_MOVEABLE, byteCount));
     if (!handle) {
         return E_OUTOFMEMORY;
@@ -377,7 +377,7 @@ STDMETHODIMP COMDropSource::GiveFeedback(DWORD) {
     return DRAGDROP_S_USEDEFAULTCURSORS;
 }
 
-HRESULT StartDragOperation(HWND hwndSource, const std::wstring& text, POINT ptCursorClient,
+HRESULT StartDragOperation(HWND hwndSource, const std::u16string& text, POINT ptCursorClient,
         DWORD allowedEffects, DWORD* outEffect) {
     auto dataObject = Microsoft::WRL::Make<TextDataObject>(text);
     auto dropSource = Microsoft::WRL::Make<COMDropSource>();
@@ -538,7 +538,7 @@ HRESULT COMDropTarget::dropAt(IDataObject* dataObject, const Point& clientPt, DW
     // Give a text hover handler the same chance to refuse at the drop point that it had while
     // hovering (it may have set None) - a drop refused there must not be delivered.
     DropEffect proposed = (target != nullptr) ? DropEffect::Copy : DropEffect::None;
-    std::wstring text;
+    std::u16string text;
     bool hasText = extractUnicodeText(dataObject, text);
     if (target != nullptr && hasText) {
         DropTarget* dropTarget = target->dropTarget();

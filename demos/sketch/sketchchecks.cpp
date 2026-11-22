@@ -337,8 +337,8 @@ namespace sketch {
         document.clearObjects();
         document.undoStack().clear();
         auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
-        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::wideToUtf8(field(name)->text()) : std::string("?"); };
-        auto type = [&field](const char* name, const wchar_t* value) {
+        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::utf16ToUtf8(field(name)->text()) : std::string("?"); };
+        auto type = [&field](const char* name, const char16_t* value) {
             if (auto* f = field(name)) {
                 f->setText(value);
                 f->onReturnPressed(*f);
@@ -350,26 +350,26 @@ namespace sketch {
         document.setSelection({rect.id()});
         expect(field("transformXField")->isEnabled() && text("transformXField") == "10" && text("transformYField") == "20" &&
                    text("transformWField") == "100" && text("transformHField") == "50" && text("transformAngleField") == "0", "the fields show the selection's box");
-        type("transformXField", L"40");
+        type("transformXField", u"40");
         expect(std::fabs(document.object(0).geometryBounds().x0 - 40.0) < 1e-9 && std::fabs(document.object(0).geometryBounds().x1 - 140.0) < 1e-9, "typing X moves the selection");
-        type("transformWField", L"200");
+        type("transformWField", u"200");
         expect(std::fabs(document.object(0).geometryBounds().x1 - 240.0) < 1e-9 && std::fabs(document.object(0).geometryBounds().y1 - 70.0) < 1e-9, "typing W resizes it, keeping the corner and the height");
         auto* link = dynamic_cast<newui::ToolbarButton*>(frame.rootView().findView("linkAspectButton"));
         if (link != nullptr) {
             link->setChecked(true);
-            type("transformHField", L"100");
+            type("transformHField", u"100");
             expect(std::fabs(document.object(0).geometryBounds().y1 - document.object(0).geometryBounds().y0 - 100.0) < 1e-9 &&
                        std::fabs(document.object(0).geometryBounds().x1 - document.object(0).geometryBounds().x0 - 400.0) < 1e-9, "with the link down, H keeps the proportions");
             link->setChecked(false);
         }
-        type("transformWField", L"abc");
+        type("transformWField", u"abc");
         expect(text("transformWField") == "400", "a value that is not a number is put back");
         document.undoStack().undo();
         document.undoStack().undo();
         document.undoStack().undo();
         document.undoStack().undo();
         document.setSelection({document.object(0).id()});
-        type("transformAngleField", L"90");
+        type("transformAngleField", u"90");
         expect(std::fabs(document.object(0).frameAngle() - 3.14159265358979323846 / 2.0) < 1e-9 && text("transformAngleField") == "90", "typing an angle turns the selection");
         expect(window_.commands().enabled("object.transformAgain"), "Transform Again is available after a transform");
         newui::MenuItem* again = window_.menuItem("Object/Transform", "Transform Again");
@@ -389,7 +389,7 @@ namespace sketch {
         document.undoStack().clear();
         auto label = [&frame](const char* name) { return dynamic_cast<newui::Label*>(frame.rootView().findView(name)); };
         auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
-        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::wideToUtf8(field(name)->text()) : std::string("?"); };
+        auto text = [&field](const char* name) { return field(name) != nullptr ? newui::utf16ToUtf8(field(name)->text()) : std::string("?"); };
         const std::uint32_t left = newui::mbmLeftButton;
         auto drag = [&label, left](const char* name, float pixels, std::uint32_t keys) {
             newui::Label* caption = label(name);
@@ -927,7 +927,7 @@ namespace sketch {
         onPath->onClick(*onPath);
         expect(document.findById(text)->textWarp().kind == sketch::TextWarp::Kind::OnPath, "Make Text on Path puts the text on the path");
         expect(field("textPathStartField") != nullptr && field("textPathStartField")->isEnabled(), "the Text panel offers the start of the text on the path");
-        field("textPathStartField")->setText(L"50");
+        field("textPathStartField")->setText(u"50");
         field("textPathStartField")->onReturnPressed(*field("textPathStartField"));
         expect(document.findById(text)->textWarp().start == 50.0, "typing a start moves the text along the path");
         release->onClick(*release);
@@ -953,8 +953,8 @@ namespace sketch {
         expect(!field("textSizeField")->isEnabled(), "the Text panel is disabled with no text selected");
         sketch::SketchObject& text = document.add(sketch::SketchObject::makeText("Hello", "", 24.0, BLPoint(20, 60)));
         document.setSelection({text.id()});
-        expect(field("textSizeField")->isEnabled() && newui::wideToUtf8(field("textSizeField")->text()) == "24", "it shows the selected text's size");
-        field("textSizeField")->setText(L"36");
+        expect(field("textSizeField")->isEnabled() && newui::utf16ToUtf8(field("textSizeField")->text()) == "24", "it shows the selected text's size");
+        field("textSizeField")->setText(u"36");
         field("textSizeField")->onReturnPressed(*field("textSizeField"));
         expect(text.fontSize() == 36.0 && document.undoStack().undoDescription() == "Text Size", "typing a size resizes the text (one undo step)");
         if (auto* bold = button("textBoldButton")) {
@@ -965,11 +965,11 @@ namespace sketch {
             center->setChecked(true);
             expect(text.textStyle().align == sketch::TextStyle::Center && !button("textAlignLeftButton")->isChecked(), "the alignment buttons act as one group");
         }
-        field("textTrackingField")->setText(L"4");
+        field("textTrackingField")->setText(u"4");
         field("textTrackingField")->onReturnPressed(*field("textTrackingField"));
         expect(text.textStyle().tracking == 4.0, "typing a tracking sets it");
         document.undoStack().undo();
-        expect(text.textStyle().tracking == 0.0 && newui::wideToUtf8(field("textTrackingField")->text()) == "0", "undo restores it and the panel follows");
+        expect(text.textStyle().tracking == 0.0 && newui::utf16ToUtf8(field("textTrackingField")->text()) == "0", "undo restores it and the panel follows");
         document.clearObjects();
         document.undoStack().clear();
     }
@@ -1021,7 +1021,7 @@ namespace sketch {
 
         // Rename through the name field.
         if (auto* field = dynamic_cast<newui::TextField*>(frame.rootView().findView("layerNameField"))) {
-            field->setText(L"Details");
+            field->setText(u"Details");
             field->onReturnPressed(*field);
             expect(document.findLayer(sub)->name == "Details", "the name field renames the active layer");
         }
@@ -1265,7 +1265,7 @@ namespace sketch {
             expect(document.object(0).fill().color().toHex() == "#0ab824", "moving R keeps G and B (#f2b824 -> #0ab824)");
             expect(document.object(0).fill().color().toRgba32().r() == 10, "red slider edits the selected fill");
             expect(document.undoStack().canUndo(), "slider edit is undoable");
-            hex->setText(L"#336699");
+            hex->setText(u"#336699");
             hex->onReturnPressed(*hex);
             expect(document.object(0).fill().color().toHex() == "#336699", "hex field edits the selected fill");
             document.undoStack().undo();
@@ -1282,7 +1282,7 @@ namespace sketch {
                 expect(document.object(0).fill().kind() == sketch::SketchPaint::Kind::Linear, "linear button makes a linear gradient");
                 expect(bar->parsedStops().size() == 2, "gradient bar shows two stops");
                 std::string first = document.object(0).fill().gradient().stops.front().color.toHex();
-                hex->setText(L"#112233");
+                hex->setText(u"#112233");
                 hex->onReturnPressed(*hex);
                 expect(document.object(0).fill().gradient().stops[bar->selectedStop()].color.toHex() == "#112233", "hex edits the selected stop");
                 addStopButton->onClick(*addStopButton);
@@ -1524,7 +1524,7 @@ namespace sketch {
             auto* opacitySlider = dynamic_cast<newui::Slider*>(frame.rootView().findView("opacitySlider"));
             auto field = [&frame](const char* name) { return dynamic_cast<newui::TextField*>(frame.rootView().findView(name)); };
             auto shown = [&frame](const char* name) { auto* v = frame.rootView().findView(name); return v != nullptr && v->isVisible(); };
-            auto type = [&field](const char* name, const wchar_t* text) {
+            auto type = [&field](const char* name, const char16_t* text) {
                 if (auto* f = field(name)) {
                     f->setText(text);
                     f->onReturnPressed(*f);
@@ -1545,16 +1545,16 @@ namespace sketch {
                     "Add Effect puts a drop shadow on top of the stack");
                 expect(rows() == 4 && stack->selectedIndex() == std::optional<std::size_t>(0), "the new effect is the selected top row");
                 expect(shown("effectRow") && shown("effectColorRow") && shown("effectXField"), "a drop shadow shows offset, blur and color");
-                expect(newui::wideToUtf8(field("effectXField")->text()) == "4" && newui::wideToUtf8(field("effectSizeField")->text()) == "6", "the fields show the shadow's defaults");
-                type("effectXField", L"9");
+                expect(newui::utf16ToUtf8(field("effectXField")->text()) == "4" && newui::utf16ToUtf8(field("effectSizeField")->text()) == "6", "the fields show the shadow's defaults");
+                type("effectXField", u"9");
                 expect(std::fabs(document.object(0).appearance()[2].offsetX - 9.0) < 1e-9, "the X field sets the offset");
-                type("effectSizeField", L"12");
+                type("effectSizeField", u"12");
                 expect(std::fabs(document.object(0).appearance()[2].softness - 12.0) < 1e-9, "the Blur field sets the softness");
-                type("effectSizeField", L"-3");
+                type("effectSizeField", u"-3");
                 expect(document.object(0).appearance()[2].softness == 0.0, "a negative blur is clamped to zero");
-                type("effectColorField", L"#ff0000");
+                type("effectColorField", u"#ff0000");
                 expect(document.object(0).appearance()[2].color.toHex() == "#ff0000", "the color field sets the tint");
-                type("effectColorField", L"nonsense");
+                type("effectColorField", u"nonsense");
                 expect(document.object(0).appearance()[2].color.toHex() == "#ff0000", "an unparsable color is ignored");
                 opacitySlider->setValue(40.0f);
                 expect(std::fabs(document.object(0).appearance()[2].opacity - 0.4) < 0.01 && document.object(0).opacity() == 1.0,
@@ -1569,8 +1569,8 @@ namespace sketch {
                 stylePanel_.addEffect(sketch::EffectKind::RoundCorners);
                 expect(rows() == 5 && stack->selectedIndex() == std::optional<std::size_t>(0), "a second effect is added on top and chosen");
                 expect(shown("effectRow") && !shown("effectColorRow") && !shown("effectXField"), "round corners shows only its radius");
-                expect(newui::wideToUtf8(field("effectSizeField")->text()) == "10", "the size field shows the radius");
-                type("effectSizeField", L"14");
+                expect(newui::utf16ToUtf8(field("effectSizeField")->text()) == "10", "the size field shows the radius");
+                type("effectSizeField", u"14");
                 expect(std::fabs(document.object(0).appearance()[3].radius - 14.0) < 1e-9, "the size field sets the radius");
 
                 stylePanel_.addEffect(sketch::EffectKind::GaussianBlur);
@@ -1587,14 +1587,14 @@ namespace sketch {
                 stylePanel_.addEffect(sketch::EffectKind::OffsetPath);
                 expect(shown("effectRow") && !shown("effectColorRow") && !shown("effectXField") && labelText("effectSizeLabel") == "Offset",
                     "offset path shows only its offset");
-                type("effectSizeField", L"-4");
+                type("effectSizeField", u"-4");
                 expect(std::fabs(document.object(0).appearance().back().radius + 4.0) < 1e-9, "the offset may be negative (inward)");
                 stylePanel_.addEffect(sketch::EffectKind::Roughen);
                 expect(shown("effectXField") && !shown("effectColorRow") && labelText("effectXLabel") == "Detail" && labelText("effectYLabel") == "Seed" &&
                            labelText("effectSizeLabel") == "Size", "roughen shows size, detail and seed");
-                type("effectXField", L"12");
-                type("effectYField", L"5");
-                type("effectSizeField", L"3");
+                type("effectXField", u"12");
+                type("effectYField", u"5");
+                type("effectSizeField", u"3");
                 expect(std::fabs(document.object(0).appearance().back().offsetX - 12.0) < 1e-9 && std::fabs(document.object(0).appearance().back().offsetY - 5.0) < 1e-9 &&
                            std::fabs(document.object(0).appearance().back().radius - 3.0) < 1e-9, "the roughen fields set detail, seed and size");
                 stylePanel_.addEffect(sketch::EffectKind::DropShadow);

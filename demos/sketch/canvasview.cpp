@@ -944,30 +944,12 @@ namespace sketch {
         return SyncReturn::Ignored;
     }
 
-    namespace {
-        std::wstring widenUtf8(const std::string& text) {
-            if (text.empty()) { return std::wstring(); }
-            int n = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0);
-            std::wstring out(std::size_t(n), L'\0');
-            ::MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), out.data(), n);
-            return out;
-        }
-
-        std::string narrowUtf8(const std::wstring& text) {
-            if (text.empty()) { return std::string(); }
-            int n = ::WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
-            std::string out(std::size_t(n), '\0');
-            ::WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), out.data(), n, nullptr, nullptr);
-            return out;
-        }
-    }
-
     bool CanvasView::copySelection() {
         if (document_ == nullptr) {
             return false;
         }
         std::string svg = document_->selectionToSvg();
-        if (svg.empty() || !ClipboardManager::setText(widenUtf8(svg), this)) {
+        if (svg.empty() || !ClipboardManager::setText(utf8ToUtf16(svg), this)) {
             return false;
         }
         pasteCount_ = 0;
@@ -983,12 +965,12 @@ namespace sketch {
     }
 
     bool CanvasView::paste(bool inPlace) {
-        std::wstring text;
+        std::u16string text;
         if (document_ == nullptr || !ClipboardManager::getText(text)) {
             return false;
         }
         double offset = inPlace ? 0.0 : 12.0 * double(++pasteCount_);
-        return document_->pasteSvg(narrowUtf8(text), offset, offset);
+        return document_->pasteSvg(utf16ToUtf8(text), offset, offset);
     }
 
     SyncReturn CanvasView::handleKeyDown(View& /*sender*/, std::uint32_t keyMask, int /*keyChar*/, int /*repeatCount*/, std::uint32_t vkCode) {

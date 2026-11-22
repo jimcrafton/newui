@@ -278,18 +278,18 @@ TEST(SpreadsheetController, TheFormulaBarFollowsTheSelectionAndCommits) {
     auto* formula = new newui::TextField();
     f.controller->setFormulaBar(nameBox, formula);
     f.view->setActiveCell(1, 1);
-    EXPECT_EQ(nameBox->text(), L"B2");
-    EXPECT_EQ(formula->text(), L"2");
+    EXPECT_EQ(nameBox->text(), u"B2");
+    EXPECT_EQ(formula->text(), u"2");
 
-    formula->setText(L"99");
+    formula->setText(u"99");
     formula->onReturnPressed(*formula);   // Enter in the formula field edits the active cell
     EXPECT_EQ(f.model->cellText(1, 1), "99");
 
-    nameBox->setText(L"c3");
+    nameBox->setText(u"c3");
     nameBox->onReturnPressed(*nameBox);   // the name box is the Go to box
     EXPECT_EQ(f.view->activeRow(), 2u);
     EXPECT_EQ(f.view->activeColumn(), 2u);
-    EXPECT_EQ(nameBox->text(), L"C3");
+    EXPECT_EQ(nameBox->text(), u"C3");
 
     f.controller.reset();
     nameBox->destroy();

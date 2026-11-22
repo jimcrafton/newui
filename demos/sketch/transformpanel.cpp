@@ -15,19 +15,19 @@ namespace sketch {
         constexpr double kPi = 3.14159265358979323846;
 
         // 12.5 -> "12.5", 100 -> "100", 0.125 -> "0.125" (up to three decimals, trailing zeros dropped).
-        std::wstring numberText(double value) {
+        std::u16string numberText(double value) {
             char buffer[48];
             std::snprintf(buffer, sizeof(buffer), "%.3f", value);
             std::string text = buffer;
             while (!text.empty() && text.back() == '0') { text.pop_back(); }
             if (!text.empty() && text.back() == '.') { text.pop_back(); }
             if (text == "-0" || text.empty()) { text = "0"; }
-            return newui::utf8ToWide(text);
+            return newui::utf8ToUtf16(text);
         }
 
         // The number a field holds (a trailing unit such as " pt" is ignored); false when it does not start with one.
-        bool parseNumber(const std::wstring& text, double& value) {
-            std::string narrow = newui::wideToUtf8(text);
+        bool parseNumber(const std::u16string& text, double& value) {
+            std::string narrow = newui::utf16ToUtf8(text);
             char* end = nullptr;
             double parsed = std::strtod(narrow.c_str(), &end);
             if (end == narrow.c_str() || !std::isfinite(parsed)) {
@@ -83,7 +83,7 @@ namespace sketch {
         const double values[5] = {box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, angle};
         for (int i = 0; i < 5; ++i) {
             if (fields_[i] != nullptr) {
-                fields_[i]->setText(any ? numberText(values[i]) : std::wstring());
+                fields_[i]->setText(any ? numberText(values[i]) : std::u16string());
                 fields_[i]->setEnabled(any);
             }
         }

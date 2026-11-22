@@ -98,7 +98,7 @@ namespace sketch {
                 if (updating_) {
                     return newui::SyncReturn::Handled;
                 }
-                const std::string text = newui::wideToUtf8(name_->text());
+                const std::string text = newui::utf16ToUtf8(name_->text());
                 if (focusObject_ && document_.selection().size() == 1) {
                     document_.renameObject(document_.selection().front(), text);
                 } else {
@@ -343,7 +343,7 @@ namespace sketch {
         }
         updating_ = true;
         if (name_ != nullptr) {
-            name_->setText(newui::utf8ToWide(focusObject_ && single != nullptr ? single->name() : (layer != nullptr ? layer->name : std::string())));
+            name_->setText(newui::utf8ToUtf16(focusObject_ && single != nullptr ? single->name() : (layer != nullptr ? layer->name : std::string())));
         }
         if (color_ != nullptr && layer != nullptr) {
             const std::uint32_t now = layerColor(*layer);

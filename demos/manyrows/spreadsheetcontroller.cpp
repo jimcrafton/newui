@@ -51,7 +51,7 @@ namespace manyrows {
         if (nameBox_ != nullptr) {
             // The name box is also the Go to box: Enter jumps to what was typed.
             nameBox_->onReturnPressed += [this](newui::TextField&) {
-                if (goTo(newui::wideToUtf8(nameBox_->text()))) {
+                if (goTo(newui::utf16ToUtf8(nameBox_->text()))) {
                     focusTable();
                 } else {
                     syncFormulaBar();   // back to the active cell's name
@@ -62,7 +62,7 @@ namespace manyrows {
         if (formulaField_ != nullptr) {
             // Enter in the field commits it to the active cell and hands the focus back to the table.
             formulaField_->onReturnPressed += [this](newui::TextField&) {
-                if (table_.hasActiveCell() && commit(table_.activeRow(), table_.activeColumn(), newui::wideToUtf8(formulaField_->text()))) {
+                if (table_.hasActiveCell() && commit(table_.activeRow(), table_.activeColumn(), newui::utf16ToUtf8(formulaField_->text()))) {
                     if (auto* root = table_.rootView()) {
                         root->setFocusedSubView(&table_);
                     }
@@ -184,7 +184,7 @@ namespace manyrows {
             return false;
         }
         // The table owns the clipboard data (and is asked to render it later if it ever is delayed).
-        if (!newui::ClipboardManager::setText(newui::utf8ToWide(text), &table_)) {
+        if (!newui::ClipboardManager::setText(newui::utf8ToUtf16(text), &table_)) {
             say("The clipboard is busy - try again");
             return false;
         }
@@ -208,12 +208,12 @@ namespace manyrows {
         if (!range.has_value() || refused()) {
             return;
         }
-        std::wstring wide;
+        std::u16string wide;
         if (!newui::ClipboardManager::getText(wide) || wide.empty()) {
             say("The clipboard has no text to paste");
             return;
         }
-        SpreadsheetEditor::PasteOutcome outcome = editor_.paste(*range, TableClipText::parse(newui::wideToUtf8(wide)), model_.isGenerated());
+        SpreadsheetEditor::PasteOutcome outcome = editor_.paste(*range, TableClipText::parse(newui::utf16ToUtf8(wide)), model_.isGenerated());
         if (!outcome.error.empty()) {
             say(outcome.error);
             return;
@@ -459,12 +459,12 @@ namespace manyrows {
             return;
         }
         if (!table_.hasActiveCell()) {
-            nameBox_->setText(L"");
-            formulaField_->setText(L"");
+            nameBox_->setText(u"");
+            formulaField_->setText(u"");
             return;
         }
-        nameBox_->setText(newui::utf8ToWide(SpreadsheetEditor::cellName(table_.activeRow(), table_.activeColumn())));
-        formulaField_->setText(newui::utf8ToWide(model_.cellText(table_.activeRow(), table_.activeColumn())));
+        nameBox_->setText(newui::utf8ToUtf16(SpreadsheetEditor::cellName(table_.activeRow(), table_.activeColumn())));
+        formulaField_->setText(newui::utf8ToUtf16(model_.cellText(table_.activeRow(), table_.activeColumn())));
     }
 
     // Edit > Undo / Redo show what they would act on.

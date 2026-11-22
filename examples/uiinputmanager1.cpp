@@ -88,7 +88,7 @@ newui::SyncReturn FrameClosed(newui::Frame& frame) {
 }
 
 // Same minimal real Model mvc1.cpp already established - see its own doc
-// comment for why value() hands back std::string, not std::wstring.
+// comment for why value() hands back std::string, not std::u16string.
 class StringListModel : public newui::ListModel {
 public:
     std::vector<std::string> rows;
@@ -266,7 +266,7 @@ int main() {
     row1->addChild(buttonOne);
 
     auto* fieldOne = new newui::TextField();
-    fieldOne->setText(L"Click or Tab here");
+    fieldOne->setText(u"Click or Tab here");
     fieldOne->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     row1->addChild(fieldOne);
 
@@ -309,7 +309,7 @@ int main() {
 
     for (int i = 1; i <= 3; ++i) {
         auto* field = new newui::TextField();
-        field->setText(L"Panel field " + std::to_wstring(i));
+        field->setText(u"Panel field " + newui::utf8ToUtf16(std::to_string(i)));
         field->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
         panel->addChild(field);
     }
@@ -656,7 +656,7 @@ int main() {
     fluentRow->addChild(fluentToolbarButton);
 
     auto* fluentField = new newui::TextField();
-    fluentField->setText(L"Fluent field");
+    fluentField->setText(u"Fluent field");
     // fluentRowLayout uses CrossAxisAlignment::Center (above), not the
     // vertical FlexLayout default's implicit stretch row1 relies on for
     // fieldOne (section 1) - a child here sizes to its own desiredSize()

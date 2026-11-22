@@ -91,13 +91,13 @@ newui::SyncReturn FrameClosed(newui::Frame& frame) {
     return newui::SyncReturn::Handled;
 }
 
-std::wstring joinPaths(const std::vector<std::wstring>& paths) {
-    std::wstring joined;
+std::u16string joinPaths(const std::vector<std::wstring>& paths) {
+    std::u16string joined;
     for (std::size_t i = 0; i < paths.size(); ++i) {
         if (i != 0) {
-            joined += L"; ";
+            joined += u"; ";
         }
-        joined += paths[i];
+        joined += newui::fromWide(paths[i]);
     }
     return joined;
 }
@@ -114,14 +114,9 @@ const char* dropEffectName(newui::DropEffect effect) {
 // UTF-8 encodes text - the virtual file's real, on-disk contents once
 // Explorer materializes it, same conversion clipboard1.cpp's own
 // toUtf8Bytes() uses for its custom-format demo.
-std::vector<std::uint8_t> toUtf8Bytes(const std::wstring& text) {
-    if (text.empty()) {
-        return {};
-    }
-    int required = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(required));
-    ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), reinterpret_cast<char*>(bytes.data()), required, nullptr, nullptr);
-    return bytes;
+std::vector<std::uint8_t> toUtf8Bytes(const std::u16string& text) {
+    const std::string utf8 = newui::utf16ToUtf8(text);
+    return std::vector<std::uint8_t>(utf8.begin(), utf8.end());
 }
 
 }  // namespace
@@ -171,7 +166,7 @@ int main() {
 
     auto* textField = new newui::TextField();
     textField->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    textField->setText(L"Hello from newui drag!");
+    textField->setText(u"Hello from newui drag!");
     fieldRow->addChild(textField);
 
     auto* dragSourceHint = new newui::Label();
@@ -272,9 +267,9 @@ int main() {
     // onProvideText is actually handled.
     dragSource->setDragSource(std::make_unique<newui::DropSource>());
     dragSource->dragSource()->onProvideText.add(
-        [textField](newui::DropSource&, std::wstring& outText) {
+        [textField](newui::DropSource&, std::u16string& outText) {
             outText = textField->text();
-            printf("Starting outgoing drag: \"%ls\"\n", outText.c_str());
+            printf("Starting outgoing drag: \"%s\"\n", newui::utf16ToUtf8(outText).c_str());
             fflush(stdout);
             return newui::SyncReturn::Handled;
         });
@@ -335,7 +330,7 @@ int main() {
             return newui::SyncReturn::Handled;
         });
     dropTargetBox->dropTarget()->onTextDropped.add(
-        [statusLabel, droppedTextField](newui::DropTarget&, const std::wstring& text) {
+        [statusLabel, droppedTextField](newui::DropTarget&, const std::u16string& text) {
             droppedTextField->setText(text);
             statusLabel->setText("Dropped text.");
             return newui::SyncReturn::Handled;

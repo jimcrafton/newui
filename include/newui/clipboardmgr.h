@@ -137,12 +137,12 @@ public:
     // attached to a RootView) opens the clipboard unassociated with any
     // window. Returns false if the clipboard couldn't be opened or the
     // allocation failed.
-    static bool setText(const std::wstring& text, View* owner = nullptr);
+    static bool setText(const std::u16string& text, View* owner = nullptr);
 
     // Reads CF_UNICODETEXT into outText, leaving it unmodified and
     // returning false if the clipboard couldn't be opened or holds no
     // text.
-    static bool getText(std::wstring& outText);
+    static bool getText(std::u16string& outText);
 
     // Thin wrapper over RegisterClipboardFormatW() - registers formatName
     // (an arbitrary string, e.g. a MIME type) and returns its UINT atom,
@@ -256,7 +256,7 @@ public:
     static bool setMimeDataSet(const std::vector<MimeData>& items, View* owner = nullptr);
     // text as CF_UNICODETEXT's bytes (null-terminated UTF-16) - the data "text/plain" needs in
     // setMimeData()/setMimeDataSet().
-    static std::vector<std::uint8_t> textMimeData(const std::wstring& text);
+    static std::vector<std::uint8_t> textMimeData(const std::u16string& text);
 
     // application/x-file-list <-> CF_HDROP (a real DROPFILES structure,
     // not a byte blob) - kept separate from setMimeData()/getMimeData()

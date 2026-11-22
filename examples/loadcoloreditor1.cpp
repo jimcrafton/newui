@@ -72,12 +72,12 @@ int main() {
     }
 
     // Prove the load actually reconstructed real content from the file,
-    // not just an empty window. TextField::text() is std::wstring (unlike
+    // not just an empty window. TextField::text() is std::u16string (unlike
     // Label::text()/Frame::getTitle()'s std::string) - narrow it for
-    // printf via the same newui::wideToUtf8() the reflection read path
+    // printf via the same newui::utf16ToUtf8() the reflection read path
     // itself uses for this property.
     printf("Loaded from file - title=\"%s\" hexInput=\"%s\" compareHex=\"%s\"\n",
-           frame.getTitle().c_str(), newui::wideToUtf8(hexInput->text()).c_str(), compareHex->text().c_str());
+           frame.getTitle().c_str(), newui::utf16ToUtf8(hexInput->text()).c_str(), compareHex->text().c_str());
 
     auto closeDialog = [&frame](const char* which) {
         printf("%s pressed.\n", which);

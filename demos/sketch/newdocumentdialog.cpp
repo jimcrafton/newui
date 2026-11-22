@@ -17,19 +17,19 @@ namespace sketch {
     using namespace newui;
 
     namespace {
-        std::string narrow(const std::wstring& text) {
+        std::string narrow(const std::u16string& text) {
             std::string result;
-            for (wchar_t ch : text) {
+            for (char16_t ch : text) {
                 result.push_back(ch < 128 ? char(ch) : '?');
             }
             return result;
         }
 
-        std::wstring widen(const std::string& text) {
-            return std::wstring(text.begin(), text.end());
+        std::u16string widen(const std::string& text) {
+            return std::u16string(text.begin(), text.end());
         }
 
-        bool parseNumber(const std::wstring& text, double& out) {
+        bool parseNumber(const std::u16string& text, double& out) {
             std::string s = narrow(text);
             char* end = nullptr;
             double value = std::strtod(s.c_str(), &end);
@@ -437,7 +437,7 @@ namespace sketch {
         expect(!landscape->isChecked(), "landscape unchecks");
 
         link->setChecked(true);
-        widthField->setText(L"2.5");
+        widthField->setText(u"2.5");
         widthField->onReturnPressed(*widthField);
         expect(narrow(heightField->text()) == "20.22", "linked proportions scale the height (2.5 x 20.22)");
         link->setChecked(false);

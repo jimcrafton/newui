@@ -12,18 +12,18 @@ namespace sketch {
 
     namespace {
         // 12.5 -> "12.5", 24 -> "24" (up to two decimals, trailing zeros dropped).
-        std::wstring numberText(double value) {
+        std::u16string numberText(double value) {
             char buffer[48];
             std::snprintf(buffer, sizeof(buffer), "%.2f", value);
             std::string text = buffer;
             while (!text.empty() && text.back() == '0') { text.pop_back(); }
             if (!text.empty() && text.back() == '.') { text.pop_back(); }
             if (text == "-0" || text.empty()) { text = "0"; }
-            return newui::utf8ToWide(text);
+            return newui::utf8ToUtf16(text);
         }
 
-        bool parseNumber(const std::wstring& text, double& value) {
-            std::string narrow = newui::wideToUtf8(text);
+        bool parseNumber(const std::u16string& text, double& value) {
+            std::string narrow = newui::utf16ToUtf8(text);
             char* end = nullptr;
             double parsed = std::strtod(narrow.c_str(), &end);
             if (end == narrow.c_str() || !std::isfinite(parsed)) {
@@ -78,14 +78,14 @@ namespace sketch {
         onButton("deletePatternButton", [this]() { document_.deletePattern(document_.activePattern()); });
         if (symbolName_ != nullptr) {
             symbolName_->onReturnPressed += [this](newui::TextField&) {
-                if (!updating_) { document_.renameSymbol(document_.activeSymbol(), newui::wideToUtf8(symbolName_->text())); }
+                if (!updating_) { document_.renameSymbol(document_.activeSymbol(), newui::utf16ToUtf8(symbolName_->text())); }
                 refresh();
                 return newui::SyncReturn::Handled;
             };
         }
         if (patternName_ != nullptr) {
             patternName_->onReturnPressed += [this](newui::TextField&) {
-                if (!updating_) { document_.renamePattern(document_.activePattern(), newui::wideToUtf8(patternName_->text())); }
+                if (!updating_) { document_.renamePattern(document_.activePattern(), newui::utf16ToUtf8(patternName_->text())); }
                 refresh();
                 return newui::SyncReturn::Handled;
             };
@@ -136,21 +136,21 @@ namespace sketch {
         fillCombo(patternCombo_, document_.patterns(), patternNames_, pattern);
         auto nameOf = [](const std::shared_ptr<const SymbolDef>& def) { return def ? def->name : std::string(); };
         if (symbolName_ != nullptr) {
-            symbolName_->setText(newui::utf8ToWide(nameOf(document_.findSymbol(symbol))));
+            symbolName_->setText(newui::utf8ToUtf16(nameOf(document_.findSymbol(symbol))));
             symbolName_->setEnabled(symbol != 0);
         }
         if (patternName_ != nullptr) {
-            patternName_->setText(newui::utf8ToWide(nameOf(document_.findPattern(pattern))));
+            patternName_->setText(newui::utf8ToUtf16(nameOf(document_.findPattern(pattern))));
             patternName_->setEnabled(pattern != 0);
         }
         const SketchPaint* paint = document_.selectedPatternPaint();
         if (scale_ != nullptr) {
             scale_->setEnabled(paint != nullptr);
-            scale_->setText(paint != nullptr ? numberText(paint->patternScale() * 100.0) : std::wstring());
+            scale_->setText(paint != nullptr ? numberText(paint->patternScale() * 100.0) : std::u16string());
         }
         if (angle_ != nullptr) {
             angle_->setEnabled(paint != nullptr);
-            angle_->setText(paint != nullptr ? numberText(paint->patternAngle()) : std::wstring());
+            angle_->setText(paint != nullptr ? numberText(paint->patternAngle()) : std::u16string());
         }
         auto enable = [this](const char* name, bool on) {
             if (auto* control = dynamic_cast<newui::Control*>(root_.findView(name))) {

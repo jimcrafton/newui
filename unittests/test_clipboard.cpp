@@ -7,20 +7,20 @@
 #include <algorithm>
 
 TEST(ClipboardManager, SetTextThenGetTextRoundTripsUnicodeContent) {
-    std::wstring written = L"Hello, 世界! éèê";
+    std::u16string written = u"Hello, 世界! éèê";
     ASSERT_TRUE(newui::ClipboardManager::setText(written));
 
-    std::wstring read;
+    std::u16string read;
     ASSERT_TRUE(newui::ClipboardManager::getText(read));
     EXPECT_EQ(read, written);
 }
 
 TEST(ClipboardManager, SetTextWithEmptyStringRoundTrips) {
-    ASSERT_TRUE(newui::ClipboardManager::setText(L""));
+    ASSERT_TRUE(newui::ClipboardManager::setText(u""));
 
-    std::wstring read;
+    std::u16string read;
     ASSERT_TRUE(newui::ClipboardManager::getText(read));
-    EXPECT_EQ(read, L"");
+    EXPECT_EQ(read, u"");
 }
 
 TEST(ClipboardManager, GetTextReturnsFalseWhenClipboardHoldsNoText) {
@@ -28,9 +28,9 @@ TEST(ClipboardManager, GetTextReturnsFalseWhenClipboardHoldsNoText) {
     ::EmptyClipboard();
     ::CloseClipboard();
 
-    std::wstring read = L"unchanged";
+    std::u16string read = u"unchanged";
     EXPECT_FALSE(newui::ClipboardManager::getText(read));
-    EXPECT_EQ(read, L"unchanged");
+    EXPECT_EQ(read, u"unchanged");
 }
 
 TEST(ClipboardManager, RegisterCustomFormatIsStableAcrossCalls) {
@@ -263,7 +263,7 @@ TEST(ClipboardManager, SetMimeDataWrapsTextHtmlAndGetMimeDataUnwrapsIt) {
 }
 
 TEST(ClipboardManager, GetAvailableMimeTypesIncludesAKnownWrittenFormat) {
-    ASSERT_TRUE(newui::ClipboardManager::setText(L"some text"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(u"some text"));
 
     std::vector<std::wstring> mimeTypes = newui::ClipboardManager::getAvailableMimeTypes();
     EXPECT_NE(std::find(mimeTypes.begin(), mimeTypes.end(), L"text/plain"), mimeTypes.end());
@@ -350,15 +350,15 @@ TEST(ClipboardManager, SetMimeDataSetPutsEveryFormatOnTheClipboardAtOnce) {
     const std::vector<std::uint8_t> privateData = { 'a', 'b', 'c' };
     ASSERT_TRUE(newui::ClipboardManager::setMimeDataSet({
         { L"application/x-newui-test-multi", privateData },
-        { L"text/plain", newui::ClipboardManager::textMimeData(L"plain version") },
+        { L"text/plain", newui::ClipboardManager::textMimeData(u"plain version") },
     }));
 
     std::vector<std::uint8_t> read;
     ASSERT_TRUE(newui::ClipboardManager::getMimeData(L"application/x-newui-test-multi", read));
     EXPECT_EQ(read, privateData);
-    std::wstring text;
+    std::u16string text;
     ASSERT_TRUE(newui::ClipboardManager::getText(text));
-    EXPECT_EQ(text, L"plain version");
+    EXPECT_EQ(text, u"plain version");
 }
 
 TEST(ClipboardManager, SetMimeDataSetWithNothingToWriteFails) {

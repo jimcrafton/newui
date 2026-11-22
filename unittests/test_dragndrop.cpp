@@ -51,9 +51,9 @@ public:
         hasFiles_ = true;
     }
 
-    void setText(const std::wstring& text) {
+    void setText(const std::u16string& text) {
         const auto* begin = reinterpret_cast<const std::uint8_t*>(text.c_str());
-        textBytes_.assign(begin, begin + (text.size() + 1) * sizeof(wchar_t));
+        textBytes_.assign(begin, begin + (text.size() + 1) * sizeof(char16_t));
         hasText_ = true;
     }
 
@@ -232,17 +232,17 @@ TEST(DragDropExtraction, ExtractFilePathsFailsOnNullDataObject) {
 
 TEST(DragDropExtraction, ExtractUnicodeTextReturnsTheDroppedString) {
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"Hello, drop!");
+    dataObject->setText(u"Hello, drop!");
 
-    std::wstring text;
+    std::u16string text;
     ASSERT_TRUE(newui::extractUnicodeText(dataObject.Get(), text));
-    EXPECT_EQ(text, L"Hello, drop!");
+    EXPECT_EQ(text, u"Hello, drop!");
 }
 
 TEST(DragDropExtraction, ExtractUnicodeTextFailsWhenFormatNotOffered) {
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
 
-    std::wstring text;
+    std::u16string text;
     EXPECT_FALSE(newui::extractUnicodeText(dataObject.Get(), text));
 }
 
@@ -275,21 +275,21 @@ TEST(DragDropExtraction, ExtractDibImageFailsWhenFormatNotOffered) {
 }
 
 TEST(TextDataObject, QueryGetDataAcceptsUnicodeTextHglobal) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     FORMATETC formatEtc{ CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     EXPECT_EQ(dataObject->QueryGetData(&formatEtc), S_OK);
 }
 
 TEST(TextDataObject, QueryGetDataRejectsOtherFormats) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     FORMATETC formatEtc{ CF_DIB, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     EXPECT_EQ(dataObject->QueryGetData(&formatEtc), DV_E_FORMATETC);
 }
 
 TEST(TextDataObject, GetDataHandsBackANullTerminatedCopyOfTheText) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     FORMATETC formatEtc{ CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM medium{};
@@ -298,13 +298,13 @@ TEST(TextDataObject, GetDataHandsBackANullTerminatedCopyOfTheText) {
 
     void* locked = ::GlobalLock(medium.hGlobal);
     ASSERT_NE(locked, nullptr);
-    EXPECT_STREQ(static_cast<const wchar_t*>(locked), L"Hello, drag!");
+    EXPECT_EQ(std::u16string(static_cast<const char16_t*>(locked)), u"Hello, drag!");
     ::GlobalUnlock(medium.hGlobal);
     ::ReleaseStgMedium(&medium);
 }
 
 TEST(TextDataObject, GetDataRejectsAnUnsupportedFormat) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     FORMATETC formatEtc{ CF_DIB, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM medium{};
@@ -312,7 +312,7 @@ TEST(TextDataObject, GetDataRejectsAnUnsupportedFormat) {
 }
 
 TEST(TextDataObject, EnumFormatEtcListsOnlyUnicodeTextForGet) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     Microsoft::WRL::ComPtr<IEnumFORMATETC> enumerator;
     ASSERT_EQ(dataObject->EnumFormatEtc(DATADIR_GET, &enumerator), S_OK);
@@ -325,7 +325,7 @@ TEST(TextDataObject, EnumFormatEtcListsOnlyUnicodeTextForGet) {
 }
 
 TEST(TextDataObject, EnumFormatEtcRefusesSetDirection) {
-    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::wstring(L"Hello, drag!"));
+    auto dataObject = Microsoft::WRL::Make<newui::TextDataObject>(std::u16string(u"Hello, drag!"));
 
     Microsoft::WRL::ComPtr<IEnumFORMATETC> enumerator;
     EXPECT_EQ(dataObject->EnumFormatEtc(DATADIR_SET, &enumerator), E_NOTIMPL);
@@ -479,11 +479,11 @@ struct DropTargetFixture {
 TEST(COMDropTarget, DragEnterAtNegotiatesCopyWhenTheHitViewAccepts) {
     DropTargetFixture fixture;
     auto childDropTarget = std::make_unique<newui::DropTarget>();
-    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::wstring&) { return newui::SyncReturn::Handled; });
+    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::u16string&) { return newui::SyncReturn::Handled; });
     fixture.child->setDropTarget(std::move(childDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -496,7 +496,7 @@ TEST(COMDropTarget, DragEnterAtRefusesWhenNothingInTheChainAccepts) {
     DropTargetFixture fixture;
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -508,11 +508,11 @@ TEST(COMDropTarget, DragEnterAtRefusesWhenNothingInTheChainAccepts) {
 TEST(COMDropTarget, DragEnterAtRefusesWhenTheSourceDidNotAllowCopy) {
     DropTargetFixture fixture;
     auto childDropTarget = std::make_unique<newui::DropTarget>();
-    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::wstring&) { return newui::SyncReturn::Handled; });
+    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::u16string&) { return newui::SyncReturn::Handled; });
     fixture.child->setDropTarget(std::move(childDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -526,11 +526,11 @@ TEST(COMDropTarget, DragEnterAtWalksUpToAnAncestorThatAccepts) {
     // child itself has no DropTarget - only fixture.root does, so a hit
     // over child has to walk up through parent() to find it.
     auto rootDropTarget = std::make_unique<newui::DropTarget>();
-    rootDropTarget->onTextDropped.add([](newui::DropTarget&, const std::wstring&) { return newui::SyncReturn::Handled; });
+    rootDropTarget->onTextDropped.add([](newui::DropTarget&, const std::u16string&) { return newui::SyncReturn::Handled; });
     fixture.root->setDropTarget(std::move(rootDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -542,11 +542,11 @@ TEST(COMDropTarget, DragEnterAtWalksUpToAnAncestorThatAccepts) {
 TEST(COMDropTarget, DragOverAtReusesTheDataObjectRememberedFromDragEnterAt) {
     DropTargetFixture fixture;
     auto childDropTarget = std::make_unique<newui::DropTarget>();
-    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::wstring&) { return newui::SyncReturn::Handled; });
+    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::u16string&) { return newui::SyncReturn::Handled; });
     fixture.child->setDropTarget(std::move(childDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -561,11 +561,11 @@ TEST(COMDropTarget, DragOverAtReusesTheDataObjectRememberedFromDragEnterAt) {
 TEST(COMDropTarget, DragLeaveClearsTheRememberedDataObject) {
     DropTargetFixture fixture;
     auto childDropTarget = std::make_unique<newui::DropTarget>();
-    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::wstring&) { return newui::SyncReturn::Handled; });
+    childDropTarget->onTextDropped.add([](newui::DropTarget&, const std::u16string&) { return newui::SyncReturn::Handled; });
     fixture.child->setDropTarget(std::move(childDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -608,7 +608,7 @@ TEST(COMDropTarget, DropAtPrefersFilesOverTextWhenBothAreOffered) {
         filesCalled = true;
         return newui::SyncReturn::Handled;
     });
-    childDropTarget->onTextDropped.add([&textCalled](newui::DropTarget&, const std::wstring&) {
+    childDropTarget->onTextDropped.add([&textCalled](newui::DropTarget&, const std::u16string&) {
         textCalled = true;
         return newui::SyncReturn::Handled;
     });
@@ -616,7 +616,7 @@ TEST(COMDropTarget, DropAtPrefersFilesOverTextWhenBothAreOffered) {
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
     dataObject->setFilePaths({ L"C:\\fake\\a.txt" });
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -628,29 +628,29 @@ TEST(COMDropTarget, DropAtPrefersFilesOverTextWhenBothAreOffered) {
 
 TEST(COMDropTarget, DropAtFallsThroughToTextWhenFilesAreNotRegistered) {
     DropTargetFixture fixture;
-    std::wstring received;
+    std::u16string received;
     auto childDropTarget = std::make_unique<newui::DropTarget>();
-    childDropTarget->onTextDropped.add([&received](newui::DropTarget&, const std::wstring& text) {
+    childDropTarget->onTextDropped.add([&received](newui::DropTarget&, const std::u16string& text) {
         received = text;
         return newui::SyncReturn::Handled;
     });
     fixture.child->setDropTarget(std::move(childDropTarget));
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
     EXPECT_EQ(comDropTarget->dropAt(dataObject.Get(), newui::Point(50, 50), &effect), S_OK);
-    EXPECT_EQ(received, L"hello");
+    EXPECT_EQ(received, u"hello");
 }
 
 TEST(COMDropTarget, DropAtDispatchesNothingWhenNothingInTheChainAccepts) {
     DropTargetFixture fixture;
 
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"hello");
+    dataObject->setText(u"hello");
 
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
@@ -666,24 +666,24 @@ namespace {
 struct HoverProbe {
     int overCount = 0;
     int leaveCount = 0;
-    std::wstring lastText;
+    std::u16string lastText;
     newui::Point lastPoint;
     newui::DropEffect answer = newui::DropEffect::Copy;  // what the handler sets
     std::vector<std::string> order;                       // "over", "leave", "droppedAt", "dropped"
 
     void attachTo(newui::View* view) {
         auto dropTarget = std::make_unique<newui::DropTarget>();
-        dropTarget->onTextDropped.add([this](newui::DropTarget&, const std::wstring&) {
+        dropTarget->onTextDropped.add([this](newui::DropTarget&, const std::u16string&) {
             order.push_back("dropped");
             return newui::SyncReturn::Handled;
         });
-        dropTarget->onTextDroppedAt.add([this](newui::DropTarget&, const std::wstring& text, const newui::Point& pt) {
+        dropTarget->onTextDroppedAt.add([this](newui::DropTarget&, const std::u16string& text, const newui::Point& pt) {
             order.push_back("droppedAt");
             lastText = text;
             lastPoint = pt;
             return newui::SyncReturn::Handled;
         });
-        dropTarget->onTextDragOver.add([this](newui::DropTarget&, const std::wstring& text, const newui::Point& pt,
+        dropTarget->onTextDragOver.add([this](newui::DropTarget&, const std::u16string& text, const newui::Point& pt,
                 newui::DropEffect& effect) {
             ++overCount;
             order.push_back("over");
@@ -707,13 +707,13 @@ TEST(COMDropTarget, DragEnterAndOverFireTextDragOverWithTheTextAndTheTargetLocal
     HoverProbe probe;
     probe.attachTo(fixture.child);
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
     comDropTarget->dragEnterAt(dataObject.Get(), newui::Point(50, 60), &effect);
     EXPECT_EQ(probe.overCount, 1);
-    EXPECT_EQ(probe.lastText, L"payload");
+    EXPECT_EQ(probe.lastText, u"payload");
     EXPECT_FLOAT_EQ(probe.lastPoint.x, 40.0f);
     EXPECT_FLOAT_EQ(probe.lastPoint.y, 50.0f);
 
@@ -731,7 +731,7 @@ TEST(COMDropTarget, AHoverHandlerCanRefuseTheDropAtThatPoint) {
     probe.answer = newui::DropEffect::None;
     probe.attachTo(fixture.child);
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
@@ -751,7 +751,7 @@ TEST(COMDropTarget, DragLeaveFiresOnDragLeaveOnceAndOnlyWhenHovering) {
     HoverProbe probe;
     probe.attachTo(fixture.child);
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     comDropTarget->DragLeave();  // never hovered anything
@@ -770,7 +770,7 @@ TEST(COMDropTarget, MovingOffTheTargetFiresOnDragLeave) {
     HoverProbe probe;
     probe.attachTo(fixture.child);
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
@@ -786,7 +786,7 @@ TEST(COMDropTarget, DropEndsTheHoverThenDeliversPositionedAndPlainTextDrops) {
     HoverProbe probe;
     probe.attachTo(fixture.child);
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
@@ -810,12 +810,12 @@ TEST(COMDropTarget, DropEndsTheHoverThenDeliversPositionedAndPlainTextDrops) {
 TEST(COMDropTarget, AViewWithOnlyHoverDelegatesDoesNotAccept) {
     DropTargetFixture fixture;
     auto dropTarget = std::make_unique<newui::DropTarget>();
-    dropTarget->onTextDragOver.add([](newui::DropTarget&, const std::wstring&, const newui::Point&, newui::DropEffect&) {
+    dropTarget->onTextDragOver.add([](newui::DropTarget&, const std::u16string&, const newui::Point&, newui::DropEffect&) {
         return newui::SyncReturn::Handled;
     });
     fixture.child->setDropTarget(std::move(dropTarget));
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;
@@ -826,12 +826,12 @@ TEST(COMDropTarget, AViewWithOnlyHoverDelegatesDoesNotAccept) {
 TEST(COMDropTarget, AViewWithOnlyTextDroppedAtStillAccepts) {
     DropTargetFixture fixture;
     auto dropTarget = std::make_unique<newui::DropTarget>();
-    dropTarget->onTextDroppedAt.add([](newui::DropTarget&, const std::wstring&, const newui::Point&) {
+    dropTarget->onTextDroppedAt.add([](newui::DropTarget&, const std::u16string&, const newui::Point&) {
         return newui::SyncReturn::Handled;
     });
     fixture.child->setDropTarget(std::move(dropTarget));
     auto dataObject = Microsoft::WRL::Make<MockDataObject>();
-    dataObject->setText(L"payload");
+    dataObject->setText(u"payload");
     auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(*fixture.root);
 
     DWORD effect = DROPEFFECT_COPY;

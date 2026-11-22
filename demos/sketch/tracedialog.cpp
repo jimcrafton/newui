@@ -17,8 +17,8 @@ namespace sketch {
     using namespace newui;
 
     namespace {
-        bool parseNumber(const std::wstring& text, double& out) {
-            const std::string narrow = wideToUtf8(text);
+        bool parseNumber(const std::u16string& text, double& out) {
+            const std::string narrow = utf16ToUtf8(text);
             char* end = nullptr;
             const double value = std::strtod(narrow.c_str(), &end);
             if (end == narrow.c_str() || !std::isfinite(value)) {
@@ -28,7 +28,7 @@ namespace sketch {
             return true;
         }
 
-        std::wstring whole(int value) { return utf8ToWide(std::to_string(value)); }
+        std::u16string whole(int value) { return utf8ToUtf16(std::to_string(value)); }
 
         // One run of the dialog: finds the controls once, shows `options` in them and reads them back.
         class Session {
@@ -156,13 +156,13 @@ namespace sketch {
             button("traceButton") && button("traceCancelButton"))) {
             return failures;
         }
-        expect(wideToUtf8(field("traceColorsField")->text()) == "12" && wideToUtf8(field("traceSizeField")->text()) == "600" &&
-            wideToUtf8(field("traceSpecksField")->text()) == "10", "it shows the options it was given");
+        expect(utf16ToUtf8(field("traceColorsField")->text()) == "12" && utf16ToUtf8(field("traceSizeField")->text()) == "600" &&
+            utf16ToUtf8(field("traceSpecksField")->text()) == "10", "it shows the options it was given");
         expect(combo("traceSmoothnessCombo")->selectedIndex() == std::optional<std::size_t>(2) && combo("traceWhiteCombo")->selectedIndex() == std::optional<std::size_t>(1),
             "and the smoothness and the white choice");
-        field("traceColorsField")->setText(L"99");
-        field("traceSizeField")->setText(L"10");
-        field("traceSpecksField")->setText(L"abc");
+        field("traceColorsField")->setText(u"99");
+        field("traceSizeField")->setText(u"10");
+        field("traceSpecksField")->setText(u"abc");
         combo("traceSmoothnessCombo")->setSelectedIndex(0);
         combo("traceWhiteCombo")->setSelectedIndex(0);
         button("traceButton")->onClick(*button("traceButton"));

@@ -127,7 +127,7 @@ namespace manyrows {
         if (!column.has_value() || !op.has_value() || *op >= sizeof(kOps) / sizeof(kOps[0])) {
             return;
         }
-        std::string text = value_ != nullptr ? newui::wideToUtf8(value_->text()) : std::string();
+        std::string text = value_ != nullptr ? newui::utf16ToUtf8(value_->text()) : std::string();
         std::vector<FilterRule> rules = model_.filters();
         rules.push_back(FilterRule(*column, kOps[*op], FilterRule::needsValue(kOps[*op]) ? text : std::string()));
         sheet_.setFilters(std::move(rules));
@@ -167,7 +167,7 @@ namespace manyrows {
         bool needsValue = op < sizeof(kOps) / sizeof(kOps[0]) ? FilterRule::needsValue(kOps[op]) : true;
         value_->controller().inputTraits().setReadOnly(!needsValue);
         if (!needsValue) {
-            value_->setText(L"");
+            value_->setText(u"");
         }
     }
 

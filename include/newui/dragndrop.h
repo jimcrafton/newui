@@ -63,7 +63,7 @@ struct VirtualFile {
 class DropSource {
 public:
     Delegate<DropSource, std::vector<VirtualFile>&> onProvideFiles;
-    Delegate<DropSource, std::wstring&> onProvideText;
+    Delegate<DropSource, std::u16string&> onProvideText;
     Delegate<DropSource, DropEffect> onDragComplete;
 };
 
@@ -84,7 +84,7 @@ class DropTarget {
 public:
     Delegate<DropTarget, const std::vector<std::wstring>&> onFilesDropped;
     Delegate<DropTarget, const BLImage&> onImageDropped;
-    Delegate<DropTarget, const std::wstring&> onTextDropped;
+    Delegate<DropTarget, const std::u16string&> onTextDropped;
 
     // Text drops with a position, and live hover feedback while one is in flight - what a
     // designer-style surface needs to show "it would land here" cues. All points are in this
@@ -92,13 +92,13 @@ public:
     // onTextDroppedAt has a listener (the hover delegates alone never make a View accept).
     //
     // onTextDropped's positioned twin - both fire on a drop when both have listeners.
-    Delegate<DropTarget, const std::wstring&, const Point&> onTextDroppedAt;
+    Delegate<DropTarget, const std::u16string&, const Point&> onTextDroppedAt;
 
     // Fired for the drag's first move over this target and every move after (the first call after
     // onDragLeave is the "enter"), with the dragged text and the current point. A handler can set
     // effect to DropEffect::None to refuse a drop at this point (the cursor shows "not allowed",
     // and the drop itself is refused there too); it starts as Copy.
-    Delegate<DropTarget, const std::wstring&, const Point&, DropEffect&> onTextDragOver;
+    Delegate<DropTarget, const std::u16string&, const Point&, DropEffect&> onTextDragOver;
 
     // The hover over this target ended: the drag left it, was cancelled, or is about to be dropped
     // on it (fired right before onTextDropped/onTextDroppedAt) - so a subscriber only needs this
@@ -117,7 +117,7 @@ public:
 bool extractFilePaths(IDataObject* dataObject, std::vector<std::wstring>& outPaths);
 
 // CF_UNICODETEXT -> its UTF-16 text.
-bool extractUnicodeText(IDataObject* dataObject, std::wstring& outText);
+bool extractUnicodeText(IDataObject* dataObject, std::u16string& outText);
 
 // CF_DIB -> decoded via dibimage.h's dibBytesToImage().
 bool extractDibImage(IDataObject* dataObject, BLImage& outImage);
@@ -133,7 +133,7 @@ class TextDataObject final : public Microsoft::WRL::RuntimeClass<
     Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
     IDataObject> {
 public:
-    explicit TextDataObject(std::wstring text);
+    explicit TextDataObject(std::u16string text);
 
     STDMETHODIMP GetData(FORMATETC* formatEtcIn, STGMEDIUM* medium) override;
     STDMETHODIMP GetDataHere(FORMATETC* formatEtc, STGMEDIUM* medium) override;
@@ -146,7 +146,7 @@ public:
     STDMETHODIMP EnumDAdvise(IEnumSTATDATA** enumAdvise) override;
 
 private:
-    std::wstring text_;
+    std::u16string text_;
 };
 
 // VirtualFileDataObject - a WRL-backed IDataObject exposing a set of
@@ -219,7 +219,7 @@ public:
 // (View::dragSource()) being asked by RootView's generic mouse-gesture
 // detection (rootview.cpp), not a direct call to this from application
 // code.
-HRESULT StartDragOperation(HWND hwndSource, const std::wstring& text, POINT ptCursorClient,
+HRESULT StartDragOperation(HWND hwndSource, const std::u16string& text, POINT ptCursorClient,
     DWORD allowedEffects = DROPEFFECT_COPY, DWORD* outEffect = nullptr);
 
 // Starts an outgoing virtual-file drag from hwndSource - wraps
@@ -288,7 +288,7 @@ private:
 
     RootView& rootView_;
     Microsoft::WRL::ComPtr<IDataObject> currentDataObject_;
-    std::wstring currentText_;       // the drag's CF_UNICODETEXT payload, cached at drag-enter
+    std::u16string currentText_;       // the drag's CF_UNICODETEXT payload, cached at drag-enter
     bool hasCurrentText_ = false;
     View* hoverView_ = nullptr;      // non-owning; the View whose DropTarget last got onTextDragOver
     Microsoft::WRL::ComPtr<IDropTargetHelper> dropTargetHelper_;

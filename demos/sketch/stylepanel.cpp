@@ -24,20 +24,20 @@ namespace sketch {
         // Full weight at the start fading to a thin tip; and a lens: pointed ends swelling to the middle.
         std::vector<WidthPoint> taperProfile() { return {WidthPoint{0.0, 1.0, 1.0}, WidthPoint{1.0, 0.1, 0.1}}; }
         std::vector<WidthPoint> bulgeProfile() { return {WidthPoint{0.0, 0.05, 0.05}, WidthPoint{0.5, 1.5, 1.5}, WidthPoint{1.0, 0.05, 0.05}}; }
-        std::string narrow(const std::wstring& text) {
+        std::string narrow(const std::u16string& text) {
             std::string result;
-            for (wchar_t ch : text) {
+            for (char16_t ch : text) {
                 result.push_back(ch < 128 ? char(ch) : '?');
             }
             return result;
         }
 
-        std::wstring widen(const std::string& text) {
-            return std::wstring(text.begin(), text.end());
+        std::u16string widen(const std::string& text) {
+            return std::u16string(text.begin(), text.end());
         }
 
         // The leading number in text such as "4 pt" or "55%"; false when there is none.
-        bool leadingNumber(const std::wstring& text, double& out) {
+        bool leadingNumber(const std::u16string& text, double& out) {
             std::string s = narrow(text);
             char* end = nullptr;
             double value = std::strtod(s.c_str(), &end);
@@ -1193,7 +1193,7 @@ namespace sketch {
         if (auto* field = find<TextField>("gradientAngleField")) {
             char buffer[32];
             std::snprintf(buffer, sizeof(buffer), "%g", std::round((paint.isGradient() ? paint.gradient().angleDegrees : 0.0) * 10.0) / 10.0);
-            field->setText(paint.isGradient() ? widen(buffer) + L"\u00b0" : std::wstring());
+            field->setText(paint.isGradient() ? widen(buffer) + u"\u00b0" : std::u16string());
         }
         if (auto* label = find<Label>("gradientTypeLabel")) {
             label->setText(paint.kind() == SketchPaint::Kind::Radial ? "Radial" : (paint.kind() == SketchPaint::Kind::Linear ? "Linear" : "-"));

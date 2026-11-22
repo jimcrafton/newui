@@ -126,14 +126,14 @@ namespace detail {
 
 }
 
-bool ClipboardManager::setText(const std::wstring& text, View* owner) {
+bool ClipboardManager::setText(const std::u16string& text, View* owner) {
     try {
         detail::ClipboardScope scope(detail::windowHandleOf(owner));
         if (!::EmptyClipboard()) {
             return false;
         }
 
-        std::size_t size = (text.length() + 1) * sizeof(wchar_t);
+        std::size_t size = (text.length() + 1) * sizeof(char16_t);   // CF_UNICODETEXT is UTF-16
         detail::GlobalMemoryHandle handle = detail::allocGlobalMemory(GHND, size);
         {
             detail::GlobalMemoryLock lock = detail::lockGlobalMemory(handle.get());
@@ -150,7 +150,7 @@ bool ClipboardManager::setText(const std::wstring& text, View* owner) {
     }
 }
 
-bool ClipboardManager::getText(std::wstring& outText) {
+bool ClipboardManager::getText(std::u16string& outText) {
     try {
         detail::ClipboardScope scope;
         if (!::IsClipboardFormatAvailable(CF_UNICODETEXT)) {
@@ -163,7 +163,7 @@ bool ClipboardManager::getText(std::wstring& outText) {
         }
 
         detail::GlobalMemoryLock lock = detail::lockGlobalMemory(static_cast<HGLOBAL>(data));
-        outText = static_cast<const wchar_t*>(lock.get());
+        outText = static_cast<const char16_t*>(lock.get());
         return true;
     } catch (const std::runtime_error&) {
         return false;
@@ -417,9 +417,9 @@ bool ClipboardManager::setMimeDataSet(const std::vector<MimeData>& items, View* 
     }
 }
 
-std::vector<std::uint8_t> ClipboardManager::textMimeData(const std::wstring& text) {
+std::vector<std::uint8_t> ClipboardManager::textMimeData(const std::u16string& text) {
     const auto* bytes = reinterpret_cast<const std::uint8_t*>(text.c_str());
-    return std::vector<std::uint8_t>(bytes, bytes + (text.size() + 1) * sizeof(wchar_t));
+    return std::vector<std::uint8_t>(bytes, bytes + (text.size() + 1) * sizeof(char16_t));
 }
 
 bool ClipboardManager::getMimeData(const std::wstring& mimeType, std::vector<std::uint8_t>& outData) {

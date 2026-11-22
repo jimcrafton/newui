@@ -2994,7 +2994,7 @@ namespace newui {
         if (selection_.isEmpty() || traits_.isSecureTextEntry()) {
             return false;
         }
-        return ClipboardManager::setText(toWideString(model().storage().substring(selection_.ranges()[0])), &owner_);
+        return ClipboardManager::setText(model().storage().substring(selection_.ranges()[0]), &owner_);
     }
 
     bool TextController::cut() {
@@ -3009,11 +3009,10 @@ namespace newui {
     }
 
     bool TextController::paste() {
-        std::wstring pastedWide;
-        if (traits_.isReadOnly() || !ClipboardManager::getText(pastedWide) || pastedWide.empty()) {
+        std::u16string pasted;
+        if (traits_.isReadOnly() || !ClipboardManager::getText(pasted) || pasted.empty()) {
             return false;
         }
-        std::u16string pasted = fromWide(pastedWide);
         if (!multiline_) {
             std::u16string flat;
             for (std::size_t i = 0; i < pasted.size(); ++i) {

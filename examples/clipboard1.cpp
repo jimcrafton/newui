@@ -59,24 +59,13 @@ newui::SyncReturn FrameClosed(newui::Frame& frame) {
 // UTF-8 encodes/decodes text for the custom-format demo below - just
 // enough to prove the custom format really carries independent bytes,
 // not a general-purpose Unicode conversion utility.
-std::vector<std::uint8_t> toUtf8Bytes(const std::wstring& text) {
-    if (text.empty()) {
-        return {};
-    }
-    int required = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(required));
-    ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), reinterpret_cast<char*>(bytes.data()), required, nullptr, nullptr);
-    return bytes;
+std::vector<std::uint8_t> toUtf8Bytes(const std::u16string& text) {
+    const std::string utf8 = newui::utf16ToUtf8(text);
+    return std::vector<std::uint8_t>(utf8.begin(), utf8.end());
 }
 
-std::wstring fromUtf8Bytes(const std::vector<std::uint8_t>& bytes) {
-    if (bytes.empty()) {
-        return L"";
-    }
-    int required = ::MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size()), nullptr, 0);
-    std::wstring text(static_cast<std::size_t>(required), L'\0');
-    ::MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size()), &text[0], required);
-    return text;
+std::u16string fromUtf8Bytes(const std::vector<std::uint8_t>& bytes) {
+    return newui::utf8ToUtf16(std::string(bytes.begin(), bytes.end()));
 }
 
 // A small, deliberately colorful swatch to copy - four quadrants plus a
@@ -156,7 +145,7 @@ int main() {
 
     auto* sourceField = new newui::TextField();
     sourceField->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    sourceField->setText(L"Hello from newui!");
+    sourceField->setText(u"Hello from newui!");
     sourceRow->addChild(sourceField);
 
     auto* buttonsRow = makeRow(28.0f);
@@ -229,7 +218,7 @@ int main() {
     });
 
     pasteTextButton->onClick.add([statusLabel, resultField](newui::Control&) {
-        std::wstring text;
+        std::u16string text;
         if (newui::ClipboardManager::getText(text)) {
             resultField->setText(text);
             statusLabel->setText("Pasted plain text from the system clipboard.");
@@ -262,13 +251,13 @@ int main() {
         // click, possibly after sourceField's own text has changed
         // again, so it needs its own snapshot rather than reading
         // sourceField live.
-        std::wstring snapshot = sourceField->text();
+        std::u16string snapshot = sourceField->text();
         bool ok = newui::ClipboardManager::setDelayedRenderer(
             CF_UNICODETEXT,
             [snapshot]() {
-                printf("Rendering delayed clipboard text now: \"%ls\"\n", snapshot.c_str());
+                printf("Rendering delayed clipboard text now: \"%s\"\n", newui::utf16ToUtf8(snapshot).c_str());
                 fflush(stdout);
-                std::vector<std::uint8_t> bytes((snapshot.size() + 1) * sizeof(wchar_t));
+                std::vector<std::uint8_t> bytes((snapshot.size() + 1) * sizeof(char16_t));
                 std::memcpy(bytes.data(), snapshot.c_str(), bytes.size());
                 return bytes;
             },

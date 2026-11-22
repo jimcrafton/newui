@@ -901,7 +901,7 @@ namespace newui {
 						// (dragndrop.h) - only one kind of drag can actually
 						// start per gesture.
 						std::vector<VirtualFile> files;
-						std::wstring text;
+						std::u16string text;
 						bool providingFiles = dragSource->onProvideFiles.syncCallFirst(*dragSource, files).handled();
 						bool providingText = !providingFiles
 							&& dragSource->onProvideText.syncCallFirst(*dragSource, text).handled();
