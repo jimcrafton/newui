@@ -20,5 +20,8 @@ namespace newui {
         inline NativeCursorHandle toNativeCursor(HCURSOR cursor) { return static_cast<NativeCursorHandle>(cursor); }
         inline HCURSOR toHCURSOR(NativeCursorHandle handle) { return static_cast<HCURSOR>(handle); }
 
+        inline NativeMenuHandle toNativeMenu(HMENU menu) { return static_cast<NativeMenuHandle>(menu); }
+        inline HMENU toHMENU(NativeMenuHandle handle) { return static_cast<HMENU>(handle); }
+
     } // namespace win32
 } // namespace newui

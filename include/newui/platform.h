@@ -44,4 +44,7 @@ namespace newui {
     // Null means "nothing to show".
     using NativeCursorHandle = void*;
 
+    // Opaque native popup-menu handle: HMENU on Windows, NSMenu* on macOS. Null means "no menu built".
+    using NativeMenuHandle = void*;
+
 } // namespace newui

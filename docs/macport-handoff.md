@@ -110,7 +110,11 @@ first, then 3.3. 3.2 is verified on Windows. 3.4 slice 1 (Cursor + RunLoop) is i
 `NativeCursorHandle` (`platform.h`, `toNativeCursor/toHCURSOR` in `win32/nativehandles.h`), `Cursor::handle()` and
 `View::resolvedCursor()` return it, `RunLoop::TimerHandle` is `std::uintptr_t`, `RunLoop::runModal` takes `NativeWindowHandle`,
 `TimerProc` replaced by a file-local `winTimerProc` calling public-but-internal `RunLoop::timerFired`.
-3.4 slices 2 (Dialog/ContextMenu/ClipboardScope/PopupTool) and 3 (Frame/RootView accessors) remain.
+3.4 slice 1 verified on Windows. Slice 2a (Dialog + ContextMenu) in tree, Windows build pending: `Dialog::show*`/`dialogHandle()`/`showModal`
+take/return `NativeWindowHandle`; `ContextMenu::show`, `handle()`, `MenuItem::ownerMenu_` use new `NativeMenuHandle`
+(`toNativeMenu/toHMENU`); tests updated. Still to do: `MenuItem::bitmap()` (HBITMAP) check, `PopupTool`/`CalloutTool`
+(their `HWND`+`HINSTANCE` feed the `RootView` constructor, so do with slice 3), `ClipboardScope` (3.5, detail namespace),
+slice 3 (Frame/RootView accessors).
 
 ## Next actions, in order
 

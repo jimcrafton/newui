@@ -136,7 +136,7 @@ namespace newui {
         // at all.
         // ------------------------------------------------------------------
 
-        static DialogResult showMessageBox(HWND owner, const std::string& text, const std::string& title,
+        static DialogResult showMessageBox(NativeWindowHandle owner, const std::string& text, const std::string& title,
                                             MessageBoxButtons buttons = MessageBoxButtons::Ok,
                                             MessageBoxIcon icon = MessageBoxIcon::None,
                                             DialogPosition position = DialogPosition::CenterOnRootView);
@@ -160,20 +160,20 @@ namespace newui {
         // (no owner window).
         // ------------------------------------------------------------------
 
-        static bool showOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
-        static bool showOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths);
-        static bool showSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showOpenFile(NativeWindowHandle owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showOpenFileMulti(NativeWindowHandle owner, const FileDialogOptions& options, std::vector<std::string>& outPaths);
+        static bool showSaveFile(NativeWindowHandle owner, const FileDialogOptions& options, std::string& outPath);
 
         // FOS_PICKFOLDERS on an IFileOpenDialog - the modern Common Item
         // Dialog replacement for the old SHBrowseForFolder.
-        static bool showBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath);
+        static bool showBrowseForFolder(NativeWindowHandle owner, const FileDialogOptions& options, std::string& outPath);
 
         virtual bool initialize();
 
 
         // Same name as before (Frame's own equivalent is frameHandle()) - kept as the name this
         // class's own callers/tests already use.
-        HWND dialogHandle() const {
+        NativeWindowHandle dialogHandle() const {
             return frameHandle();
         }
 
@@ -202,7 +202,7 @@ namespace newui {
         // couldn't be created or this Dialog was already closed.
         DialogResult showModal(Frame* owner = nullptr);
         DialogResult showModal(View* view);
-        DialogResult showModal(HWND hwnd, RunLoop* runLoop=nullptr);
+        DialogResult showModal(NativeWindowHandle hwnd, RunLoop* runLoop=nullptr);
 
         // Closes the dialog, recording result - the first close() call
         // (whether this explicit call, or the user closing the window
@@ -235,7 +235,7 @@ namespace newui {
         DialogResult result_ = DialogResult::None;
         bool closed_ = false;
         DialogPosition position_ = DialogPosition::CenterOnRootView;
-		HWND modalOwner_ = nullptr;  // only valid during showModal() - the owner window disabled for the duration
+		NativeWindowHandle modalOwner_ = nullptr;  // only valid during showModal() - the owner window disabled for the duration
     };
 
 }

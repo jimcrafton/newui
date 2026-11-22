@@ -1,6 +1,7 @@
 #include "newui/dialogs.h"
 #include "newui/reflectionio.h"
 #include "newui/subview.h"
+#include "newui/win32/nativehandles.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_input.hpp>
@@ -86,7 +87,7 @@ TEST(Dialog, ChildTreeSurvivesWindowDestruction) {
     dialog.rootView().addChild(child);
 
     ASSERT_TRUE(dialog.show());
-    HWND hwnd = dialog.dialogHandle();
+    HWND hwnd = newui::win32::toHWND(dialog.dialogHandle());
     ASSERT_NE(hwnd, nullptr);
 
     ::SendMessage(hwnd, WM_CLOSE, 0, 0);

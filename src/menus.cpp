@@ -8,6 +8,7 @@
 #include "newui/font.h"
 #include "newui/uicolormanager.h"
 #include "newui/graphics.h"
+#include "newui/win32/nativehandles.h"
 
 #include <algorithm>
 
@@ -266,11 +267,11 @@ void MenuItem::setAction(Action* action) {
 
 ContextMenu::~ContextMenu() {
     if (hmenu_ != nullptr) {
-        ::DestroyMenu(hmenu_);
+        ::DestroyMenu(win32::toHMENU(hmenu_));
     }
 }
 
-void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
+void ContextMenu::buildMenuLevel(NativeMenuHandle hmenu, MenuItem& parentItem) {
     int position = 0;
     for (MenuItem* childPtr : parentItem.children_) {
         MenuItem& item = *childPtr;
@@ -329,10 +330,10 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
             }
         }
 
-        ::InsertMenuItemA(hmenu, static_cast<UINT>(position), TRUE, &mii);
+        ::InsertMenuItemA(win32::toHMENU(hmenu), static_cast<UINT>(position), TRUE, &mii);
 
         if (!item.isSeparator() && item.hasChildren()) {
-            buildMenuLevel(mii.hSubMenu, item);
+            buildMenuLevel(win32::toNativeMenu(mii.hSubMenu), item);
         }
 
         ++position;
@@ -341,17 +342,18 @@ void ContextMenu::buildMenuLevel(HMENU hmenu, MenuItem& parentItem) {
 
 void ContextMenu::buildNativeMenu(MenuItem& parentItem) {
     if (hmenu_ != nullptr) {
-        ::DestroyMenu(hmenu_);
+        ::DestroyMenu(win32::toHMENU(hmenu_));
         hmenu_ = nullptr;
     }
     commandMap_.clear();
     nextCommandId_ = 1000;
 
-    hmenu_ = ::CreatePopupMenu();
+    hmenu_ = win32::toNativeMenu(::CreatePopupMenu());
     buildMenuLevel(hmenu_, parentItem);
 }
 
-bool ContextMenu::show(HWND owner, MenuItem& parentItem, int screenX, int screenY) {
+bool ContextMenu::show(NativeWindowHandle ownerNative, MenuItem& parentItem, int screenX, int screenY) {
+    HWND owner = win32::toHWND(ownerNative);
     buildNativeMenu(parentItem);
 
     // Opts owner into real native dark chrome (uicolormanager.h) right
@@ -362,7 +364,7 @@ bool ContextMenu::show(HWND owner, MenuItem& parentItem, int screenX, int screen
     enableDarkModeForWindow(owner);
 
     ::SetForegroundWindow(owner);
-    UINT id = UINT(::TrackPopupMenuEx(hmenu_, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+    UINT id = UINT(::TrackPopupMenuEx(win32::toHMENU(hmenu_), TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
         screenX, screenY, owner, nullptr));
     // Documented MSDN workaround: without this, the popup can reappear on
     // the user's very next click into owner.
@@ -370,7 +372,7 @@ bool ContextMenu::show(HWND owner, MenuItem& parentItem, int screenX, int screen
 
     bool clicked = (id != 0) && dispatchCommand(id);
 
-    ::DestroyMenu(hmenu_);
+    ::DestroyMenu(win32::toHMENU(hmenu_));
     hmenu_ = nullptr;
 
     return clicked;
@@ -402,7 +404,7 @@ void ContextMenu::setChecked(MenuItem& item, bool checked) {
     // no-ops, so this is harmless to call on one, it just has no visible
     // effect (there is no native command id to look it up by afterward).
     if (item.ownerMenu_ != nullptr) {
-        ::CheckMenuItem(item.ownerMenu_, item.commandId_,
+        ::CheckMenuItem(win32::toHMENU(item.ownerMenu_), item.commandId_,
             MF_BYCOMMAND | (checked ? MF_CHECKED : MF_UNCHECKED));
     }
 }
@@ -410,7 +412,7 @@ void ContextMenu::setChecked(MenuItem& item, bool checked) {
 void ContextMenu::setEnabled(MenuItem& item, bool enabled) {
     item.state().setEnabled(enabled);
     if (item.ownerMenu_ != nullptr) {
-        ::EnableMenuItem(item.ownerMenu_, item.commandId_,
+        ::EnableMenuItem(win32::toHMENU(item.ownerMenu_), item.commandId_,
             MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
     }
 }

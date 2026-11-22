@@ -290,7 +290,7 @@ namespace newui {
         // directly. Only valid while that show() call is on the stack;
         // dangles once the popup is torn down (harmless - nothing reads
         // it afterward).
-        HMENU ownerMenu_ = nullptr;
+        NativeMenuHandle ownerMenu_ = nullptr;
 
         MenuState state_;
         std::string text_;
@@ -333,7 +333,7 @@ namespace newui {
         // needed at all. Destroys its native popup before returning
         // regardless of outcome. Returns true iff an item was actually
         // clicked (its onClick already fired by the time this returns).
-        bool show(HWND owner, MenuItem& parentItem, int screenX, int screenY);
+        bool show(NativeWindowHandle owner, MenuItem& parentItem, int screenX, int screenY);
 
         // Looks up the leaf MenuItem registered for id (assigned during
         // the show() currently on the stack) and fires its onClick. If
@@ -357,7 +357,7 @@ namespace newui {
         // call, or nullptr before either has run. Exposed for inspection
         // (e.g. tests verifying tree structure via GetMenuItemCount()/
         // GetMenuStringA()/etc. against a real HMENU).
-        HMENU handle() const {
+        NativeMenuHandle handle() const {
             return hmenu_;
         }
 
@@ -374,7 +374,7 @@ namespace newui {
         void buildNativeMenu(MenuItem& parentItem);
 
     private:
-        HMENU hmenu_ = nullptr;
+        NativeMenuHandle hmenu_ = nullptr;
         std::unordered_map<UINT, MenuItem*> commandMap_;
         UINT nextCommandId_ = 1000;  // stays clear of low ids - same
                                       // defensive-headroom habit as
@@ -385,7 +385,7 @@ namespace newui {
         // already-created native container - CreatePopupMenu() for the
         // top level, or a nested one for a submenu), assigning command
         // ids/ownerMenu_ as it goes - see menus.cpp.
-        void buildMenuLevel(HMENU hmenu, MenuItem& parentItem);
+        void buildMenuLevel(NativeMenuHandle hmenu, MenuItem& parentItem);
     };
 
     // Handle Frame's WM_MEASUREITEM/WM_DRAWITEM for an ownerDrawn

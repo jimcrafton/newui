@@ -1,4 +1,5 @@
 #include "newui/menus.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/viewstyle.h"
 #include "newui/layout.h"
 
@@ -105,7 +106,7 @@ TEST(ContextMenu, BuildNativeMenuBuildsCorrectNestingAndText) {
     TestableContextMenu fileMenu;
     fileMenu.buildNativeMenu(*file);
 
-    HMENU hmenu = fileMenu.handle();
+    HMENU hmenu = newui::win32::toHMENU(fileMenu.handle());
     ASSERT_NE(hmenu, nullptr);
     EXPECT_EQ(::GetMenuItemCount(hmenu), 3);
 
@@ -121,7 +122,7 @@ TEST(ContextMenu, BuildNativeMenuBuildsCorrectNestingAndText) {
 
     TestableContextMenu editMenu;
     editMenu.buildNativeMenu(*edit);
-    EXPECT_EQ(::GetMenuItemCount(editMenu.handle()), 1);
+    EXPECT_EQ(::GetMenuItemCount(newui::win32::toHMENU(editMenu.handle())), 1);
 }
 
 TEST(ContextMenu, LeafItemTextIncludesTabSeparatedShortcut) {
@@ -133,7 +134,7 @@ TEST(ContextMenu, LeafItemTextIncludesTabSeparatedShortcut) {
     menu.buildNativeMenu(root);
 
     char buf[64] = {};
-    ::GetMenuStringA(menu.handle(), 0, buf, sizeof(buf), MF_BYPOSITION);
+    ::GetMenuStringA(newui::win32::toHMENU(menu.handle()), 0, buf, sizeof(buf), MF_BYPOSITION);
     EXPECT_STREQ(buf, "Save\tCtrl+S");
 }
 
@@ -193,7 +194,7 @@ TEST(ContextMenu, RadioGroupMembersGetRadioCheckMenuFlag) {
     MENUITEMINFOA mii = {};
     mii.cbSize = sizeof(mii);
     mii.fMask = MIIM_FTYPE;
-    ASSERT_TRUE(::GetMenuItemInfoA(menu.handle(), smallItem->commandId(), FALSE, &mii));
+    ASSERT_TRUE(::GetMenuItemInfoA(newui::win32::toHMENU(menu.handle()), smallItem->commandId(), FALSE, &mii));
     EXPECT_NE(mii.fType & MFT_RADIOCHECK, 0u);
 }
 
@@ -214,7 +215,7 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
     menu.buildNativeMenu(root);
 
     // Build-time native state matches the model (smallItem started checked).
-    EXPECT_NE(::GetMenuState(menu.handle(), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
+    EXPECT_NE(::GetMenuState(newui::win32::toHMENU(menu.handle()), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 
     menu.dispatchCommand(mediumItem->commandId());
 
@@ -222,9 +223,9 @@ TEST(ContextMenu, DispatchCommandOnRadioGroupMemberUnchecksSiblingsInModelAndNat
     EXPECT_TRUE(mediumItem->isChecked());
     EXPECT_FALSE(largeItem->isChecked());
 
-    EXPECT_EQ(::GetMenuState(menu.handle(), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
-    EXPECT_NE(::GetMenuState(menu.handle(), mediumItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
-    EXPECT_EQ(::GetMenuState(menu.handle(), largeItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
+    EXPECT_EQ(::GetMenuState(newui::win32::toHMENU(menu.handle()), smallItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
+    EXPECT_NE(::GetMenuState(newui::win32::toHMENU(menu.handle()), mediumItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
+    EXPECT_EQ(::GetMenuState(newui::win32::toHMENU(menu.handle()), largeItem->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 }
 
 TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
@@ -236,11 +237,11 @@ TEST(ContextMenu, SetCheckedAndSetEnabledUpdateModelAndNativeMenu) {
 
     menu.setChecked(*wrap, true);
     EXPECT_TRUE(wrap->isChecked());
-    EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
+    EXPECT_NE(::GetMenuState(newui::win32::toHMENU(menu.handle()), wrap->commandId(), MF_BYCOMMAND) & MF_CHECKED, 0u);
 
     menu.setEnabled(*wrap, false);
     EXPECT_FALSE(wrap->state().isEnabled());
-    EXPECT_NE(::GetMenuState(menu.handle(), wrap->commandId(), MF_BYCOMMAND) & MF_GRAYED, 0u);
+    EXPECT_NE(::GetMenuState(newui::win32::toHMENU(menu.handle()), wrap->commandId(), MF_BYCOMMAND) & MF_GRAYED, 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +260,7 @@ TEST(ContextMenu, OwnerDrawnItemGetsOwnerDrawFlagAndItemDataPointer) {
     MENUITEMINFOA mii = {};
     mii.cbSize = sizeof(mii);
     mii.fMask = MIIM_FTYPE | MIIM_DATA;
-    ASSERT_TRUE(::GetMenuItemInfoA(menu.handle(), custom->commandId(), FALSE, &mii));
+    ASSERT_TRUE(::GetMenuItemInfoA(newui::win32::toHMENU(menu.handle()), custom->commandId(), FALSE, &mii));
     EXPECT_NE(mii.fType & MFT_OWNERDRAW, 0u);
     EXPECT_EQ(reinterpret_cast<newui::MenuItem*>(mii.dwItemData), custom);
 }

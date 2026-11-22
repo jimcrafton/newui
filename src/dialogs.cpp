@@ -5,6 +5,7 @@
 #include "newui/subview.h"
 #include "newui/runloop.h"
 #include "newui/utils.h"
+#include "newui/win32/nativehandles.h"
 
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -193,8 +194,9 @@ namespace {
 
 }  // namespace
 
-DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const std::string& title,
+DialogResult Dialog::showMessageBox(NativeWindowHandle ownerNative, const std::string& text, const std::string& title,
                                      MessageBoxButtons buttons, MessageBoxIcon icon, DialogPosition position) {
+    HWND owner = win32::toHWND(ownerNative);
     UINT flags = 0;
     switch (buttons) {
         case MessageBoxButtons::Ok:              flags |= MB_OK; break;
@@ -232,7 +234,8 @@ DialogResult Dialog::showMessageBox(HWND owner, const std::string& text, const s
     }
 }
 
-bool Dialog::showOpenFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showOpenFile(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
+    HWND owner = win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -253,7 +256,8 @@ bool Dialog::showOpenFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::showOpenFileMulti(HWND owner, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
+bool Dialog::showOpenFileMulti(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
+    HWND owner = win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -298,7 +302,8 @@ bool Dialog::showOpenFileMulti(HWND owner, const FileDialogOptions& options, std
     return result;
 }
 
-bool Dialog::showSaveFile(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showSaveFile(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
+    HWND owner = win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -319,7 +324,8 @@ bool Dialog::showSaveFile(HWND owner, const FileDialogOptions& options, std::str
     return result;
 }
 
-bool Dialog::showBrowseForFolder(HWND owner, const FileDialogOptions& options, std::string& outPath) {
+bool Dialog::showBrowseForFolder(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
+    HWND owner = win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -403,7 +409,7 @@ bool Dialog::initialize()
     const int width = static_cast<int>(bounds_.size().width);
     const int height = static_cast<int>(bounds_.size().height);
     if (modalOwner_ != nullptr) {
-        POINT at = centeredOn(anchorRect(modalOwner_, position_), width, height);
+        POINT at = centeredOn(anchorRect(win32::toHWND(modalOwner_), position_), width, height);
         x = at.x;
         y = at.y;
     }
@@ -411,7 +417,7 @@ bool Dialog::initialize()
     auto hwnd = ::CreateWindowExA(
         dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
         x, y, width, height,
-        modalOwner_,
+        win32::toHWND(modalOwner_),
         NULL,
          ::GetModuleHandleA(nullptr),
         this
@@ -499,7 +505,7 @@ DialogResult Dialog::showModal(View* view)
 }
 
 
-DialogResult Dialog::showModal(HWND hwnd, RunLoop* runLoop) {
+DialogResult Dialog::showModal(NativeWindowHandle hwnd, RunLoop* runLoop) {
 
 	modalOwner_ = hwnd;
 
