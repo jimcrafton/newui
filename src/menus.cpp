@@ -361,7 +361,7 @@ bool ContextMenu::show(NativeWindowHandle ownerNative, MenuItem& parentItem, int
     // eligibility off its owner window, not off hmenu_ itself, and this
     // is cheap/idempotent enough to just redo on every show() rather than
     // caching whether some particular owner has already been opted in.
-    enableDarkModeForWindow(owner);
+    enableDarkModeForWindow(newui::win32::toNativeHandle(owner));
 
     ::SetForegroundWindow(owner);
     UINT id = UINT(::TrackPopupMenuEx(win32::toHMENU(hmenu_), TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,

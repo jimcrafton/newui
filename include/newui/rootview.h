@@ -264,7 +264,7 @@ namespace newui {
         //into the coordinate system of root view
         void invalidate(View* fromView, const newui::Rect* invalidArea);
 
-        std::tuple<RootView*, SubView*> getTarget(HWND hwnd);
+        std::tuple<RootView*, SubView*> getTarget(NativeWindowHandle hwnd);
 
         // Which SubView the mouse is currently over (nullptr if none) -
         // updated on every mouse move/leave; drives onMouseEntered()/
@@ -360,7 +360,7 @@ namespace newui {
         // ThemedViewStyle (viewstyle.h) opening an HTHEME via
         // OpenThemeData(), which requires a real HWND.
         NativeWindowHandle windowHandle() const {
-            return viewHwnd_;
+            return viewHandle_;
         }
 
         // Cached DPI/font-relative metrics for this RootView's own window -
@@ -531,7 +531,7 @@ namespace newui {
         void initDefaultBackground();
 
 	    Frame* parentFrame_ = nullptr;
-		HWND viewHwnd_ = nullptr;
+		NativeWindowHandle viewHandle_ = nullptr;
 
 		// See displayMetrics()/refreshDisplayMetrics() above.
 		DisplayMetrics displayMetrics_ = DisplayMetrics::forWindow(nullptr);
@@ -539,8 +539,8 @@ namespace newui {
 		// Only set when constructed via the standalone (Frame-less)
 		// constructor above - parentFrame_ stays nullptr in that case.
 		// See initialize()'s parent/hInstance resolution.
-		HWND externalParentHwnd_ = nullptr;
-		HINSTANCE externalInstanceHandle_ = nullptr;
+		NativeWindowHandle externalParentHandle_ = nullptr;
+		NativeInstanceHandle externalInstanceHandle_ = nullptr;
 
         // Owns getImageBuffer()'s pixels and the final transfer of them to
         // the window - see PresentSurface (presentsurface.h). Always

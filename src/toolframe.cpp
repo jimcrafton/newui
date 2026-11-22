@@ -16,7 +16,7 @@ namespace newui {
         }
     }
 
-    bool ToolFrame::initialize(HWND owner) {
+    bool ToolFrame::initialize(NativeWindowHandle owner) {
         if (owner == nullptr) {
             return false;
         }
@@ -28,7 +28,7 @@ namespace newui {
         // No CS_DROPSHADOW (PopupFrame's): a captioned, sized window already gets the system's own shadow, and the class shadow doubles it.
         wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         wcex.lpfnWndProc = &Frame::WndProc;
-        wcex.hInstance = Application::instance().instanceHandle();
+        wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
         wcex.lpszClassName = className.c_str();
         ::RegisterClassExA(&wcex);
 
@@ -37,8 +37,8 @@ namespace newui {
             activatesOnClick_ ? WS_EX_TOOLWINDOW : (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE),
             className.c_str(), title_.c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
             b.left(), b.top(), b.size().width, b.size().height,
-            owner_, NULL,
-            Application::instance().instanceHandle(),
+            newui::win32::toHWND(owner_), NULL,
+            newui::win32::toHINSTANCE(Application::instance().instanceHandle()),
             this
         );
         if (!hwnd || hwnd != newui::win32::toHWND(frameHandle())) {

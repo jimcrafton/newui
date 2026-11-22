@@ -339,7 +339,8 @@ namespace newui {
 		}
 	}
 
-	void enableDarkModeForWindow(HWND hwnd) {
+	void enableDarkModeForWindow(NativeWindowHandle nativeWindow) {
+		HWND hwnd = newui::win32::toHWND(nativeWindow);
 		if (hwnd == nullptr) {
 			return;
 		}

@@ -160,3 +160,11 @@ types) and `MenuItem::bitmap()` (HBITMAP).
 (`std::uint32_t`) instead of `UINT`, `handleRenderAllFormats(NativeWindowHandle)`; the `detail::` HGLOBAL/`ClipboardScope`/CF_HTML helpers moved to
 `include/newui/win32/clipboard_win32.h`; `MenuItem::bitmap()/setBitmap()` use new `NativeBitmapHandle` (`toNativeBitmap/toHBITMAP`).
 Then remaining before 3.3: 3.6 (peers, WndProc, `Application::instanceHandle()`, private HWND members, `getTarget(HWND)`), 3.7.
+
+3.5 clipboard + bitmap verified on Windows (2026-11-22). 3.6a in tree, Windows build pending: `Application::instanceHandle()` /
+`dummyWindowHandle()` return `NativeInstanceHandle`/`NativeWindowHandle`; `Frame/RootView::getTarget` take `NativeWindowHandle`;
+private members renamed/retyped (`Frame::frameHandle_`, `RootView::viewHandle_`, `externalParentHandle_`, `externalInstanceHandle_`);
+`PopupFrame/ToolFrame::initialize(NativeWindowHandle)`, `owner_`, `PopupTool::ownerHwnd_`, `enableDarkModeForWindow(NativeWindowHandle)`.
+Still Win32 in public headers for 3.6b+: `handleMessage/WndProc/WNDPROC` (Frame, RootView, PopupFrame, ToolFrame, Dialog, Application),
+`fromWindow(HWND)`, `PresentSurface::setWindow/window/paint(HDC)` + GDI/DXGI surfaces, `graphics.h` HDC/HBITMAP, `translateKeyEventInfo`,
+`UINT commandId` (menus), `text.h systemCaretWidth`, `utils.h translateButtonMask`, `popupframe.h MouseHookProc/kDismissMessage`.

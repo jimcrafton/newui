@@ -25,7 +25,7 @@ namespace newui {
         removeOutsideClickHook();
     }
 
-    bool PopupFrame::initialize(HWND owner) {
+    bool PopupFrame::initialize(NativeWindowHandle owner) {
         owner_ = owner;
 
         WNDCLASSEXA wcex = {};
@@ -37,7 +37,7 @@ namespace newui {
         // same reasoning, unrelated to the popup-specific styling below.
         wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_DROPSHADOW;
         wcex.lpfnWndProc = &Frame::WndProc;
-        wcex.hInstance = Application::instance().instanceHandle();
+        wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
         wcex.lpszClassName = className.c_str();
         ::RegisterClassExA(&wcex);
 
@@ -46,8 +46,8 @@ namespace newui {
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             className.c_str(), "", WS_POPUP | WS_BORDER,
             b.left(), b.top(), b.size().width, b.size().height,
-            owner_, NULL,
-            Application::instance().instanceHandle(),
+            newui::win32::toHWND(owner_), NULL,
+            newui::win32::toHINSTANCE(Application::instance().instanceHandle()),
             this
         );
 

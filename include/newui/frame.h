@@ -116,7 +116,7 @@ public:
 		return bounds_;
 	}
 
-	std::tuple<Frame*, RootView*> getTarget(HWND hwnd) ;
+	std::tuple<Frame*, RootView*> getTarget(NativeWindowHandle hwnd) ;
 
 	TitleChangedDelegate onTitleChanged;
 	
@@ -202,7 +202,7 @@ public:
 	std::vector<Converter*> converters_;
 	std::map<std::string, BindingSource> bindingSources_;
 
-	HWND frameHandle_ = nullptr;
+	NativeWindowHandle frameHandle_ = nullptr;
 	WNDPROC defaultWndProc_ = nullptr;
 	WNDPROC wndProc_ = nullptr;
 

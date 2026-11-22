@@ -174,7 +174,7 @@ namespace newui {
 	}
 
 	RootView::RootView(NativeWindowHandle externalParentHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name)
-		: externalParentHwnd_(newui::win32::toHWND(externalParentHwnd)), externalInstanceHandle_(win32::toHINSTANCE(instanceHandle)) {
+		: externalParentHandle_(externalParentHwnd), externalInstanceHandle_(instanceHandle) {
 		surface_ = createPresentSurface(defaultPresentBackend());
 		bounds_ = bounds;
 		name_ = name;
@@ -238,7 +238,7 @@ namespace newui {
 		updateLayout();
 		resizeImageBuffer((int)bounds_.size().width, (int)bounds_.size().height);
 		
-		::SetWindowPos(viewHwnd_, NULL,
+		::SetWindowPos(newui::win32::toHWND(viewHandle_), NULL,
 			(int)bounds_.left(),
 			(int)bounds_.top(),
 			(int)bounds_.size().width,
@@ -263,7 +263,7 @@ namespace newui {
 
 	void RootView::setPresentBackend(PresentBackend backend) {
 		surface_ = createPresentSurface(backend);
-		surface_->setWindow(viewHwnd_);
+		surface_->setWindow(newui::win32::toHWND(viewHandle_));
 	}
 
 	BLFormat RootView::imageBufferFormat() const {
@@ -781,12 +781,12 @@ namespace newui {
 		return hit != nullptr ? static_cast<View*>(hit) : static_cast<View*>(this);
 	}
 
-	std::tuple<RootView*, SubView*> RootView::getTarget(HWND hwnd)
+	std::tuple<RootView*, SubView*> RootView::getTarget(NativeWindowHandle hwnd)
 	{
 		RootView* targetView = nullptr;
 		SubView* targetSubView = nullptr;
 
-		if (hwnd == viewHwnd_) {
+		if (hwnd == viewHandle_) {
 			targetView = this;
 		}
 		else {
@@ -1167,7 +1167,7 @@ namespace newui {
 		}
 
 		POINT client = penInfo.pointerInfo.ptPixelLocation;
-		::ScreenToClient(viewHwnd_, &client);
+		::ScreenToClient(newui::win32::toHWND(viewHandle_), &client);
 
 		PenInfo info;
 		info.pointerFlags = penInfo.pointerInfo.pointerFlags;
@@ -1250,7 +1250,7 @@ namespace newui {
 				// WM_DPICHANGED handling pattern).
 				const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
 				if (suggested != nullptr) {
-					::SetWindowPos(viewHwnd_, nullptr,
+					::SetWindowPos(newui::win32::toHWND(viewHandle_), nullptr,
 						suggested->left, suggested->top,
 						suggested->right - suggested->left, suggested->bottom - suggested->top,
 						SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1264,19 +1264,19 @@ namespace newui {
 
 				//this checks if we truly have work to do,
 				//if non zero return then returns with no painting
-				if (!GetUpdateRect(viewHwnd_, NULL, FALSE)) {
+				if (!GetUpdateRect(newui::win32::toHWND(viewHandle_), NULL, FALSE)) {
 					outLRESULT = 0;
 					result = true;
 					return result;
 				}
 
 				PAINTSTRUCT ps;
-				HDC hdc = ::BeginPaint(viewHwnd_, &ps);
+				HDC hdc = ::BeginPaint(newui::win32::toHWND(viewHandle_), &ps);
 
 				newui::Rect paintRect = win32::fromRECT(ps.rcPaint);
 
 				surface_->paint(hdc, paintRect);
-				::EndPaint(viewHwnd_, &ps);
+				::EndPaint(newui::win32::toHWND(viewHandle_), &ps);
 				result = true;
 			}
 			break;
@@ -1332,8 +1332,8 @@ namespace newui {
 				// main window ran *before* this tail code, which then
 				// unconditionally overwrote it right back onto the
 				// popup's own now-hidden HWND).
-				if (::IsWindowVisible(viewHwnd_)) {
-					::SetFocus(viewHwnd_);
+				if (::IsWindowVisible(newui::win32::toHWND(viewHandle_))) {
+					::SetFocus(newui::win32::toHWND(viewHandle_));
 					// Keeps delivering WM_MOUSEMOVE/WM_*BUTTONUP to this
 					// window even once the cursor leaves it - needed so
 					// capturedSubView_ (set by mouseDown() above) keeps
@@ -1341,7 +1341,7 @@ namespace newui {
 					// drag that goes outside the window's bounds. Released
 					// on the matching button-up below (or via
 					// WM_CAPTURECHANGED if something else steals it first).
-					::SetCapture(viewHwnd_);
+					::SetCapture(newui::win32::toHWND(viewHandle_));
 				}
 				result = true;
 			}
@@ -1402,7 +1402,7 @@ namespace newui {
 					TRACKMOUSEEVENT trackmouseEvent = { 0,0,0,0 };
 					trackmouseEvent.cbSize = sizeof(trackmouseEvent);
 					trackmouseEvent.dwFlags = TME_LEAVE;
-					trackmouseEvent.hwndTrack = viewHwnd_;
+					trackmouseEvent.hwndTrack = newui::win32::toHWND(viewHandle_);
 					trackmouseEvent.dwHoverTime = HOVER_DEFAULT;
 
 					if (_TrackMouseEvent(&trackmouseEvent)) {
@@ -1427,7 +1427,7 @@ namespace newui {
 				// second monitor to the left/above gives negatives): convert, or the hit test only lands
 				// right when this window happens to sit at the screen's origin.
 				POINT screenPt = { static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
-				::ScreenToClient(viewHwnd_, &screenPt);
+				::ScreenToClient(newui::win32::toHWND(viewHandle_), &screenPt);
 				Point pt(static_cast<float>(screenPt.x), static_cast<float>(screenPt.y));
 				auto btnMask = translateButtonMask(wParam);
 				auto keyMask = translateKeyMask(wParam);
@@ -1440,7 +1440,7 @@ namespace newui {
 			case WM_MOUSELEAVE: {
 				POINT pt = { 0,0 };
 				::GetCursorPos(&pt);
-				ScreenToClient(viewHwnd_, &pt);
+				ScreenToClient(newui::win32::toHWND(viewHandle_), &pt);
 
 				Point pt2(pt.x, pt.y);
 				
@@ -1479,7 +1479,7 @@ namespace newui {
 				// does, since Windows sends WM_LBUTTONDBLCLK instead of a
 				// second WM_LBUTTONDOWN, so the Win32-level capture needs
 				// re-establishing here too.
-				::SetCapture(viewHwnd_);
+				::SetCapture(newui::win32::toHWND(viewHandle_));
 				result = true;
 			}
 			break;
@@ -1499,7 +1499,7 @@ namespace newui {
 			case WM_CHAR: case WM_KEYDOWN: case WM_KEYUP: {
 
 				KeyboardEventInfo keyData = {};
-				translateKeyEventInfo(viewHwnd_, message, wParam, lParam, keyData);
+				translateKeyEventInfo(newui::win32::toHWND(viewHandle_), message, wParam, lParam, keyData);
 
 				int  keyCharVal = 0;
 				int eventType = keUndefined;
@@ -1581,7 +1581,7 @@ namespace newui {
 				// need its own OpenClipboard()/CloseClipboard(), which
 				// ClipboardManager::handleRenderAllFormats() does
 				// internally.
-				ClipboardManager::handleRenderAllFormats(viewHwnd_);
+				ClipboardManager::handleRenderAllFormats(viewHandle_);
 				result = true;
 			}
 			break;
@@ -1614,7 +1614,7 @@ namespace newui {
 			::SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(thisPtr));
 
 			// Save the handle inside the object
-			thisPtr->viewHwnd_ = hWnd;
+			thisPtr->viewHandle_ = newui::win32::toNativeHandle(hWnd);
 			thisPtr->surface_->setWindow(hWnd);
 		}
 		else {
@@ -1647,8 +1647,8 @@ namespace newui {
 	{
 		bool result = true;
 
-		HWND parent = parentFrame_ ? newui::win32::toHWND(parentFrame_->frameHandle()) : externalParentHwnd_;
-		HINSTANCE hinst = parentFrame_ ? Application::instance().instanceHandle() : externalInstanceHandle_;
+		HWND parent = newui::win32::toHWND(parentFrame_ ? parentFrame_->frameHandle() : externalParentHandle_);
+		HINSTANCE hinst = newui::win32::toHINSTANCE(parentFrame_ ? Application::instance().instanceHandle() : externalInstanceHandle_);
 
 		if (nullptr == parent) {
 			return false;
@@ -1706,7 +1706,7 @@ namespace newui {
 
 		//frameHandle_ was set in WndProc during WM_NCCREATE, so we can check it here
 		//should be the same as hwnd returned from CreateWindowExA
-		if (hwnd != this->viewHwnd_) {
+		if (hwnd != newui::win32::toHWND(this->viewHandle_)) {
 			result = false;
 			return result;
 		}
@@ -1715,8 +1715,8 @@ namespace newui {
 
 		postCreate();
 
-		::ShowWindow(viewHwnd_, SW_SHOW);
-		::SetFocus(viewHwnd_);
+		::ShowWindow(newui::win32::toHWND(viewHandle_), SW_SHOW);
+		::SetFocus(newui::win32::toHWND(viewHandle_));
 
 		return View::initialize();
 	}
@@ -1727,7 +1727,7 @@ namespace newui {
 	}
 
 	void RootView::refreshDisplayMetrics() {
-		displayMetrics_ = DisplayMetrics::forWindow(win32::toNativeHandle(viewHwnd_));
+		displayMetrics_ = DisplayMetrics::forWindow(viewHandle_);
 		onDisplayMetricsChanged(*this);
 	}
 
@@ -1753,7 +1753,7 @@ namespace newui {
 		if (SUCCEEDED(::OleInitialize(nullptr))) {
 			auto registration = std::make_shared<DropTargetRegistration>();
 			registration->target = Microsoft::WRL::Make<COMDropTarget>(*this);
-			if (FAILED(::RegisterDragDrop(viewHwnd_, registration->target.Get()))) {
+			if (FAILED(::RegisterDragDrop(newui::win32::toHWND(viewHandle_), registration->target.Get()))) {
 				::OleUninitialize();
 			} else {
 				comDropTarget_ = registration;
@@ -1769,14 +1769,14 @@ namespace newui {
 	}
 
 	void RootView::releaseWindow() {
-		if (nullptr != viewHwnd_) {
+		if (nullptr != newui::win32::toHWND(viewHandle_)) {
 			if (comDropTarget_) {
-				::RevokeDragDrop(viewHwnd_);
+				::RevokeDragDrop(newui::win32::toHWND(viewHandle_));
 				comDropTarget_.reset();
 				::OleUninitialize();
 			}
-			DestroyWindow(viewHwnd_);
-			viewHwnd_ = nullptr;
+			DestroyWindow(newui::win32::toHWND(viewHandle_));
+			viewHandle_ = nullptr;
 			surface_->setWindow(nullptr);
 		}
 	}

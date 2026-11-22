@@ -95,12 +95,12 @@ LRESULT CALLBACK Application::DummyWndProc(HWND hWnd, UINT message, WPARAM wPara
 
 			if (changeStyle) {
 
-				LONG_PTR style = ::GetWindowLongPtr(Application::instance().dummyWindowHandle(), GWL_STYLE);
+				LONG_PTR style = ::GetWindowLongPtr(newui::win32::toHWND(Application::instance().dummyWindowHandle()), GWL_STYLE);
 				if (style & WS_POPUP) {
 					style &= ~WS_POPUP;
 					style |= WS_CHILD;
-					::SetWindowLongPtr(Application::instance().dummyWindowHandle(), GWL_STYLE, style);
-					::SetWindowPos(Application::instance().dummyWindowHandle(), NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+					::SetWindowLongPtr(newui::win32::toHWND(Application::instance().dummyWindowHandle()), GWL_STYLE, style);
+					::SetWindowPos(newui::win32::toHWND(Application::instance().dummyWindowHandle()), NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
 				}
 			}
 			changeStyle = false;
@@ -204,7 +204,7 @@ SyncReturn FrameClosed(Frame& frame) {
 
 SyncReturn FrameDestroyed(Frame& frame) {
 	
-    DestroyWindow(Application::instance().dummyWindowHandle());
+    DestroyWindow(newui::win32::toHWND(Application::instance().dummyWindowHandle()));
 
 	return SyncReturn::Handled;
 }
@@ -215,7 +215,7 @@ void Application::run() {
     }
     
 	try {
-		instanceHandle_ = ::GetModuleHandle(NULL);
+		instanceHandle_ = newui::win32::toNativeInstance(::GetModuleHandle(NULL));
 
 		// Declares this process per-monitor-v2 DPI aware, so Windows stops
 		// bitmap-stretching our windows on a non-96-DPI display (a
@@ -284,7 +284,7 @@ void Application::run() {
 		wcex.lpfnWndProc = (WNDPROC)Application::DummyWndProc;
 		wcex.cbClsExtra = 0;
 		wcex.cbWndExtra = 0;
-		wcex.hInstance = instanceHandle_;
+		wcex.hInstance = newui::win32::toHINSTANCE(instanceHandle_);
 		wcex.hIcon = NULL;
 		wcex.hCursor = NULL;
 		wcex.hbrBackground = 0;
@@ -295,7 +295,7 @@ void Application::run() {
 		::RegisterClassExA(&wcex);
 
 
-		dummyWindowHandle_ = ::CreateWindowA(className.c_str(), NULL, WS_POPUP, 0, 0, 0, 0, parent, NULL, instanceHandle_, NULL);
+		dummyWindowHandle_ = newui::win32::toNativeHandle(::CreateWindowA(className.c_str(), NULL, WS_POPUP, 0, 0, 0, 0, parent, NULL, newui::win32::toHINSTANCE(instanceHandle_), NULL));
 
 
 		if (!frame_->initialize()) {

@@ -92,11 +92,11 @@ public:
         return RunLoop::current();
     }
 
-    HINSTANCE instanceHandle() const {
+    NativeInstanceHandle instanceHandle() const {
         return instanceHandle_;
     }
 
-	HWND dummyWindowHandle() const {
+	NativeWindowHandle dummyWindowHandle() const {
 		return dummyWindowHandle_;
 	}
 
@@ -167,8 +167,8 @@ private:
     std::string name_;
     SettingsManager settings_;
     Frame* frame_ = nullptr;
-	HWND dummyWindowHandle_ = nullptr;
-    HINSTANCE instanceHandle_ = nullptr;
+	NativeWindowHandle dummyWindowHandle_ = nullptr;
+    NativeInstanceHandle instanceHandle_ = nullptr;
     
     std::unordered_map<std::string, std::string> customValues_;
 

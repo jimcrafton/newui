@@ -144,7 +144,7 @@ namespace newui {
     // owner window before TrackPopupMenuEx() - see ContextMenu::show()
     // (menus.cpp). Idempotent and cheap to call on every show() - actual
     // work only happens the first time a given HWND is seen.
-    void enableDarkModeForWindow(HWND hwnd);
+    void enableDarkModeForWindow(NativeWindowHandle hwnd);
 
     // Un-sticks native TrackPopupMenuEx() popups (ContextMenu, menus.h)
     // from whichever Light/Dark mode was active the first time this

@@ -37,7 +37,7 @@ namespace newui {
         // owner relationship is what keeps this correctly stacked above/
         // tied to the real window that spawned it (e.g. so it doesn't
         // outlive or float independently of that window).
-        bool initialize(HWND owner);
+        bool initialize(NativeWindowHandle owner);
 
         // Frame::setBounds() (inherited) only ever updates this object's
         // own bounds_/rootView_ sizing model - it never actually moves the
@@ -65,7 +65,7 @@ namespace newui {
         bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
 
     private:
-        HWND owner_ = nullptr;
+        NativeWindowHandle owner_ = nullptr;
 
         // A WH_MOUSE_LL (low-level, system-wide) hook, installed only
         // while shown, is used to detect an outside click - not

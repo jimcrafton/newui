@@ -202,7 +202,7 @@ namespace newui {
         // The window passed to the constructor. dismissNow() hands keyboard focus back to it
         // after an in-app dismissal (row click, Escape, dismiss() from code) - destroying the
         // focused popup HWND otherwise leaves no window holding OS keyboard focus.
-        HWND ownerHwnd_ = nullptr;
+        NativeWindowHandle ownerHwnd_ = nullptr;
 
         // Set by onRootLostFocus() - the user moved focus elsewhere on purpose (outside click,
         // another window), so dismissNow() must not steal it back.

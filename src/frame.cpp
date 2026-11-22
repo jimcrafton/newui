@@ -74,8 +74,8 @@ void Frame::setTitle(const std::string& title)
 	}
 	std::string oldTitle = title_;
 	title_ = title;
-	if (frameHandle_ != nullptr && ::IsWindow(frameHandle_)) {
-		::SetWindowTextA(frameHandle_, title_.c_str());
+	if (frameHandle_ != nullptr && ::IsWindow(newui::win32::toHWND(frameHandle_))) {
+		::SetWindowTextA(newui::win32::toHWND(frameHandle_), title_.c_str());
 	}
 	onTitleChanged.syncCall(*this, oldTitle, title);
 }
@@ -116,7 +116,7 @@ LRESULT CALLBACK Frame::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
 		::SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(thisPtr));
 
 		// Save the handle inside the object
-		thisPtr->frameHandle_ = hWnd;
+		thisPtr->frameHandle_ = newui::win32::toNativeHandle(hWnd);
 	}
 	else {
 		thisPtr = reinterpret_cast<Frame*>(::GetWindowLongPtr(hWnd, GWLP_USERDATA));
@@ -140,7 +140,7 @@ void Frame::updateViewBounds()
 {
 	if (nullptr != rootView_) {
 		RECT clientRect = {};
-		if (GetClientRect(frameHandle_, &clientRect)) {
+		if (GetClientRect(newui::win32::toHWND(frameHandle_), &clientRect)) {
 			Size clientSize(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
 			rootView_->setBounds(Rect(Point(0,0), clientSize));
 		}
@@ -166,7 +166,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 	switch (message) {
 		case WM_CREATE: {
 			if (!frameCreated()) {
-				::PostMessage(frameHandle_, WM_QUIT, 0, 0);
+				::PostMessage(newui::win32::toHWND(frameHandle_), WM_QUIT, 0, 0);
 			}
 			result = true;
 		}
@@ -204,7 +204,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			}
 			onClosed(*this);
 
-			DestroyWindow(frameHandle_);
+			DestroyWindow(newui::win32::toHWND(frameHandle_));
 
 			result = true;
 		}
@@ -269,7 +269,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			// WM_DPICHANGED handling pattern).
 			const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
 			if (suggested != nullptr) {
-				::SetWindowPos(frameHandle_, nullptr,
+				::SetWindowPos(newui::win32::toHWND(frameHandle_), nullptr,
 					suggested->left, suggested->top,
 					suggested->right - suggested->left, suggested->bottom - suggested->top,
 					SWP_NOZORDER | SWP_NOACTIVATE);
@@ -411,7 +411,7 @@ bool Frame::initialize()
 	wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
 	wcex.cbClsExtra = 0;
 	wcex.cbWndExtra = 0;
-	wcex.hInstance = Application::instance().instanceHandle();
+	wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
 	wcex.hIcon = NULL;
 	wcex.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
 	wcex.hbrBackground = NULL;//(HBRUSH)(COLOR_WINDOW+1);
@@ -425,9 +425,9 @@ bool Frame::initialize()
 	auto hwnd = ::CreateWindowExA(
 		0, className.c_str(), title_.c_str(), FRAME_WINDOW,
 		bounds_.left(), bounds_.top(), bounds_.size().width, bounds_.size().height,
-		Application::instance().dummyWindowHandle(), 
+		newui::win32::toHWND(Application::instance().dummyWindowHandle()), 
 		NULL,
-		Application::instance().instanceHandle(), 
+		newui::win32::toHINSTANCE(Application::instance().instanceHandle()), 
 		this
 	);
 
@@ -439,18 +439,18 @@ bool Frame::initialize()
 
 	//frameHandle_ was set in WndProc during WM_NCCREATE, so we can check it here
 	//should be the same as hwnd returned from CreateWindowExA
-	if (hwnd != this->frameHandle_) {
+	if (hwnd != newui::win32::toHWND(this->frameHandle_)) {
 		result = false;
 		return result;
 	}
 
-	::ShowWindow(frameHandle_, SW_SHOW);
-	::RedrawWindow(frameHandle_, NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
+	::ShowWindow(newui::win32::toHWND(frameHandle_), SW_SHOW);
+	::RedrawWindow(newui::win32::toHWND(frameHandle_), NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
 
 	return result;
 }
 
-std::tuple<Frame*, RootView*> Frame::getTarget(HWND hwnd) 
+std::tuple<Frame*, RootView*> Frame::getTarget(NativeWindowHandle hwnd) 
 {
 	Frame* targetFrame = nullptr;
 	RootView* targetView = nullptr;

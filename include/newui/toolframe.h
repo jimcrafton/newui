@@ -17,7 +17,7 @@ namespace newui {
         ~ToolFrame() override;
 
         // owner is required: it keeps this window above the window that spawned it and closes it with that window.
-        bool initialize(HWND owner);
+        bool initialize(NativeWindowHandle owner);
 
         // Moves and sizes the real window; screenBounds is in screen coordinates.
         void moveTo(const Rect& screenBounds);
@@ -41,7 +41,7 @@ namespace newui {
         bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
 
     private:
-        HWND owner_ = nullptr;
+        NativeWindowHandle owner_ = nullptr;
         bool activatesOnClick_ = false;
         Size minimumSize_ = Size(200.0f, 120.0f);
     };

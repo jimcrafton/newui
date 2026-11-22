@@ -388,7 +388,7 @@ bool Dialog::initialize()
     wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
-    wcex.hInstance = Application::instance().instanceHandle();
+    wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
     wcex.hIcon = NULL;
     wcex.hCursor = NULL;//LoadCursor(NULL, IDC_ARROW);
     wcex.hbrBackground = NULL;//(HBRUSH)(COLOR_WINDOW+1);
@@ -431,7 +431,7 @@ bool Dialog::initialize()
 
     //frameHandle_ was set in WndProc during WM_NCCREATE, so we can check it here
     //should be the same as hwnd returned from CreateWindowExA
-    if (hwnd != this->frameHandle_) {
+    if (hwnd != newui::win32::toHWND(this->frameHandle_)) {
         result = false;
         return result;
     }
