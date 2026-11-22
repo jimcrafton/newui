@@ -11,6 +11,19 @@
 #   error "newui/win32/geometryconv.h is Windows-only"
 #endif
 
+// Same macro setup newui.h uses; must precede <windows.h> whichever header gets included first.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
 #include <windows.h>
 
 namespace newui {
