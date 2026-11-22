@@ -11,6 +11,7 @@
 #include "newui/uicolormanager.h"
 #include "newui/viewstyle.h"
 #include "newui/win32/geometryconv.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/reflection.h"
 
 #include <atomic>
