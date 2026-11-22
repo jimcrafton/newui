@@ -11,6 +11,7 @@
 #include <newui/keyboard_constants.h>
 #include <newui/rootview.h>
 #include <newui/clipboardmgr.h>
+#include <newui/utils.h>
 
 #include <algorithm>
 #include <cmath>
