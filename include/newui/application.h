@@ -92,10 +92,12 @@ public:
         return RunLoop::current();
     }
 
+    //@reflect ignore=true
     NativeInstanceHandle instanceHandle() const {
         return instanceHandle_;
     }
 
+	//@reflect ignore=true
 	NativeWindowHandle dummyWindowHandle() const {
 		return dummyWindowHandle_;
 	}
