@@ -1,6 +1,7 @@
 #include "newui/viewstyle.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
+#include "newui/win32/geometryconv.h"
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -1922,26 +1923,26 @@ TEST(RectDeflated, NegativeAmountInflates) {
 }
 
 // ---------------------------------------------------------------------------
-// Point/Rect <-> Win32 POINT/RECT (geometry.h) - implicit both ways.
+// Point/Rect <-> Win32 POINT/RECT (win32/geometryconv.h) - explicit conversions.
 // ---------------------------------------------------------------------------
 
 TEST(PointConversion, ConvertsToWin32Point) {
     newui::Point p(3.0f, -5.0f);
-    POINT native = p;
+    POINT native = newui::win32::toPOINT(p);
     EXPECT_EQ(native.x, 3);
     EXPECT_EQ(native.y, -5);
 }
 
 TEST(PointConversion, ConvertsFromWin32Point) {
     POINT native = { 7, 9 };
-    newui::Point p = native;
+    newui::Point p = newui::win32::fromPOINT(native);
     EXPECT_FLOAT_EQ(p.x, 7.0f);
     EXPECT_FLOAT_EQ(p.y, 9.0f);
 }
 
 TEST(RectConversion, ConvertsToWin32Rect) {
     newui::Rect r(2.0f, 4.0f, 10.0f, 20.0f);
-    RECT native = r;
+    RECT native = newui::win32::toRECT(r);
     EXPECT_EQ(native.left, 2);
     EXPECT_EQ(native.top, 4);
     EXPECT_EQ(native.right, 12);
@@ -1950,7 +1951,7 @@ TEST(RectConversion, ConvertsToWin32Rect) {
 
 TEST(RectConversion, ConvertsFromWin32Rect) {
     RECT native = { 1, 2, 11, 22 };
-    newui::Rect r = native;
+    newui::Rect r = newui::win32::fromRECT(native);
     EXPECT_FLOAT_EQ(r.left(), 1.0f);
     EXPECT_FLOAT_EQ(r.top(), 2.0f);
     EXPECT_FLOAT_EQ(r.size().width, 10.0f);
