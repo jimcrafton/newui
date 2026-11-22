@@ -1,4 +1,5 @@
 #include "newui/application.h"
+#include "newui/win32/nativehandles.h"
 
 #include "newui/frame.h"
 #include "newui/newui.h"

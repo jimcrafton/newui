@@ -1,4 +1,5 @@
 #include "newui/uicolormanager.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/themedata.h"
 
 #include <algorithm>
