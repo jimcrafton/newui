@@ -10,6 +10,7 @@
 #include "newui/keyboard_constants.h"
 #include "newui/uicolormanager.h"
 #include "newui/viewstyle.h"
+#include "newui/win32/geometryconv.h"
 #include "newui/reflection.h"
 
 #include <atomic>
@@ -1262,7 +1263,7 @@ namespace newui {
 				PAINTSTRUCT ps;
 				HDC hdc = ::BeginPaint(viewHwnd_, &ps);
 
-				newui::Rect paintRect = ps.rcPaint;
+				newui::Rect paintRect = win32::fromRECT(ps.rcPaint);
 
 				surface_->paint(hdc, paintRect);
 				::EndPaint(viewHwnd_, &ps);
