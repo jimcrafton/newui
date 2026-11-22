@@ -2,6 +2,7 @@
 #include "newui/application.h"
 #include "newui/clipboardmgr.h"
 #include "newui/dragndrop.h"
+#include "newui/win32/dragndrop_com.h"
 #include "newui/frame.h"
 #include "newui/mouse_constants.h"
 #include "newui/subview.h"
@@ -100,6 +101,14 @@ namespace {
 }
 
 namespace newui {
+
+	namespace {
+		// What RootView::comDropTarget_ points at (see rootview.h): keeps the COM object alive while registered.
+		struct DropTargetRegistration {
+			Microsoft::WRL::ComPtr<COMDropTarget> target;
+		};
+	}
+
 
 	bool parseRepaintMode(const std::string& text, RepaintMode& out) {
 		std::string lower;
@@ -1742,10 +1751,12 @@ namespace newui {
 		// stance - same as CoCreateInstance failures throughout
 		// dragndrop.cpp) - comDropTarget_ just stays null either way.
 		if (SUCCEEDED(::OleInitialize(nullptr))) {
-			comDropTarget_ = Microsoft::WRL::Make<COMDropTarget>(*this);
-			if (FAILED(::RegisterDragDrop(viewHwnd_, comDropTarget_.Get()))) {
-				comDropTarget_.Reset();
+			auto registration = std::make_shared<DropTargetRegistration>();
+			registration->target = Microsoft::WRL::Make<COMDropTarget>(*this);
+			if (FAILED(::RegisterDragDrop(viewHwnd_, registration->target.Get()))) {
 				::OleUninitialize();
+			} else {
+				comDropTarget_ = registration;
 			}
 		}
 	}
@@ -1761,7 +1772,7 @@ namespace newui {
 		if (nullptr != viewHwnd_) {
 			if (comDropTarget_) {
 				::RevokeDragDrop(viewHwnd_);
-				comDropTarget_.Reset();
+				comDropTarget_.reset();
 				::OleUninitialize();
 			}
 			DestroyWindow(viewHwnd_);

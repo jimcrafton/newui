@@ -2,7 +2,8 @@
 #include "newui/win32/nativehandles.h"
 
 #include "newui/dibimage.h"
-#include "newui/enum_format_etc.h"
+#include "newui/win32/dragndrop_com.h"
+#include "newui/win32/enum_format_etc.h"
 #include "newui/rootview.h"
 #include "newui/subview.h"
 #include "newui/view.h"

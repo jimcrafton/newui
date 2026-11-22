@@ -611,7 +611,8 @@ namespace newui {
         // automatically - pure listening plumbing with zero behavioral
         // effect until some View actually calls setDropTarget(), so there's
         // no reason to make this opt-in per window.
-        Microsoft::WRL::ComPtr<COMDropTarget> comDropTarget_;
+        // Type-erased so this header needs no COM/WRL: the Windows code in rootview.cpp stores a holder of a ComPtr<COMDropTarget> here.
+        std::shared_ptr<void> comDropTarget_;
 
         // Mouse/keyboard routing state - see hoveredSubView()/
         // capturedSubView()/focusedSubView() above for what each means.

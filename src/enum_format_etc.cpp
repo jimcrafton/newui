@@ -1,4 +1,4 @@
-#include "newui/enum_format_etc.h"
+#include "newui/win32/enum_format_etc.h"
 
 namespace newui {
 

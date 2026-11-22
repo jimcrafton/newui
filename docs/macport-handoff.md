@@ -146,3 +146,12 @@ Slice 2a verified on Windows. Slice 3 in tree, Windows build pending: `Frame::fr
 
 * None of the design decisions are open.
 * Not yet done: put CMake on `PATH`; create the repo venv; add `CLAUDE.md` to git (user's call).
+
+## 3.4 done, 3.5 in progress (2026-11-22)
+
+3.4 slices 1-3 verified on Windows. 3.5 in tree, Windows build pending: `dragndrop.h` keeps only `DropEffect`, `VirtualFile`,
+`DropSource`, `DropTarget`; everything OLE (`extract*`, `TextDataObject`, `VirtualFileDataObject`, `COMDropSource`, `COMDropTarget`,
+`StartDragOperation`, `StartVirtualFileDrag`, `toDropEffect*`) moved to `include/newui/win32/dragndrop_com.h`;
+`enum_format_etc.h` moved to `include/newui/win32/`. `RootView::comDropTarget_` is a `std::shared_ptr<void>` holding a
+`DropTargetRegistration` (defined in `rootview.cpp`). Not yet done from 3.5: `ClipboardScope`/`clipboardmgr.h` (UINT, HWND, HGLOBAL
+types) and `MenuItem::bitmap()` (HBITMAP).
