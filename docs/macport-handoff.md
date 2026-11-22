@@ -98,9 +98,9 @@ Step 1.1-1.8 and 2.1-2.4 are done and committed (2.4's Windows verification of e
 | 1.1-1.8 | done, verified |
 | 1.9 `clang-cl` | skipped (optional) |
 | 2.1-2.3 | done, verified |
-| 2.4 clipboard/dragndrop to `u16string` | committed; confirm examples/demos build |
-| 2.5 final grep | audit done, no code change needed (all hits are Win32-boundary files); Windows hand-test of emoji/CJK pending |
-| 3 Win32 out of public headers | not started |
+| 2.4 clipboard/dragndrop to `u16string` | done; all targets (examples, demos) build on Windows after include/`utf16ToUtf8` fixes (uncommitted) |
+| 2.5 final grep | done (all hits are Win32-boundary files); only the emoji/CJK TextField hand-test is pending |
+| 3 Win32 out of public headers | 3.1 `platform.h` + `win32/nativehandles.h` added (uncommitted, unused yet); 3.2 next |
 | 4 first Mac build | not started |
 
 ## Next actions, in order
