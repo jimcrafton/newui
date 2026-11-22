@@ -1,6 +1,7 @@
 #include "newui/view.h"
 #include "newui/subview.h"
 #include "newui/rootview.h"
+#include "newui/win32/geometryconv.h"
 #include <cassert>
 
 namespace newui {
@@ -91,9 +92,9 @@ namespace newui {
 		if (hwnd == nullptr) {
 			return rootPt;
 		}
-		POINT pt = rootPt;
+		POINT pt = win32::toPOINT(rootPt);
 		::ClientToScreen(hwnd, &pt);
-		return pt;
+		return win32::fromPOINT(pt);
 	}
 
 	Point View::screenToLocal(const Point& screenPt) const
@@ -102,9 +103,9 @@ namespace newui {
 		HWND hwnd = (root != nullptr) ? root->windowHandle() : nullptr;
 		Point rootPt = screenPt;
 		if (hwnd != nullptr) {
-			POINT pt = screenPt;
+			POINT pt = win32::toPOINT(screenPt);
 			::ScreenToClient(hwnd, &pt);
-			rootPt = pt;
+			rootPt = win32::fromPOINT(pt);
 		}
 		return rootToLocal(rootPt);
 	}

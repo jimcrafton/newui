@@ -1,4 +1,5 @@
 #include "newui/gdipresentsurface.h"
+#include "newui/win32/geometryconv.h"
 
 #include <cstring>
 
@@ -100,7 +101,7 @@ namespace newui {
 		if (window() != nullptr) {
 			// Snapped outward to whole pixels: converting a fractional Rect to a RECT truncates every
 			// edge, which would leave up to a pixel of the region's right/bottom edge un-invalidated.
-			RECT r = dirty.snappedOutwardToPixels();
+			RECT r = win32::toRECT(dirty.snappedOutwardToPixels());
 			::InvalidateRect(window(), &r, FALSE);
 		}
 	}
