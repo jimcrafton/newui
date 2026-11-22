@@ -304,7 +304,7 @@ namespace newui {
         return result;
     }
 
-    SyncReturn TextFoldingController::handleModelAfterChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind) {
+    SyncReturn TextFoldingController::handleModelAfterChar(text::TextModel& sender, size_t offset, char16_t ch, text::CharChangeKind kind) {
         if (kind == text::CharChangeKind::Inserted) {
             adjustFolds(offset, 0, 1);
         } else {
@@ -314,7 +314,7 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
-    SyncReturn TextFoldingController::handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement) {
+    SyncReturn TextFoldingController::handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::u16string& replacement) {
         adjustFolds(range.start(), range.length(), replacement.size());
         countTextLines();
         return SyncReturn::Handled;

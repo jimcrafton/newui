@@ -508,7 +508,7 @@ int main() {
 
     auto* textField = new newui::TextField();
     textField->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    textField->setText(L"Hello, DirectWrite!");
+    textField->setText(u"Hello, DirectWrite!");
     textFieldRow->addChild(textField);
 
     // Highlights "DirectWrite" (offsets 7-18 of "Hello, DirectWrite!") and
@@ -560,14 +560,14 @@ int main() {
 
     auto* textControl = new newui::TextControl();
     textControl->setText(
-        L"This is a multi-line TextControl.\n"
-        L"It word-wraps automatically, and Enter starts a new paragraph.\n"
-        L"Up/Down move between visual lines.\n"
-        L"This text is deliberately long enough to overflow the box's own height, "
-        L"so a vertical scrollbar should appear automatically on the right edge, "
-        L"provided by the ScrollView this TextControl is hosted inside - try "
-        L"scrolling with the mouse wheel or dragging the scrollbar's thumb.\n"
-        L"One more paragraph, just to be sure there's plenty to scroll through.");
+        u"This is a multi-line TextControl.\n"
+        u"It word-wraps automatically, and Enter starts a new paragraph.\n"
+        u"Up/Down move between visual lines.\n"
+        u"This text is deliberately long enough to overflow the box's own height, "
+        u"so a vertical scrollbar should appear automatically on the right edge, "
+        u"provided by the ScrollView this TextControl is hosted inside - try "
+        u"scrolling with the mouse wheel or dragging the scrollbar's thumb.\n"
+        u"One more paragraph, just to be sure there's plenty to scroll through.");
     textControlScrollView->addChild(textControl);
 
     /*

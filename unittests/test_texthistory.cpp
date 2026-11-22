@@ -1,4 +1,5 @@
 #include "newui/texthistory.h"
+#include "newui/utils.h"
 
 #include "newui/clipboardmgr.h"
 #include "newui/controls.h"
@@ -15,38 +16,38 @@ using newui::text::TextRange;
 
 namespace {
     // Types text one character at a time at the end, the way a keyboard does.
-    void type(HistoryTextModel& model, const std::wstring& text) {
-        for (wchar_t c : text) {
-            model.insert(model.length(), std::wstring(1, c));
+    void type(HistoryTextModel& model, const std::u16string& text) {
+        for (char16_t c : text) {
+            model.insert(model.length(), std::u16string(1, c));
         }
     }
 }
 
 TEST(HistoryTextModel, StartsWithNothingToUndoOrRedo) {
-    HistoryTextModel model(L"hello");
+    HistoryTextModel model(u"hello");
     EXPECT_FALSE(model.canUndo());
     EXPECT_FALSE(model.canRedo());
     EXPECT_FALSE(model.undo());
     EXPECT_FALSE(model.redo());
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_TRUE(model.isClean());
 }
 
 TEST(HistoryTextModel, UndoAndRedoPutAnInsertBackAndForth) {
-    HistoryTextModel model(L"hello world");
-    model.insert(5, L", cruel");
-    ASSERT_EQ(model.text(), L"hello, cruel world");
+    HistoryTextModel model(u"hello world");
+    model.insert(5, u", cruel");
+    ASSERT_EQ(model.text(), u"hello, cruel world");
 
     TextRange affected;
     ASSERT_TRUE(model.undo(&affected));
-    EXPECT_EQ(model.text(), L"hello world");
+    EXPECT_EQ(model.text(), u"hello world");
     EXPECT_EQ(affected.start(), 5u);
     EXPECT_EQ(affected.length(), 0u);
     EXPECT_FALSE(model.canUndo());
     EXPECT_TRUE(model.canRedo());
 
     ASSERT_TRUE(model.redo(&affected));
-    EXPECT_EQ(model.text(), L"hello, cruel world");
+    EXPECT_EQ(model.text(), u"hello, cruel world");
     EXPECT_EQ(affected.start(), 5u);
     EXPECT_EQ(affected.length(), 7u);
     EXPECT_TRUE(model.canUndo());
@@ -54,215 +55,215 @@ TEST(HistoryTextModel, UndoAndRedoPutAnInsertBackAndForth) {
 }
 
 TEST(HistoryTextModel, UndoRestoresRemovedAndReplacedText) {
-    HistoryTextModel model(L"one two three");
+    HistoryTextModel model(u"one two three");
     model.remove(TextRange(3, 4));
-    ASSERT_EQ(model.text(), L"one three");
-    model.replace(TextRange(4, 5), L"3");
-    ASSERT_EQ(model.text(), L"one 3");
+    ASSERT_EQ(model.text(), u"one three");
+    model.replace(TextRange(4, 5), u"3");
+    ASSERT_EQ(model.text(), u"one 3");
 
     TextRange affected;
     ASSERT_TRUE(model.undo(&affected));
-    EXPECT_EQ(model.text(), L"one three");
+    EXPECT_EQ(model.text(), u"one three");
     EXPECT_EQ(affected.start(), 4u);
     EXPECT_EQ(affected.length(), 5u);   // "three" is back
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"one two three");
+    EXPECT_EQ(model.text(), u"one two three");
     ASSERT_TRUE(model.redo());
     ASSERT_TRUE(model.redo());
-    EXPECT_EQ(model.text(), L"one 3");
+    EXPECT_EQ(model.text(), u"one 3");
 }
 
 TEST(HistoryTextModel, TypingIsOneStepPerRunOfTheSameKindOfCharacter) {
     HistoryTextModel model;
-    type(model, L"hello world");
+    type(model, u"hello world");
     EXPECT_EQ(model.undoStepCount(), 3u);   // "hello", " ", "world"
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"hello ");
+    EXPECT_EQ(model.text(), u"hello ");
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"");
+    EXPECT_EQ(model.text(), u"");
     ASSERT_TRUE(model.redo());
     ASSERT_TRUE(model.redo());
     ASSERT_TRUE(model.redo());
-    EXPECT_EQ(model.text(), L"hello world");
+    EXPECT_EQ(model.text(), u"hello world");
 }
 
 TEST(HistoryTextModel, ALineBreakIsAStepOfItsOwn) {
     HistoryTextModel model;
-    type(model, L"ab\ncd");
+    type(model, u"ab\ncd");
     EXPECT_EQ(model.undoStepCount(), 3u);
     model.undo();
-    EXPECT_EQ(model.text(), L"ab\n");
+    EXPECT_EQ(model.text(), u"ab\n");
     model.undo();
-    EXPECT_EQ(model.text(), L"ab");
+    EXPECT_EQ(model.text(), u"ab");
 }
 
 TEST(HistoryTextModel, PastedAndReplacedTextAreNotMergedIntoTyping) {
     HistoryTextModel model;
-    type(model, L"abc");
-    model.insert(3, L"defg");   // a paste
-    type(model, L"h");
+    type(model, u"abc");
+    model.insert(3, u"defg");   // a paste
+    type(model, u"h");
     EXPECT_EQ(model.undoStepCount(), 3u);
-    model.replace(TextRange(0, 1), L"X");
+    model.replace(TextRange(0, 1), u"X");
     EXPECT_EQ(model.undoStepCount(), 4u);
 }
 
 TEST(HistoryTextModel, BackspaceRunsAreOneStep) {
-    HistoryTextModel model(L"hello world");
+    HistoryTextModel model(u"hello world");
     for (int i = 0; i < 5; ++i) {
         model.remove(TextRange(10 - static_cast<size_t>(i), 1));   // backspace from the end
     }
-    ASSERT_EQ(model.text(), L"hello ");
+    ASSERT_EQ(model.text(), u"hello ");
     EXPECT_EQ(model.undoStepCount(), 1u);
     TextRange affected;
     ASSERT_TRUE(model.undo(&affected));
-    EXPECT_EQ(model.text(), L"hello world");
+    EXPECT_EQ(model.text(), u"hello world");
     EXPECT_EQ(affected.start(), 6u);
     EXPECT_EQ(affected.length(), 5u);
     ASSERT_TRUE(model.redo());
-    EXPECT_EQ(model.text(), L"hello ");
+    EXPECT_EQ(model.text(), u"hello ");
 }
 
 TEST(HistoryTextModel, DeleteRunsAreOneStep) {
-    HistoryTextModel model(L"hello world");
+    HistoryTextModel model(u"hello world");
     for (int i = 0; i < 5; ++i) {
         model.remove(TextRange(6, 1));   // forward Delete at the same place
     }
-    ASSERT_EQ(model.text(), L"hello ");
+    ASSERT_EQ(model.text(), u"hello ");
     EXPECT_EQ(model.undoStepCount(), 1u);
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"hello world");
+    EXPECT_EQ(model.text(), u"hello world");
 }
 
 TEST(HistoryTextModel, BackspaceOverJustTypedTextShrinksTheRunAndAnEmptiedRunLeavesNothing) {
-    HistoryTextModel model(L"x");
-    type(model, L"abc");   // "xabc"
+    HistoryTextModel model(u"x");
+    type(model, u"abc");   // "xabc"
     model.remove(TextRange(3, 1));
     model.remove(TextRange(2, 1));
-    ASSERT_EQ(model.text(), L"xa");
+    ASSERT_EQ(model.text(), u"xa");
     EXPECT_EQ(model.undoStepCount(), 1u);
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"x");
+    EXPECT_EQ(model.text(), u"x");
 
-    HistoryTextModel other(L"x");
-    type(other, L"a");
+    HistoryTextModel other(u"x");
+    type(other, u"a");
     other.remove(TextRange(1, 1));
-    EXPECT_EQ(other.text(), L"x");
+    EXPECT_EQ(other.text(), u"x");
     EXPECT_EQ(other.undoStepCount(), 0u);
     EXPECT_FALSE(other.canUndo());
 }
 
 TEST(HistoryTextModel, BreakCoalescingStartsANewStep) {
     HistoryTextModel model;
-    type(model, L"ab");
+    type(model, u"ab");
     model.breakCoalescing();
-    type(model, L"cd");
+    type(model, u"cd");
     EXPECT_EQ(model.undoStepCount(), 2u);
     model.undo();
-    EXPECT_EQ(model.text(), L"ab");
+    EXPECT_EQ(model.text(), u"ab");
 }
 
 TEST(HistoryTextModel, TypingNotAtTheEndOfTheLastRunIsANewStep) {
     HistoryTextModel model;
-    type(model, L"abc");
-    model.insert(0, L"X");   // somewhere else
+    type(model, u"abc");
+    model.insert(0, u"X");   // somewhere else
     EXPECT_EQ(model.undoStepCount(), 2u);
 }
 
 TEST(HistoryTextModel, AGroupIsOneStepHoweverManyEditsItHolds) {
-    HistoryTextModel model(L"a b a");
+    HistoryTextModel model(u"a b a");
     model.beginGroup();
-    model.replace(TextRange(0, 1), L"X");
-    model.replace(TextRange(4, 1), L"X");
+    model.replace(TextRange(0, 1), u"X");
+    model.replace(TextRange(4, 1), u"X");
     model.beginGroup();   // nested: only the outermost counts
-    model.insert(5, L"!");
+    model.insert(5, u"!");
     model.endGroup();
     EXPECT_FALSE(model.canUndo());   // not until it ends
     model.endGroup();
-    ASSERT_EQ(model.text(), L"X b X!");
+    ASSERT_EQ(model.text(), u"X b X!");
     EXPECT_EQ(model.undoStepCount(), 1u);
 
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"a b a");
+    EXPECT_EQ(model.text(), u"a b a");
     ASSERT_TRUE(model.redo());
-    EXPECT_EQ(model.text(), L"X b X!");
+    EXPECT_EQ(model.text(), u"X b X!");
 }
 
 TEST(HistoryTextModel, AGroupOfEditsThatDependOnEachOtherUndoesInReverseAndRedoesInOrder) {
-    HistoryTextModel model(L"0123456789");
+    HistoryTextModel model(u"0123456789");
     model.beginGroup();
-    model.insert(2, L"abc");        // 01abc23456789
+    model.insert(2, u"abc");        // 01abc23456789
     model.remove(TextRange(0, 4));  // c23456789   - reaches into what was just inserted
-    model.insert(3, L"XYZ");        // c23XYZ456789
+    model.insert(3, u"XYZ");        // c23XYZ456789
     model.endGroup();
-    ASSERT_EQ(model.text(), L"c23XYZ456789");
+    ASSERT_EQ(model.text(), u"c23XYZ456789");
     ASSERT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"0123456789");
+    EXPECT_EQ(model.text(), u"0123456789");
     ASSERT_TRUE(model.redo());
-    EXPECT_EQ(model.text(), L"c23XYZ456789");
+    EXPECT_EQ(model.text(), u"c23XYZ456789");
 }
 
 TEST(HistoryTextModel, AnEmptyGroupAddsNothing) {
-    HistoryTextModel model(L"a");
+    HistoryTextModel model(u"a");
     model.beginGroup();
     model.endGroup();
     EXPECT_FALSE(model.canUndo());
 }
 
 TEST(HistoryTextModel, ANewEditEndsTheRedoHistory) {
-    HistoryTextModel model(L"abc");
-    model.insert(3, L"1");
+    HistoryTextModel model(u"abc");
+    model.insert(3, u"1");
     model.breakCoalescing();
-    model.insert(4, L"2");
+    model.insert(4, u"2");
     model.undo();
     ASSERT_TRUE(model.canRedo());
-    model.insert(0, L"Z");
+    model.insert(0, u"Z");
     EXPECT_FALSE(model.canRedo());
-    EXPECT_EQ(model.text(), L"Zabc1");
+    EXPECT_EQ(model.text(), u"Zabc1");
 }
 
 TEST(HistoryTextModel, TypingAfterAnUndoIsANewStepNotAMergeIntoTheOldOne) {
     HistoryTextModel model;
-    type(model, L"abc");
+    type(model, u"abc");
     model.undo();
-    type(model, L"xyz");
-    EXPECT_EQ(model.text(), L"xyz");
+    type(model, u"xyz");
+    EXPECT_EQ(model.text(), u"xyz");
     EXPECT_EQ(model.undoStepCount(), 1u);
     model.undo();
-    EXPECT_EQ(model.text(), L"");
+    EXPECT_EQ(model.text(), u"");
     EXPECT_FALSE(model.canUndo());
     model.redo();
-    EXPECT_EQ(model.text(), L"xyz");
+    EXPECT_EQ(model.text(), u"xyz");
 }
 
 TEST(HistoryTextModel, SetTextAndClearForgetTheHistory) {
-    HistoryTextModel model(L"abc");
-    model.insert(3, L"d");
+    HistoryTextModel model(u"abc");
+    model.insert(3, u"d");
     ASSERT_TRUE(model.canUndo());
-    model.setText(L"loaded");
+    model.setText(u"loaded");
     EXPECT_FALSE(model.canUndo());
     EXPECT_FALSE(model.canRedo());
     EXPECT_TRUE(model.isClean());
 
-    model.insert(6, L"!");
+    model.insert(6, u"!");
     model.undo();
     ASSERT_TRUE(model.canRedo());
     model.clear();
     EXPECT_FALSE(model.canRedo());
     EXPECT_FALSE(model.canUndo());
-    EXPECT_EQ(model.text(), L"");
+    EXPECT_EQ(model.text(), u"");
 }
 
 TEST(HistoryTextModel, CleanStateFollowsSaveEditUndoRedo) {
-    HistoryTextModel model(L"abc");
+    HistoryTextModel model(u"abc");
     EXPECT_TRUE(model.isClean());
-    model.insert(3, L"d");
+    model.insert(3, u"d");
     EXPECT_FALSE(model.isClean());
     model.markClean();
     EXPECT_TRUE(model.isClean());
 
-    model.insert(4, L"e");   // not merged into the saved step
+    model.insert(4, u"e");   // not merged into the saved step
     EXPECT_EQ(model.undoStepCount(), 2u);
     EXPECT_FALSE(model.isClean());
     model.undo();
@@ -280,28 +281,28 @@ TEST(HistoryTextModel, CleanStateFollowsSaveEditUndoRedo) {
     EXPECT_FALSE(model.isClean());
     model.undo();
     EXPECT_TRUE(model.isClean());
-    model.insert(0, L"Z");
+    model.insert(0, u"Z");
     EXPECT_FALSE(model.isClean());
     model.undo();
     EXPECT_TRUE(model.isClean());
 
-    HistoryTextModel lost(L"abc");
-    lost.insert(3, L"d");
+    HistoryTextModel lost(u"abc");
+    lost.insert(3, u"d");
     lost.markClean();
     lost.undo();
-    lost.insert(0, L"Q");   // the saved state was in the redo history
+    lost.insert(0, u"Q");   // the saved state was in the redo history
     lost.undo();
     EXPECT_FALSE(lost.isClean());
 }
 
 TEST(HistoryTextModel, UndoAndRedoFireTheOrdinaryEditEvents) {
-    HistoryTextModel model(L"hello world");
-    model.replace(TextRange(6, 5), L"there");
+    HistoryTextModel model(u"hello world");
+    model.replace(TextRange(6, 5), u"there");
 
-    std::vector<std::wstring> seen;
+    std::vector<std::u16string> seen;
     int changed = 0;
-    model.onAfterRangeChanged.add([&](TextModel&, const TextRange& range, const std::wstring& replacement) {
-        seen.push_back(std::to_wstring(range.start()) + L"+" + std::to_wstring(range.length()) + L"->" + replacement);
+    model.onAfterRangeChanged.add([&](TextModel&, const TextRange& range, const std::u16string& replacement) {
+        seen.push_back(newui::utf8ToUtf16(std::to_string(range.start())) + u"+" + newui::utf8ToUtf16(std::to_string(range.length())) + u"->" + replacement);
         return newui::SyncReturn::Ignored;
     });
     model.onChanged.add([&](newui::Model&) { ++changed; return newui::SyncReturn::Ignored; });
@@ -309,80 +310,80 @@ TEST(HistoryTextModel, UndoAndRedoFireTheOrdinaryEditEvents) {
     model.undo();
     model.redo();
     ASSERT_EQ(seen.size(), 2u);
-    EXPECT_EQ(seen[0], L"6+5->world");
-    EXPECT_EQ(seen[1], L"6+5->there");
+    EXPECT_EQ(seen[0], u"6+5->world");
+    EXPECT_EQ(seen[1], u"6+5->there");
     EXPECT_EQ(changed, 2);
 }
 
 TEST(HistoryTextModel, AVetoedEditLeavesNoStep) {
-    HistoryTextModel model(L"abc");
-    model.onBeforeChar.add([](TextModel&, size_t, wchar_t, newui::text::CharChangeKind, bool& canChange) {
+    HistoryTextModel model(u"abc");
+    model.onBeforeChar.add([](TextModel&, size_t, char16_t, newui::text::CharChangeKind, bool& canChange) {
         canChange = false;
         return newui::SyncReturn::Handled;
     });
-    model.insert(3, L"d");
-    EXPECT_EQ(model.text(), L"abc");
+    model.insert(3, u"d");
+    EXPECT_EQ(model.text(), u"abc");
     EXPECT_FALSE(model.canUndo());
 }
 
 TEST(HistoryTextModel, AVetoedUndoKeepsTheStep) {
-    HistoryTextModel model(L"abc");
-    model.insert(3, L"defg");
+    HistoryTextModel model(u"abc");
+    model.insert(3, u"defg");
     bool allow = false;
-    model.onBeforeRangeChanged.add([&](TextModel&, const TextRange&, const std::wstring&, bool& canChange) {
+    model.onBeforeRangeChanged.add([&](TextModel&, const TextRange&, const std::u16string&, bool& canChange) {
         canChange = allow;
         return newui::SyncReturn::Handled;
     });
     EXPECT_FALSE(model.undo());
-    EXPECT_EQ(model.text(), L"abcdefg");
+    EXPECT_EQ(model.text(), u"abcdefg");
     EXPECT_TRUE(model.canUndo());
     allow = true;
     EXPECT_TRUE(model.undo());
-    EXPECT_EQ(model.text(), L"abc");
+    EXPECT_EQ(model.text(), u"abc");
 }
 
 TEST(HistoryTextModel, TheOldestStepsAreDroppedBeyondTheLimit) {
     HistoryTextModel model;
     model.setMaxUndoSteps(3);
     for (int i = 0; i < 6; ++i) {
-        model.insert(model.length(), L"ab");   // pasted-size, so no merging
+        model.insert(model.length(), u"ab");   // pasted-size, so no merging
     }
     EXPECT_EQ(model.undoStepCount(), 3u);
     while (model.undo()) {
     }
-    EXPECT_EQ(model.text(), L"ababab");   // the three oldest can't be undone
+    EXPECT_EQ(model.text(), u"ababab");   // the three oldest can't be undone
 }
 
 TEST(HistoryTextModel, TheModelSnapshotIsUnaffectedByLaterEdits) {
-    HistoryTextModel model(L"snap");
+    HistoryTextModel model(u"snap");
     const newui::text::PieceTree snapshot = model.snapshot();
-    model.insert(4, L"shot");
+    model.insert(4, u"shot");
     model.undo();
     model.redo();
-    EXPECT_EQ(snapshot.str(), L"snap");
-    EXPECT_EQ(model.text(), L"snapshot");
+    EXPECT_EQ(snapshot.str(), u"snap");
+    EXPECT_EQ(model.text(), u"snapshot");
 }
 
 TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
-    static const wchar_t alphabet[] = L"ab \n\r_.";
+    static const char16_t alphabet[] = u"ab \n\r_.";
     for (unsigned seed = 1; seed <= 20; ++seed) {
         std::mt19937 rng(seed);
         auto randomText = [&](size_t n) {
-            std::wstring s;
+            std::u16string s;
             for (size_t i = 0; i < n; ++i) {
-                s += alphabet[rng() % (sizeof(alphabet) / sizeof(wchar_t) - 1)];
+                s += alphabet[rng() % (sizeof(alphabet) / sizeof(char16_t) - 1)];
             }
             return s;
         };
-        const std::wstring initial = randomText(rng() % 60);
+        const std::u16string initial = randomText(rng() % 60);
         HistoryTextModel model(initial);
-        std::wstring reference = initial;
+        std::u16string reference = initial;
         for (int step = 0; step < 300; ++step) {
             const size_t at = reference.empty() ? 0 : rng() % (reference.size() + 1);
             switch (rng() % 8) {
             case 0: case 1: case 2: {   // typing at the end or at a place
                 const size_t where = rng() % 2 ? reference.size() : at;
-                const std::wstring c = randomText(1);
+                const std::u16string c = randomText(1);
                 model.insert(where, c);
                 reference.insert(where, c);
                 break;
@@ -396,14 +397,14 @@ TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
                 break;
             }
             case 4: {   // paste
-                const std::wstring s = randomText(1 + rng() % 20);
+                const std::u16string s = randomText(1 + rng() % 20);
                 model.insert(at, s);
                 reference.insert(at, s);
                 break;
             }
             case 5: {   // replace
                 const size_t n = rng() % 6;
-                const std::wstring s = randomText(rng() % 6);
+                const std::u16string s = randomText(rng() % 6);
                 model.replace(TextRange(at, n), s);
                 reference.replace(at, n < reference.size() - at ? n : reference.size() - at, s);
                 break;
@@ -415,7 +416,7 @@ TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
                 model.beginGroup();
                 for (int i = 0; i < 3; ++i) {
                     const size_t where = reference.empty() ? 0 : rng() % (reference.size() + 1);
-                    const std::wstring s = randomText(1 + rng() % 3);
+                    const std::u16string s = randomText(1 + rng() % 3);
                     model.insert(where, s);
                     reference.insert(where, s);
                 }
@@ -427,7 +428,7 @@ TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
         }
 
         // A walk up and down the history: each undo is undone by a redo, exactly.
-        std::vector<std::wstring> states;   // states[i]: the text with i steps undone
+        std::vector<std::u16string> states;   // states[i]: the text with i steps undone
         states.push_back(reference);
         while (model.undo()) {
             states.push_back(model.text());
@@ -445,38 +446,38 @@ TEST(HistoryTextModel, RandomEditsUndoAllTheWayBackAndRedoAllTheWayForward) {
 TEST(TextControlUndo, UndoAndRedoGoThroughTheModelAndPlaceTheCaretAtTheEndOfTheRestoredText) {
     newui::TextControl control;
     control.setModel(std::make_unique<HistoryTextModel>());
-    control.setText(L"hello world");
+    control.setText(u"hello world");
     EXPECT_FALSE(control.canUndo());
 
     control.model().remove(TextRange(5, 6));   // " world"
-    ASSERT_EQ(control.text(), L"hello");
+    ASSERT_EQ(control.text(), u"hello");
     EXPECT_TRUE(control.canUndo());
     control.caret().setPosition(newui::text::TextPosition(0));
 
     ASSERT_TRUE(control.undo());
-    EXPECT_EQ(control.text(), L"hello world");
+    EXPECT_EQ(control.text(), u"hello world");
     EXPECT_EQ(control.caret().position().offset(), 11u);   // after what came back
     EXPECT_TRUE(control.canRedo());
 
     ASSERT_TRUE(control.redo());
-    EXPECT_EQ(control.text(), L"hello");
+    EXPECT_EQ(control.text(), u"hello");
     EXPECT_EQ(control.caret().position().offset(), 5u);
     EXPECT_FALSE(control.undo() && control.undo());   // only one step to undo
 }
 
 TEST(TextControlUndo, APlainTextModelHasNoHistory) {
     newui::TextControl control;
-    control.setText(L"abc");
-    control.model().insert(3, L"d");
+    control.setText(u"abc");
+    control.model().insert(3, u"d");
     EXPECT_FALSE(control.canUndo());
     EXPECT_FALSE(control.undo());
     EXPECT_FALSE(control.redo());
-    EXPECT_EQ(control.text(), L"abcd");
+    EXPECT_EQ(control.text(), u"abcd");
 }
 
 namespace {
-    std::wstring clipboardText() {
-        std::wstring out;
+    std::u16string clipboardText() {
+        std::u16string out;
         newui::ClipboardManager::getText(out);
         return out;
     }
@@ -484,86 +485,86 @@ namespace {
 
 TEST(TextControlClipboard, CopyPutsTheSelectionOnTheClipboardAndLeavesTheText) {
     newui::TextControl control;
-    control.setText(L"hello world");
+    control.setText(u"hello world");
     EXPECT_FALSE(control.copy());   // nothing selected
     control.selection().setRange(TextRange(6, 5));
     ASSERT_TRUE(control.copy());
-    EXPECT_EQ(clipboardText(), L"world");
-    EXPECT_EQ(control.text(), L"hello world");
+    EXPECT_EQ(clipboardText(), u"world");
+    EXPECT_EQ(control.text(), u"hello world");
 }
 
 TEST(TextControlClipboard, CutRemovesTheSelectionAndPlacesTheCaretWhereItWas) {
     newui::TextControl control;
     control.setModel(std::make_unique<HistoryTextModel>());
-    control.setText(L"hello world");
+    control.setText(u"hello world");
     control.selection().setRange(TextRange(0, 6));
     ASSERT_TRUE(control.cut());
-    EXPECT_EQ(clipboardText(), L"hello ");
-    EXPECT_EQ(control.text(), L"world");
+    EXPECT_EQ(clipboardText(), u"hello ");
+    EXPECT_EQ(control.text(), u"world");
     EXPECT_EQ(control.caret().position().offset(), 0u);
     EXPECT_TRUE(control.selection().isEmpty());
     ASSERT_TRUE(control.undo());   // one undo step
-    EXPECT_EQ(control.text(), L"hello world");
+    EXPECT_EQ(control.text(), u"hello world");
 }
 
 TEST(TextControlClipboard, PasteReplacesTheSelectionOrInsertsAtTheCaretAndIsOneUndoStep) {
     newui::TextControl control;
     control.setModel(std::make_unique<HistoryTextModel>());
-    ASSERT_TRUE(newui::ClipboardManager::setText(L"XYZ"));
-    control.setText(L"abcdef");
+    ASSERT_TRUE(newui::ClipboardManager::setText(u"XYZ"));
+    control.setText(u"abcdef");
     control.selection().setRange(TextRange(1, 2));
     ASSERT_TRUE(control.paste());
-    EXPECT_EQ(control.text(), L"aXYZdef");
+    EXPECT_EQ(control.text(), u"aXYZdef");
     EXPECT_EQ(control.caret().position().offset(), 4u);
 
     control.caret().setPosition(newui::text::TextPosition(7));
     ASSERT_TRUE(control.paste());
-    EXPECT_EQ(control.text(), L"aXYZdefXYZ");
+    EXPECT_EQ(control.text(), u"aXYZdefXYZ");
 
     ASSERT_TRUE(control.undo());
-    EXPECT_EQ(control.text(), L"aXYZdef");
+    EXPECT_EQ(control.text(), u"aXYZdef");
     ASSERT_TRUE(control.undo());
-    EXPECT_EQ(control.text(), L"abcdef");
+    EXPECT_EQ(control.text(), u"abcdef");
 }
 
 TEST(TextControlClipboard, PasteIntoASingleLineFieldTurnsLineBreaksIntoSpaces) {
     newui::TextField field;
-    ASSERT_TRUE(newui::ClipboardManager::setText(L"a\r\nb\nc\rd"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(u"a\r\nb\nc\rd"));
     ASSERT_TRUE(field.paste());
-    EXPECT_EQ(field.text(), L"a b c d");
+    EXPECT_EQ(field.text(), u"a b c d");
 }
 
 TEST(TextControlClipboard, PasteWithNoTextOnTheClipboardDoesNothing) {
     newui::TextControl control;
-    control.setText(L"abc");
-    ASSERT_TRUE(newui::ClipboardManager::setText(L""));
+    control.setText(u"abc");
+    ASSERT_TRUE(newui::ClipboardManager::setText(u""));
     EXPECT_FALSE(control.paste());
-    EXPECT_EQ(control.text(), L"abc");
+    EXPECT_EQ(control.text(), u"abc");
 }
 
 TEST(TextControlClipboard, SecureEntryNeverCopiesAndReadOnlyNeverChanges) {
     newui::TextControl secret;
-    secret.setText(L"hunter2");
+    secret.setText(u"hunter2");
     secret.selection().setRange(TextRange(0, 7));
-    ASSERT_TRUE(newui::ClipboardManager::setText(L"untouched"));
+    ASSERT_TRUE(newui::ClipboardManager::setText(u"untouched"));
     secret.inputTraits().setSecureTextEntry(true);
     EXPECT_FALSE(secret.copy());
     EXPECT_FALSE(secret.cut());
-    EXPECT_EQ(clipboardText(), L"untouched");
-    EXPECT_EQ(secret.text(), L"hunter2");
+    EXPECT_EQ(clipboardText(), u"untouched");
+    EXPECT_EQ(secret.text(), u"hunter2");
 
     newui::TextControl locked;
-    locked.setText(L"fixed");
+    locked.setText(u"fixed");
     locked.selection().setRange(TextRange(0, 5));
     locked.inputTraits().setReadOnly(true);
     EXPECT_TRUE(locked.copy());          // reading is fine
     EXPECT_FALSE(locked.cut());
     EXPECT_FALSE(locked.paste());
-    EXPECT_EQ(locked.text(), L"fixed");
+    EXPECT_EQ(locked.text(), u"fixed");
 }
 
 TEST(HistoryTextModel, OnHistoryChangedFiresAfterTheHistoryIsUpdatedNotBefore) {
-    HistoryTextModel model(L"abc");
+    HistoryTextModel model(u"abc");
     struct Seen { bool canUndo; bool canRedo; };
     std::vector<Seen> seen;
     model.onHistoryChanged.add([&](TextModel& sender) {
@@ -577,7 +578,7 @@ TEST(HistoryTextModel, OnHistoryChangedFiresAfterTheHistoryIsUpdatedNotBefore) {
         return newui::SyncReturn::Ignored;
     });
 
-    model.insert(3, L"d");
+    model.insert(3, u"d");
     ASSERT_EQ(seen.size(), 1u);
     EXPECT_TRUE(seen[0].canUndo);
     EXPECT_FALSE(seen[0].canRedo);
@@ -592,7 +593,7 @@ TEST(HistoryTextModel, OnHistoryChangedFiresAfterTheHistoryIsUpdatedNotBefore) {
     ASSERT_EQ(seen.size(), 3u);
     EXPECT_TRUE(seen[2].canUndo);
 
-    model.setText(L"loaded");   // the history is forgotten
+    model.setText(u"loaded");   // the history is forgotten
     ASSERT_GE(seen.size(), 4u);
     EXPECT_FALSE(seen.back().canUndo);
     EXPECT_FALSE(seen.back().canRedo);
@@ -601,16 +602,16 @@ TEST(HistoryTextModel, OnHistoryChangedFiresAfterTheHistoryIsUpdatedNotBefore) {
     seen.clear();
     model.beginGroup();
     ASSERT_EQ(seen.size(), 1u);
-    model.insert(0, L"x");
+    model.insert(0, u"x");
     model.endGroup();
     EXPECT_TRUE(seen.back().canUndo);
 
     // A vetoed edit changes nothing.
     seen.clear();
-    model.onBeforeChar.add([](TextModel&, size_t, wchar_t, newui::text::CharChangeKind, bool& canChange) {
+    model.onBeforeChar.add([](TextModel&, size_t, char16_t, newui::text::CharChangeKind, bool& canChange) {
         canChange = false;
         return newui::SyncReturn::Handled;
     });
-    model.insert(0, L"y");
+    model.insert(0, u"y");
     EXPECT_TRUE(seen.empty());
 }

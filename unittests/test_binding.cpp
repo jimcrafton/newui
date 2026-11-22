@@ -87,7 +87,7 @@ TEST(PropertyChanged, SliderToggleAndTextControlNotify) {
     slider.setValue(30.0f);
     slider.setValue(30.0f);  // unchanged: no second notification
     toggle.setChecked(true);
-    text.setText(L"hello");
+    text.setText(u"hello");
 
     ASSERT_EQ(seen.size(), 3u);
     EXPECT_EQ(seen[0], "value");
@@ -192,13 +192,13 @@ TEST(Binding, ConvertersShapeTheValue) {
     auto* audible = frame.rootView().findView<Toggle>("audible");
 
     volume->setValue(40.0f);
-    EXPECT_EQ(readout->text(), L"40%");
+    EXPECT_EQ(readout->text(), u"40%");
 
-    readout->setText(L"75 %");
+    readout->setText(u"75 %");
     EXPECT_FLOAT_EQ(volume->value(), 75.0f);
 
     // Not a number: the slider keeps its value and the binding reports why.
-    readout->setText(L"loud");
+    readout->setText(u"loud");
     EXPECT_FLOAT_EQ(volume->value(), 75.0f);
     EXPECT_FALSE(frame.bindings()[0]->lastError().empty());
 
@@ -407,21 +407,21 @@ TEST(Binding, PipelineReportsConversionAndValidationSeparately) {
     frame.addBinding(binding);
     ASSERT_TRUE(frame.resolveBindings()) << binding->lastError();
 
-    text->setText(L"7");  // valid: written through
+    text->setText(u"7");  // valid: written through
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 7.0);
     EXPECT_TRUE(binding->isValid());
 
-    text->setText(L"99");  // converts, rule rejects: source keeps 7
+    text->setText(u"99");  // converts, rule rejects: source keeps 7
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 7.0);
     EXPECT_EQ(binding->errorKind(), BindingErrorKind::Validation);
     EXPECT_FALSE(binding->isValid());
 
-    text->setText(L"abc");  // cannot convert
+    text->setText(u"abc");  // cannot convert
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 7.0);
     EXPECT_EQ(binding->errorKind(), BindingErrorKind::Conversion);
 
     EXPECT_FALSE(binding->validate());
-    text->setText(L"3");
+    text->setText(u"3");
     EXPECT_TRUE(binding->validate());
     EXPECT_EQ(binding->errorKind(), BindingErrorKind::None);
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 3.0);
@@ -483,13 +483,13 @@ TEST(BindingGroup, LoadDirtyRevert) {
     EXPECT_EQ(group.bindings().size(), 2u);
     EXPECT_FALSE(group.dirty());
 
-    f.pw->setText(L"changed");
+    f.pw->setText(u"changed");
     EXPECT_TRUE(group.dirty());
     EXPECT_EQ(f.stored("pw"), "secret");  // OnCommit: not written yet
 
     EXPECT_TRUE(group.revert());
     EXPECT_FALSE(group.dirty());
-    EXPECT_EQ(f.pw->text(), L"secret");
+    EXPECT_EQ(f.pw->text(), u"secret");
 }
 
 TEST(BindingGroup, CommitIsAllOrNothing) {
@@ -497,20 +497,20 @@ TEST(BindingGroup, CommitIsAllOrNothing) {
     ASSERT_TRUE(f.build());
     BindingGroup& group = f.frame.bindingGroup("account");
 
-    f.pw->setText(L"newpass");
-    f.pw2->setText(L"abc");  // too short
+    f.pw->setText(u"newpass");
+    f.pw2->setText(u"abc");  // too short
     EXPECT_FALSE(group.commit());
     ASSERT_EQ(group.errors().size(), 1u);
     EXPECT_EQ(f.stored("pw"), "secret");  // the valid field was not written either
     EXPECT_EQ(f.stored("pw2"), "secret");
 
-    f.pw2->setText(L"different");  // valid alone, but the cross-field rule fails
+    f.pw2->setText(u"different");  // valid alone, but the cross-field rule fails
     EXPECT_FALSE(group.commit());
     ASSERT_EQ(group.errors().size(), 1u);
     EXPECT_EQ(group.errors()[0], "Passwords differ");
     EXPECT_EQ(f.stored("pw"), "secret");
 
-    f.pw2->setText(L"newpass");
+    f.pw2->setText(u"newpass");
     EXPECT_TRUE(group.commit()) << (group.errors().empty() ? "" : group.errors()[0]);
     EXPECT_TRUE(group.errors().empty());
     EXPECT_EQ(f.stored("pw"), "newpass");
@@ -588,7 +588,7 @@ TEST(BindingFocus, OnCommitWritesWhenFocusMovesAwayViaUIInputManager) {
     root.setFocusedSubView(f.a);
     ASSERT_EQ(root.focusedSubView(), f.a);
 
-    f.a->setText(L"8");
+    f.a->setText(u"8");
     EXPECT_DOUBLE_EQ(f.stored(), 5.0);  // still editing: not committed
     EXPECT_TRUE(f.binding->dirty());
 
@@ -605,12 +605,12 @@ TEST(BindingFocus, RejectedValueMarksTheControlAndClearsWhenFixed) {
     RootView& root = f.frame.rootView();
     root.setFocusedSubView(f.a);
 
-    f.a->setText(L"99");
+    f.a->setText(u"99");
     UIInputManager::instance().moveFocus(root, FocusNavigationDirection::Next);
     EXPECT_DOUBLE_EQ(f.stored(), 5.0);  // rule rejected it
     EXPECT_FALSE(f.a->errorText().empty());
 
-    f.a->setText(L"7");
+    f.a->setText(u"7");
     EXPECT_TRUE(f.binding->commit());
     EXPECT_TRUE(f.a->errorText().empty());
     EXPECT_DOUBLE_EQ(f.stored(), 7.0);
@@ -642,13 +642,13 @@ TEST(BindingFocus, EnterCommitsATextFieldAndPassesOnWhenValid) {
     root.setFocusedSubView(field);
     const UIInputManager& input = UIInputManager::instance();
 
-    field->setText(L"99");  // invalid: Enter is consumed, nothing written, outlined
+    field->setText(u"99");  // invalid: Enter is consumed, nothing written, outlined
     EXPECT_TRUE(input.routeDialogKeyDown(root, 0, 0, 1, vkReturn));
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 5.0);
     EXPECT_FALSE(field->errorText().empty());
     EXPECT_EQ(root.focusedSubView(), field);
 
-    field->setText(L"7");  // valid: written; no default button, so the key is left unhandled
+    field->setText(u"7");  // valid: written; no default button, so the key is left unhandled
     EXPECT_FALSE(input.routeDialogKeyDown(root, 0, 0, 1, vkReturn));
     EXPECT_DOUBLE_EQ(std::any_cast<double>(model.values["n"]), 7.0);
     EXPECT_TRUE(field->errorText().empty());
@@ -663,12 +663,12 @@ TEST(BindingFocus, ErrorTargetLabelShowsAndClearsTheMessage) {
     f.binding->setErrorTarget("err");
     ASSERT_TRUE(f.frame.resolveBindings()) << f.binding->lastError();
 
-    f.a->setText(L"99");
+    f.a->setText(u"99");
     EXPECT_FALSE(f.binding->commit());
     EXPECT_FALSE(label->text().empty());
     EXPECT_EQ(label->text(), f.binding->lastError());
 
-    f.a->setText(L"7");
+    f.a->setText(u"7");
     EXPECT_TRUE(f.binding->commit());
     EXPECT_TRUE(label->text().empty());
 
@@ -684,21 +684,21 @@ TEST(BindingGroup, ValidateOnlyNeverWritesAndStillTakesPartInGroupRules) {
     second->setMode(BindingMode::ValidateOnly);
     second->setSource("");
     second->setKey("");
-    f.pw2->setText(L"");
+    f.pw2->setText(u"");
     ASSERT_TRUE(f.frame.resolveBindings()) << second->lastError();
     BindingGroup& group = f.frame.bindingGroup("account");
 
-    f.pw->setText(L"newpass");
-    f.pw2->setText(L"other!");  // valid on its own, but the passwords differ
+    f.pw->setText(u"newpass");
+    f.pw2->setText(u"other!");  // valid on its own, but the passwords differ
     EXPECT_FALSE(group.commit());
     EXPECT_EQ(group.errors().size(), 1u);
     EXPECT_EQ(f.stored("pw"), "secret");
 
-    f.pw2->setText(L"newpass");
+    f.pw2->setText(u"newpass");
     EXPECT_TRUE(group.commit());
     EXPECT_EQ(f.stored("pw"), "newpass");
     EXPECT_EQ(f.stored("pw2"), "secret");  // never written: it has no source
-    EXPECT_EQ(f.pw2->text(), L"newpass");  // and never overwritten by a refresh
+    EXPECT_EQ(f.pw2->text(), u"newpass");  // and never overwritten by a refresh
     EXPECT_FALSE(group.dirty());
 }
 
@@ -708,17 +708,17 @@ TEST(BindingGroup, GroupRuleFailureShowsOnTheBlamedFieldAsSoonAsAFieldCommits) {
     Binding* first = f.frame.bindings()[0];
     Binding* second = f.frame.bindings()[1];
 
-    f.pw->setText(L"newpass");
+    f.pw->setText(u"newpass");
     EXPECT_TRUE(first->commit());  // fine alone, but pw2 still holds "secret": the rule blames pw2 (right side)
     EXPECT_EQ(f.pw2->errorText(), "Passwords differ");
     EXPECT_TRUE(f.pw->errorText().empty());
     EXPECT_EQ(f.stored("pw"), "newpass");  // a field that is valid on its own is still written
 
-    f.pw2->setText(L"newpass");
+    f.pw2->setText(u"newpass");
     EXPECT_TRUE(second->commit());  // now they match: the message goes away
     EXPECT_TRUE(f.pw2->errorText().empty());
 
-    f.pw2->setText(L"zzzzzz");
+    f.pw2->setText(u"zzzzzz");
     EXPECT_TRUE(second->commit());
     EXPECT_EQ(f.pw2->errorText(), "Passwords differ");
     EXPECT_TRUE(f.frame.bindingGroup("account").load());  // revert clears it

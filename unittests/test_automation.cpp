@@ -25,7 +25,7 @@ struct AutomationFixture : public ::testing::Test {
         editor = new TextControl();
         editor->setName("autoEditor");
         editor->setBounds(Rect(10, 20, 200, 100));
-        editor->setText(L"hello \"world\"");
+        editor->setText(u"hello \"world\"");
         root->addChild(editor);
         Automation::expose(*root);
     }
@@ -191,7 +191,7 @@ TEST_F(AutomationFixture, DescribeAndGetReadReflectedProperties) {
 }
 
 TEST_F(AutomationFixture, CaretReportsALineAndColumn) {
-    editor->setText(L"one\ntwo\nthree\n");
+    editor->setText(u"one\ntwo\nthree\n");
     editor->caret().setPosition(text::TextPosition(5));   // "two": the 2nd character of line 2
 
     std::string answer = Automation::handle("{\"cmd\":\"caret\",\"name\":\"autoEditor\"}");

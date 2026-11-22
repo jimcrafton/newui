@@ -1584,7 +1584,7 @@ TEST(TextField, DefaultConstructedIsVisibleAndEmpty) {
     auto* field = new TextField();
 
     EXPECT_TRUE(field->isEnabled());
-    EXPECT_EQ(field->text(), L"");
+    EXPECT_EQ(field->text(), u"");
     EXPECT_TRUE(field->model().empty());
 
     field->destroy();
@@ -1603,10 +1603,10 @@ TEST(TextField, StyleIsThemedEditStyle) {
 TEST(TextField, SetTextForwardsToModel) {
     auto* field = new TextField();
 
-    field->setText(L"hello");
+    field->setText(u"hello");
 
-    EXPECT_EQ(field->text(), L"hello");
-    EXPECT_EQ(field->model().text(), L"hello");
+    EXPECT_EQ(field->text(), u"hello");
+    EXPECT_EQ(field->model().text(), u"hello");
 
     field->destroy();
     delete field;
@@ -1620,9 +1620,9 @@ TEST(TextField, ModelAccessorReachesTheRealMutatorsAndEvents) {
         return SyncReturn::Handled;
         });
 
-    field->model().insert(0, L"hi");
+    field->model().insert(0, u"hi");
 
-    EXPECT_EQ(field->text(), L"hi");
+    EXPECT_EQ(field->text(), u"hi");
     EXPECT_EQ(onChangedCount, 1);
 
     field->destroy();
@@ -1880,16 +1880,16 @@ TEST(DropDownList, GotAndLostFocusToggleThemedEditStyleFocused) {
 
 TEST(TextField, SetModelReplacesTheModelAndReflectsItsContent) {
     auto* field = new TextField();
-    field->setText(L"original");
+    field->setText(u"original");
 
     auto newModel = std::make_unique<text::TextModel>();
-    newModel->setText(L"replacement");
+    newModel->setText(u"replacement");
     text::TextModel* newModelPtr = newModel.get();
 
     field->setModel(std::move(newModel));
 
     EXPECT_EQ(&field->model(), newModelPtr);
-    EXPECT_EQ(field->text(), L"replacement");
+    EXPECT_EQ(field->text(), u"replacement");
 
     field->destroy();
     delete field;
@@ -1920,7 +1920,7 @@ TEST(TextControl, SetModelRewiresContentSizeChangeNotificationToTheNewModel) {
     EXPECT_GE(contentSizeChangedCount, 1) << "setModel() itself should notify";
 
     int countAfterSwap = contentSizeChangedCount;
-    textControl->model().setText(L"typed after swap");
+    textControl->model().setText(u"typed after swap");
 
     EXPECT_GT(contentSizeChangedCount, countAfterSwap) << "a change on the NEW model should still reach handleModelChanged after the swap";
 
@@ -1942,9 +1942,9 @@ TEST(TextControl, SetModelRewiresContentSizeChangeNotificationToTheNewModel) {
 
 namespace {
 
-const std::wstring kManyLines =
-    L"line one\nline two\nline three\nline four\nline five\nline six\n"
-    L"line seven\nline eight\nline nine\nline ten";
+const std::u16string kManyLines =
+    u"line one\nline two\nline three\nline four\nline five\nline six\n"
+    u"line seven\nline eight\nline nine\nline ten";
 
 }  // namespace
 
@@ -1984,7 +1984,7 @@ TEST(TextControl, ReportsRealContentHeightEvenBeforeAnyPaintCall) {
 TEST(TextControl, ReportsBoundsSizeWhenContentFits) {
     auto* textControl = new TextControl();
     textControl->setBounds(Rect(0, 0, 100, 60));
-    textControl->setText(L"short");
+    textControl->setText(u"short");
 
     Size reported = textControl->contentSize();
 
@@ -3986,7 +3986,7 @@ namespace {
 TEST(TextControl, ColorRunsRecolorTheirRangeOfTheText) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"WWWWWW plain");
+    textControl.setText(u"WWWWWW plain");
     textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
     ASSERT_EQ(redTextPixels(textControl), 0u);
 
@@ -4019,7 +4019,7 @@ namespace {
 TEST(TextControl, HighlightsCurrentLineTintsTheFullLineWidthPastTheTextItself) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"ab");
+    textControl.setText(u"ab");
     textControl.caret().setPosition(text::TextPosition(0));
 
     const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);   // far right of "ab", same line
@@ -4033,7 +4033,7 @@ TEST(TextControl, HighlightsCurrentLineTintsTheFullLineWidthPastTheTextItself) {
 TEST(TextControl, HighlightsCurrentLineIsOffByDefault) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"ab");
+    textControl.setText(u"ab");
     textControl.caret().setPosition(text::TextPosition(0));
     EXPECT_FALSE(textControl.highlightsCurrentLine());
 
@@ -4046,7 +4046,7 @@ TEST(TextControl, HighlightsCurrentLineIsOffByDefault) {
 TEST(TextControl, HighlightsCurrentLineStaysThroughAnActiveSelection) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"ab");
+    textControl.setText(u"ab");
     textControl.caret().setPosition(text::TextPosition(0));
 
     const std::uint32_t before = pixelAt(textControl, 300, 40, 250, 10);
@@ -4061,7 +4061,7 @@ TEST(TextControl, HighlightsCurrentLineStaysThroughAnActiveSelection) {
 TEST(TextControl, ColorRunsPastTheEndOfTheTextAreIgnored) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"abc");
+    textControl.setText(u"abc");
     textControl.setColorRuns({ text::TextColorRun{ 2, 50, Color(1.0f, 0.0f, 0.0f, 1.0f) },
                                text::TextColorRun{ 10, 5, Color(0.0f, 1.0f, 0.0f, 1.0f) } });
 
@@ -4099,7 +4099,7 @@ namespace {
 
     TextControl& decoratedText(TextControl& textControl) {
         textControl.setBounds(Rect(0, 0, 300, 40));
-        textControl.setText(L"alpha beta gamma");
+        textControl.setText(u"alpha beta gamma");
         textControl.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
         return textControl;
     }
@@ -4221,7 +4221,7 @@ TEST(TextControlLineAnnotations, AnnotationsMoveWithEditsBeforeThem) {
     annotation.text = "x";
     textControl.setLineAnnotations({ annotation });
 
-    textControl.model().insert(0, L"abc ");
+    textControl.model().insert(0, u"abc ");
     ASSERT_EQ(textControl.lineAnnotations().size(), 1u);
     EXPECT_EQ(textControl.lineAnnotations()[0].offset, 10u);
 }
@@ -4268,7 +4268,7 @@ namespace {
         return pixels;
     }
 
-    const std::wstring kLongLine = L"a long line of text that is a good deal wider than a hundred pixel control could ever show";
+    const std::u16string kLongLine = u"a long line of text that is a good deal wider than a hundred pixel control could ever show";
 }
 
 TEST(TextControlWordWrap, WrappingIsTheDefaultAndTheContentIsNeverWiderThanTheView) {
@@ -4295,7 +4295,7 @@ TEST(TextControlWordWrap, WithWrappingOffTheContentIsAsWideAsTheLongestLine) {
 TEST(TextControlWordWrap, ShortTextWithWrappingOffIsNeverNarrowerThanTheView) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"abc");
+    textControl.setText(u"abc");
     textControl.setWordWrap(false);
 
     EXPECT_FLOAT_EQ(textControl.contentSize().width, 300.0f);
@@ -4386,7 +4386,7 @@ namespace {
         return scan;
     }
 
-    TextControl& styledText(TextControl& textControl, const std::wstring& text) {
+    TextControl& styledText(TextControl& textControl, const std::u16string& text) {
         textControl.setBounds(Rect(0, 0, 400, 40));
         textControl.setFont(Font("Segoe UI", 16.0f));
         textControl.setText(text);
@@ -4397,14 +4397,14 @@ namespace {
 
 TEST(TextControlFontRuns, BoldWidensTheTextAndMovesTheCaretPositionsAfterIt) {
     TextControl plain;
-    styledText(plain, L"mmmmmm x");
+    styledText(plain, u"mmmmmm x");
     plain.controller().ensureLayoutUpToDate();
     Point plainX;
     float height = 0.0f;
     plain.controller().layoutEngine().hitTestPosition(text::TextPosition(7), plainX, height);
 
     TextControl bold;
-    styledText(bold, L"mmmmmm x");
+    styledText(bold, u"mmmmmm x");
     text::TextFontRun run;
     run.start = 0;
     run.length = 6;
@@ -4420,7 +4420,7 @@ TEST(TextControlFontRuns, BoldWidensTheTextAndMovesTheCaretPositionsAfterIt) {
 // The point of one shared layout: what's drawn is what's hit-tested.
 TEST(TextControlFontRuns, TheDrawnBoldTextEndsWhereItsHitTestRectEnds) {
     TextControl textControl;
-    styledText(textControl, L"mmmmmmmm");
+    styledText(textControl, u"mmmmmmmm");
     text::TextFontRun run;
     run.start = 0;
     run.length = 8;
@@ -4437,9 +4437,9 @@ TEST(TextControlFontRuns, TheDrawnBoldTextEndsWhereItsHitTestRectEnds) {
 
 TEST(TextControlFontRuns, UnderlineAddsInkBelowTheText) {
     TextControl plain;
-    styledText(plain, L"abc abc abc");
+    styledText(plain, u"abc abc abc");
     TextControl underlined;
-    styledText(underlined, L"abc abc abc");
+    styledText(underlined, u"abc abc abc");
     text::TextFontRun run;
     run.start = 0;
     run.length = 11;
@@ -4452,9 +4452,9 @@ TEST(TextControlFontRuns, UnderlineAddsInkBelowTheText) {
 
 TEST(TextControlFontRuns, ItalicChangesTheDrawnGlyphs) {
     TextControl plain;
-    styledText(plain, L"lllllll");
+    styledText(plain, u"lllllll");
     TextControl italic;
-    styledText(italic, L"lllllll");
+    styledText(italic, u"lllllll");
     text::TextFontRun run;
     run.start = 0;
     run.length = 7;
@@ -4535,7 +4535,7 @@ TEST(TextStyles, AStyleWithALineBackgroundTintsItsLineEvenWithoutAMessage) {
 TEST(TextStyles, ATextControlStylesItsRangesAndRestylesWhenTheSheetChanges) {
     TextControl textControl;
     textControl.setBounds(Rect(0, 0, 300, 40));
-    textControl.setText(L"auto x = 1; // note");
+    textControl.setText(u"auto x = 1; // note");
     textControl.setStyledRanges({ { 0, 4, "keyword" }, { 12, 7, "comment" } });
     EXPECT_TRUE(textControl.colorRuns().empty()) << "nothing to resolve names against yet";
 
@@ -4557,13 +4557,13 @@ TEST(TextStyles, AStyleFontSizeChangesTheLayout) {
 
     TextControl plain;
     plain.setBounds(Rect(0, 0, 400, 80));
-    plain.setText(L"small BIG");
+    plain.setText(u"small BIG");
     plain.controller().ensureLayoutUpToDate();
     const std::vector<Rect> plainRects = plain.controller().layoutEngine().hitTestRange(text::TextRange(6, 3));
 
     TextControl styled;
     styled.setBounds(Rect(0, 0, 400, 80));
-    styled.setText(L"small BIG");
+    styled.setText(u"small BIG");
     styled.setStyleSheet(sheet);
     styled.setStyledRanges({ { 6, 3, "big" } });
     styled.controller().ensureLayoutUpToDate();
@@ -4643,11 +4643,11 @@ TEST(TextFieldPlaceholder, TextReplacesItAndClearingBringsItBack) {
     field.setPlaceholder("Search");
     const std::vector<std::uint32_t> empty = renderField(field);
 
-    field.setText(L"abc");
+    field.setText(u"abc");
     EXPECT_NE(renderField(field), empty);
-    EXPECT_EQ(field.text(), L"abc");
+    EXPECT_EQ(field.text(), u"abc");
 
-    field.setText(L"");
+    field.setText(u"");
     EXPECT_EQ(renderField(field), empty);
 }
 
@@ -4666,7 +4666,7 @@ TEST(TextFieldPlaceholder, IsAReflectedProperty) {
 // What a status bar listens to: the caret moving, the selection changing, overwrite mode flipping.
 TEST(TextController, EditStateChangesAreReported) {
     TextControl control;
-    control.setText(L"hello\nworld");
+    control.setText(u"hello\nworld");
     int changes = 0;
     control.controller().onEditStateChanged.add([&changes](TextController&) {
         ++changes;

@@ -1,7 +1,7 @@
 #include "newui/piecetree.h"
 
 #include <algorithm>
-#include <cwchar>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -20,7 +20,7 @@ namespace newui::text {
             return node ? node->stats : empty;
         }
 
-        Stats scan(const wchar_t* p, std::size_t n) {
+        Stats scan(const char16_t* p, std::size_t n) {
             Stats s;
             s.length = n;
             if (n == 0) {
@@ -29,11 +29,11 @@ namespace newui::text {
             s.first = p[0];
             s.last = p[n - 1];
             for (std::size_t i = 0; i < n; ++i) {
-                if (p[i] == L'\r') {
+                if (p[i] == u'\r') {
                     ++s.cr;
-                } else if (p[i] == L'\n') {
+                } else if (p[i] == u'\n') {
                     ++s.lf;
-                    if (i > 0 && p[i - 1] == L'\r') {
+                    if (i > 0 && p[i - 1] == u'\r') {
                         ++s.pairs;
                     }
                 }
@@ -52,7 +52,7 @@ namespace newui::text {
             r.length = a.length + b.length;
             r.cr = a.cr + b.cr;
             r.lf = a.lf + b.lf;
-            r.pairs = a.pairs + b.pairs + (a.last == L'\r' && b.first == L'\n' ? 1 : 0);
+            r.pairs = a.pairs + b.pairs + (a.last == u'\r' && b.first == u'\n' ? 1 : 0);
             r.first = a.first;
             r.last = b.last;
             return r;
@@ -179,7 +179,7 @@ namespace newui::text {
         }
     }
 
-    PieceTree::PieceTree(std::wstring_view text) {
+    PieceTree::PieceTree(std::u16string_view text) {
         root_ = appendText(nullptr, text);
     }
 
@@ -195,7 +195,7 @@ namespace newui::text {
         return validateNode(root_.get());
     }
 
-    wchar_t PieceTree::at(std::size_t offset) const {
+    char16_t PieceTree::at(std::size_t offset) const {
         const Node* node = root_.get();
         while (node != nullptr) {
             const std::size_t leftLength = statsOf(node->left).length;
@@ -208,46 +208,46 @@ namespace newui::text {
                 node = node->right.get();
             }
         }
-        return L'\0';
+        return u'\0';
     }
 
-    void PieceTree::forEachChunk(std::size_t start, std::size_t length, const std::function<void(const wchar_t*, std::size_t)>& visit) const {
+    void PieceTree::forEachChunk(std::size_t start, std::size_t length, const std::function<void(const char16_t*, std::size_t)>& visit) const {
         const std::size_t total = this->length();
         const std::size_t from = start < total ? start : total;
         const std::size_t to = length < total - from ? from + length : total;
-        auto each = [&](const wchar_t* data, std::size_t n) {
+        auto each = [&](const char16_t* data, std::size_t n) {
             visit(data, n);
             return true;
         };
         visitRange(root_.get(), from, to, each);
     }
 
-    void PieceTree::appendTo(std::size_t start, std::size_t length, std::wstring& out) const {
-        forEachChunk(start, length, [&](const wchar_t* data, std::size_t n) { out.append(data, n); });
+    void PieceTree::appendTo(std::size_t start, std::size_t length, std::u16string& out) const {
+        forEachChunk(start, length, [&](const char16_t* data, std::size_t n) { out.append(data, n); });
     }
 
-    std::wstring PieceTree::substring(std::size_t start, std::size_t length) const {
-        std::wstring out;
+    std::u16string PieceTree::substring(std::size_t start, std::size_t length) const {
+        std::u16string out;
         appendTo(start, length, out);
         return out;
     }
 
-    std::wstring PieceTree::str() const {
-        std::wstring out;
+    std::u16string PieceTree::str() const {
+        std::u16string out;
         out.reserve(length());
         appendTo(0, length(), out);
         return out;
     }
 
-    std::size_t PieceTree::find(wchar_t ch, std::size_t from) const {
+    std::size_t PieceTree::find(char16_t ch, std::size_t from) const {
         const std::size_t total = length();
         if (from >= total) {
             return npos;
         }
         std::size_t result = npos;
         std::size_t position = from;
-        auto each = [&](const wchar_t* data, std::size_t n) {
-            if (const wchar_t* found = std::wmemchr(data, ch, n)) {
+        auto each = [&](const char16_t* data, std::size_t n) {
+            if (const char16_t* found = std::char_traits<char16_t>::find(data, n, ch)) {
                 result = position + static_cast<std::size_t>(found - data);
                 return false;
             }
@@ -258,19 +258,19 @@ namespace newui::text {
         return result;
     }
 
-    std::size_t PieceTree::count(wchar_t ch, std::size_t start, std::size_t length) const {
+    std::size_t PieceTree::count(char16_t ch, std::size_t start, std::size_t length) const {
         std::size_t n = 0;
-        forEachChunk(start, length, [&](const wchar_t* data, std::size_t size) {
+        forEachChunk(start, length, [&](const char16_t* data, std::size_t size) {
             n += static_cast<std::size_t>(std::count(data, data + size, ch));
         });
         return n;
     }
 
-    std::size_t PieceTree::commonPrefixLength(const std::wstring& other) const {
+    std::size_t PieceTree::commonPrefixLength(const std::u16string& other) const {
         const std::size_t total = length();
         const std::size_t limit = total < other.size() ? total : other.size();
         std::size_t matched = 0;
-        auto each = [&](const wchar_t* data, std::size_t n) {
+        auto each = [&](const char16_t* data, std::size_t n) {
             std::size_t i = 0;
             while (i < n && data[i] == other[matched + i]) {
                 ++i;
@@ -282,23 +282,23 @@ namespace newui::text {
         return matched;
     }
 
-    bool PieceTree::equals(const std::wstring& other) const {
+    bool PieceTree::equals(const std::u16string& other) const {
         return length() == other.size() && commonPrefixLength(other) == other.size();
     }
 
-    std::size_t PieceTree::commonSuffixLength(const std::wstring& other, std::size_t limit) const {
+    std::size_t PieceTree::commonSuffixLength(const std::u16string& other, std::size_t limit) const {
         const std::size_t total = length();
         std::size_t max = total < other.size() ? total : other.size();
         max = limit < max ? limit : max;
-        std::vector<std::pair<const wchar_t*, std::size_t>> chunks;
-        auto each = [&](const wchar_t* data, std::size_t n) {
+        std::vector<std::pair<const char16_t*, std::size_t>> chunks;
+        auto each = [&](const char16_t* data, std::size_t n) {
             chunks.emplace_back(data, n);
             return true;
         };
         visitRange(root_.get(), total - max, total, each);
         std::size_t matched = 0;
         for (std::size_t c = chunks.size(); c-- > 0;) {
-            const wchar_t* data = chunks[c].first;
+            const char16_t* data = chunks[c].first;
             const std::size_t n = chunks[c].second;
             std::size_t i = 0;
             while (i < n && data[n - 1 - i] == other[other.size() - 1 - matched - i]) {
@@ -314,13 +314,13 @@ namespace newui::text {
 
     namespace {
         struct Chunk {
-            const wchar_t* data;
+            const char16_t* data;
             std::size_t length;
         };
 
         std::vector<Chunk> chunksOf(const NodePtr& root, std::size_t from, std::size_t to) {
             std::vector<Chunk> chunks;
-            auto each = [&](const wchar_t* data, std::size_t n) {
+            auto each = [&](const char16_t* data, std::size_t n) {
                 chunks.push_back({ data, n });
                 return true;
             };
@@ -345,8 +345,8 @@ namespace newui::text {
             const std::size_t remainingA = a[i].length - usedA;
             const std::size_t remainingB = b[j].length - usedB;
             const std::size_t run = remainingA < remainingB ? remainingA : remainingB;
-            const wchar_t* pa = a[i].data + usedA;
-            const wchar_t* pb = b[j].data + usedB;
+            const char16_t* pa = a[i].data + usedA;
+            const char16_t* pb = b[j].data + usedB;
             if (pa != pb) {   // the very same characters need no comparing
                 std::size_t k = 0;
                 while (k < run && pa[k] == pb[k]) {
@@ -390,8 +390,8 @@ namespace newui::text {
             const std::size_t remainingA = a[i - 1].length - usedA;
             const std::size_t remainingB = b[j - 1].length - usedB;
             const std::size_t run = remainingA < remainingB ? remainingA : remainingB;
-            const wchar_t* endA = a[i - 1].data + remainingA;
-            const wchar_t* endB = b[j - 1].data + remainingB;
+            const char16_t* endA = a[i - 1].data + remainingA;
+            const char16_t* endB = b[j - 1].data + remainingB;
             if (endA != endB) {
                 std::size_t k = 0;
                 while (k < run && endA[-1 - static_cast<std::ptrdiff_t>(k)] == endB[-1 - static_cast<std::ptrdiff_t>(k)]) {
@@ -457,11 +457,11 @@ namespace newui::text {
             const Stats pieceAcc = combine(leftAcc, node->piece.stats);
             if (k <= pieceAcc.breaks()) {
                 std::size_t need = k - leftAcc.breaks();
-                wchar_t previous = leftAcc.length > 0 ? leftAcc.last : L'\0';
-                const wchar_t* p = node->piece.data();
+                char16_t previous = leftAcc.length > 0 ? leftAcc.last : u'\0';
+                const char16_t* p = node->piece.data();
                 for (std::size_t i = 0; i < node->piece.length; ++i) {
-                    const wchar_t c = p[i];
-                    if ((c == L'\r' || (c == L'\n' && previous != L'\r')) && --need == 0) {
+                    const char16_t c = p[i];
+                    if ((c == u'\r' || (c == u'\n' && previous != u'\r')) && --need == 0) {
                         return leftAcc.length + i;
                     }
                     previous = c;
@@ -486,14 +486,14 @@ namespace newui::text {
             return length();
         }
         const std::size_t start = findBreakStart(line);
-        return start + (at(start) == L'\r' && at(start + 1) == L'\n' ? 2 : 1);
+        return start + (at(start) == u'\r' && at(start + 1) == u'\n' ? 2 : 1);
     }
 
     std::size_t PieceTree::lineOfOffset(std::size_t offset) const {
         const std::size_t total = length();
         offset = offset < total ? offset : total;
         std::size_t line = statsBefore(offset).breaks();
-        if (offset > 0 && offset < total && at(offset - 1) == L'\r' && at(offset) == L'\n') {
+        if (offset > 0 && offset < total && at(offset - 1) == u'\r' && at(offset) == u'\n') {
             --line;   // inside a "\r\n": the '\r' counted, but the line doesn't start until after the '\n'
         }
         return line;
@@ -508,7 +508,7 @@ namespace newui::text {
             return npos;
         }
         if (terminatorLength != nullptr) {
-            *terminatorLength = at(start) == L'\r' && at(start + 1) == L'\n' ? 2 : 1;
+            *terminatorLength = at(start) == u'\r' && at(start + 1) == u'\n' ? 2 : 1;
         }
         return start;
     }
@@ -520,7 +520,7 @@ namespace newui::text {
         return statsBefore(to).breaks() - statsBefore(from).breaks();
     }
 
-    PieceTree::NodePtr PieceTree::appendText(NodePtr left, std::wstring_view text) {
+    PieceTree::NodePtr PieceTree::appendText(NodePtr left, std::u16string_view text) {
         std::size_t done = 0;
 
         // Typing continues the last piece when it ends exactly where its block's used part does.
@@ -562,7 +562,7 @@ namespace newui::text {
         return left;
     }
 
-    void PieceTree::replace(std::size_t start, std::size_t length, std::wstring_view text) {
+    void PieceTree::replace(std::size_t start, std::size_t length, std::u16string_view text) {
         const std::size_t total = this->length();
         start = start < total ? start : total;
         length = length < total - start ? length : total - start;
@@ -574,12 +574,12 @@ namespace newui::text {
         root_ = merge(appendText(std::move(head.first), text), rest.second);
     }
 
-    void PieceTree::insert(std::size_t offset, std::wstring_view text) {
+    void PieceTree::insert(std::size_t offset, std::u16string_view text) {
         replace(offset, 0, text);
     }
 
     void PieceTree::erase(std::size_t start, std::size_t length) {
-        replace(start, length, std::wstring_view());
+        replace(start, length, std::u16string_view());
     }
 
     void PieceTree::clear() {

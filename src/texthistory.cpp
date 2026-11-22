@@ -6,20 +6,20 @@
 namespace newui::text {
 
     namespace {
-        bool isLineBreak(wchar_t c) {
-            return c == L'\r' || c == L'\n';
+        bool isLineBreak(char16_t c) {
+            return c == u'\r' || c == u'\n';
         }
 
         // A typing run continues while the characters stay in one class.
-        int charClass(wchar_t c) {
-            if (c == L'_' || std::iswalnum(static_cast<wint_t>(c)) != 0) {
+        int charClass(char16_t c) {
+            if (c == u'_' || std::iswalnum(static_cast<wint_t>(c)) != 0) {
                 return 1;
             }
             return std::iswspace(static_cast<wint_t>(c)) != 0 ? 2 : 3;
         }
     }
 
-    void HistoryTextModel::setText(const std::wstring& text) {
+    void HistoryTextModel::setText(const std::u16string& text) {
         if (replaying_) {
             TextModel::setText(text);
             return;
@@ -45,7 +45,7 @@ namespace newui::text {
         }
     }
 
-    void HistoryTextModel::insert(size_t offset, const std::wstring& text) {
+    void HistoryTextModel::insert(size_t offset, const std::u16string& text) {
         if (replaying_) {
             TextModel::insert(offset, text);
             return;
@@ -65,10 +65,10 @@ namespace newui::text {
         const size_t start = range.start() < before.length() ? range.start() : before.length();
         const size_t end = range.end() < before.length() ? range.end() : before.length();
         TextModel::remove(range);
-        record(before, start, end > start ? end - start : 0, std::wstring());
+        record(before, start, end > start ? end - start : 0, std::u16string());
     }
 
-    void HistoryTextModel::replace(const TextRange& range, const std::wstring& replacement) {
+    void HistoryTextModel::replace(const TextRange& range, const std::u16string& replacement) {
         if (replaying_) {
             TextModel::replace(range, replacement);
             return;
@@ -80,7 +80,7 @@ namespace newui::text {
         record(before, start, end > start ? end - start : 0, replacement);
     }
 
-    void HistoryTextModel::record(const PieceTree& before, size_t start, size_t removed, const std::wstring& inserted) {
+    void HistoryTextModel::record(const PieceTree& before, size_t start, size_t removed, const std::u16string& inserted) {
         PieceTree after = snapshot();
         if (after.sameAs(before)) {
             return;   // vetoed, or nothing to do
@@ -105,7 +105,7 @@ namespace newui::text {
         }
         Item item;
         item.steps.push_back({ before, std::move(after), start, removed, inserted.size() });
-        item.lastTyped = removed == 0 && inserted.size() == 1 ? inserted[0] : L'\0';
+        item.lastTyped = removed == 0 && inserted.size() == 1 ? inserted[0] : u'\0';
         push(std::move(item));
         // What can be continued: one typed character (not a break), or one removed.
         mergeable_ = (removed == 0 && inserted.size() == 1 && !isLineBreak(inserted[0]))
@@ -113,7 +113,7 @@ namespace newui::text {
     }
 
     bool HistoryTextModel::tryMerge(const PieceTree& /*before*/, const PieceTree& after, size_t start, size_t removed,
-            const std::wstring& inserted) {
+            const std::u16string& inserted) {
         if (undo_.empty() || undo_.back().steps.size() != 1) {
             return false;
         }
@@ -123,7 +123,7 @@ namespace newui::text {
         if (removed == 0 && inserted.size() == 1 && !isLineBreak(inserted[0])) {
             // Typing on the end of a typed run of the same kind.
             if (top.removed == 0 && top.inserted > 0 && start == top.start + top.inserted
-                    && (item.lastTyped == L'\0' || charClass(item.lastTyped) == charClass(inserted[0]))) {
+                    && (item.lastTyped == u'\0' || charClass(item.lastTyped) == charClass(inserted[0]))) {
                 ++top.inserted;
                 top.after = after;
                 item.lastTyped = inserted[0];
@@ -135,7 +135,7 @@ namespace newui::text {
             // Backspace over the last character just typed.
             if (top.removed == 0 && top.inserted > 0 && start == top.start + top.inserted - 1) {
                 --top.inserted;
-                item.lastTyped = L'\0';
+                item.lastTyped = u'\0';
                 if (top.inserted == 0) {
                     undo_.pop_back();   // typed and taken back: nothing left to undo
                     mergeable_ = false;

@@ -47,7 +47,7 @@ struct IDWriteTextLayout;
 namespace newui::text {
 
     // A single position within a TextStorage's content, expressed as a
-    // plain character offset - TextStorage's own backing is a std::wstring
+    // plain character offset - TextStorage's own backing is a std::u16string
     // today, addressed by UTF-16 code-unit offset (see its own class
     // comment on how a future, more sophisticated backing stays valid
     // without this type changing). Deliberately not an opaque handle the
@@ -371,7 +371,7 @@ namespace newui::text {
     class TextStorage {
     public:
         TextStorage() = default;
-        explicit TextStorage(const std::wstring& text) : tree_(text) {}
+        explicit TextStorage(const std::u16string& text) : tree_(text) {}
 
         size_t length() const { return tree_.length(); }
         bool empty() const { return tree_.empty(); }
@@ -379,23 +379,23 @@ namespace newui::text {
         // The whole content as one string - a convenience: it's built on demand and kept until
         // the next edit (O(n)), and the reference is good only until then. Prefer the range reads
         // below, or snapshot(), for anything that runs per keystroke or per frame.
-        const std::wstring& text() const;
-        void setText(const std::wstring& text);
+        const std::u16string& text() const;
+        void setText(const std::u16string& text);
 
         // The content as it is now, unaffected by later edits and safe to read on another thread
         // (O(1)).
         PieceTree snapshot() const { return tree_; }
 
-        // The character at offset, or L'\0' if offset is out of range -
+        // The character at offset, or u'\0' if offset is out of range -
         // never throws (a caret one past the last character, or a stale
         // offset after a concurrent edit elsewhere, are both ordinary
         // situations for a caller to hit, not exceptional ones).
-        wchar_t at(size_t offset) const;
+        char16_t at(size_t offset) const;
 
         // The characters range covers, clamped to this storage's current
         // length() - a range that runs past the end returns however much
         // of it actually exists rather than throwing.
-        std::wstring substring(const TextRange& range) const;
+        std::u16string substring(const TextRange& range) const;
 
         // Range-based reads: everything a reader needs without assuming the
         // content is one contiguous string (text() above is the exception,
@@ -403,25 +403,25 @@ namespace newui::text {
         // frame should use these. All clamp like substring() does.
 
         // Appends the characters range covers to out.
-        void appendTo(const TextRange& range, std::wstring& out) const;
+        void appendTo(const TextRange& range, std::u16string& out) const;
 
         // The offset of the first ch at or after from, or npos.
         static constexpr size_t npos = static_cast<size_t>(-1);
-        size_t find(wchar_t ch, size_t from = 0) const;
+        size_t find(char16_t ch, size_t from = 0) const;
 
         // How many ch fall inside range.
-        size_t count(wchar_t ch, const TextRange& range) const;
+        size_t count(char16_t ch, const TextRange& range) const;
 
         // Calls visit with each contiguous stretch of range, in order.
-        void forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const;
+        void forEachChunk(const TextRange& range, const std::function<void(const char16_t*, size_t)>& visit) const;
 
         // Whole-content comparisons against a plain string, without copying
         // this one: equality, the length of the shared start, and of the
         // shared end (at most limit characters - callers pass what's left
         // after the shared start so the two can't overlap).
-        bool equals(const std::wstring& other) const;
-        size_t commonPrefixLength(const std::wstring& other) const;
-        size_t commonSuffixLength(const std::wstring& other, size_t limit) const;
+        bool equals(const std::u16string& other) const;
+        size_t commonPrefixLength(const std::u16string& other) const;
+        size_t commonSuffixLength(const std::u16string& other, size_t limit) const;
 
         // Line breaks are "\n", "\r\n" and a lone '\r' - the one rule the
         // layout engine, the folding gutter and the lexer all share.
@@ -443,20 +443,20 @@ namespace newui::text {
 
         // Inserts text at offset (clamped to [0, length()]) - equivalent
         // to replace(TextRange(offset, 0), text).
-        void insert(size_t offset, const std::wstring& text);
+        void insert(size_t offset, const std::u16string& text);
 
         // Removes range's own characters (clamped to this storage's
-        // current length()) - equivalent to replace(range, L"").
+        // current length()) - equivalent to replace(range, u"").
         void remove(const TextRange& range);
 
         // Replaces range's own characters (clamped to this storage's
         // current length()) with replacement in one step - insert()/
         // remove() above are both expressed in terms of this.
-        void replace(const TextRange& range, const std::wstring& replacement);
+        void replace(const TextRange& range, const std::u16string& replacement);
 
     private:
         PieceTree tree_;
-        mutable std::wstring flat_;   // text()'s copy
+        mutable std::u16string flat_;   // text()'s copy
         mutable bool flatValid_ = false;
     };
 
@@ -511,8 +511,8 @@ namespace newui::text {
         // clear() - fires only the RangeChanged pair. A listener that
         // wants to know about every content change regardless of size
         // has to subscribe to both.
-        typedef Delegate<TextModel, size_t /*offset*/, wchar_t, CharChangeKind, bool& /*canChange*/> BeforeCharDelegate;
-        typedef Delegate<TextModel, size_t /*offset*/, wchar_t, CharChangeKind> AfterCharDelegate;
+        typedef Delegate<TextModel, size_t /*offset*/, char16_t, CharChangeKind, bool& /*canChange*/> BeforeCharDelegate;
+        typedef Delegate<TextModel, size_t /*offset*/, char16_t, CharChangeKind> AfterCharDelegate;
 
         // range/replacement describe this specific edit (the span being
         // replaced and what it's being replaced with) in both Before and
@@ -521,8 +521,8 @@ namespace newui::text {
         // has now been applied. A caller wanting the range the
         // replacement now actually occupies can compute
         // TextRange(range.start(), replacement.size()) from either.
-        typedef Delegate<TextModel, const TextRange&, const std::wstring& /*replacement*/, bool& /*canChange*/> BeforeRangeChangedDelegate;
-        typedef Delegate<TextModel, const TextRange&, const std::wstring& /*replacement*/> AfterRangeChangedDelegate;
+        typedef Delegate<TextModel, const TextRange&, const std::u16string& /*replacement*/, bool& /*canChange*/> BeforeRangeChangedDelegate;
+        typedef Delegate<TextModel, const TextRange&, const std::u16string& /*replacement*/> AfterRangeChangedDelegate;
 
         BeforeCharDelegate onBeforeChar;
         AfterCharDelegate onAfterChar;
@@ -530,14 +530,14 @@ namespace newui::text {
         AfterRangeChangedDelegate onAfterRangeChanged;
 
         TextModel() = default;
-        explicit TextModel(const std::wstring& text) : storage_(text) {}
+        explicit TextModel(const std::u16string& text) : storage_(text) {}
 
         const TextStorage& storage() const { return storage_; }
 
         size_t length() const { return storage_.length(); }
         bool empty() const override { return storage_.empty(); }
 
-        const std::wstring& text() const { return storage_.text(); }
+        const std::u16string& text() const { return storage_.text(); }
 
         // The content as it is now, unaffected by later edits and safe to read on another thread
         // (O(1)) - see TextStorage::snapshot().
@@ -548,11 +548,11 @@ namespace newui::text {
 
         // A no-op (storage() left exactly as it was) if onBeforeRangeChanged
         // vetoes.
-        virtual void setText(const std::wstring& text);
+        virtual void setText(const std::u16string& text);
 
         // A no-op if onBeforeChar (text.size() == 1) or
         // onBeforeRangeChanged (every other size, including 0) vetoes.
-        virtual void insert(size_t offset, const std::wstring& text);
+        virtual void insert(size_t offset, const std::u16string& text);
 
         // A no-op if onBeforeChar (range clamps to length 1) or
         // onBeforeRangeChanged (every other length) vetoes.
@@ -562,7 +562,7 @@ namespace newui::text {
         // regardless of range's or replacement's length - see this
         // class's own doc comment on why a 1-for-1 replace() isn't
         // treated as a Char event. A no-op if vetoed.
-        virtual void replace(const TextRange& range, const std::wstring& replacement);
+        virtual void replace(const TextRange& range, const std::u16string& replacement);
 
         // Undo/redo: none here (always false); HistoryTextModel has them. On success
         // *affected (if given) is where the text that was put back now sits.
@@ -583,8 +583,8 @@ namespace newui::text {
 
         // Model: value()/setValue() bridge the generic std::any API to
         // this class's own typed text() above - value() returns text()
-        // boxed as std::any(std::wstring); setValue() calls setText() if
-        // newValue actually holds a std::wstring (a no-op otherwise,
+        // boxed as std::any(std::u16string); setValue() calls setText() if
+        // newValue actually holds a std::u16string (a no-op otherwise,
         // rather than throwing std::bad_any_cast - matching TextStorage's
         // own "clamp/ignore, don't throw" convention for out-of-range
         // input). Neither calls the Model base version of itself - unlike
@@ -606,11 +606,11 @@ namespace newui::text {
     private:
         // Fires onBeforeChar and returns whether the caller should
         // proceed (canChange's final value).
-        bool fireBeforeChar(size_t offset, wchar_t ch, CharChangeKind kind);
+        bool fireBeforeChar(size_t offset, char16_t ch, CharChangeKind kind);
 
         // Fires onBeforeRangeChanged and returns whether the caller
         // should proceed (canChange's final value).
-        bool fireBeforeRangeChanged(const TextRange& range, const std::wstring& replacement);
+        bool fireBeforeRangeChanged(const TextRange& range, const std::u16string& replacement);
 
         // Every mutator above ends with this once its own After event
         // has already fired - fires onChanged() (so an owning Controller/
@@ -795,7 +795,7 @@ namespace newui::text {
     struct TextFold {
         std::size_t start = 0;
         std::size_t length = 0;
-        std::wstring placeholder = L"...";
+        std::u16string placeholder = u"...";
         bool collapsed = false;
 
         std::size_t end() const { return start + length; }
@@ -860,7 +860,7 @@ namespace newui::text {
         // called with matching values for one owning control (see
         // TextField::paint()/TextControl::paint(), controls.cpp).
         // colorRuns (optional) recolor ranges of text over textColor.
-        void render(BLContext& ctx, int width, int height, const std::wstring& text,
+        void render(BLContext& ctx, int width, int height, const std::u16string& text,
             const Font& font, const Color& textColor, float scrollOffsetY = 0.0f, bool wordWrap = true,
             const std::vector<TextColorRun>& colorRuns = {});
 

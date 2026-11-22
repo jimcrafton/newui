@@ -50,8 +50,8 @@ namespace newui {
         void modelAttached(text::TextModel& model) override;
 
     private:
-        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind);
-        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement);
+        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, char16_t ch, text::CharChangeKind kind);
+        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::u16string& replacement);
         // Moves folds_ through an edit replacing removed characters at start with inserted ones.
         void adjustFolds(std::size_t start, std::size_t removed, std::size_t inserted);
         // The far edge of a collapsed fold starting (forward) or ending (back) at offset, or

@@ -188,7 +188,7 @@ After Step 4, Phase 1 of the main plan (NSWindow, NSView, present, RunLoop) star
 | 1.7 Type names | done in working tree: new `readableTypeName()` in `utils.h` (`__cxa_demangle` on Clang/GCC), used by `demangleTypeName`, `extractNamespace`, `reflection.h` `qualifiedTypeName` and `automation.cpp` `typeName`; test `Reflection.TypeNameHelpers`; Windows build+test pending | | |
 | 1.8 Integer audit | done in working tree. Audit found a real problem: `Property::readValue`/`writeValue` matched `uint64_t`/`unsigned long long` and then `any_cast<uint64_t>`, so `size_t` (`unsigned long` on Apple) and `long` were skipped or would throw; now matched by exact type in `reflection.cpp`; test `ReflectionIO.EveryIntegerTypeRoundTripsThroughObjectWriterAndReader`; Windows build+test pending | | |
 | 1.9 clang-cl (optional) | not started | | |
-| 2.1 UTF-16 helpers | done in working tree: `utf8ToUtf16`/`utf16ToUtf8` in `utils.h/.cpp`, tests `Utf16.*` in `test_utils.cpp`; Windows build+test pending. 2.2-2.5 not started | | |
+| 2.1 UTF-16 helpers | done (verified on Windows): `utf8ToUtf16`/`utf16ToUtf8` in `utils.h/.cpp`, tests `Utf16.*` in `test_utils.cpp`; 2.2 text core -> `std::u16string` (`piecetree`, `texthistory`, `text`, plus its consumers `controls`, `textfolding`, `automation`, `binding`, `reflection`, demos/examples and their tests), done in working tree, Windows build+test pending (`PieceTree` tests pass natively on Apple Clang). 2.3-2.5 not started | | |
 | 3 Public headers | not started | | |
 | 4 First Mac build | not started | | |
 

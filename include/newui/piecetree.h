@@ -20,8 +20,8 @@ namespace newui::text {
             std::size_t cr = 0;
             std::size_t lf = 0;
             std::size_t pairs = 0;     // "\r\n" pairs with both characters inside
-            wchar_t first = 0;         // valid when length > 0
-            wchar_t last = 0;
+            char16_t first = 0;         // valid when length > 0
+            char16_t last = 0;
             std::size_t breaks() const { return cr + lf - pairs; }
         };
 
@@ -29,8 +29,8 @@ namespace newui::text {
         // piece covers, so the characters a piece refers to never change.
         //@reflect ignore=true
         struct Block {
-            explicit Block(std::size_t capacity_) : data(new wchar_t[capacity_]), capacity(capacity_) {}
-            std::unique_ptr<wchar_t[]> data;
+            explicit Block(std::size_t capacity_) : data(new char16_t[capacity_]), capacity(capacity_) {}
+            std::unique_ptr<char16_t[]> data;
             std::size_t capacity = 0;
             std::size_t used = 0;
         };
@@ -42,7 +42,7 @@ namespace newui::text {
             std::size_t start = 0;
             std::size_t length = 0;
             Stats stats;
-            const wchar_t* data() const { return block->data.get() + start; }
+            const char16_t* data() const { return block->data.get() + start; }
         };
 
         // Treap node (a random priority keeps it balanced); the subtree's totals are in stats.
@@ -70,7 +70,7 @@ namespace newui::text {
     // time may edit a tree and the copies made from it (they share the block that new text is
     // appended to).
     //
-    // Offsets and lengths are in wchar_t units. Line breaks are "\n", "\r\n" and a lone '\r'; a
+    // Offsets and lengths are in char16_t units. Line breaks are "\n", "\r\n" and a lone '\r'; a
     // line ends at a break, so there is always at least one line, and an empty one after a final
     // break. Everything clamps out-of-range arguments rather than throwing.
     //@reflect ignore=true
@@ -79,33 +79,33 @@ namespace newui::text {
         static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
         PieceTree() = default;
-        explicit PieceTree(std::wstring_view text);
+        explicit PieceTree(std::u16string_view text);
 
         std::size_t length() const;
         bool empty() const { return length() == 0; }
         // How many pieces the text is in now (diagnostics and tests).
         std::size_t pieceCount() const;
 
-        // The character at offset, or L'\0' past the end.
-        wchar_t at(std::size_t offset) const;
+        // The character at offset, or u'\0' past the end.
+        char16_t at(std::size_t offset) const;
 
         // The characters [start, start + length), clamped.
-        void appendTo(std::size_t start, std::size_t length, std::wstring& out) const;
-        std::wstring substring(std::size_t start, std::size_t length) const;
-        std::wstring str() const;
+        void appendTo(std::size_t start, std::size_t length, std::u16string& out) const;
+        std::u16string substring(std::size_t start, std::size_t length) const;
+        std::u16string str() const;
 
         // Calls visit with each contiguous stretch of [start, start + length), in order.
-        void forEachChunk(std::size_t start, std::size_t length, const std::function<void(const wchar_t*, std::size_t)>& visit) const;
+        void forEachChunk(std::size_t start, std::size_t length, const std::function<void(const char16_t*, std::size_t)>& visit) const;
 
         // The offset of the first ch at or after from, or npos.
-        std::size_t find(wchar_t ch, std::size_t from = 0) const;
-        std::size_t count(wchar_t ch, std::size_t start, std::size_t length) const;
+        std::size_t find(char16_t ch, std::size_t from = 0) const;
+        std::size_t count(char16_t ch, std::size_t start, std::size_t length) const;
 
         // Against a plain string, without building this one: equality, the length of the shared
         // start, and of the shared end (at most limit characters).
-        bool equals(const std::wstring& other) const;
-        std::size_t commonPrefixLength(const std::wstring& other) const;
-        std::size_t commonSuffixLength(const std::wstring& other, std::size_t limit) const;
+        bool equals(const std::u16string& other) const;
+        std::size_t commonPrefixLength(const std::u16string& other) const;
+        std::size_t commonSuffixLength(const std::u16string& other, std::size_t limit) const;
 
         // The same, against another tree - stretches both share (an edit copies only what it
         // touches) are skipped without comparing. sameAs() is the O(1) "same tree" test, which
@@ -127,9 +127,9 @@ namespace newui::text {
         // How many breaks start in [start, start + length).
         std::size_t countLineBreaks(std::size_t start, std::size_t length) const;
 
-        void insert(std::size_t offset, std::wstring_view text);
+        void insert(std::size_t offset, std::u16string_view text);
         void erase(std::size_t start, std::size_t length);
-        void replace(std::size_t start, std::size_t length, std::wstring_view text);
+        void replace(std::size_t start, std::size_t length, std::u16string_view text);
         void clear();
 
         // Checks the tree's own invariants (totals, balance order, no empty pieces) - for tests.
@@ -138,7 +138,7 @@ namespace newui::text {
     private:
         using NodePtr = std::shared_ptr<const piecetree_detail::Node>;
 
-        NodePtr appendText(NodePtr left, std::wstring_view text);
+        NodePtr appendText(NodePtr left, std::u16string_view text);
         piecetree_detail::Stats statsBefore(std::size_t offset) const;
         std::size_t findBreakStart(std::size_t k) const;
 

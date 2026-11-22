@@ -31,12 +31,12 @@ namespace newui::text {
     class HistoryTextModel : public TextModel {
     public:
         HistoryTextModel() = default;
-        explicit HistoryTextModel(const std::wstring& text) : TextModel(text) {}
+        explicit HistoryTextModel(const std::u16string& text) : TextModel(text) {}
 
-        void setText(const std::wstring& text) override;
-        void insert(size_t offset, const std::wstring& text) override;
+        void setText(const std::u16string& text) override;
+        void insert(size_t offset, const std::u16string& text) override;
         void remove(const TextRange& range) override;
-        void replace(const TextRange& range, const std::wstring& replacement) override;
+        void replace(const TextRange& range, const std::u16string& replacement) override;
         void clear() override;
 
         bool canUndo() const override { return !undo_.empty() && groupDepth_ == 0; }
@@ -73,11 +73,11 @@ namespace newui::text {
         };
         struct Item {
             std::vector<Step> steps;
-            wchar_t lastTyped = 0;   // for continuing a typing run
+            char16_t lastTyped = 0;   // for continuing a typing run
         };
 
-        void record(const PieceTree& before, std::size_t start, std::size_t removed, const std::wstring& inserted);
-        bool tryMerge(const PieceTree& before, const PieceTree& after, std::size_t start, std::size_t removed, const std::wstring& inserted);
+        void record(const PieceTree& before, std::size_t start, std::size_t removed, const std::u16string& inserted);
+        bool tryMerge(const PieceTree& before, const PieceTree& after, std::size_t start, std::size_t removed, const std::u16string& inserted);
         void push(Item item);
         bool apply(const Step& step, bool undoing);
 

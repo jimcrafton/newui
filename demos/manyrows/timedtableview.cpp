@@ -113,7 +113,7 @@ namespace manyrows {
         }
 
         editing_ = true;
-        editor_->setText(utf8ToWide(text));
+        editor_->setText(utf8ToUtf16(text));
         placeEditor();
         editor_->setVisible(true);
         editor_->caret().setPosition(text::TextPosition(editor_->text().size()));
@@ -138,7 +138,7 @@ namespace manyrows {
         if (!editing_) {
             return true;
         }
-        std::string text = wideToUtf8(editor_->text());
+        std::string text = utf16ToUtf8(editor_->text());
         if (commitHandler_ && !commitHandler_(editRow_, editColumn_, text)) {
             return false;
         }
@@ -186,7 +186,7 @@ namespace manyrows {
         if (editing_ || !hasActiveCell() || (keyMask & (kmCtrl | kmAlt)) != 0 || keyCharVal < 32 || keyCharVal == 127) {
             return SyncReturn::Ignored;
         }
-        std::string typed = wideToUtf8(std::wstring(1, wchar_t(keyCharVal)));
+        std::string typed = utf16ToUtf8(std::u16string(1, char16_t(keyCharVal)));
         beginEdit(&typed);
         return SyncReturn::Handled;
     }

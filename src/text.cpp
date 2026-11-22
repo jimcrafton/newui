@@ -259,12 +259,12 @@ namespace newui::text {
         ctx.restore();
     }
 
-    void TextStorage::setText(const std::wstring& text) {
+    void TextStorage::setText(const std::u16string& text) {
         tree_ = PieceTree(text);
         flatValid_ = false;
     }
 
-    const std::wstring& TextStorage::text() const {
+    const std::u16string& TextStorage::text() const {
         if (!flatValid_) {
             flat_ = tree_.str();
             flatValid_ = true;
@@ -272,40 +272,40 @@ namespace newui::text {
         return flat_;
     }
 
-    wchar_t TextStorage::at(size_t offset) const {
+    char16_t TextStorage::at(size_t offset) const {
         return tree_.at(offset);
     }
 
-    std::wstring TextStorage::substring(const TextRange& range) const {
+    std::u16string TextStorage::substring(const TextRange& range) const {
         return tree_.substring(range.start(), range.length());
     }
 
-    void TextStorage::appendTo(const TextRange& range, std::wstring& out) const {
+    void TextStorage::appendTo(const TextRange& range, std::u16string& out) const {
         tree_.appendTo(range.start(), range.length(), out);
     }
 
-    size_t TextStorage::find(wchar_t ch, size_t from) const {
+    size_t TextStorage::find(char16_t ch, size_t from) const {
         const size_t found = tree_.find(ch, from);
         return found == PieceTree::npos ? npos : found;
     }
 
-    size_t TextStorage::count(wchar_t ch, const TextRange& range) const {
+    size_t TextStorage::count(char16_t ch, const TextRange& range) const {
         return tree_.count(ch, range.start(), range.length());
     }
 
-    void TextStorage::forEachChunk(const TextRange& range, const std::function<void(const wchar_t*, size_t)>& visit) const {
+    void TextStorage::forEachChunk(const TextRange& range, const std::function<void(const char16_t*, size_t)>& visit) const {
         tree_.forEachChunk(range.start(), range.length(), visit);
     }
 
-    bool TextStorage::equals(const std::wstring& other) const {
+    bool TextStorage::equals(const std::u16string& other) const {
         return tree_.equals(other);
     }
 
-    size_t TextStorage::commonPrefixLength(const std::wstring& other) const {
+    size_t TextStorage::commonPrefixLength(const std::u16string& other) const {
         return tree_.commonPrefixLength(other);
     }
 
-    size_t TextStorage::commonSuffixLength(const std::wstring& other, size_t limit) const {
+    size_t TextStorage::commonSuffixLength(const std::u16string& other, size_t limit) const {
         return tree_.commonSuffixLength(other, limit);
     }
 
@@ -330,32 +330,32 @@ namespace newui::text {
         return tree_.lineOfOffset(offset);
     }
 
-    void TextStorage::insert(size_t offset, const std::wstring& text) {
+    void TextStorage::insert(size_t offset, const std::u16string& text) {
         replace(TextRange(offset, 0), text);
     }
 
     void TextStorage::remove(const TextRange& range) {
-        replace(range, std::wstring());
+        replace(range, std::u16string());
     }
 
-    void TextStorage::replace(const TextRange& range, const std::wstring& replacement) {
+    void TextStorage::replace(const TextRange& range, const std::u16string& replacement) {
         tree_.replace(range.start(), range.length(), replacement);
         flatValid_ = false;
     }
 
-    bool TextModel::fireBeforeChar(size_t offset, wchar_t ch, CharChangeKind kind) {
+    bool TextModel::fireBeforeChar(size_t offset, char16_t ch, CharChangeKind kind) {
         bool canChange = true;
         onBeforeChar(*this, offset, ch, kind, canChange);
         return canChange;
     }
 
-    bool TextModel::fireBeforeRangeChanged(const TextRange& range, const std::wstring& replacement) {
+    bool TextModel::fireBeforeRangeChanged(const TextRange& range, const std::u16string& replacement) {
         bool canChange = true;
         onBeforeRangeChanged(*this, range, replacement, canChange);
         return canChange;
     }
 
-    void TextModel::setText(const std::wstring& text) {
+    void TextModel::setText(const std::u16string& text) {
         TextRange fullRange(0, storage_.length());
         if (!fireBeforeRangeChanged(fullRange, text)) {
             return;
@@ -365,7 +365,7 @@ namespace newui::text {
         notifyChanged();
     }
 
-    void TextModel::insert(size_t offset, const std::wstring& text) {
+    void TextModel::insert(size_t offset, const std::u16string& text) {
         size_t clampedOffset = offset < storage_.length() ? offset : storage_.length();
 
         if (text.size() == 1) {
@@ -394,7 +394,7 @@ namespace newui::text {
         size_t clampedLength = clampedEnd - clampedStart;
 
         if (clampedLength == 1) {
-            wchar_t removedChar = storage_.at(clampedStart);
+            char16_t removedChar = storage_.at(clampedStart);
             if (!fireBeforeChar(clampedStart, removedChar, CharChangeKind::Removed)) {
                 return;
             }
@@ -402,16 +402,16 @@ namespace newui::text {
             onAfterChar(*this, clampedStart, removedChar, CharChangeKind::Removed);
         } else {
             TextRange clampedRange(clampedStart, clampedLength);
-            if (!fireBeforeRangeChanged(clampedRange, std::wstring())) {
+            if (!fireBeforeRangeChanged(clampedRange, std::u16string())) {
                 return;
             }
             storage_.remove(range);
-            onAfterRangeChanged(*this, clampedRange, std::wstring());
+            onAfterRangeChanged(*this, clampedRange, std::u16string());
         }
         notifyChanged();
     }
 
-    void TextModel::replace(const TextRange& range, const std::wstring& replacement) {
+    void TextModel::replace(const TextRange& range, const std::u16string& replacement) {
         size_t clampedStart = range.start() < storage_.length() ? range.start() : storage_.length();
         size_t clampedEnd = range.end() < storage_.length() ? range.end() : storage_.length();
         if (clampedEnd < clampedStart) {
@@ -432,19 +432,19 @@ namespace newui::text {
     }
 
     void TextModel::setValue(const std::any& newValue, const std::any& key) {
-        if (const std::wstring* text = std::any_cast<std::wstring>(&newValue)) {
+        if (const std::u16string* text = std::any_cast<std::u16string>(&newValue)) {
             setText(*text);
         }
     }
 
     void TextModel::clear() {
         TextRange fullRange(0, storage_.length());
-        if (!fireBeforeRangeChanged(fullRange, std::wstring())) {
+        if (!fireBeforeRangeChanged(fullRange, std::u16string())) {
             return;
         }
-        storage_.setText(std::wstring());
+        storage_.setText(std::u16string());
         Model::clear();  // fires onCleared()
-        onAfterRangeChanged(*this, fullRange, std::wstring());
+        onAfterRangeChanged(*this, fullRange, std::u16string());
         notifyChanged();
     }
 
@@ -677,7 +677,7 @@ namespace newui::text {
         ctx.restore();
     }
 
-    void TextRenderer::render(BLContext& ctx, int width, int height, const std::wstring& text,
+    void TextRenderer::render(BLContext& ctx, int width, int height, const std::u16string& text,
             const Font& font, const Color& textColor, float scrollOffsetY, bool wordWrap,
             const std::vector<TextColorRun>& colorRuns) {
         if (width <= 0 || height <= 0) {
@@ -689,7 +689,7 @@ namespace newui::text {
         }
         IDWriteTextLayoutPtr textLayout;
         if (FAILED(DirectWriteResources::dwriteFactory().CreateTextLayout(
-                text.c_str(), static_cast<UINT32>(text.size()), format,
+                toWide(text), static_cast<UINT32>(text.size()), format,
                 static_cast<float>(width), static_cast<float>(height), &textLayout))) {
             return;
         }
@@ -933,7 +933,7 @@ namespace newui::text {
             float width = 0.0f;          // its widest row, trailing whitespace included
             float top = 0.0f;
             float height = 0.0f;
-            std::wstring text;           // what's laid out: the visible text with placeholders
+            std::u16string text;           // what's laid out: the visible text with placeholders
             std::vector<LayoutSegment> segments;
             std::vector<Placeholder> placeholders;
             std::vector<TextFontRun> runs;   // in layout positions
@@ -1150,9 +1150,9 @@ namespace newui::text {
                     storage.appendTo(TextRange(pos, end - pos), line.text);
                     line.length = end - line.start;
                     line.terminator = lineBreak == TextStorage::npos ? 0 : breakLength;
-                    line.terminatorIsCr = lineBreak != TextStorage::npos && storage.at(lineBreak) == L'\r';
+                    line.terminatorIsCr = lineBreak != TextStorage::npos && storage.at(lineBreak) == u'\r';
                     done = lineBreak == TextStorage::npos;
-                    pos = done ? std::wstring::npos : lineBreak + breakLength;
+                    pos = done ? std::u16string::npos : lineBreak + breakLength;
                     break;
                 }
 
@@ -1193,7 +1193,7 @@ namespace newui::text {
             const std::size_t suffix = snapshot.commonSuffixLength(lastText_, shorter - prefix);
             // An edit right after a '\r' can turn it into half of a "\r\n" - the line it ends is
             // touched too.
-            const std::size_t first = impl_->lineForOffset(prefix > 0 && storage.at(prefix - 1) == L'\r' ? prefix - 1 : prefix);
+            const std::size_t first = impl_->lineForOffset(prefix > 0 && storage.at(prefix - 1) == u'\r' ? prefix - 1 : prefix);
             // The first line after the edit whose preceding break is unchanged too.
             const std::size_t oldSuffixStart = oldSize - suffix;
             std::size_t keep = static_cast<std::size_t>(std::upper_bound(lines.begin(), lines.end(), oldSuffixStart,
@@ -1201,7 +1201,7 @@ namespace newui::text {
             keep = keep > first + 1 ? keep : first + 1;
             const std::size_t from = lines[first].start;
             const std::size_t oldStop = keep < lines.size() ? lines[keep].start : oldSize;
-            const std::size_t newStop = keep < lines.size() ? oldStop - oldSize + textSize : std::wstring::npos;
+            const std::size_t newStop = keep < lines.size() ? oldStop - oldSize + textSize : std::u16string::npos;
             const std::size_t newSuffixStart = keep < lines.size() ? newStop : textSize;
 
             const bool sameAround = runsWithin(lastFontRuns_, 0, from) == runsWithin(fontRuns, 0, from)
@@ -1233,7 +1233,7 @@ namespace newui::text {
 
         if (!edited) {
             std::vector<Impl::Line> fresh;
-            build(0, std::wstring::npos, fresh);
+            build(0, std::u16string::npos, fresh);
 
             // Keep the layouts of unchanged lines (same laid-out text and styling), matched from
             // the front and the back.
@@ -1281,7 +1281,7 @@ namespace newui::text {
             if (line.layout == nullptr) {
                 IDWriteTextLayoutPtr layout;
                 if (FAILED(DirectWriteResources::dwriteFactory().CreateTextLayout(
-                        line.text.c_str(), static_cast<UINT32>(line.text.size()), format, maxWidth, maxHeight, &layout))) {
+                        toWide(line.text), static_cast<UINT32>(line.text.size()), format, maxWidth, maxHeight, &layout))) {
                     lines.clear();
                     lastText_.clear();
                     return false;
@@ -1532,10 +1532,10 @@ namespace newui::text {
             for (const LayoutSegment& segment : line.segments) {   // placeholders aren't text
                 for (std::size_t k = 0; k < segment.length; ++k) {
                     const std::size_t at = segment.layoutStart + k;
-                    const wchar_t ch = line.text[at];
-                    if (ch == L' ') {
+                    const char16_t ch = line.text[at];
+                    if (ch == u' ') {
                         mark(line, at, WhitespaceKind::Space, false);
-                    } else if (ch == L'\t') {
+                    } else if (ch == u'\t') {
                         mark(line, at, WhitespaceKind::Tab, false);
                     }
                 }

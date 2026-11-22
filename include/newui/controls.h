@@ -1881,8 +1881,8 @@ namespace newui {
         // own doc comment.
         SyncReturn handleCaretVisibilityChanged(text::Caret& sender);
         SyncReturn handleCaretPositionChanged(text::Caret& sender);
-        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind);
-        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement);
+        SyncReturn handleModelAfterChar(text::TextModel& sender, size_t offset, char16_t ch, text::CharChangeKind kind);
+        SyncReturn handleModelAfterRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::u16string& replacement);
         // Moves colorRuns_, fontRuns_ and decorations_ through an edit replacing removed characters
         // at start with inserted ones: after it they shift, one it lands inside grows or shrinks,
         // one it swallows goes.
@@ -1896,8 +1896,8 @@ namespace newui {
         // maxLength() uniformly, not just the keyboard path. Matches this
         // toolkit's existing "veto in a Before handler" convention (see
         // TextModel::onBeforeChar/onBeforeRangeChanged's own doc comment).
-        SyncReturn handleModelBeforeChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind, bool& canChange);
-        SyncReturn handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement, bool& canChange);
+        SyncReturn handleModelBeforeChar(text::TextModel& sender, size_t offset, char16_t ch, text::CharChangeKind kind, bool& canChange);
+        SyncReturn handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::u16string& replacement, bool& canChange);
 
         Control& owner_;
         bool multiline_ = false;
@@ -2026,8 +2026,8 @@ namespace newui {
         // common case; reach model() directly for insert()/remove()/
         // replace(), or to subscribe to its onBeforeChar/onAfterChar/
         // onBeforeRangeChanged/onAfterRangeChanged/onChanged events.
-        const std::wstring& text() const { return controller_->model().text(); }
-        void setText(const std::wstring& text) { controller_->model().setText(text); }
+        const std::u16string& text() const { return controller_->model().text(); }
+        void setText(const std::u16string& text) { controller_->model().setText(text); }
         // Where the text sits in the field. Left and Top by default (the field has always been top-left); the placeholder stays where it was.
         TextAlignment textAlignment() const { return controller_->textAlignment(); }
         void setTextAlignment(TextAlignment value) { controller_->setTextAlignment(value); }
@@ -2189,8 +2189,8 @@ namespace newui {
             onContentSizeChanged(*this);
         }
 
-        const std::wstring& text() const { return controller_->model().text(); }
-        void setText(const std::wstring& text) { controller_->model().setText(text); }
+        const std::u16string& text() const { return controller_->model().text(); }
+        void setText(const std::u16string& text) { controller_->model().setText(text); }
         bool canUndo() const { return controller_->canUndo(); }
         bool canRedo() const { return controller_->canRedo(); }
         bool undo() { return controller_->undo(); }

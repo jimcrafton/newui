@@ -1,4 +1,5 @@
 #include "newui/text.h"
+#include "newui/utils.h"
 
 #include "newui/font.h"
 #include "newui/subview.h"
@@ -141,159 +142,159 @@ TEST(TextStorage, DefaultConstructedIsEmpty) {
     TextStorage storage;
     EXPECT_TRUE(storage.empty());
     EXPECT_EQ(storage.length(), 0u);
-    EXPECT_EQ(storage.text(), L"");
+    EXPECT_EQ(storage.text(), u"");
 }
 
 TEST(TextStorage, ConstructedFromStringHoldsItDirectly) {
-    TextStorage storage(L"hello");
+    TextStorage storage(u"hello");
     EXPECT_FALSE(storage.empty());
     EXPECT_EQ(storage.length(), 5u);
-    EXPECT_EQ(storage.text(), L"hello");
+    EXPECT_EQ(storage.text(), u"hello");
 }
 
 TEST(TextStorage, SetTextReplacesWholeContent) {
-    TextStorage storage(L"hello");
-    storage.setText(L"goodbye");
-    EXPECT_EQ(storage.text(), L"goodbye");
+    TextStorage storage(u"hello");
+    storage.setText(u"goodbye");
+    EXPECT_EQ(storage.text(), u"goodbye");
     EXPECT_EQ(storage.length(), 7u);
 }
 
 TEST(TextStorage, AtReturnsCharacterAtOffset) {
-    TextStorage storage(L"hello");
-    EXPECT_EQ(storage.at(0), L'h');
-    EXPECT_EQ(storage.at(4), L'o');
+    TextStorage storage(u"hello");
+    EXPECT_EQ(storage.at(0), u'h');
+    EXPECT_EQ(storage.at(4), u'o');
 }
 
 TEST(TextStorage, AtReturnsNulCharacterForOutOfRangeOffsetRatherThanThrowing) {
-    TextStorage storage(L"hello");
-    EXPECT_EQ(storage.at(5), L'\0');
-    EXPECT_EQ(storage.at(1000), L'\0');
+    TextStorage storage(u"hello");
+    EXPECT_EQ(storage.at(5), u'\0');
+    EXPECT_EQ(storage.at(1000), u'\0');
 }
 
 TEST(TextStorage, SubstringExtractsRequestedRange) {
-    TextStorage storage(L"hello world");
-    EXPECT_EQ(storage.substring(TextRange(6, 5)), L"world");
-    EXPECT_EQ(storage.substring(TextRange(0, 5)), L"hello");
+    TextStorage storage(u"hello world");
+    EXPECT_EQ(storage.substring(TextRange(6, 5)), u"world");
+    EXPECT_EQ(storage.substring(TextRange(0, 5)), u"hello");
 }
 
 TEST(TextStorage, SubstringClampsARangeThatRunsPastTheEnd) {
-    TextStorage storage(L"hello");
-    EXPECT_EQ(storage.substring(TextRange(3, 100)), L"lo");
+    TextStorage storage(u"hello");
+    EXPECT_EQ(storage.substring(TextRange(3, 100)), u"lo");
 }
 
 TEST(TextStorage, SubstringOfARangeEntirelyPastTheEndIsEmpty) {
-    TextStorage storage(L"hello");
-    EXPECT_EQ(storage.substring(TextRange(10, 5)), L"");
+    TextStorage storage(u"hello");
+    EXPECT_EQ(storage.substring(TextRange(10, 5)), u"");
 }
 
 TEST(TextStorage, InsertAtOffsetSplicesTextIn) {
-    TextStorage storage(L"hlo");
-    storage.insert(1, L"el");
-    EXPECT_EQ(storage.text(), L"hello");
+    TextStorage storage(u"hlo");
+    storage.insert(1, u"el");
+    EXPECT_EQ(storage.text(), u"hello");
 }
 
 TEST(TextStorage, InsertAtStartPrepends) {
-    TextStorage storage(L"world");
-    storage.insert(0, L"hello ");
-    EXPECT_EQ(storage.text(), L"hello world");
+    TextStorage storage(u"world");
+    storage.insert(0, u"hello ");
+    EXPECT_EQ(storage.text(), u"hello world");
 }
 
 TEST(TextStorage, InsertAtEndAppends) {
-    TextStorage storage(L"hello");
-    storage.insert(storage.length(), L" world");
-    EXPECT_EQ(storage.text(), L"hello world");
+    TextStorage storage(u"hello");
+    storage.insert(storage.length(), u" world");
+    EXPECT_EQ(storage.text(), u"hello world");
 }
 
 TEST(TextStorage, InsertAtOffsetPastEndClampsToEnd) {
-    TextStorage storage(L"hello");
-    storage.insert(1000, L"!");
-    EXPECT_EQ(storage.text(), L"hello!");
+    TextStorage storage(u"hello");
+    storage.insert(1000, u"!");
+    EXPECT_EQ(storage.text(), u"hello!");
 }
 
 TEST(TextStorage, RemoveDeletesTheGivenRange) {
-    TextStorage storage(L"hello world");
+    TextStorage storage(u"hello world");
     storage.remove(TextRange(5, 6));  // " world"
-    EXPECT_EQ(storage.text(), L"hello");
+    EXPECT_EQ(storage.text(), u"hello");
 }
 
 TEST(TextStorage, RemoveClampsARangeThatRunsPastTheEnd) {
-    TextStorage storage(L"hello");
+    TextStorage storage(u"hello");
     storage.remove(TextRange(3, 100));
-    EXPECT_EQ(storage.text(), L"hel");
+    EXPECT_EQ(storage.text(), u"hel");
 }
 
 TEST(TextStorage, RemoveOfARangeEntirelyPastTheEndIsANoOp) {
-    TextStorage storage(L"hello");
+    TextStorage storage(u"hello");
     storage.remove(TextRange(10, 5));
-    EXPECT_EQ(storage.text(), L"hello");
+    EXPECT_EQ(storage.text(), u"hello");
 }
 
 TEST(TextStorage, ReplaceSwapsTheGivenRangeForNewText) {
-    TextStorage storage(L"hello world");
-    storage.replace(TextRange(6, 5), L"there");
-    EXPECT_EQ(storage.text(), L"hello there");
+    TextStorage storage(u"hello world");
+    storage.replace(TextRange(6, 5), u"there");
+    EXPECT_EQ(storage.text(), u"hello there");
 }
 
 TEST(TextStorage, ReplaceWithLongerTextGrowsStorage) {
-    TextStorage storage(L"hi");
-    storage.replace(TextRange(0, 2), L"hello");
-    EXPECT_EQ(storage.text(), L"hello");
+    TextStorage storage(u"hi");
+    storage.replace(TextRange(0, 2), u"hello");
+    EXPECT_EQ(storage.text(), u"hello");
 }
 
 TEST(TextStorage, ReplaceWithEmptyRangeActsAsInsert) {
-    TextStorage storage(L"hed");
-    storage.replace(TextRange(1, 0), L"ell");
-    EXPECT_EQ(storage.text(), L"helled");
+    TextStorage storage(u"hed");
+    storage.replace(TextRange(1, 0), u"ell");
+    EXPECT_EQ(storage.text(), u"helled");
 }
 
 TEST(TextStorage, AppendToAddsTheClampedRangeToWhatIsThere) {
-    TextStorage storage(L"hello world");
-    std::wstring out = L">";
+    TextStorage storage(u"hello world");
+    std::u16string out = u">";
     storage.appendTo(TextRange(6, 5), out);
     storage.appendTo(TextRange(9, 100), out);   // clamped
     storage.appendTo(TextRange(50, 5), out);    // past the end: nothing
-    EXPECT_EQ(out, L">worldld");
+    EXPECT_EQ(out, u">worldld");
 }
 
 TEST(TextStorage, FindLocatesTheFirstMatchFromAnOffset) {
-    TextStorage storage(L"a\nb\nc");
-    EXPECT_EQ(storage.find(L'\n'), 1u);
-    EXPECT_EQ(storage.find(L'\n', 2), 3u);
-    EXPECT_EQ(storage.find(L'\n', 4), TextStorage::npos);
-    EXPECT_EQ(storage.find(L'z'), TextStorage::npos);
-    EXPECT_EQ(storage.find(L'a', 1000), TextStorage::npos);
+    TextStorage storage(u"a\nb\nc");
+    EXPECT_EQ(storage.find(u'\n'), 1u);
+    EXPECT_EQ(storage.find(u'\n', 2), 3u);
+    EXPECT_EQ(storage.find(u'\n', 4), TextStorage::npos);
+    EXPECT_EQ(storage.find(u'z'), TextStorage::npos);
+    EXPECT_EQ(storage.find(u'a', 1000), TextStorage::npos);
 }
 
 TEST(TextStorage, CountCountsWithinTheClampedRange) {
-    TextStorage storage(L"a\nb\nc\n");
-    EXPECT_EQ(storage.count(L'\n', TextRange(0, 6)), 3u);
-    EXPECT_EQ(storage.count(L'\n', TextRange(2, 2)), 1u);
-    EXPECT_EQ(storage.count(L'\n', TextRange(0, 100)), 3u);
-    EXPECT_EQ(storage.count(L'\n', TextRange(100, 5)), 0u);
+    TextStorage storage(u"a\nb\nc\n");
+    EXPECT_EQ(storage.count(u'\n', TextRange(0, 6)), 3u);
+    EXPECT_EQ(storage.count(u'\n', TextRange(2, 2)), 1u);
+    EXPECT_EQ(storage.count(u'\n', TextRange(0, 100)), 3u);
+    EXPECT_EQ(storage.count(u'\n', TextRange(100, 5)), 0u);
 }
 
 TEST(TextStorage, ForEachChunkVisitsTheWholeRangeInOrder) {
-    TextStorage storage(L"hello world");
-    std::wstring seen;
-    storage.forEachChunk(TextRange(3, 100), [&](const wchar_t* data, size_t length) { seen.append(data, length); });
-    EXPECT_EQ(seen, L"lo world");
+    TextStorage storage(u"hello world");
+    std::u16string seen;
+    storage.forEachChunk(TextRange(3, 100), [&](const char16_t* data, size_t length) { seen.append(data, length); });
+    EXPECT_EQ(seen, u"lo world");
 
     int calls = 0;
-    storage.forEachChunk(TextRange(50, 5), [&](const wchar_t*, size_t) { ++calls; });
+    storage.forEachChunk(TextRange(50, 5), [&](const char16_t*, size_t) { ++calls; });
     EXPECT_EQ(calls, 0);
 }
 
 TEST(TextStorage, EqualsAndCommonPrefixAndSuffixCompareWithoutCopying) {
-    TextStorage storage(L"hello world");
-    EXPECT_TRUE(storage.equals(L"hello world"));
-    EXPECT_FALSE(storage.equals(L"hello worle"));
-    EXPECT_EQ(storage.commonPrefixLength(L"hello there"), 6u);
-    EXPECT_EQ(storage.commonPrefixLength(L"hello"), 5u);
-    EXPECT_EQ(storage.commonPrefixLength(L"xyz"), 0u);
-    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 100), 10u);
-    EXPECT_EQ(storage.commonSuffixLength(L"jello world", 4), 4u);   // limited
-    EXPECT_EQ(storage.commonSuffixLength(L"xyz", 100), 0u);
-    EXPECT_EQ(storage.commonSuffixLength(L"world", 100), 5u);
+    TextStorage storage(u"hello world");
+    EXPECT_TRUE(storage.equals(u"hello world"));
+    EXPECT_FALSE(storage.equals(u"hello worle"));
+    EXPECT_EQ(storage.commonPrefixLength(u"hello there"), 6u);
+    EXPECT_EQ(storage.commonPrefixLength(u"hello"), 5u);
+    EXPECT_EQ(storage.commonPrefixLength(u"xyz"), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(u"jello world", 100), 10u);
+    EXPECT_EQ(storage.commonSuffixLength(u"jello world", 4), 4u);   // limited
+    EXPECT_EQ(storage.commonSuffixLength(u"xyz", 100), 0u);
+    EXPECT_EQ(storage.commonSuffixLength(u"world", 100), 5u);
 }
 
 TEST(TextStorage, EmptyStorageHasOneEmptyLine) {
@@ -305,7 +306,7 @@ TEST(TextStorage, EmptyStorageHasOneEmptyLine) {
 }
 
 TEST(TextStorage, LinesEndAtNewlineAndAFinalNewlineStartsAnEmptyLine) {
-    TextStorage storage(L"ab\ncd\n");
+    TextStorage storage(u"ab\ncd\n");
     EXPECT_EQ(storage.lineCount(), 3u);
     EXPECT_EQ(storage.lineStart(0), 0u);
     EXPECT_EQ(storage.lineStart(1), 3u);
@@ -319,7 +320,7 @@ TEST(TextStorage, LinesEndAtNewlineAndAFinalNewlineStartsAnEmptyLine) {
 }
 
 TEST(TextStorage, CrLfIsOneBreakAndALoneCrIsABreakToo) {
-    TextStorage storage(L"a\r\nb\rc\r\nd");
+    TextStorage storage(u"a\r\nb\rc\r\nd");
     EXPECT_EQ(storage.lineCount(), 4u);
     EXPECT_EQ(storage.lineStart(1), 3u);
     EXPECT_EQ(storage.lineStart(2), 5u);
@@ -330,14 +331,14 @@ TEST(TextStorage, CrLfIsOneBreakAndALoneCrIsABreakToo) {
 }
 
 TEST(TextStorage, ATrailingCrStartsAnEmptyLineAndCrCrIsTwoBreaks) {
-    EXPECT_EQ(TextStorage(L"a\r").lineCount(), 2u);
-    EXPECT_EQ(TextStorage(L"a\r\r").lineCount(), 3u);
-    EXPECT_EQ(TextStorage(L"a\r\n\r\n").lineCount(), 3u);
-    EXPECT_EQ(TextStorage(L"\n\r").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(u"a\r").lineCount(), 2u);
+    EXPECT_EQ(TextStorage(u"a\r\r").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(u"a\r\n\r\n").lineCount(), 3u);
+    EXPECT_EQ(TextStorage(u"\n\r").lineCount(), 3u);
 }
 
 TEST(TextStorage, FindLineBreakReportsTheBreakAndItsLength) {
-    TextStorage storage(L"ab\r\ncd\ref\ngh");
+    TextStorage storage(u"ab\r\ncd\ref\ngh");
     size_t length = 0;
     EXPECT_EQ(storage.findLineBreak(0, &length), 2u);
     EXPECT_EQ(length, 2u);   // "\r\n"
@@ -346,12 +347,12 @@ TEST(TextStorage, FindLineBreakReportsTheBreakAndItsLength) {
     EXPECT_EQ(storage.findLineBreak(7, &length), 9u);
     EXPECT_EQ(length, 1u);   // '\n'
     EXPECT_EQ(storage.findLineBreak(10), TextStorage::npos);
-    EXPECT_EQ(TextStorage(L"end\r").findLineBreak(0, &length), 3u);
+    EXPECT_EQ(TextStorage(u"end\r").findLineBreak(0, &length), 3u);
     EXPECT_EQ(length, 1u);   // a '\r' at the very end has nothing to pair with
 }
 
 TEST(TextStorage, CountLineBreaksCountsACrLfOnceAndOnlyBreaksStartingInRange) {
-    TextStorage storage(L"a\r\nb\rc\nd");
+    TextStorage storage(u"a\r\nb\rc\nd");
     EXPECT_EQ(storage.countLineBreaks(TextRange(0, 100)), 3u);
     EXPECT_EQ(storage.countLineBreaks(TextRange(0, 2)), 1u);    // "a\r": the break starts inside
     EXPECT_EQ(storage.countLineBreaks(TextRange(2, 1)), 0u);    // just the '\n' half of a "\r\n"
@@ -360,16 +361,16 @@ TEST(TextStorage, CountLineBreaksCountsACrLfOnceAndOnlyBreaksStartingInRange) {
 }
 
 TEST(TextStorage, TheLineIndexFollowsEdits) {
-    TextStorage storage(L"one\ntwo");
+    TextStorage storage(u"one\ntwo");
     EXPECT_EQ(storage.lineCount(), 2u);
-    storage.insert(3, L"\nand a half");
+    storage.insert(3, u"\nand a half");
     EXPECT_EQ(storage.lineCount(), 3u);
     EXPECT_EQ(storage.lineStart(2), 15u);
     storage.remove(TextRange(3, 11));
     EXPECT_EQ(storage.lineCount(), 2u);
-    storage.setText(L"x");
+    storage.setText(u"x");
     EXPECT_EQ(storage.lineCount(), 1u);
-    storage.replace(TextRange(0, 1), L"\n\n\n");
+    storage.replace(TextRange(0, 1), u"\n\n\n");
     EXPECT_EQ(storage.lineCount(), 4u);
 }
 
@@ -783,51 +784,51 @@ TEST(TextModel, DefaultConstructedIsEmpty) {
     TextModel model;
     EXPECT_TRUE(model.empty());
     EXPECT_EQ(model.length(), 0u);
-    EXPECT_EQ(model.text(), L"");
+    EXPECT_EQ(model.text(), u"");
 }
 
 TEST(TextModel, ConstructedFromStringHoldsItDirectly) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     EXPECT_FALSE(model.empty());
     EXPECT_EQ(model.length(), 5u);
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
 }
 
 TEST(TextModel, StorageReflectsCurrentContent) {
-    TextModel model(L"hello");
-    EXPECT_EQ(model.storage().text(), L"hello");
+    TextModel model(u"hello");
+    EXPECT_EQ(model.storage().text(), u"hello");
 }
 
 TEST(TextModel, SetTextReplacesContentAndFiresOnChanged) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     int onChangedCount = 0;
     model.onChanged.add([&](newui::Model&) {
         ++onChangedCount;
         return newui::SyncReturn::Handled;
         });
 
-    model.setText(L"goodbye");
+    model.setText(u"goodbye");
 
-    EXPECT_EQ(model.text(), L"goodbye");
+    EXPECT_EQ(model.text(), u"goodbye");
     EXPECT_EQ(onChangedCount, 1);
 }
 
 TEST(TextModel, InsertUpdatesTextAndFiresOnChanged) {
-    TextModel model(L"hlo");
+    TextModel model(u"hlo");
     int onChangedCount = 0;
     model.onChanged.add([&](newui::Model&) {
         ++onChangedCount;
         return newui::SyncReturn::Handled;
         });
 
-    model.insert(1, L"el");
+    model.insert(1, u"el");
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(onChangedCount, 1);
 }
 
 TEST(TextModel, RemoveUpdatesTextAndFiresOnChanged) {
-    TextModel model(L"hello world");
+    TextModel model(u"hello world");
     int onChangedCount = 0;
     model.onChanged.add([&](newui::Model&) {
         ++onChangedCount;
@@ -836,26 +837,26 @@ TEST(TextModel, RemoveUpdatesTextAndFiresOnChanged) {
 
     model.remove(TextRange(5, 6));
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(onChangedCount, 1);
 }
 
 TEST(TextModel, ReplaceUpdatesTextAndFiresOnChanged) {
-    TextModel model(L"hello world");
+    TextModel model(u"hello world");
     int onChangedCount = 0;
     model.onChanged.add([&](newui::Model&) {
         ++onChangedCount;
         return newui::SyncReturn::Handled;
         });
 
-    model.replace(TextRange(6, 5), L"there");
+    model.replace(TextRange(6, 5), u"there");
 
-    EXPECT_EQ(model.text(), L"hello there");
+    EXPECT_EQ(model.text(), u"hello there");
     EXPECT_EQ(onChangedCount, 1);
 }
 
 TEST(TextModel, ClearEmptiesContentAndFiresOnClearedAndOnChanged) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     int onClearedCount = 0;
     int onChangedCount = 0;
     model.onCleared.add([&](newui::Model&) {
@@ -875,40 +876,40 @@ TEST(TextModel, ClearEmptiesContentAndFiresOnClearedAndOnChanged) {
 }
 
 TEST(TextModel, ValueReturnsCurrentTextBoxedAsWstring) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     std::any result = model.value();
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(std::any_cast<std::wstring>(result), L"hello");
+    EXPECT_EQ(std::any_cast<std::u16string>(result), u"hello");
 }
 
 TEST(TextModel, SetValueWithWstringReplacesTextAndFiresOnChanged) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     int onChangedCount = 0;
     model.onChanged.add([&](newui::Model&) {
         ++onChangedCount;
         return newui::SyncReturn::Handled;
         });
 
-    model.setValue(std::any(std::wstring(L"goodbye")));
+    model.setValue(std::any(std::u16string(u"goodbye")));
 
-    EXPECT_EQ(model.text(), L"goodbye");
+    EXPECT_EQ(model.text(), u"goodbye");
     EXPECT_EQ(onChangedCount, 1);
 }
 
 TEST(TextModel, SetValueWithWrongTypeIsANoOp) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     model.setValue(std::any(std::string("goodbye")));  // not a wstring
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
 }
 
 TEST(TextModel, AddViewThenMutatingDoesNotCrashAndViewIsAutoRemovedOnDestruction) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     auto* view = new newui::SubView();
     model.addView(view);
     EXPECT_EQ(model.viewCount(), 1u);
 
     // Exercises updateAllViews() against a real registered View.
-    model.setText(L"goodbye");
+    model.setText(u"goodbye");
 
     // onDestroyed (what Model's auto-unregister subscribes to) fires from
     // View::destroy(), not from ~View() itself - a bare delete skips it,
@@ -920,8 +921,8 @@ TEST(TextModel, AddViewThenMutatingDoesNotCrashAndViewIsAutoRemovedOnDestruction
 
     // Mutating again after the view is gone must not crash or touch freed
     // memory.
-    model.setText(L"final");
-    EXPECT_EQ(model.text(), L"final");
+    model.setText(u"final");
+    EXPECT_EQ(model.text(), u"final");
 }
 
 TEST(TextSelection, BeforeAndAfterSelectionChangedFireOnSetRangeWithTheNewRange) {
@@ -1021,30 +1022,30 @@ struct TextModelEventCounters {
     int beforeRangeChanged = 0, afterRangeChanged = 0;
     int onChanged = 0;
     size_t lastCharOffset = 0;
-    wchar_t lastChar = 0;
+    char16_t lastChar = 0;
     CharChangeKind lastCharKind = CharChangeKind::Inserted;
     TextRange lastRange;
-    std::wstring lastReplacement;
+    std::u16string lastReplacement;
 
     explicit TextModelEventCounters(TextModel& model) {
-        model.onBeforeChar.add([this](TextModel&, size_t offset, wchar_t ch, CharChangeKind kind, bool&) {
+        model.onBeforeChar.add([this](TextModel&, size_t offset, char16_t ch, CharChangeKind kind, bool&) {
             ++beforeChar;
             lastCharOffset = offset;
             lastChar = ch;
             lastCharKind = kind;
             return newui::SyncReturn::Handled;
             });
-        model.onAfterChar.add([this](TextModel&, size_t, wchar_t, CharChangeKind) {
+        model.onAfterChar.add([this](TextModel&, size_t, char16_t, CharChangeKind) {
             ++afterChar;
             return newui::SyncReturn::Handled;
             });
-        model.onBeforeRangeChanged.add([this](TextModel&, const TextRange& range, const std::wstring& replacement, bool&) {
+        model.onBeforeRangeChanged.add([this](TextModel&, const TextRange& range, const std::u16string& replacement, bool&) {
             ++beforeRangeChanged;
             lastRange = range;
             lastReplacement = replacement;
             return newui::SyncReturn::Handled;
             });
-        model.onAfterRangeChanged.add([this](TextModel&, const TextRange&, const std::wstring&) {
+        model.onAfterRangeChanged.add([this](TextModel&, const TextRange&, const std::u16string&) {
             ++afterRangeChanged;
             return newui::SyncReturn::Handled;
             });
@@ -1058,100 +1059,100 @@ struct TextModelEventCounters {
 }  // namespace
 
 TEST(TextModel, SingleCharacterInsertFiresOnlyCharEvents) {
-    TextModel model(L"hllo");
+    TextModel model(u"hllo");
     TextModelEventCounters counters(model);
 
-    model.insert(1, L"e");
+    model.insert(1, u"e");
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(counters.beforeChar, 1);
     EXPECT_EQ(counters.afterChar, 1);
     EXPECT_EQ(counters.beforeRangeChanged, 0);
     EXPECT_EQ(counters.afterRangeChanged, 0);
     EXPECT_EQ(counters.onChanged, 1);
     EXPECT_EQ(counters.lastCharOffset, 1u);
-    EXPECT_EQ(counters.lastChar, L'e');
+    EXPECT_EQ(counters.lastChar, u'e');
     EXPECT_EQ(counters.lastCharKind, CharChangeKind::Inserted);
 }
 
 TEST(TextModel, MultiCharacterInsertFiresOnlyRangeChangedEvents) {
-    TextModel model(L"hlo");
+    TextModel model(u"hlo");
     TextModelEventCounters counters(model);
 
-    model.insert(1, L"el");
+    model.insert(1, u"el");
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(counters.beforeChar, 0);
     EXPECT_EQ(counters.afterChar, 0);
     EXPECT_EQ(counters.beforeRangeChanged, 1);
     EXPECT_EQ(counters.afterRangeChanged, 1);
     EXPECT_EQ(counters.lastRange, TextRange(1, 0));
-    EXPECT_EQ(counters.lastReplacement, L"el");
+    EXPECT_EQ(counters.lastReplacement, u"el");
 }
 
 TEST(TextModel, SingleCharacterRemoveFiresOnlyCharEventsWithTheRemovedCharacter) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     TextModelEventCounters counters(model);
 
     model.remove(TextRange(1, 1));  // removes 'e'
 
-    EXPECT_EQ(model.text(), L"hllo");
+    EXPECT_EQ(model.text(), u"hllo");
     EXPECT_EQ(counters.beforeChar, 1);
     EXPECT_EQ(counters.afterChar, 1);
     EXPECT_EQ(counters.beforeRangeChanged, 0);
     EXPECT_EQ(counters.afterRangeChanged, 0);
     EXPECT_EQ(counters.lastCharOffset, 1u);
-    EXPECT_EQ(counters.lastChar, L'e');
+    EXPECT_EQ(counters.lastChar, u'e');
     EXPECT_EQ(counters.lastCharKind, CharChangeKind::Removed);
 }
 
 TEST(TextModel, MultiCharacterRemoveFiresOnlyRangeChangedEvents) {
-    TextModel model(L"hello world");
+    TextModel model(u"hello world");
     TextModelEventCounters counters(model);
 
     model.remove(TextRange(5, 6));
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(counters.beforeChar, 0);
     EXPECT_EQ(counters.afterChar, 0);
     EXPECT_EQ(counters.beforeRangeChanged, 1);
     EXPECT_EQ(counters.afterRangeChanged, 1);
     EXPECT_EQ(counters.lastRange, TextRange(5, 6));
-    EXPECT_EQ(counters.lastReplacement, L"");
+    EXPECT_EQ(counters.lastReplacement, u"");
 }
 
 TEST(TextModel, ReplaceAlwaysFiresRangeChangedEvenAtSingleCharacterLength) {
-    TextModel model(L"hxllo");
+    TextModel model(u"hxllo");
     TextModelEventCounters counters(model);
 
     // A 1-for-1 replace isn't treated as a Char event - see TextModel's
     // own class comment on why replace() always goes through
     // RangeChanged regardless of length.
-    model.replace(TextRange(1, 1), L"e");
+    model.replace(TextRange(1, 1), u"e");
 
-    EXPECT_EQ(model.text(), L"hello");
+    EXPECT_EQ(model.text(), u"hello");
     EXPECT_EQ(counters.beforeChar, 0);
     EXPECT_EQ(counters.afterChar, 0);
     EXPECT_EQ(counters.beforeRangeChanged, 1);
     EXPECT_EQ(counters.afterRangeChanged, 1);
     EXPECT_EQ(counters.lastRange, TextRange(1, 1));
-    EXPECT_EQ(counters.lastReplacement, L"e");
+    EXPECT_EQ(counters.lastReplacement, u"e");
 }
 
 TEST(TextModel, SetTextFiresRangeChangedWithTheFullOldRangeAndNewText) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     TextModelEventCounters counters(model);
 
-    model.setText(L"goodbye");
+    model.setText(u"goodbye");
 
     EXPECT_EQ(counters.beforeChar, 0);
     EXPECT_EQ(counters.beforeRangeChanged, 1);
     EXPECT_EQ(counters.lastRange, TextRange(0, 5));  // "hello"'s own length
-    EXPECT_EQ(counters.lastReplacement, L"goodbye");
+    EXPECT_EQ(counters.lastReplacement, u"goodbye");
 }
 
 TEST(TextModel, ClearFiresRangeChangedWithTheFullOldRange) {
-    TextModel model(L"hello");
+    TextModel model(u"hello");
     TextModelEventCounters counters(model);
     int onClearedCount = 0;
     model.onCleared.add([&](newui::Model&) {
@@ -1164,43 +1165,43 @@ TEST(TextModel, ClearFiresRangeChangedWithTheFullOldRange) {
     EXPECT_EQ(counters.beforeRangeChanged, 1);
     EXPECT_EQ(counters.afterRangeChanged, 1);
     EXPECT_EQ(counters.lastRange, TextRange(0, 5));
-    EXPECT_EQ(counters.lastReplacement, L"");
+    EXPECT_EQ(counters.lastReplacement, u"");
     EXPECT_EQ(onClearedCount, 1);
 }
 
 TEST(TextModel, VetoingBeforeCharPreventsInsertAndSuppressesEverythingAfter) {
-    TextModel model(L"hllo");
-    model.onBeforeChar.add([](TextModel&, size_t, wchar_t, CharChangeKind, bool& canChange) {
+    TextModel model(u"hllo");
+    model.onBeforeChar.add([](TextModel&, size_t, char16_t, CharChangeKind, bool& canChange) {
         canChange = false;
         return newui::SyncReturn::Handled;
         });
     TextModelEventCounters counters(model);
 
-    model.insert(1, L"e");
+    model.insert(1, u"e");
 
-    EXPECT_EQ(model.text(), L"hllo");  // unchanged
+    EXPECT_EQ(model.text(), u"hllo");  // unchanged
     EXPECT_EQ(counters.afterChar, 0);
     EXPECT_EQ(counters.onChanged, 0);
 }
 
 TEST(TextModel, VetoingBeforeRangeChangedPreventsReplaceAndSuppressesEverythingAfter) {
-    TextModel model(L"hello world");
-    model.onBeforeRangeChanged.add([](TextModel&, const TextRange&, const std::wstring&, bool& canChange) {
+    TextModel model(u"hello world");
+    model.onBeforeRangeChanged.add([](TextModel&, const TextRange&, const std::u16string&, bool& canChange) {
         canChange = false;
         return newui::SyncReturn::Handled;
         });
     TextModelEventCounters counters(model);
 
-    model.replace(TextRange(6, 5), L"there");
+    model.replace(TextRange(6, 5), u"there");
 
-    EXPECT_EQ(model.text(), L"hello world");  // unchanged
+    EXPECT_EQ(model.text(), u"hello world");  // unchanged
     EXPECT_EQ(counters.afterRangeChanged, 0);
     EXPECT_EQ(counters.onChanged, 0);
 }
 
 TEST(TextModel, VetoingBeforeRangeChangedPreventsClearAndOnClearedDoesNotFire) {
-    TextModel model(L"hello");
-    model.onBeforeRangeChanged.add([](TextModel&, const TextRange&, const std::wstring&, bool& canChange) {
+    TextModel model(u"hello");
+    model.onBeforeRangeChanged.add([](TextModel&, const TextRange&, const std::u16string&, bool& canChange) {
         canChange = false;
         return newui::SyncReturn::Handled;
         });
@@ -1212,7 +1213,7 @@ TEST(TextModel, VetoingBeforeRangeChangedPreventsClearAndOnClearedDoesNotFire) {
 
     model.clear();
 
-    EXPECT_EQ(model.text(), L"hello");  // unchanged
+    EXPECT_EQ(model.text(), u"hello");  // unchanged
     EXPECT_EQ(onClearedCount, 0);
 }
 
@@ -1224,8 +1225,8 @@ TEST(DirectWriteResources, FactoriesAreLiveAndUsable) {
 
     IDWriteFactory& dwrite = DirectWriteResources::dwriteFactory();
     IDWriteTextFormat* format = nullptr;
-    HRESULT hr = dwrite.CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"en-us", &format);
+    HRESULT hr = dwrite.CreateTextFormat(u"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, u"en-us", &format);
     EXPECT_TRUE(SUCCEEDED(hr));
     if (format != nullptr) {
         format->Release();
@@ -1248,8 +1249,8 @@ TEST(TextRenderer, RenderWithNonPositiveSizeIsANoOp) {
 
     newui::Font font;
     newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
-    renderer.render(ctx, 0, 10, L"hello", font, black);   // width <= 0
-    renderer.render(ctx, 10, 0, L"hello", font, black);   // height <= 0
+    renderer.render(ctx, 0, 10, u"hello", font, black);   // width <= 0
+    renderer.render(ctx, 10, 0, u"hello", font, black);   // height <= 0
     ctx.end();
 
     BLImageData data;
@@ -1268,7 +1269,7 @@ TEST(TextRenderer, RenderDrawsVisiblePixelsForNonEmptyText) {
     newui::Font font;
     font.setSize(16.0f);
     newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
-    renderer.render(ctx, 120, 40, L"Hi", font, black);
+    renderer.render(ctx, 120, 40, u"Hi", font, black);
     ctx.end();
 
     BLImageData data;
@@ -1300,8 +1301,8 @@ TEST(TextRenderer, RenderIsSafeAcrossRepeatedCallsWithTheSameFont) {
     newui::Font font;
     newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
 
-    renderer.render(ctx, 120, 40, L"one", font, black);
-    renderer.render(ctx, 120, 40, L"two", font, black);
+    renderer.render(ctx, 120, 40, u"one", font, black);
+    renderer.render(ctx, 120, 40, u"two", font, black);
     ctx.end();
 
     SUCCEED();
@@ -1321,8 +1322,8 @@ TEST(TextRenderer, RenderIsSafeAcrossRepeatedCallsWithADifferentFont) {
     bigFont.setSize(20.0f);
     newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
 
-    renderer.render(ctx, 120, 40, L"one", smallFont, black);
-    renderer.render(ctx, 120, 40, L"two", bigFont, black);
+    renderer.render(ctx, 120, 40, u"one", smallFont, black);
+    renderer.render(ctx, 120, 40, u"two", bigFont, black);
     ctx.end();
 
     SUCCEED();
@@ -1344,7 +1345,7 @@ TEST(TextLayoutEngine, HitTestMethodsReturnNothingBeforeAnySuccessfulUpdate) {
 
 TEST(TextLayoutEngine, UpdateWithValidInputsSucceeds) {
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello World");
+    TextStorage storage(u"Hello World");
     newui::Font font;
 
     EXPECT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
@@ -1352,7 +1353,7 @@ TEST(TextLayoutEngine, UpdateWithValidInputsSucceeds) {
 
 TEST(TextLayoutEngine, HitTestPositionReturnsAPositiveHeightForAValidPosition) {
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello World");
+    TextStorage storage(u"Hello World");
     newui::Font font;
     font.setSize(16.0f);
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
@@ -1368,7 +1369,7 @@ TEST(TextLayoutEngine, HitTestPositionReturnsAPositiveHeightForAValidPosition) {
 
 TEST(TextLayoutEngine, HitTestPositionLeavesOutputsAtDefaultForAnInvalidPosition) {
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello World");
+    TextStorage storage(u"Hello World");
     newui::Font font;
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
@@ -1382,7 +1383,7 @@ TEST(TextLayoutEngine, HitTestPositionLeavesOutputsAtDefaultForAnInvalidPosition
 
 TEST(TextLayoutEngine, HitTestRangeReturnsOneRectForARangeThatFitsOnASingleLine) {
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello World");
+    TextStorage storage(u"Hello World");
     newui::Font font;
     font.setSize(16.0f);
     // Wide/tall enough that "Hello World" needs no wrapping at all.
@@ -1400,7 +1401,7 @@ TEST(TextLayoutEngine, HitTestRangeReturnsMultipleRectsForARangeSpanningWrappedL
     // A long run of distinct words with a narrow maxWidth forces DirectWrite
     // to wrap across several lines - the whole-text range then has to span
     // more than one of those lines.
-    TextStorage storage(L"AAAA BBBB CCCC DDDD EEEE FFFF");
+    TextStorage storage(u"AAAA BBBB CCCC DDDD EEEE FFFF");
     newui::Font font;
     font.setSize(20.0f);
     ASSERT_TRUE(engine.update(storage, font, 60.0f, 500.0f));
@@ -1418,7 +1419,7 @@ TEST(TextLayoutEngine, WordWrapFalseStaysOnOneLineAtTheSameNarrowWidthThatWouldO
     // needing" to wrap for short-enough text - see TextController::
     // ensureLayoutUpToDate()'s own doc comment (controls.h).
     TextLayoutEngine engine;
-    TextStorage storage(L"AAAA BBBB CCCC DDDD EEEE FFFF");
+    TextStorage storage(u"AAAA BBBB CCCC DDDD EEEE FFFF");
     newui::Font font;
     font.setSize(20.0f);
     ASSERT_TRUE(engine.update(storage, font, 60.0f, 500.0f, /*wordWrap=*/false));
@@ -1436,7 +1437,7 @@ TEST(TextLayoutEngine, HitTestRangeOfAnOutOfBoundsRangeDoesNotCrash) {
     // doesn't fabricate real (non-zero-width) selection geometry out of
     // nowhere - not that the result is empty.
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello");
+    TextStorage storage(u"Hello");
     newui::Font font;
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
@@ -1449,7 +1450,7 @@ TEST(TextLayoutEngine, HitTestRangeOfAnOutOfBoundsRangeDoesNotCrash) {
 
 TEST(TextLayoutEngine, HitTestPointReturnsAPositionNearTheStartForAPointNearTheOrigin) {
     TextLayoutEngine engine;
-    TextStorage storage(L"Hello World");
+    TextStorage storage(u"Hello World");
     newui::Font font;
     font.setSize(16.0f);
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
@@ -1465,12 +1466,12 @@ TEST(TextLayoutEngine, UpdateReflectsChangedTextOnASubsequentCall) {
     newui::Font font;
     font.setSize(16.0f);
 
-    TextStorage shortStorage(L"Hi");
+    TextStorage shortStorage(u"Hi");
     ASSERT_TRUE(engine.update(shortStorage, font, 500.0f, 200.0f));
     std::vector<newui::Rect> shortRects = engine.hitTestRange(TextRange(0, shortStorage.length()));
     ASSERT_EQ(shortRects.size(), 1u);
 
-    TextStorage longerStorage(L"Hello World, this is a longer line of text");
+    TextStorage longerStorage(u"Hello World, this is a longer line of text");
     ASSERT_TRUE(engine.update(longerStorage, font, 500.0f, 200.0f));
     std::vector<newui::Rect> longerRects = engine.hitTestRange(TextRange(0, longerStorage.length()));
 
@@ -1501,7 +1502,7 @@ namespace {
 TEST(TextLayoutEngine, SplitsTheTextIntoLinesAtEachBreak) {
     TextLayoutEngine engine;
     newui::Font font;
-    TextStorage storage(L"a\nbb\r\nccc");
+    TextStorage storage(u"a\nbb\r\nccc");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
     ASSERT_EQ(engine.lineCount(), 3u);
@@ -1524,9 +1525,9 @@ TEST(TextLayoutEngine, DISABLED_TimingsOnALargeText) {
     auto ms = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
-    std::wstring text;
+    std::u16string text;
     for (int i = 0; i < 100000; ++i) {
-        text += L"    int value" + std::to_wstring(i) + L" = compute(alpha, beta);\n";
+        text += u"    int value" + newui::utf8ToUtf16(std::to_string(i)) + u" = compute(alpha, beta);\n";
     }
     TextStorage storage(text);
     TextLayoutEngine engine;
@@ -1535,10 +1536,10 @@ TEST(TextLayoutEngine, DISABLED_TimingsOnALargeText) {
     ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
     auto t1 = clock::now();
     // A keystroke in the middle.
-    storage.insert(text.size() / 2, L"x");
+    storage.insert(text.size() / 2, u"x");
     ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
     auto t2 = clock::now();
-    storage.insert(text.size() / 2 + 1, L"y");
+    storage.insert(text.size() / 2 + 1, u"y");
     ASSERT_TRUE(engine.update(storage, font, 800.0f, 600.0f, false));
     auto t3 = clock::now();
     std::printf("100000 lines: first full layout %.0f ms (%zu DirectWrite layouts), keystroke %.2f ms then %.2f ms (%zu built)\n",
@@ -1548,7 +1549,7 @@ TEST(TextLayoutEngine, DISABLED_TimingsOnALargeText) {
 TEST(TextLayoutEngine, ALoneCrBreaksALineToo) {
     TextLayoutEngine engine;
     newui::Font font;
-    TextStorage storage(L"a\rbb\r\nccc\rd");
+    TextStorage storage(u"a\rbb\r\nccc\rd");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
     ASSERT_EQ(engine.lineCount(), 4u);
@@ -1572,16 +1573,16 @@ namespace {
 }
 
 TEST(TextLayoutEngine, EditsThatMakeOrBreakACrLfPairMatchAFreshLayout) {
-    struct Case { const wchar_t* before; std::size_t at; std::size_t remove; const wchar_t* insert; };
+    struct Case { const char16_t* before; std::size_t at; std::size_t remove; const char16_t* insert; };
     const Case cases[] = {
-        { L"a\rb\nc", 2, 0, L"\n" },       // '\n' typed after a '\r': "\r\n"
-        { L"a\r\nb\nc", 2, 1, L"" },       // its '\n' deleted: a lone '\r' again
-        { L"a\r\nb\nc", 1, 1, L"" },       // its '\r' deleted
-        { L"a\nb\nc", 1, 0, L"\r" },       // '\r' typed before a '\n'
-        { L"a\nb\nc", 1, 0, L"x\r" },      // text ending in '\r' typed before a '\n'
-        { L"a\rb\rc", 2, 0, L"\n\r" },
-        { L"a\r\rb", 2, 0, L"\n" },        // between two lone '\r's
-        { L"one\r\ntwo\r\nthree", 5, 3, L"" },   // a whole line removed
+        { u"a\rb\nc", 2, 0, u"\n" },       // '\n' typed after a '\r': "\r\n"
+        { u"a\r\nb\nc", 2, 1, u"" },       // its '\n' deleted: a lone '\r' again
+        { u"a\r\nb\nc", 1, 1, u"" },       // its '\r' deleted
+        { u"a\nb\nc", 1, 0, u"\r" },       // '\r' typed before a '\n'
+        { u"a\nb\nc", 1, 0, u"x\r" },      // text ending in '\r' typed before a '\n'
+        { u"a\rb\rc", 2, 0, u"\n\r" },
+        { u"a\r\rb", 2, 0, u"\n" },        // between two lone '\r's
+        { u"one\r\ntwo\r\nthree", 5, 3, u"" },   // a whole line removed
     };
     for (const Case& c : cases) {
         TextLayoutEngine incremental;
@@ -1600,7 +1601,7 @@ TEST(TextLayoutEngine, EditsThatMakeOrBreakACrLfPairMatchAFreshLayout) {
 TEST(TextLayoutEngine, EmptyAndTrailingLinesHaveARealHeight) {
     TextLayoutEngine engine;
     newui::Font font;
-    TextStorage storage(L"abc\n");
+    TextStorage storage(u"abc\n");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
     ASSERT_EQ(engine.lineCount(), 2u);
@@ -1616,15 +1617,15 @@ TEST(TextLayoutEngine, EmptyAndTrailingLinesHaveARealHeight) {
 TEST(TextLayoutEngine, AnEditRebuildsOnlyTheLinesItTouched) {
     TextLayoutEngine engine;
     newui::Font font;
-    TextStorage original(L"one\ntwo\nthree\nfour\nfive");
+    TextStorage original(u"one\ntwo\nthree\nfour\nfive");
     ASSERT_TRUE(engine.update(original, font, 500.0f, 200.0f));
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 5u);
 
-    TextStorage edited(L"one\ntwo\nthreeX\nfour\nfive");
+    TextStorage edited(u"one\ntwo\nthreeX\nfour\nfive");
     ASSERT_TRUE(engine.update(edited, font, 500.0f, 200.0f));
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
 
-    TextStorage split(L"one\ntwo\nthr\neeX\nfour\nfive");
+    TextStorage split(u"one\ntwo\nthr\neeX\nfour\nfive");
     ASSERT_TRUE(engine.update(split, font, 500.0f, 200.0f));
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 2u);
     EXPECT_EQ(engine.lineCount(), 6u);
@@ -1639,7 +1640,7 @@ TEST(TextLayoutEngine, HitTestingMapsAcrossLines) {
     TextLayoutEngine engine;
     newui::Font font;
     font.setSize(16.0f);
-    TextStorage storage(L"first\nsecond\nthird");
+    TextStorage storage(u"first\nsecond\nthird");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
     newui::Point topLeft;
@@ -1667,7 +1668,7 @@ TEST(TextLayoutEngine, HitTestRangeSpanningLinesCoversEachLineAndTheBreaks) {
     TextLayoutEngine engine;
     newui::Font font;
     font.setSize(16.0f);
-    TextStorage storage(L"first\nsecond\nthird");
+    TextStorage storage(u"first\nsecond\nthird");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
 
     // "rst\nsecond\nth"
@@ -1681,11 +1682,11 @@ TEST(TextRenderer, EngineRenderDrawsOnlyTheLinesInView) {
     TextLayoutEngine engine;
     newui::Font font;
     font.setSize(16.0f);
-    std::wstring text = L"X";
+    std::u16string text = u"X";
     for (int i = 0; i < 200; ++i) {
-        text += L"\n";
+        text += u"\n";
     }
-    text += L"X";
+    text += u"X";
     TextStorage storage(text);
     ASSERT_TRUE(engine.update(storage, font, 120.0f, 40.0f));
     newui::Color black(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1714,12 +1715,12 @@ TEST(TextRenderer, EngineRenderDrawsOnlyTheLinesInView) {
 
 namespace {
     // "a {" / "  b" / "}" / "c", with [3, 8) - the break after '{' up to '}' - foldable.
-    const wchar_t* kFoldText = L"a {\n  b\n}\nc";
+    const char16_t* kFoldText = u"a {\n  b\n}\nc";
     TextFold blockFold(bool collapsed) {
         TextFold fold;
         fold.start = 3;
         fold.length = 5;
-        fold.placeholder = L"...";
+        fold.placeholder = u"...";
         fold.collapsed = collapsed;
         return fold;
     }
@@ -1793,7 +1794,7 @@ TEST(TextLayoutEngine, FontRunsFollowTheTextAroundACollapsedFold) {
     TextLayoutEngine boldEngine;
     newui::Font font;
     font.setSize(16.0f);
-    TextStorage storage(L"xx {\n hidden\n} yyyy");
+    TextStorage storage(u"xx {\n hidden\n} yyyy");
     TextFold fold;
     fold.start = 4;
     fold.length = 9;

@@ -41,6 +41,19 @@ namespace newui {
 	std::u16string utf8ToUtf16(const std::string& text);
 	std::string utf16ToUtf8(const std::u16string& text);
 
+	// The Win32 boundary: wchar_t is 16-bit here, so UTF-16 text (char16_t) and the wide strings
+	// Windows APIs take are the same bytes. These casts are the only place that relies on it; the
+	// rest of the text code uses char16_t / std::u16string.
+#ifdef _WIN32
+	static_assert(sizeof(wchar_t) == sizeof(char16_t), "Win32 wchar_t is UTF-16");
+	inline const wchar_t* toWide(const char16_t* text) { return reinterpret_cast<const wchar_t*>(text); }
+	inline const wchar_t* toWide(const std::u16string& text) { return reinterpret_cast<const wchar_t*>(text.c_str()); }
+	inline std::wstring toWideString(const std::u16string& text) { return std::wstring(toWide(text), text.size()); }
+	inline std::u16string fromWide(const std::wstring& text) {
+		return std::u16string(reinterpret_cast<const char16_t*>(text.c_str()), text.size());
+	}
+#endif
+
 	// A path with '\' turned into '/' and any trailing '/' dropped (a lone "/" stays), so paths
 	// from different sources compare and join the same way.
 	std::string normalizePath(std::string path);

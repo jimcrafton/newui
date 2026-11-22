@@ -1,4 +1,5 @@
 #include "newui/piecetree.h"
+#include "newui/utils.h"
 
 #include <gtest/gtest.h>
 
@@ -18,20 +19,20 @@ namespace {
         std::size_t length;
     };
 
-    // The line-break rule, written the plain way against a std::wstring.
-    std::vector<RefBreak> refBreaks(const std::wstring& s) {
+    // The line-break rule, written the plain way against a std::u16string.
+    std::vector<RefBreak> refBreaks(const std::u16string& s) {
         std::vector<RefBreak> out;
         for (std::size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == L'\r') {
-                out.push_back({ i, i + 1 < s.size() && s[i + 1] == L'\n' ? std::size_t(2) : std::size_t(1) });
-            } else if (s[i] == L'\n' && (i == 0 || s[i - 1] != L'\r')) {
+            if (s[i] == u'\r') {
+                out.push_back({ i, i + 1 < s.size() && s[i + 1] == u'\n' ? std::size_t(2) : std::size_t(1) });
+            } else if (s[i] == u'\n' && (i == 0 || s[i - 1] != u'\r')) {
                 out.push_back({ i, 1 });
             }
         }
         return out;
     }
 
-    std::vector<std::size_t> refLineStarts(const std::wstring& s) {
+    std::vector<std::size_t> refLineStarts(const std::u16string& s) {
         std::vector<std::size_t> starts{ 0 };
         for (const RefBreak& b : refBreaks(s)) {
             starts.push_back(b.start + b.length);
@@ -41,7 +42,7 @@ namespace {
 
     // Everything the tree answers, against the reference; a sample of offsets for the queries that
     // take one (all of them when the text is small).
-    void expectMatches(const PieceTree& tree, const std::wstring& ref, std::mt19937& rng, const char* what) {
+    void expectMatches(const PieceTree& tree, const std::u16string& ref, std::mt19937& rng, const char* what) {
         SCOPED_TRACE(what);
         ASSERT_EQ(tree.length(), ref.size());
         ASSERT_TRUE(tree.validate());
@@ -95,10 +96,10 @@ namespace {
                 ASSERT_EQ(terminator, expectedLength);
             }
 
-            ASSERT_EQ(tree.at(offset), offset < ref.size() ? ref[offset] : L'\0');
-            const wchar_t ch = L"ab \r\n"[rng() % 5];
+            ASSERT_EQ(tree.at(offset), offset < ref.size() ? ref[offset] : u'\0');
+            const char16_t ch = u"ab \r\n"[rng() % 5];
             const std::size_t expectedFind = ref.find(ch, offset);
-            ASSERT_EQ(tree.find(ch, offset), expectedFind == std::wstring::npos ? PieceTree::npos : expectedFind);
+            ASSERT_EQ(tree.find(ch, offset), expectedFind == std::u16string::npos ? PieceTree::npos : expectedFind);
 
             const std::size_t length = rng() % 300;
             const auto rangeEnd = std::lower_bound(breaks.begin(), breaks.end(), offset + length,
@@ -112,9 +113,9 @@ namespace {
         }
 
         // Against a lightly edited copy.
-        std::wstring other = ref;
+        std::u16string other = ref;
         if (!other.empty()) {
-            other[rng() % other.size()] = L'#';
+            other[rng() % other.size()] = u'#';
         }
         std::size_t prefix = 0;
         while (prefix < ref.size() && prefix < other.size() && ref[prefix] == other[prefix]) {
@@ -131,11 +132,11 @@ namespace {
         ASSERT_EQ(tree.commonSuffixLength(other, 3), suffix < 3 ? suffix : 3);
     }
 
-    std::wstring randomText(std::mt19937& rng, std::size_t length) {
-        static const wchar_t alphabet[] = L"ab \r\n\r\nx";   // breaks are common, so pairs and lone '\r's are
-        std::wstring s;
+    std::u16string randomText(std::mt19937& rng, std::size_t length) {
+        static const char16_t alphabet[] = u"ab \r\n\r\nx";   // breaks are common, so pairs and lone '\r's are
+        std::u16string s;
         for (std::size_t i = 0; i < length; ++i) {
-            s += alphabet[rng() % (sizeof(alphabet) / sizeof(wchar_t) - 1)];
+            s += alphabet[rng() % (sizeof(alphabet) / sizeof(char16_t) - 1)];
         }
         return s;
     }
@@ -146,118 +147,118 @@ TEST(PieceTree, EmptyTreeAnswersSensibly) {
     EXPECT_TRUE(tree.empty());
     EXPECT_EQ(tree.length(), 0u);
     EXPECT_EQ(tree.pieceCount(), 0u);
-    EXPECT_EQ(tree.at(0), L'\0');
-    EXPECT_EQ(tree.str(), L"");
+    EXPECT_EQ(tree.at(0), u'\0');
+    EXPECT_EQ(tree.str(), u"");
     EXPECT_EQ(tree.lineCount(), 1u);
     EXPECT_EQ(tree.lineStart(0), 0u);
     EXPECT_EQ(tree.lineStart(3), 0u);
     EXPECT_EQ(tree.lineOfOffset(9), 0u);
-    EXPECT_EQ(tree.find(L'a'), PieceTree::npos);
+    EXPECT_EQ(tree.find(u'a'), PieceTree::npos);
     EXPECT_EQ(tree.findLineBreak(0), PieceTree::npos);
-    EXPECT_TRUE(tree.equals(L""));
+    EXPECT_TRUE(tree.equals(u""));
     EXPECT_TRUE(tree.validate());
 }
 
 TEST(PieceTree, BuildsFromTextAndReadsItBackAcrossBlocks) {
-    std::wstring text;
+    std::u16string text;
     for (int i = 0; i < 1000; ++i) {
-        text += L"line " + std::to_wstring(i) + L"\n";
+        text += u"line " + newui::utf8ToUtf16(std::to_string(i)) + u"\n";
     }
     PieceTree tree(text);
     EXPECT_GT(tree.pieceCount(), 3u);   // more than one block
     EXPECT_EQ(tree.length(), text.size());
     EXPECT_EQ(tree.str(), text);
-    EXPECT_EQ(tree.at(0), L'l');
-    EXPECT_EQ(tree.at(text.size() - 1), L'\n');
-    EXPECT_EQ(tree.at(text.size()), L'\0');
+    EXPECT_EQ(tree.at(0), u'l');
+    EXPECT_EQ(tree.at(text.size() - 1), u'\n');
+    EXPECT_EQ(tree.at(text.size()), u'\0');
     EXPECT_EQ(tree.substring(5000, 40), text.substr(5000, 40));
     EXPECT_EQ(tree.lineCount(), 1001u);
     EXPECT_TRUE(tree.validate());
 }
 
 TEST(PieceTree, InsertEraseAndReplaceClampLikeAString) {
-    PieceTree tree(L"hello world");
-    tree.insert(5, L",");
-    EXPECT_EQ(tree.str(), L"hello, world");
+    PieceTree tree(u"hello world");
+    tree.insert(5, u",");
+    EXPECT_EQ(tree.str(), u"hello, world");
     tree.erase(5, 1);
-    EXPECT_EQ(tree.str(), L"hello world");
-    tree.replace(6, 5, L"there");
-    EXPECT_EQ(tree.str(), L"hello there");
-    tree.insert(1000, L"!");
-    EXPECT_EQ(tree.str(), L"hello there!");
+    EXPECT_EQ(tree.str(), u"hello world");
+    tree.replace(6, 5, u"there");
+    EXPECT_EQ(tree.str(), u"hello there");
+    tree.insert(1000, u"!");
+    EXPECT_EQ(tree.str(), u"hello there!");
     tree.erase(10, 1000);
-    EXPECT_EQ(tree.str(), L"hello ther");
+    EXPECT_EQ(tree.str(), u"hello ther");
     tree.erase(1000, 5);
-    EXPECT_EQ(tree.str(), L"hello ther");
-    tree.replace(0, 0, L"");
-    EXPECT_EQ(tree.str(), L"hello ther");
-    tree.replace(0, 100, L"");
+    EXPECT_EQ(tree.str(), u"hello ther");
+    tree.replace(0, 0, u"");
+    EXPECT_EQ(tree.str(), u"hello ther");
+    tree.replace(0, 100, u"");
     EXPECT_TRUE(tree.empty());
     EXPECT_EQ(tree.pieceCount(), 0u);
-    tree.insert(0, L"back");
-    EXPECT_EQ(tree.str(), L"back");
+    tree.insert(0, u"back");
+    EXPECT_EQ(tree.str(), u"back");
     tree.clear();
     EXPECT_TRUE(tree.empty());
     EXPECT_TRUE(tree.validate());
 }
 
 TEST(PieceTree, TypingContinuesOnePieceInsteadOfMakingOnePerCharacter) {
-    PieceTree tree(L"start");
+    PieceTree tree(u"start");
     for (int i = 0; i < 1500; ++i) {
-        tree.insert(tree.length(), std::wstring(1, L'a'));
+        tree.insert(tree.length(), std::u16string(1, u'a'));
     }
     EXPECT_EQ(tree.length(), 1505u);
     EXPECT_LE(tree.pieceCount(), 2u);
 
     // In the middle too: type, then keep typing where the caret moved to.
-    PieceTree middle(L"headtail");
+    PieceTree middle(u"headtail");
     for (int i = 0; i < 500; ++i) {
-        middle.insert(4 + static_cast<std::size_t>(i), std::wstring(1, L'x'));
+        middle.insert(4 + static_cast<std::size_t>(i), std::u16string(1, u'x'));
     }
-    EXPECT_EQ(middle.str(), L"head" + std::wstring(500, L'x') + L"tail");
+    EXPECT_EQ(middle.str(), u"head" + std::u16string(500, u'x') + u"tail");
     EXPECT_LE(middle.pieceCount(), 4u);
     EXPECT_TRUE(middle.validate());
 }
 
 TEST(PieceTree, ACopyIsASnapshotEditsToTheOriginalNeverTouch) {
-    PieceTree tree(L"one two three");
+    PieceTree tree(u"one two three");
     const PieceTree before = tree;
-    tree.replace(4, 3, L"2");
-    tree.insert(0, L">> ");
+    tree.replace(4, 3, u"2");
+    tree.insert(0, u">> ");
     tree.erase(tree.length() - 5, 5);
-    EXPECT_EQ(before.str(), L"one two three");
-    EXPECT_EQ(tree.str(), L">> one 2 ");
+    EXPECT_EQ(before.str(), u"one two three");
+    EXPECT_EQ(tree.str(), u">> one 2 ");
 
     // Undo: put the old tree back, then edit from there.
     const PieceTree edited = tree;
     tree = before;
-    tree.insert(3, L"!");
-    EXPECT_EQ(tree.str(), L"one! two three");
-    EXPECT_EQ(edited.str(), L">> one 2 ");
+    tree.insert(3, u"!");
+    EXPECT_EQ(tree.str(), u"one! two three");
+    EXPECT_EQ(edited.str(), u">> one 2 ");
     EXPECT_TRUE(tree.validate());
     EXPECT_TRUE(edited.validate());
     EXPECT_TRUE(before.validate());
 }
 
 TEST(PieceTree, TypingAfterGoingBackToAnOlderTreeDoesNotCorruptTheNewerOne) {
-    PieceTree lineage(L"abc");
+    PieceTree lineage(u"abc");
     const PieceTree snapshotAbc = lineage;
-    lineage.insert(3, L"def");
+    lineage.insert(3, u"def");
     const PieceTree snapshotAbcdef = lineage;   // its last piece ends where the block's used part does
     lineage = snapshotAbc;                      // undo
-    lineage.insert(3, L"XYZ");                  // must not overwrite what snapshotAbcdef refers to
-    EXPECT_EQ(lineage.str(), L"abcXYZ");
-    EXPECT_EQ(snapshotAbcdef.str(), L"abcdef");
-    EXPECT_EQ(snapshotAbc.str(), L"abc");
+    lineage.insert(3, u"XYZ");                  // must not overwrite what snapshotAbcdef refers to
+    EXPECT_EQ(lineage.str(), u"abcXYZ");
+    EXPECT_EQ(snapshotAbcdef.str(), u"abcdef");
+    EXPECT_EQ(snapshotAbc.str(), u"abc");
     EXPECT_TRUE(lineage.validate());
 }
 
 TEST(PieceTree, ACrLfSplitAcrossPiecesIsStillOneBreak) {
     // '\r' and '\n' typed separately, so they are different pieces.
-    PieceTree tree(L"a\rb");
+    PieceTree tree(u"a\rb");
     EXPECT_EQ(tree.lineCount(), 2u);
-    tree.insert(2, L"\n");   // "a\r\nb"
-    EXPECT_EQ(tree.str(), L"a\r\nb");
+    tree.insert(2, u"\n");   // "a\r\nb"
+    EXPECT_EQ(tree.str(), u"a\r\nb");
     EXPECT_EQ(tree.lineCount(), 2u);
     EXPECT_EQ(tree.lineStart(1), 3u);
     EXPECT_EQ(tree.lineOfOffset(2), 0u);   // between them
@@ -275,8 +276,8 @@ TEST(PieceTree, ACrLfSplitAcrossPiecesIsStillOneBreak) {
 }
 
 TEST(PieceTree, ACrLfSplitAcrossBlocksIsStillOneBreak) {
-    std::wstring text(2047, L'x');   // the '\r' is the last character of a block
-    text += L"\r\ny";
+    std::u16string text(2047, u'x');   // the '\r' is the last character of a block
+    text += u"\r\ny";
     PieceTree tree(text);
     EXPECT_EQ(tree.lineCount(), 2u);
     EXPECT_EQ(tree.lineStart(1), 2049u);
@@ -289,7 +290,7 @@ TEST(PieceTree, ACrLfSplitAcrossBlocksIsStillOneBreak) {
 }
 
 TEST(PieceTree, LinesEndAtBreaksAndAFinalBreakStartsAnEmptyLine) {
-    PieceTree tree(L"ab\ncd\r\nef\rgh\n");
+    PieceTree tree(u"ab\ncd\r\nef\rgh\n");
     EXPECT_EQ(tree.lineCount(), 5u);
     EXPECT_EQ(tree.lineStart(0), 0u);
     EXPECT_EQ(tree.lineStart(1), 3u);
@@ -299,15 +300,15 @@ TEST(PieceTree, LinesEndAtBreaksAndAFinalBreakStartsAnEmptyLine) {
     EXPECT_EQ(tree.lineStart(5), 13u);
     EXPECT_EQ(tree.lineOfOffset(13), 4u);
     EXPECT_EQ(tree.lineOfOffset(1000), 4u);
-    EXPECT_EQ(PieceTree(L"a\r").lineCount(), 2u);
-    EXPECT_EQ(PieceTree(L"a\r\r").lineCount(), 3u);
-    EXPECT_EQ(PieceTree(L"\n\r").lineCount(), 3u);
+    EXPECT_EQ(PieceTree(u"a\r").lineCount(), 2u);
+    EXPECT_EQ(PieceTree(u"a\r\r").lineCount(), 3u);
+    EXPECT_EQ(PieceTree(u"\n\r").lineCount(), 3u);
 }
 
 TEST(PieceTree, RandomEditsMatchAStringOnEveryQuery) {
     for (unsigned seed = 1; seed <= 4; ++seed) {
         std::mt19937 rng(seed);
-        std::wstring ref = randomText(rng, seed % 2 == 0 ? 6000 : 30);
+        std::u16string ref = randomText(rng, seed % 2 == 0 ? 6000 : 30);
         PieceTree tree(ref);
         expectMatches(tree, ref, rng, "initial");
         if (HasFatalFailure()) {
@@ -317,7 +318,7 @@ TEST(PieceTree, RandomEditsMatchAStringOnEveryQuery) {
             const unsigned op = rng() % 10;
             const std::size_t at = ref.empty() ? 0 : rng() % (ref.size() + 1);
             const std::size_t span = rng() % 4 == 0 ? rng() % 200 : rng() % 6;
-            const std::wstring text = randomText(rng, rng() % 40 == 0 ? 2000 + rng() % 4000 : rng() % 12);
+            const std::u16string text = randomText(rng, rng() % 40 == 0 ? 2000 + rng() % 4000 : rng() % 12);
             if (op < 4) {
                 tree.insert(at, text);
                 ref.insert(at, text);
@@ -345,10 +346,10 @@ TEST(PieceTree, RandomEditsMatchAStringOnEveryQuery) {
 TEST(PieceTree, ComparingWithAnotherTreeMatchesComparingStrings) {
     std::mt19937 rng(21);
     for (int round = 0; round < 300; ++round) {
-        std::wstring refA = randomText(rng, rng() % 5000);
+        std::u16string refA = randomText(rng, rng() % 5000);
         PieceTree a(refA);
         PieceTree b = a;                      // shares everything with a
-        std::wstring refB = refA;
+        std::u16string refB = refA;
         EXPECT_TRUE(a.sameAs(b));
         EXPECT_TRUE(a.equals(b));
         EXPECT_EQ(a.commonPrefixLength(b), refA.size());
@@ -358,7 +359,7 @@ TEST(PieceTree, ComparingWithAnotherTreeMatchesComparingStrings) {
         for (int e = 0; e < edits; ++e) {
             const std::size_t at = rng() % (refB.size() + 1);
             const std::size_t span = rng() % 30;
-            const std::wstring text = randomText(rng, rng() % 30);
+            const std::u16string text = randomText(rng, rng() % 30);
             b.replace(at, span, text);
             refB.replace(at, span < refB.size() - at ? span : refB.size() - at, text);
         }
@@ -388,10 +389,10 @@ TEST(PieceTree, ComparingWithAnotherTreeMatchesComparingStrings) {
 
 TEST(PieceTree, SnapshotsCanBeReadOnAnotherThreadWhileTheOriginalIsEdited) {
     std::mt19937 rng(7);
-    std::wstring ref = randomText(rng, 20000);
+    std::u16string ref = randomText(rng, 20000);
     PieceTree tree(ref);
     const PieceTree snapshot = tree;
-    const std::wstring expected = ref;
+    const std::u16string expected = ref;
 
     std::atomic<bool> stop{ false };
     std::atomic<int> reads{ 0 };
@@ -422,8 +423,8 @@ TEST(PieceTree, SnapshotsCanBeReadOnAnotherThreadWhileTheOriginalIsEdited) {
 
 TEST(PieceTree, AMultiMegabyteDocumentStaysBalancedThroughManyEdits) {
     std::mt19937 rng(11);
-    std::wstring line = L"    int value = compute(alpha, beta, gamma); // a plausible line of C++\n";
-    std::wstring ref;
+    std::u16string line = u"    int value = compute(alpha, beta, gamma); // a plausible line of C++\n";
+    std::u16string ref;
     while (ref.size() < 2 * 1024 * 1024) {
         ref += line;
     }
@@ -436,8 +437,8 @@ TEST(PieceTree, AMultiMegabyteDocumentStaysBalancedThroughManyEdits) {
             tree.erase(at, 40);
             ref.erase(at, 40);
         } else {
-            tree.insert(at, L"x = 1;\r\n");
-            ref.insert(at, L"x = 1;\r\n");
+            tree.insert(at, u"x = 1;\r\n");
+            ref.insert(at, u"x = 1;\r\n");
         }
     }
     EXPECT_TRUE(tree.validate());
@@ -456,17 +457,17 @@ TEST(PieceTree, DISABLED_Timings) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
     std::mt19937 rng(3);
-    const std::wstring line = L"    int value = compute(alpha, beta, gamma); // a plausible line of C++\n";
+    const std::u16string line = u"    int value = compute(alpha, beta, gamma); // a plausible line of C++\n";
     for (std::size_t megabytes : { 1u, 8u, 32u }) {
-        std::wstring text;
-        while (text.size() < megabytes * 1024 * 1024 / 2) {   // wchar_t: 2 bytes each
+        std::u16string text;
+        while (text.size() < megabytes * 1024 * 1024 / 2) {   // char16_t: 2 bytes each
             text += line;
         }
         auto t0 = clock::now();
         PieceTree tree(text);
         auto t1 = clock::now();
         for (int i = 0; i < 10000; ++i) {
-            tree.insert(rng() % (tree.length() + 1), L"x");
+            tree.insert(rng() % (tree.length() + 1), u"x");
         }
         auto t2 = clock::now();
         std::size_t sink = 0;
@@ -477,14 +478,14 @@ TEST(PieceTree, DISABLED_Timings) {
         auto t3 = clock::now();
         const PieceTree snapshot = tree;
         auto t4 = clock::now();
-        std::wstring flat = tree.str();
+        std::u16string flat = tree.str();
         auto t5 = clock::now();
-        std::wstring flatCopy = text;
-        flatCopy.insert(flatCopy.size() / 2, L"x");
+        std::u16string flatCopy = text;
+        flatCopy.insert(flatCopy.size() / 2, u"x");
         auto t6 = clock::now();
         std::printf("%zu MB (%zu chars, %zu lines): build %.1f ms, 10000 random inserts %.1f ms (%.2f us each), "
             "10000 lineStart+lineOfOffset %.1f ms, snapshot %.4f ms, str() %.1f ms, pieces %zu; "
-            "one std::wstring insert into the middle %.3f ms (sink %zu %zu)\n",
+            "one std::u16string insert into the middle %.3f ms (sink %zu %zu)\n",
             megabytes, text.size(), tree.lineCount(), ms(t0, t1), ms(t1, t2), ms(t1, t2) * 1000.0 / 10000.0,
             ms(t2, t3), ms(t3, t4), ms(t4, t5), tree.pieceCount(), ms(t5, t6), sink, flat.size() + flatCopy.size());
     }

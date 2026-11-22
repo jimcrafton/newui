@@ -1,4 +1,5 @@
 #include "newui/textfolding.h"
+#include "newui/utils.h"
 #include "newui/fontmanager.h"
 #include "newui/uicolormanager.h"
 
@@ -18,7 +19,7 @@ namespace {
 
     void setUp(TextFoldingControl& control, bool collapsed) {
         control.setBounds(Rect(0, 0, 300, 200));
-        control.setText(L"a {\n  b\n}\nc");
+        control.setText(u"a {\n  b\n}\nc");
         control.setFolds({ blockFold(collapsed) });
     }
 }
@@ -37,7 +38,7 @@ TEST(TextFoldingControl, ACollapsedFoldIsLaidOutAsOneLine) {
 TEST(TextFoldingControl, APlainTextControlHasNoFolding) {
     TextControl control;
     control.setBounds(Rect(0, 0, 300, 200));
-    control.setText(L"a {\n  b\n}\nc");
+    control.setText(u"a {\n  b\n}\nc");
     control.controller().ensureLayoutUpToDate();
     EXPECT_EQ(control.controller().layoutEngine().lineCount(), 4u);
 }
@@ -45,20 +46,20 @@ TEST(TextFoldingControl, APlainTextControlHasNoFolding) {
 TEST(TextFoldingControl, TextInsertedBeforeAFoldMovesIt) {
     TextFoldingControl control;
     setUp(control, true);
-    control.model().insert(0, L"xy");
+    control.model().insert(0, u"xy");
     ASSERT_EQ(control.folds().size(), 1u);
     EXPECT_EQ(control.folds()[0].start, 5u);
     EXPECT_EQ(control.folds()[0].length, 5u);
     EXPECT_TRUE(control.folds()[0].collapsed);
 
-    control.model().insert(0, L"z");   // a single character: the Char event path
+    control.model().insert(0, u"z");   // a single character: the Char event path
     EXPECT_EQ(control.folds()[0].start, 6u);
 }
 
 TEST(TextFoldingControl, TextAfterAFoldLeavesItAlone) {
     TextFoldingControl control;
     setUp(control, true);
-    control.model().insert(8, L"!");   // right at its end
+    control.model().insert(8, u"!");   // right at its end
     control.model().remove(text::TextRange(10, 2));
     ASSERT_EQ(control.folds().size(), 1u);
     EXPECT_EQ(control.folds()[0].start, 3u);
@@ -68,7 +69,7 @@ TEST(TextFoldingControl, TextAfterAFoldLeavesItAlone) {
 TEST(TextFoldingControl, AnEditInsideAFoldResizesAndExpandsIt) {
     TextFoldingControl control;
     setUp(control, true);
-    control.model().insert(6, L"bbb");
+    control.model().insert(6, u"bbb");
     ASSERT_EQ(control.folds().size(), 1u);
     EXPECT_EQ(control.folds()[0].length, 8u);
     EXPECT_FALSE(control.folds()[0].collapsed);
@@ -84,7 +85,7 @@ TEST(TextFoldingControl, AnEditAcrossAFoldsEdgeDropsIt) {
 TEST(TextFoldingControl, ReplacingAllTheTextDropsEveryFold) {
     TextFoldingControl control;
     setUp(control, true);
-    control.setText(L"something else entirely");
+    control.setText(u"something else entirely");
     EXPECT_TRUE(control.folds().empty());
 }
 
@@ -113,7 +114,7 @@ TEST(TextFoldingControl, TheCaretNeverRestsInsideACollapsedFold) {
 
 TEST(TextFoldingControl, FoldsAreSortedOutermostFirst) {
     TextFoldingControl control;
-    control.setText(L"0123456789");
+    control.setText(u"0123456789");
     text::TextFold inner;
     inner.start = 2;
     inner.length = 2;
@@ -161,7 +162,7 @@ namespace {
 TEST(TextFoldingControl, ACollapsedFoldHidesItsLinesWhenPainted) {
     TextFoldingControl control;
     control.setBounds(Rect(0, 0, 300, 200));
-    control.setText(L"WWW {\nWWWWWW\nWWWWWW\n} WWW");
+    control.setText(u"WWW {\nWWWWWW\nWWWWWW\n} WWW");
     control.setTextColor(Color(1.0f, 0.0f, 0.0f, 1.0f));
     text::TextFold fold;
     fold.start = 5;
@@ -184,9 +185,9 @@ TEST(TextFoldingControl, TheGutterSitsLeftOfTheTextAndWidensWithTheLineCount) {
     EXPECT_GT(area.left(), client.left() + 10.0f);
     EXPECT_NEAR(area.right(), client.right(), 0.5f);
 
-    std::wstring many;
+    std::u16string many;
     for (int i = 0; i < 1500; ++i) {
-        many += L"x\n";
+        many += u"x\n";
     }
     control.setText(many);
     EXPECT_GT(control.controller().textArea().left(), area.left()) << "four digits need more room than two";
@@ -274,7 +275,7 @@ TEST(TextFoldingControl, ItsControllerIsMultiLine) {
 TEST(TextFoldingControl, TheGutterHasItsOwnBackground) {
     TextFoldingControl control;
     control.setBounds(Rect(0, 0, 300, 200));
-    control.setText(L"");
+    control.setText(u"");
     BLImage image(300, 200, BL_FORMAT_PRGB32);
     {
         BLContext ctx(image);
@@ -335,7 +336,7 @@ TEST(TextControlTab, TextControlsTakeTabAndTextFieldsDoNot) {
 TEST(TextControlTab, TabStopsAreCountedInCharacters) {
     const Font font = FontManager::monospaceFont(14.0f);
     const float digit = font.measureText("0000").width / 4.0f;
-    text::TextStorage storage(L"	X");
+    text::TextStorage storage(u"	X");
     auto afterTab = [&](std::size_t tabWidth) {
         text::TextLayoutEngine engine;
         engine.update(storage, font, 500.0f, 100.0f, true, {}, {}, tabWidth);
@@ -357,7 +358,7 @@ TEST(TextControlTab, TabStopsAreCountedInCharacters) {
 TEST(TextWhitespace, SpacesTabsAndLineEndingsAreFound) {
     text::TextLayoutEngine engine;
     const Font font = FontManager::monospaceFont(14.0f);
-    text::TextStorage storage(L"a\tb c\r\nd\ne");
+    text::TextStorage storage(u"a\tb c\r\nd\ne");
     ASSERT_TRUE(engine.update(storage, font, 500.0f, 200.0f));
     const std::vector<text::WhitespaceMark> marks = engine.whitespaceMarks(0.0f, 1000.0f);
     ASSERT_EQ(marks.size(), 4u);
@@ -373,7 +374,7 @@ TEST(TextWhitespace, SpacesTabsAndLineEndingsAreFound) {
 TEST(TextWhitespace, HiddenTextHasNoMarks) {
     text::TextLayoutEngine engine;
     const Font font = FontManager::monospaceFont(14.0f);
-    text::TextStorage storage(L"{\n  a b\n}");
+    text::TextStorage storage(u"{\n  a b\n}");
     text::TextFold fold;
     fold.start = 1;
     fold.length = 7;   // the break, "  a b" and the next break
@@ -403,7 +404,7 @@ TEST(TextWhitespace, MarksPaintOnlyWhenShown) {
     };
     TextControl control;
     control.setBounds(Rect(0, 0, 300, 60));
-    control.setText(L"    \t\n");   // only whitespace: nothing else draws
+    control.setText(u"    \t\n");   // only whitespace: nothing else draws
     const std::vector<std::uint32_t> hidden = ink(control);
     control.setShowsWhitespace(true);
     EXPECT_TRUE(control.showsWhitespace());
@@ -452,7 +453,7 @@ TEST(TextRendererClearType, OpaqueOnWholePixelsGrayscaleOtherwise) {
     }
     TextControl control;
     control.setBounds(Rect(0, 0, 300, 60));
-    control.setText(L"meta: { author: \"x\" }");
+    control.setText(u"meta: { author: \"x\" }");
     control.setTextColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
     EXPECT_GT(fringePixels(control, 0.0), 50u);
     EXPECT_EQ(fringePixels(control, 0.5), 0u);
@@ -495,7 +496,7 @@ TEST(LabelAlignment, LeftAlignedTextStartsAtTheLeft) {
 // Edits carry color runs and decorations along, so they stay on their characters until reset.
 TEST(TextControlRuns, EditsMoveRunsAndDecorations) {
     TextControl control;
-    control.setText(L"alpha beta gamma");
+    control.setText(u"alpha beta gamma");
     const Color red(1.0f, 0.0f, 0.0f, 1.0f);
     control.setColorRuns({ text::TextColorRun{ 0, 5, red }, text::TextColorRun{ 6, 4, red }, text::TextColorRun{ 11, 5, red } });
     text::TextDecoration squiggle;
@@ -503,13 +504,13 @@ TEST(TextControlRuns, EditsMoveRunsAndDecorations) {
     squiggle.length = 5;
     control.setDecorations({ squiggle });
 
-    control.model().insert(0, L"xx");   // before everything: all shift
+    control.model().insert(0, u"xx");   // before everything: all shift
     ASSERT_EQ(control.colorRuns().size(), 3u);
     EXPECT_EQ(control.colorRuns()[0].start, 2u);
     EXPECT_EQ(control.colorRuns()[2].start, 13u);
     EXPECT_EQ(control.decorations()[0].start, 13u);
 
-    control.model().insert(10, L"!");   // inside "beta" (now 8..12): it grows
+    control.model().insert(10, u"!");   // inside "beta" (now 8..12): it grows
     EXPECT_EQ(control.colorRuns()[1].start, 8u);
     EXPECT_EQ(control.colorRuns()[1].length, 5u);
     EXPECT_EQ(control.colorRuns()[2].start, 14u);
@@ -531,7 +532,7 @@ TEST(TextControlRuns, EditsMoveRunsAndDecorations) {
 
 namespace {
     // Lays text out from scratch and compares every line with engine's.
-    void expectSameAsFresh(const text::TextLayoutEngine& engine, const std::wstring& value,
+    void expectSameAsFresh(const text::TextLayoutEngine& engine, const std::u16string& value,
             const std::vector<text::TextFontRun>& runs, const std::vector<text::TextFold>& folds, const char* step) {
         const Font font = FontManager::monospaceFont(14.0f);
         text::TextLayoutEngine fresh;
@@ -555,15 +556,15 @@ namespace {
 TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
     const Font font = FontManager::monospaceFont(14.0f);
     text::TextLayoutEngine engine;
-    std::wstring value;
+    std::u16string value;
     for (int i = 0; i < 60; ++i) {
-        value += L"line " + std::to_wstring(i) + L" {\r\n  body\n}\n";
+        value += u"line " + newui::utf8ToUtf16(std::to_string(i)) + u" {\r\n  body\n}\n";
     }
     std::vector<text::TextFontRun> runs;
     std::vector<text::TextFold> folds;
     text::TextFold fold;   // the second block, collapsed
-    fold.start = value.find(L"{", value.find(L"line 1 ")) + 1;
-    fold.length = value.find(L"}", fold.start) - fold.start;
+    fold.start = value.find(u"{", value.find(u"line 1 ")) + 1;
+    fold.length = value.find(u"}", fold.start) - fold.start;
     fold.collapsed = true;
     folds.push_back(fold);
 
@@ -574,7 +575,7 @@ TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
     };
     apply("initial");
 
-    auto edit = [&](std::size_t at, std::size_t removed, const std::wstring& inserted) {
+    auto edit = [&](std::size_t at, std::size_t removed, const std::u16string& inserted) {
         value.replace(at, removed, inserted);
         const std::ptrdiff_t delta = static_cast<std::ptrdiff_t>(inserted.size()) - static_cast<std::ptrdiff_t>(removed);
         for (text::TextFold& f : folds) {
@@ -584,30 +585,30 @@ TEST(TextLayoutEngineEdits, EditsMatchAFreshLayout) {
         }
     };
 
-    edit(value.find(L"line 30") + 4, 0, L"X");
+    edit(value.find(u"line 30") + 4, 0, u"X");
     apply("typing mid-document");
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 1u);
 
-    edit(value.find(L"line 40") + 7, 0, L"\n");
+    edit(value.find(u"line 40") + 7, 0, u"\n");
     apply("inserting a line break");
     EXPECT_EQ(engine.layoutsBuiltLastUpdate(), 2u);
 
-    const std::size_t joinAt = value.find(L"\n", value.find(L"line 45"));
-    edit(joinAt - 1, 2, L"");   // the \r\n
+    const std::size_t joinAt = value.find(u"\n", value.find(u"line 45"));
+    edit(joinAt - 1, 2, u"");   // the \r\n
     apply("deleting a CRLF, joining lines");
 
-    edit(0, 0, L"// top\n");
+    edit(0, 0, u"// top\n");
     apply("inserting before everything (and the fold)");
 
-    edit(value.size() - 2, 2, L"");
+    edit(value.size() - 2, 2, u"");
     apply("deleting at the end");
 
-    edit(folds[0].start - 1, 0, L"Y");   // just before the collapsed fold's line content
+    edit(folds[0].start - 1, 0, u"Y");   // just before the collapsed fold's line content
     apply("typing on the fold's line");
 
-    runs.push_back(text::TextFontRun{ value.find(L"line 50"), 4, true });
+    runs.push_back(text::TextFontRun{ value.find(u"line 50"), 4, true });
     apply("a font run added");
-    edit(value.find(L"line 50") + 2, 0, L"Z");
+    edit(value.find(u"line 50") + 2, 0, u"Z");
     runs[0].length += 1;
     apply("typing inside a font run");
 
@@ -746,7 +747,7 @@ TEST(LabelAlignment, ToolbarButtonTextAlignsBothWays) {
 TEST(LabelAlignment, TextFieldTextAlignsBothWays) {
     TextField field;
     field.setBounds(Rect(0, 0, 300, 60));
-    field.setText(L"Hxg");
+    field.setText(u"Hxg");
     int topLeft, topTop, left, top, right;
     inkOf(field, topLeft, topTop, right);   // the default: top-left, as the field has always drawn
     EXPECT_LT(topLeft, 12);

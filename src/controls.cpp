@@ -2697,11 +2697,11 @@ namespace newui {
                 continue;
             }
             std::size_t lineStart = annotation.offset;
-            while (lineStart > 0 && storage.at(lineStart - 1) != L'\n' && storage.at(lineStart - 1) != L'\r') {
+            while (lineStart > 0 && storage.at(lineStart - 1) != u'\n' && storage.at(lineStart - 1) != u'\r') {
                 --lineStart;
             }
             std::size_t lineEnd = annotation.offset;
-            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+            while (lineEnd < length && storage.at(lineEnd) != u'\n' && storage.at(lineEnd) != u'\r') {
                 ++lineEnd;
             }
             if (std::find(tintedLineEnds.begin(), tintedLineEnds.end(), lineEnd) != tintedLineEnds.end()) {
@@ -2753,7 +2753,7 @@ namespace newui {
                 continue;
             }
             std::size_t lineEnd = annotation.offset;
-            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+            while (lineEnd < length && storage.at(lineEnd) != u'\n' && storage.at(lineEnd) != u'\r') {
                 ++lineEnd;
             }
             if (std::find(seenLineEnds.begin(), seenLineEnds.end(), lineEnd) != seenLineEnds.end()) {
@@ -2812,7 +2812,7 @@ namespace newui {
                 continue;   // stale, or nothing to say
             }
             std::size_t lineEnd = annotation.offset;
-            while (lineEnd < length && storage.at(lineEnd) != L'\n' && storage.at(lineEnd) != L'\r') {
+            while (lineEnd < length && storage.at(lineEnd) != u'\n' && storage.at(lineEnd) != u'\r') {
                 ++lineEnd;
             }
             if (std::find(drawnLineEnds.begin(), drawnLineEnds.end(), lineEnd) != drawnLineEnds.end()) {
@@ -2853,7 +2853,7 @@ namespace newui {
         if (overwriteMode_ && caret_.position().isValid()) {
             const std::size_t offset = caret_.position().offset();
             const text::TextStorage& storage = model().storage();
-            if (offset < storage.length() && storage.at(offset) != L'\n' && storage.at(offset) != L'\r') {
+            if (offset < storage.length() && storage.at(offset) != u'\n' && storage.at(offset) != u'\r') {
                 const std::vector<Rect> rects = layoutEngine_.hitTestRange(text::TextRange(offset, 1));
                 width = rects.empty() ? 0.0f : rects.front().width();
             }
@@ -2961,7 +2961,7 @@ namespace newui {
         }
     }
 
-    SyncReturn TextController::handleModelAfterChar(text::TextModel& /*sender*/, size_t offset, wchar_t /*ch*/, text::CharChangeKind kind) {
+    SyncReturn TextController::handleModelAfterChar(text::TextModel& /*sender*/, size_t offset, char16_t /*ch*/, text::CharChangeKind kind) {
         if (kind == text::CharChangeKind::Inserted) {
             adjustRunsForEdit(offset, 0, 1);
         } else {
@@ -2970,7 +2970,7 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
-    SyncReturn TextController::handleModelAfterRangeChanged(text::TextModel& /*sender*/, const text::TextRange& range, const std::wstring& replacement) {
+    SyncReturn TextController::handleModelAfterRangeChanged(text::TextModel& /*sender*/, const text::TextRange& range, const std::u16string& replacement) {
         adjustRunsForEdit(range.start(), range.length(), replacement.size());
         return SyncReturn::Handled;
     }
@@ -2994,7 +2994,7 @@ namespace newui {
         if (selection_.isEmpty() || traits_.isSecureTextEntry()) {
             return false;
         }
-        return ClipboardManager::setText(model().storage().substring(selection_.ranges()[0]), &owner_);
+        return ClipboardManager::setText(toWideString(model().storage().substring(selection_.ranges()[0])), &owner_);
     }
 
     bool TextController::cut() {
@@ -3009,17 +3009,18 @@ namespace newui {
     }
 
     bool TextController::paste() {
-        std::wstring pasted;
-        if (traits_.isReadOnly() || !ClipboardManager::getText(pasted) || pasted.empty()) {
+        std::wstring pastedWide;
+        if (traits_.isReadOnly() || !ClipboardManager::getText(pastedWide) || pastedWide.empty()) {
             return false;
         }
+        std::u16string pasted = fromWide(pastedWide);
         if (!multiline_) {
-            std::wstring flat;
+            std::u16string flat;
             for (std::size_t i = 0; i < pasted.size(); ++i) {
-                if (pasted[i] == L'\r' && i + 1 < pasted.size() && pasted[i + 1] == L'\n') {
+                if (pasted[i] == u'\r' && i + 1 < pasted.size() && pasted[i + 1] == u'\n') {
                     ++i;   // "\r\n" is one break
                 }
-                flat += (pasted[i] == L'\r' || pasted[i] == L'\n') ? L' ' : pasted[i];
+                flat += (pasted[i] == u'\r' || pasted[i] == u'\n') ? u' ' : pasted[i];
             }
             pasted = std::move(flat);
         }
@@ -3122,8 +3123,8 @@ namespace newui {
     }
 
     namespace {
-        bool isTextEditingWordChar(wchar_t ch) {
-            return std::iswalnum(static_cast<wint_t>(ch)) != 0 || ch == L'_';
+        bool isTextEditingWordChar(char16_t ch) {
+            return std::iswalnum(static_cast<wint_t>(ch)) != 0 || ch == u'_';
         }
     }
 
@@ -3263,13 +3264,13 @@ namespace newui {
     }
 
     SyncReturn TextController::handleKeyPress(std::uint32_t keyMask, int keyCharVal, int repeatCount, std::uint32_t VKeyCode) {
-        wchar_t ch = static_cast<wchar_t>(keyCharVal);
+        char16_t ch = static_cast<char16_t>(keyCharVal);
         // Control characters (Backspace/Tab/Enter/Escape/etc.) arrive
         // here too via WM_CHAR - handleKeyDown() (VKeyCode-driven) is
         // where those are actually handled, not this insertion path.
         // A tab is typed like any character in a multi-line control - it only arrives at all when
         // the owner wantsTabKey() (RootView moves focus on Tab otherwise).
-        if ((ch < 0x20 && !(ch == L'\t' && multiline_)) || ch == 0x7F) {
+        if ((ch < 0x20 && !(ch == u'\t' && multiline_)) || ch == 0x7F) {
             return SyncReturn::Ignored;
         }
 
@@ -3277,15 +3278,15 @@ namespace newui {
         if (!selection_.isEmpty()) {
             text::TextRange range = selection_.ranges()[0];
             clearSelection();
-            model().replace(range, std::wstring(1, ch));
+            model().replace(range, std::u16string(1, ch));
             insertAt = range.start() + 1;
         } else {
             insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
             const text::TextStorage& storage = model().storage();
-            if (overwriteMode_ && insertAt < storage.length() && storage.at(insertAt) != L'\n' && storage.at(insertAt) != L'\r') {
-                model().replace(text::TextRange(insertAt, 1), std::wstring(1, ch));
+            if (overwriteMode_ && insertAt < storage.length() && storage.at(insertAt) != u'\n' && storage.at(insertAt) != u'\r') {
+                model().replace(text::TextRange(insertAt, 1), std::u16string(1, ch));
             } else {
-                model().insert(insertAt, std::wstring(1, ch));
+                model().insert(insertAt, std::u16string(1, ch));
             }
             insertAt += 1;
         }
@@ -3412,11 +3413,11 @@ namespace newui {
                 if (!selection_.isEmpty()) {
                     text::TextRange range = selection_.ranges()[0];
                     clearSelection();
-                    model().replace(range, L"\n");
+                    model().replace(range, u"\n");
                     insertAt = range.start() + 1;
                 } else {
                     insertAt = caret_.position().isValid() ? caret_.position().offset() : model().length();
-                    model().insert(insertAt, L"\n");
+                    model().insert(insertAt, u"\n");
                     insertAt += 1;
                 }
                 caret_.setPosition(text::TextPosition(insertAt));
@@ -3427,7 +3428,7 @@ namespace newui {
         }
     }
 
-    SyncReturn TextController::handleModelBeforeChar(text::TextModel& sender, size_t offset, wchar_t ch, text::CharChangeKind kind, bool& canChange) {
+    SyncReturn TextController::handleModelBeforeChar(text::TextModel& sender, size_t offset, char16_t ch, text::CharChangeKind kind, bool& canChange) {
         if (traits_.isReadOnly()) {
             canChange = false;
             return SyncReturn::Handled;
@@ -3438,7 +3439,7 @@ namespace newui {
         return SyncReturn::Handled;
     }
 
-    SyncReturn TextController::handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::wstring& replacement, bool& canChange) {
+    SyncReturn TextController::handleModelBeforeRangeChanged(text::TextModel& sender, const text::TextRange& range, const std::u16string& replacement, bool& canChange) {
         if (traits_.isReadOnly()) {
             canChange = false;
             return SyncReturn::Handled;
@@ -3513,7 +3514,7 @@ namespace newui {
         }
         if (controller_->model().text().empty() && !placeholder_.empty()) {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
-                utf8ToWide(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
+                utf8ToUtf16(placeholder_), controller_->font(), UIColorManager::colorFor(UIColorRole::DisabledText),
                 0.0f, /*wordWrap=*/false);
         } else {
             renderer_.render(ctx, static_cast<int>(clientBounds.width()), static_cast<int>(clientBounds.height()),
