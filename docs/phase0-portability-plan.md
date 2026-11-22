@@ -184,7 +184,7 @@ After Step 4, Phase 1 of the main plan (NSWindow, NSView, present, RunLoop) star
 | 1.3 `RunLoop` incomplete | not started | | |
 | 1.4 Wide-path streams | done in working tree (`componentsettings.cpp`); Windows build+test pending | | |
 | 1.5 Path separators | `bundle.cpp`/`bundle.h` joins now use `/` (2 test expectations in `test_bundle.cpp` updated); `fontmanager.cpp` deliberately left (Windows registry code, replaced per platform in Step 4). Windows build+test pending | | |
-| 1.6 svgandme include | not started | | |
+| 1.6 svgandme include | done in working tree (`src/svgimage.cpp`); Apple Clang syntax check of `svgimage.cpp` now has 0 errors (4+ without the fix); Windows build pending | | |
 | 1.7 Type names | not started | | |
 | 1.8 Integer audit | not started | | |
 | 1.9 clang-cl (optional) | not started | | |

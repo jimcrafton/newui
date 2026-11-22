@@ -1,5 +1,9 @@
 #include "newui/svgimage.h"
 
+// svgandme's core_table.h uses std::cout without including <iostream>; MSVC gets
+// it transitively, Clang/libc++ does not. Kept here so the vendored tree stays pristine.
+#include <iostream>
+
 #include "svg.h"
 #include "render_blend2d.h"
 #include "svg_renderer.h"
