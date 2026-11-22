@@ -1254,7 +1254,7 @@ namespace sketch {
         auto* hex = dynamic_cast<newui::TextField*>(frame.rootView().findView("hexField"));
         expect(red != nullptr && hex != nullptr, "style panel controls found");
         if (red != nullptr && hex != nullptr) {
-            std::string shown(hex->text().begin(), hex->text().end());
+            std::string shown = newui::utf16ToUtf8(hex->text());
             expect(shown == document.object(0).fill().color().toHex(), "hex field shows the selected fill");
             std::size_t undoable = 0;
             while (document.undoStack().canUndo()) { document.undoStack().undo(); ++undoable; }
@@ -1302,7 +1302,7 @@ namespace sketch {
             expect(strokeWell != nullptr, "stroke well found");
             if (strokeWell != nullptr) {
                 strokeWell->onMouseDown(*strokeWell, newui::Point(5, 5), std::uint32_t(1), 0);
-                std::string nowShown(hex->text().begin(), hex->text().end());
+                std::string nowShown = newui::utf16ToUtf8(hex->text());
                 expect(nowShown == document.object(0).stroke().color().toHex(), "clicking the stroke well shows the stroke color");
                 auto* info = dynamic_cast<newui::Label*>(frame.rootView().findView("colorPanelHeaderInfo"));
                 if (info != nullptr) {
@@ -1414,7 +1414,7 @@ namespace sketch {
         mouse(2, view(200, 150));
         auto* offsetField = dynamic_cast<newui::TextField*>(frame.rootView().findView("stopOffsetField"));
         expect(canvas->selectedGradientStop() == 1, "the new stop is the canvas's selected stop");
-        expect(offsetField != nullptr && std::string(offsetField->text().begin(), offsetField->text().end()).compare(0, 2, "50") == 0, "the Color panel shows the stop selected on the canvas");
+        expect(offsetField != nullptr && newui::utf16ToUtf8(offsetField->text()).compare(0, 2, "50") == 0, "the Color panel shows the stop selected on the canvas");
         auto* stopBar = dynamic_cast<sketch::GradientBar*>(frame.rootView().findView("gradientBar"));
         if (stopBar != nullptr) {
             stopBar->setSelectedStop(2);

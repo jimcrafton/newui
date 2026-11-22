@@ -35,6 +35,7 @@
 #include "newui/layout.h"
 #include "newui/rootview.h"
 #include "newui/uicolormanager.h"
+#include "newui/utils.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
 

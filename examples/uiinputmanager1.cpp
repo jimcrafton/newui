@@ -66,6 +66,7 @@
 #include "newui/uiinputmanager.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
+#include "newui/utils.h"
 
 #include <any>
 #include <cstdio>

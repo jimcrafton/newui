@@ -1,6 +1,6 @@
 # macOS / iOS port: handoff
 
-Snapshot: 2026-11-21. Branch `macport` (tracks `origin/macport`), last commit `2fe1835 added initial porting plans`.
+Snapshot: 2026-11-22. Branch `macport`, last commit `271a0f4 phase 2.4 mac port`.
 Read this first when resuming. The detailed plans are:
 
 * [macos-ios-port-plan.md](macos-ios-port-plan.md): overall design, subsystem-by-subsystem, phased roadmap
@@ -38,21 +38,6 @@ Read this first when resuming. The detailed plans are:
 | reflectgen venv | **not created in the repo** (the spike used a scratch venv, since deleted with the wrapper). Create: `python3.13 -m venv tools/reflectgen/.venv` then `.venv/bin/pip install -r tools/reflectgen/requirements.txt` (`clang==21.1.7`) |
 | libclang | `LIBCLANG_PATH=/Applications/Xcode-26.6.0.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/libclang.dylib` |
 
-## Uncommitted changes in the working tree
-
-| File | Change |
-|---|---|
-| `src/graphics.cpp`, `src/bundle.cpp` | `_stricmp` → portable ASCII case-insensitive suffix compare (`std::equal` + `std::tolower`); added `<algorithm>`/`<cctype>` includes |
-| `include/newui/reflectionio.h` | `localtime_s` → `#ifdef _WIN32 localtime_s #else localtime_r`; comment updated |
-| `docs/macos-ios-port-plan.md` | moved into `docs/` (already committed); decisions section; Phase 0 link; reflectgen flags note |
-| `docs/phase0-portability-plan.md` | new: Phase 0 step-by-step plan |
-| `docs/macport-handoff.md` | this file |
-| `CLAUDE.md` | new: never commit, never push |
-
-The three source edits were checked only with a standalone Apple Clang test program (suffix match and date
-format behave correctly). **They have not been built on Windows.** First action when the user is at the Windows machine:
-build + `ctest`.
-
 ## What the spike established (2026-11-20/21)
 
 * **Win32 coupling:** with stubbed Win32 headers, only 32/75 public headers and 4/62 sources compile with
@@ -73,27 +58,73 @@ build + `ctest`.
 * **sizeof probe:** does not build on macOS (includes `reflection.h` → `utils.h` → `windows.h`, plus the same
   two Clang errors), contrary to its own header comment.
 
+## Uncommitted changes in the working tree
+
+Only this handoff file (and the untracked `CLAUDE.md`, the user's call). Step 2.4 was committed by the user as `271a0f4`;
+whether the examples/demos built on Windows was not confirmed to Claude (see Next actions).
+
+What 2.4 contained, for reference:
+
+* `ClipboardManager::setText/getText/textMimeData` and the drag-and-drop text API (`onProvideText`, `onTextDropped`,
+  `onTextDroppedAt`, `onTextDragOver`, `extractUnicodeText`, `TextDataObject`, `StartDragOperation`, `currentText_`,
+  `rootview.cpp`) use `std::u16string`. Mime names, format names and file paths stay `std::wstring`.
+* The temporary `toWideString`/`fromWide` bridges from 2.2 were removed from `controls.cpp`/`test_texthistory.cpp`
+  (the helpers stay in `utils.h`, `_WIN32` only, for the DirectWrite calls in `text.cpp`).
+* Examples and demos that still used wide text with `TextField` were converted: `clipboard1`, `dragdrop1`,
+  `uiinputmanager1`, `loadcoloreditor1`, `demos/manyrows`, `demos/sketch`. These are probably not in the user's default
+  Windows target, so **ask them to build all targets**, not only `newui_tests`.
+
+## What is done (all verified on Windows unless noted)
+
+Step 1.1-1.8 and 2.1-2.4 are done and committed (2.4's Windows verification of examples/demos unconfirmed). Notes worth remembering:
+
+* 1.2 needed more than the plan: forward declarations of `classinfo`, plus a `DependentOn<Tag, T>` alias in `reflection.h`
+  so Clang accepts member access on the still-incomplete `Class`/`Property`.
+* 1.7: `readableTypeName()` in `utils.h` (`__cxa_demangle` on Clang/GCC) underlies `demangleTypeName`, `extractNamespace`,
+  `qualifiedTypeName`, `automation.cpp typeName`.
+* 1.8 found two real bugs: `Property::readValue/writeValue` matched integer types by width typedef (broke `size_t`/`long`
+  on Apple), and `ObjectWriter::writeInt*` ignored `signedVal` (negative ints never round-tripped). Both fixed. Known,
+  left alone: `ClassReader` only has 32-bit `readInt()`; 64-bit values go through `double`.
+* 2.1 portable `utf8ToUtf16`/`utf16ToUtf8`; 2.2 text core on `char16_t`; 2.3 UxTheme class names are `std::string`
+  (converted to wide at `OpenThemeData`), dead `wstring` property branches removed.
+* 1.9 (optional `clang-cl` build) skipped: the user never said whether the Clang tools are installed.
+
 ## Where we are in Phase 0
 
 | Step | Status |
 |---|---|
-| 0 Baseline/tooling | Mac tooling done. **Windows baseline test count not yet recorded** (0.1) |
-| 1.1 CRT calls | done in working tree, unverified on Windows |
-| 1.2 `classinfo` / incomplete-type fixes in `reflection.h` | done in working tree, unverified on Windows; Apple Clang reports 0 errors in `reflection.h` (remaining errors are `windows.h`/`RunLoop`) |
-| 1.0 Portability sweep script | not started (the spike's method lives only in the scratchpad: stub `windows.h` + `clang++ -fsyntax-only` over every header and source) |
-| 1.2–1.9, 2, 3, 4 | not started |
+| 0.1 Windows baseline test count | never recorded (not needed so far: every step was verified by a green build + test run) |
+| 1.0 Portability sweep script `tools/portcheck/` | not started (method lives in the scratchpad: stub `windows.h` + `clang++ -fsyntax-only`) |
+| 1.1-1.8 | done, verified |
+| 1.9 `clang-cl` | skipped (optional) |
+| 2.1-2.3 | done, verified |
+| 2.4 clipboard/dragndrop to `u16string` | committed; confirm examples/demos build |
+| 2.5 final grep | audit done, no code change needed (all hits are Win32-boundary files); Windows hand-test of emoji/CJK pending |
+| 3 Win32 out of public headers | not started |
+| 4 first Mac build | not started |
 
 ## Next actions, in order
 
-1. User: build + `ctest` on Windows with the working-tree changes; record the passing-test count (0.1); then
-   commit what they want (`CLAUDE.md` included or not is their call).
-2. ~~Step 1.2~~ done (see table).
-3. Step 1.3: fix `RunLoop` being incomplete at `delegate.h:338` (watch the `runloop.h` ↔ `delegate.h` include cycle).
-4. Steps 1.4–1.8 (wide-path streams, separators, svgandme include, type-name demangling, integer round-trip test).
-5. Step 1.0 sweep script into `tools/portcheck/`, so each step shows errors going down.
-6. Then Step 2 (UTF-16), Step 3 (Win32 out of public headers), Step 4 (first Mac build).
+1. Ask the user to confirm all targets (examples and demos too) build after 2.4; fix any errors they paste.
+2. Step 2.5: `grep -rnE 'wstring|wchar_t|\bL"' include src`; every remaining hit must be in a file that calls Win32 APIs
+   (`uicolormanager`, `dialogs`, `filewatcher`, `clipboardmgr`/`dragndrop` internals, `automation` pipe code, `text.cpp`
+   DirectWrite literals, `viewstyle.cpp` `OpenThemeData`). Hand-test: type/select/copy/paste emoji and CJK in a TextField.
+   Update the plan's status table.
+3. Decide on 1.0 (sweep script) and 1.9; then Step 3 (the big refactor: `windows.h` out of public headers), then Step 4.
+
+## Working method that has worked (reuse it)
+
+* Make the change, then check what can be checked on the Mac with Apple Clang `-fsyntax-only` and the stub `windows.h`
+  (scratchpad `/tmp/stub2/windows.h` defines `WORD UINT HWND WPARAM LPARAM DWORD`; recreate if gone). In shell scripts,
+  **quote include paths: the repo path contains a space** (`/Volumes/Music Data/...`); use a bash array.
+* Pure-C++ pieces can be built and run natively on the Mac: `test_piecetree.cpp` + `piecetree.cpp` + the UTF-16 helpers
+  + `3rdparty/googletest/googletest/src/gtest-all.cc`/`gtest_main.cc` (13 tests pass).
+* MSVC stops at the first failing file, so expect the user to paste errors one file at a time. Blanket `L"..."` -> `u"..."`
+  conversions caught DirectWrite literals once (`test_text.cpp`): when converting, always exclude `CreateTextFormat`,
+  `CreateTextLayout`, `CreateWindow` and similar Win32 calls.
+* Say plainly what was and wasn't verified; the user runs Windows builds and reports back ("works on windows, next step").
 
 ## Open items
 
-* None of the design decisions are open. Open work is the step list above.
+* None of the design decisions are open.
 * Not yet done: put CMake on `PATH`; create the repo venv; add `CLAUDE.md` to git (user's call).

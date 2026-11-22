@@ -74,6 +74,7 @@
 #include "newui/uicolormanager.h"
 #include "newui/view.h"
 #include "newui/viewstyle.h"
+#include "newui/utils.h"
 
 #include <cstdio>
 #include <iostream>
