@@ -33,6 +33,14 @@ namespace newui {
 	std::wstring utf8ToWide(const std::string& text);
 	std::string wideToUtf8(const std::wstring& text);
 
+	// Portable UTF-8 <-> UTF-16 (no platform API, same results everywhere). These are what
+	// the text code moves to (Step 2 of docs/phase0-portability-plan.md): std::wstring is
+	// 16-bit on Windows but 32-bit on Apple, std::u16string is 16-bit everywhere.
+	// Malformed input never fails: each maximal invalid subsequence (UTF-8) or unpaired
+	// surrogate (UTF-16) becomes U+FFFD, as the Unicode standard recommends.
+	std::u16string utf8ToUtf16(const std::string& text);
+	std::string utf16ToUtf8(const std::u16string& text);
+
 	// A path with '\' turned into '/' and any trailing '/' dropped (a lone "/" stays), so paths
 	// from different sources compare and join the same way.
 	std::string normalizePath(std::string path);
