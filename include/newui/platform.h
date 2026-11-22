@@ -32,14 +32,12 @@
 
 namespace newui {
 
-    // Opaque native handles. They are pointers to incomplete tag types, so public headers can pass them
-    // around without seeing the platform SDK. Platform code converts at the boundary:
+    // Opaque native window/view handle. A plain void* so public headers can pass it around without seeing
+    // the platform SDK. Platform code converts at the boundary:
     //   Windows: HWND        (see newui/win32/nativehandles.h)
-    //   macOS:   NSWindow* / NSView*
-    //   iOS:     UIWindow*  / UIView*
-    struct NativeWindowTag;
-    struct NativeViewTag;
-    using NativeWindow = NativeWindowTag*;
-    using NativeView = NativeViewTag*;
+    //   macOS:   NSWindow* / NSView*  (bridge with (__bridge void*))
+    //   iOS:     UIWindow* / UIView*
+    // One type covers both windows and views; the compiler will not catch mixing them up.
+    using NativeWindowHandle = void*;
 
 } // namespace newui

@@ -45,8 +45,8 @@ namespace newui {
 
     }
 
-    DisplayMetrics DisplayMetrics::forWindow(NativeView view) {
-        HWND hwnd = win32::toHWND(view);
+    DisplayMetrics DisplayMetrics::forWindow(NativeWindowHandle handle) {
+        HWND hwnd = win32::toHWND(handle);
         unsigned dpi = kBaselineDpi;
         if (hwnd != nullptr) {
             UINT hwndDpi = ::GetDpiForWindow(hwnd);

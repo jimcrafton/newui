@@ -40,7 +40,7 @@ namespace newui {
         // DPI's scaled point size, measured for the Dlu base metrics. hwnd
         // may be nullptr (e.g. a RootView with no HWND yet) - treated the
         // same as forDpi(96).
-        static DisplayMetrics forWindow(NativeView view);
+        static DisplayMetrics forWindow(NativeWindowHandle handle);
 
         // Synthesizes metrics for a given DPI without touching a real
         // window - for unit tests (forDpi(192) to check 2x scaling math)

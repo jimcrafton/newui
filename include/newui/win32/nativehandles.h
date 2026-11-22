@@ -14,10 +14,8 @@
 namespace newui {
     namespace win32 {
 
-        inline NativeWindow toNativeWindow(HWND hwnd) { return reinterpret_cast<NativeWindow>(hwnd); }
-        inline NativeView toNativeView(HWND hwnd) { return reinterpret_cast<NativeView>(hwnd); }
-        inline HWND toHWND(NativeWindow window) { return reinterpret_cast<HWND>(window); }
-        inline HWND toHWND(NativeView view) { return reinterpret_cast<HWND>(view); }
+        inline NativeWindowHandle toNativeHandle(HWND hwnd) { return static_cast<NativeWindowHandle>(hwnd); }
+        inline HWND toHWND(NativeWindowHandle handle) { return static_cast<HWND>(handle); }
 
     } // namespace win32
 } // namespace newui
