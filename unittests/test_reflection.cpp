@@ -709,6 +709,17 @@ TEST(Reflection, ClassLookupByFullyQualifiedName) {
     EXPECT_TRUE(instance.has_value());
 }
 
+// The type-name helpers in utils.h must give identical strings on every
+// compiler (MSVC's name() is readable, Clang/GCC's is mangled).
+TEST(Reflection, TypeNameHelpers) {
+    EXPECT_EQ(newui::readableTypeName(typeid(newui::Rect)), "newui::Rect");
+    EXPECT_EQ(newui::demangleTypeName(typeid(newui::Rect)), "Rect");
+    EXPECT_EQ(newui::extractNamespace(typeid(newui::Rect)), "newui::");
+    EXPECT_EQ(newui::readableTypeName(typeid(newui::Orientation)), "newui::Orientation");
+    EXPECT_EQ(newui::extractNamespace(typeid(int)), "");
+    EXPECT_EQ(newui::demangleTypeName(typeid(int)), "int");
+}
+
 // Same idea as ClassLookupByFullyQualifiedName above, for Enum -
 // EnumBuilder<T>'s constructor derives namespaceName() from typeid(T)
 // directly (reflection.h), independent of the bare `name` string it's

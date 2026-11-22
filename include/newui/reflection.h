@@ -273,18 +273,10 @@ namespace newui::reflection {
             friend constexpr auto accessThiefGet(Tag) { return Member; }
         };
 
-        // typeid's name with only MSVC's leading "class "/"struct "/"enum "/"union " removed - the
-        // namespace stays (unlike demangleTypeName(), which drops it).
+        // typeid's name with the namespace kept (unlike demangleTypeName(), which drops it):
+        // "newui::Size" on every compiler.
         inline std::string qualifiedTypeName(const std::type_info& info) {
-            std::string name = info.name();
-            for (const char* prefix : { "class ", "struct ", "enum ", "union " }) {
-                const std::size_t length = std::char_traits<char>::length(prefix);
-                if (name.compare(0, length, prefix) == 0) {
-                    name.erase(0, length);
-                    break;
-                }
-            }
-            return name;
+            return readableTypeName(info);
         }
 
         // T as C++ source spells it, minus references: "const newui::Size", "int*", "const View* const".

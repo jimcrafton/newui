@@ -3,6 +3,12 @@
 #include "newui/keyboard_constants.h"
 #include "newui/mouse_constants.h"
 #include <bitset>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#if defined(__GNUC__) || defined(__clang__)
+#include <cxxabi.h>
+#endif
 #include <KnownFolders.h>
 #include <ShlObj.h>
 
@@ -102,15 +108,19 @@ namespace newui {
 		return normalizePath(wideToUtf8(file));
 	}
 
-	std::string extractNamespace(const std::type_info& info)
+	std::string readableTypeName(const std::type_info& info)
 	{
-		std::string result = "";
-
 		std::string name = info.name();
 
-		// Same MSVC "class "/"struct "/"enum "/"union " keyword prefix
-		// demangleTypeName() (below) strips - without this, the namespace
-		// would come back as e.g. "class newui::" instead of "newui::".
+#if defined(__GNUC__) || defined(__clang__)
+		int status = 0;
+		std::unique_ptr<char, void (*)(void*)> demangled(abi::__cxa_demangle(name.c_str(), nullptr, nullptr, &status), std::free);
+		if (status == 0 && demangled) {
+			name = demangled.get();
+		}
+#endif
+
+		// MSVC's "class "/"struct "/"enum "/"union " keyword prefix.
 		static const char* kPrefixes[] = { "class ", "struct ", "enum ", "union " };
 		for (const char* prefix : kPrefixes) {
 			size_t len = std::strlen(prefix);
@@ -119,31 +129,22 @@ namespace newui {
 				break;
 			}
 		}
+		return name;
+	}
 
+	std::string extractNamespace(const std::type_info& info)
+	{
+		const std::string name = readableTypeName(info);
 		size_t pos = name.rfind("::");
-		if (pos != std::string::npos) {
-			result = name.substr(0, pos + 2);
-		}
-		return result;
+		return pos != std::string::npos ? name.substr(0, pos + 2) : std::string();
 	}
 
 	std::string demangleTypeName(const std::type_info& info) {
-		std::string name = info.name();
-
-		static const char* kPrefixes[] = { "class ", "struct ", "enum ", "union " };
-		for (const char* prefix : kPrefixes) {
-			size_t len = std::strlen(prefix);
-			if (name.compare(0, len, prefix) == 0) {
-				name.erase(0, len);
-				break;
-			}
-		}
-
+		std::string name = readableTypeName(info);
 		size_t pos = name.rfind("::");
 		if (pos != std::string::npos) {
 			name.erase(0, pos + 2);
 		}
-
 		return name;
 	}
 

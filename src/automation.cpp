@@ -161,11 +161,7 @@ View* findNamed(const std::string& name) {
 }
 
 std::string typeName(const View& view) {
-    std::string name = typeid(view).name();   // "class newui::TextControl"
-    size_t colons = name.rfind("::");
-    size_t space = name.rfind(' ');
-    size_t start = colons != std::string::npos ? colons + 2 : (space != std::string::npos ? space + 1 : 0);
-    return name.substr(start);
+    return demangleTypeName(typeid(view));   // "TextControl"
 }
 
 std::string findViewReply(const Request& request) {

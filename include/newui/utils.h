@@ -13,13 +13,16 @@
 #include <typeinfo>
 
 namespace newui {
-	// Strips MSVC's typeid(...).name() decoration down to a bare class
-	// name: "class newui::ButtonStyle" -> "ButtonStyle" ("class "/"struct "/
-	// "enum "/"union " prefix stripped, then everything up to the last "::"
-	// dropped). MSVC only (this project's sole toolchain) - unlike
-	// Itanium-ABI compilers (GCC/Clang), MSVC's name() is already
-	// human-readable, not mangled, so this needs no abi::__cxa_demangle
-	// equivalent.
+	// typeid(...).name() as readable C++ text with the namespace kept:
+	// "newui::Size". MSVC's name() is already readable but carries a
+	// "class "/"struct "/"enum "/"union " prefix, which is stripped; on
+	// Itanium-ABI compilers (Clang/GCC) name() is mangled ("N5newui4SizeE"), so it
+	// goes through abi::__cxa_demangle first. All the helpers below build on this,
+	// so they return the same strings on every platform.
+	std::string readableTypeName(const std::type_info& info);
+
+	// "class newui::ButtonStyle" -> "ButtonStyle": readableTypeName() with
+	// everything up to the last "::" dropped.
 	std::string demangleTypeName(const std::type_info& info);
 	std::string extractNamespace(const std::type_info& info);
 
