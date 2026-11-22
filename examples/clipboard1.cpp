@@ -27,6 +27,7 @@
 //   click "<- Paste Image" here to bring it back the other way.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/clipboardmgr.h"
 #include "newui/color.h"
@@ -52,7 +53,7 @@ namespace {
 newui::Frame* g_demoFrame = nullptr;
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     fflush(stdout);
     return newui::SyncReturn::Handled;
 }

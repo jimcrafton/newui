@@ -2,6 +2,7 @@
 
 #define _CRTDBG_MAP_ALLOC
 #include <stdlib.h>
+#include "newui/win32/nativehandles.h"
 #include <crtdbg.h>
 
 
@@ -18,7 +19,7 @@
 
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-	printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+	printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
 	return newui::SyncReturn::Handled;
 }
 

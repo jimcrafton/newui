@@ -1,4 +1,5 @@
 #include "newui/controls.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/clipboardmgr.h"
@@ -5310,8 +5311,8 @@ namespace newui {
         // own destructor sees a live frameHandle_ next to a live
         // rootView_" reasoning as Dialog::~Dialog() (dialogs.cpp) -
         // Frame::~Frame() throws otherwise.
-        if (popup_ != nullptr && popup_->frameHandle() != nullptr) {
-            ::DestroyWindow(popup_->frameHandle());
+        if (popup_ != nullptr && newui::win32::toHWND(popup_->frameHandle()) != nullptr) {
+            ::DestroyWindow(newui::win32::toHWND(popup_->frameHandle()));
         }
     }
 
@@ -5441,7 +5442,7 @@ namespace newui {
         }
 
         RootView* root = rootView();
-        if (root == nullptr || root->windowHandle() == nullptr) {
+        if (root == nullptr || newui::win32::toHWND(root->windowHandle()) == nullptr) {
             return;
         }
         // The popup's owner has to be the real top-level window, not
@@ -5451,9 +5452,9 @@ namespace newui {
         // A Frame-owned RootView's owner is its Frame. A standalone RootView (no Application/Frame, e.g. one hosted
         // in another process's window - see RootView's HWND-parent constructor) has no Frame, so fall back to the
         // top-level window its own HWND lives under; returning here instead meant the popup silently never opened.
-        HWND ownerHwnd = root->getFrame() != nullptr ? root->getFrame()->frameHandle() : nullptr;
+        HWND ownerHwnd = root->getFrame() != nullptr ? newui::win32::toHWND(root->getFrame()->frameHandle()) : nullptr;
         if (ownerHwnd == nullptr) {
-            ownerHwnd = ::GetAncestor(root->windowHandle(), GA_ROOT);
+            ownerHwnd = ::GetAncestor(newui::win32::toHWND(root->windowHandle()), GA_ROOT);
         }
         if (ownerHwnd == nullptr) {
             return;
@@ -5608,8 +5609,8 @@ namespace newui {
         RootView* root = rootView();
         if (root != nullptr) {
             root->setFocusedSubView(this);
-            if (root->windowHandle() != nullptr) {
-                ::SetFocus(root->windowHandle());
+            if (newui::win32::toHWND(root->windowHandle()) != nullptr) {
+                ::SetFocus(newui::win32::toHWND(root->windowHandle()));
             }
         }
 

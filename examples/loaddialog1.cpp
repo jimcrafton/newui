@@ -14,6 +14,7 @@
 // exists to provide.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/controls.h"
@@ -79,14 +80,14 @@ int main() {
     okButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
         [&frame](newui::Control&) -> newui::SyncReturn {
             printf("OK pressed.\n");
-            ::PostMessage(frame.frameHandle(), WM_CLOSE, 0, 0);
+            ::PostMessage(newui::win32::toHWND(frame.frameHandle()), WM_CLOSE, 0, 0);
             return newui::SyncReturn::Handled;
         }));
 
     cancelButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
         [&frame](newui::Control&) -> newui::SyncReturn {
             printf("Cancel pressed.\n");
-            ::PostMessage(frame.frameHandle(), WM_CLOSE, 0, 0);
+            ::PostMessage(newui::win32::toHWND(frame.frameHandle()), WM_CLOSE, 0, 0);
             return newui::SyncReturn::Handled;
         }));
 

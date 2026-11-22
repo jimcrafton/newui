@@ -1,4 +1,5 @@
 #include "newui/toolframe.h"
+#include "newui/win32/nativehandles.h"
 
 #include "newui/application.h"
 
@@ -10,8 +11,8 @@ namespace newui {
     // As Dialog::~Dialog and DropDownList do: Frame's destructor throws when its window is still alive, so take it down here, while
     // handleMessage() still resolves to this class (its WM_DESTROY does not quit the application).
     ToolFrame::~ToolFrame() {
-        if (frameHandle() != nullptr) {
-            ::DestroyWindow(frameHandle());
+        if (newui::win32::toHWND(frameHandle()) != nullptr) {
+            ::DestroyWindow(newui::win32::toHWND(frameHandle()));
         }
     }
 
@@ -40,7 +41,7 @@ namespace newui {
             Application::instance().instanceHandle(),
             this
         );
-        if (!hwnd || hwnd != frameHandle()) {
+        if (!hwnd || hwnd != newui::win32::toHWND(frameHandle())) {
             return false;
         }
         return true;
@@ -48,18 +49,18 @@ namespace newui {
 
     void ToolFrame::setActivatesOnClick(bool activates) {
         activatesOnClick_ = activates;
-        if (frameHandle() == nullptr) {
+        if (newui::win32::toHWND(frameHandle()) == nullptr) {
             return;
         }
-        LONG_PTR style = ::GetWindowLongPtr(frameHandle(), GWL_EXSTYLE);
+        LONG_PTR style = ::GetWindowLongPtr(newui::win32::toHWND(frameHandle()), GWL_EXSTYLE);
         style = activates ? (style & ~LONG_PTR(WS_EX_NOACTIVATE)) : (style | WS_EX_NOACTIVATE);
-        ::SetWindowLongPtr(frameHandle(), GWL_EXSTYLE, style);
+        ::SetWindowLongPtr(newui::win32::toHWND(frameHandle()), GWL_EXSTYLE, style);
     }
 
     void ToolFrame::moveTo(const Rect& screenBounds) {
         setBounds(screenBounds);
-        if (frameHandle() != nullptr) {
-            ::SetWindowPos(frameHandle(), NULL,
+        if (newui::win32::toHWND(frameHandle()) != nullptr) {
+            ::SetWindowPos(newui::win32::toHWND(frameHandle()), NULL,
                 int(screenBounds.left()), int(screenBounds.top()),
                 int(screenBounds.size().width), int(screenBounds.size().height),
                 SWP_NOZORDER | SWP_NOACTIVATE);
@@ -67,21 +68,21 @@ namespace newui {
     }
 
     void ToolFrame::show() {
-        if (frameHandle() == nullptr) {
+        if (newui::win32::toHWND(frameHandle()) == nullptr) {
             return;
         }
-        ::ShowWindow(frameHandle(), SW_SHOWNOACTIVATE);
-        ::RedrawWindow(frameHandle(), NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
+        ::ShowWindow(newui::win32::toHWND(frameHandle()), SW_SHOWNOACTIVATE);
+        ::RedrawWindow(newui::win32::toHWND(frameHandle()), NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
     }
 
     void ToolFrame::hide() {
-        if (frameHandle() != nullptr) {
-            ::ShowWindow(frameHandle(), SW_HIDE);
+        if (newui::win32::toHWND(frameHandle()) != nullptr) {
+            ::ShowWindow(newui::win32::toHWND(frameHandle()), SW_HIDE);
         }
     }
 
     bool ToolFrame::isVisible() const {
-        return frameHandle() != nullptr && ::IsWindowVisible(frameHandle()) != FALSE;
+        return newui::win32::toHWND(frameHandle()) != nullptr && ::IsWindowVisible(newui::win32::toHWND(frameHandle())) != FALSE;
     }
 
     bool ToolFrame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {

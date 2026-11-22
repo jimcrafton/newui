@@ -94,7 +94,7 @@ TEST(Dialog, ChildTreeSurvivesWindowDestruction) {
 
     EXPECT_TRUE(dialog.isClosed());
     EXPECT_EQ(dialog.dialogHandle(), nullptr);
-    EXPECT_EQ(dialog.rootView().windowHandle(), nullptr);
+    EXPECT_EQ(newui::win32::toHWND(dialog.rootView().windowHandle()), nullptr);
     ASSERT_EQ(dialog.rootView().childViews().size(), 1u);
     EXPECT_EQ(dialog.rootView().childViews()[0], child);
     EXPECT_FLOAT_EQ(child->bounds().size().width, 30.0f);  // still live, readable memory

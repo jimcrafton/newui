@@ -1,4 +1,5 @@
 #include "manyrowscontroller.h"
+#include "newui/win32/nativehandles.h"
 
 #include "io/formatregistry.h"
 
@@ -253,7 +254,7 @@ namespace manyrows {
 
     newui::UnsavedChangesChoice ManyRowsController::askUnsavedChanges(newui::Document& document) {
         std::string name = document.hasFilePath() ? std::filesystem::path(newui::utf8ToWide(document.filePath())).filename().string() : untitledName_;
-        newui::DialogResult answer = newui::Dialog::showMessageBox(frame_.frameHandle(), "Save changes to " + name + "?", "manyrows",
+        newui::DialogResult answer = newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()), "Save changes to " + name + "?", "manyrows",
             newui::MessageBoxButtons::YesNoCancel, newui::MessageBoxIcon::Question);
         return answer == newui::DialogResult::Yes ? newui::UnsavedChangesChoice::Save
             : answer == newui::DialogResult::No ? newui::UnsavedChangesChoice::Discard
@@ -269,7 +270,7 @@ namespace manyrows {
             options.defaultFileName = current.stem().string() + ".csv";   // an opened .xls is saved as CSV
         }
         std::string path;
-        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showSaveFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         return path;
     }
 
@@ -277,7 +278,7 @@ namespace manyrows {
         newui::FileDialogOptions options = fileOptions(false);
         options.title = "Open";
         std::string path;
-        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showOpenFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         return path;
     }
 
@@ -295,7 +296,7 @@ namespace manyrows {
             errorReporter_(message);
             return;
         }
-        newui::Dialog::showMessageBox(frame_.frameHandle(), message, "manyrows", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
+        newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()), message, "manyrows", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
     }
 
 }

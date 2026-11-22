@@ -25,6 +25,7 @@
 // popup is open.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/controls.h"
@@ -143,7 +144,7 @@ namespace {
     }
 
     newui::SyncReturn FrameClosed(newui::Frame& frame) {
-        printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+        printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
         return newui::SyncReturn::Handled;
     }
 
@@ -181,7 +182,7 @@ int main() {
     svgButton->setDesiredSize(newui::Size(0.0f, 28.0f));
     svgButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
         [&frame](newui::Control&) -> newui::SyncReturn {
-            ShowSvgPopup(frame.frameHandle());
+            ShowSvgPopup(newui::win32::toHWND(frame.frameHandle()));
             return newui::SyncReturn::Handled;
         }));
     root.addChild(svgButton);
@@ -192,7 +193,7 @@ int main() {
     shapeButton->setDesiredSize(newui::Size(0.0f, 28.0f));
     shapeButton->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(
         [&frame](newui::Control&) -> newui::SyncReturn {
-            ShowShapePopup(frame.frameHandle());
+            ShowShapePopup(newui::win32::toHWND(frame.frameHandle()));
             return newui::SyncReturn::Handled;
         }));
     root.addChild(shapeButton);

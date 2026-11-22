@@ -24,6 +24,7 @@
 // file's own HelpSlideState/SyncHelpSlide()/main() for the setup.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/animation.h"
 #include "newui/application.h"
 #include "newui/color.h"
@@ -210,7 +211,7 @@ newui::SyncReturn SyncHelpSlide(newui::AnimationManager&, std::uint64_t) {
 }
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
 
     // Real end-to-end proof of this session's Animation-persistence work
     // (HANDOFF.md) - a throwaway Animation targeting the real, reflected

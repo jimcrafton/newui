@@ -9,6 +9,7 @@
 // SV blend / checkerboard alpha this format has no equivalent for.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/controls.h"
@@ -81,7 +82,7 @@ int main() {
 
     auto closeDialog = [&frame](const char* which) {
         printf("%s pressed.\n", which);
-        ::PostMessage(frame.frameHandle(), WM_CLOSE, 0, 0);
+        ::PostMessage(newui::win32::toHWND(frame.frameHandle()), WM_CLOSE, 0, 0);
         return newui::SyncReturn::Handled;
     };
     closeBtn->onClick.add(std::function<newui::SyncReturn(newui::Control&)>(

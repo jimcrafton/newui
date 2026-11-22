@@ -21,6 +21,7 @@
 //      scalar like this anyway.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/color.h"
 #include "newui/controls.h"
@@ -44,7 +45,7 @@
 
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     return newui::SyncReturn::Handled;
 }
 
@@ -175,7 +176,7 @@ int main() {
 
             newui::Dialog dlg;
 			dlg.setBounds(newui::Rect(0, 0, 400, 300));
-            dlg.showModal(frame.frameHandle());
+            dlg.showModal(newui::win32::toHWND(frame.frameHandle()));
 
             return newui::SyncReturn::Handled;
         }));

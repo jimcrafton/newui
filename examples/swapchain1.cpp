@@ -8,6 +8,7 @@
 // swap chain's back buffer -> Present1().
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/frame.h"
 #include "newui/rootview.h"
@@ -190,7 +191,7 @@ int main() {
     root.style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
     root.onCreated += [](newui::View& v) {
-        HWND hwnd = static_cast<newui::RootView&>(v).windowHandle();
+        HWND hwnd = newui::win32::toHWND(static_cast<newui::RootView&>(v).windowHandle());
 
         // bounds() can still be 0x0 here (a RootView's child HWND only gets real bounds on its first
         // WM_SIZE), so ask the HWND itself.

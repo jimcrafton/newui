@@ -8,6 +8,7 @@
 // Model::size()/TreeModel::childCount().
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/controls.h"
 #include "newui/frame.h"
@@ -41,7 +42,7 @@
 extern void registerReflectionData();
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     return newui::SyncReturn::Handled;
 }
 

@@ -151,7 +151,7 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
     }
 
     newui::RootView* root = button.rootView();
-    if (root == nullptr || root->windowHandle() == nullptr) {
+    if (root == nullptr || newui::win32::toHWND(root->windowHandle()) == nullptr) {
         return newui::SyncReturn::Ignored;
     }
 
@@ -162,7 +162,7 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
     // RootView's HWND here left those unanswered, so the item never got a
     // real size or a paint - it just collapsed to a blank cell.
     newui::Frame* frame = root->getFrame();
-    if (frame == nullptr || frame->frameHandle() == nullptr) {
+    if (frame == nullptr || newui::win32::toHWND(frame->frameHandle()) == nullptr) {
         return newui::SyncReturn::Ignored;
     }
 
@@ -170,7 +170,7 @@ newui::SyncReturn MenuBarButtonClicked(newui::View& sender, const newui::Point&,
         root->accumulatedOffset(&button) + newui::Point(0.0f, button.bounds().size().height));
 
     newui::ContextMenu popup;
-    popup.show(frame->frameHandle(), *button.menuItem, int(screenPt.x), int(screenPt.y));
+    popup.show(newui::win32::toHWND(frame->frameHandle()), *button.menuItem, int(screenPt.x), int(screenPt.y));
     return newui::SyncReturn::Handled;
 }
 
@@ -353,7 +353,7 @@ void ContextMenu::buildNativeMenu(MenuItem& parentItem) {
 }
 
 bool ContextMenu::show(NativeWindowHandle ownerNative, MenuItem& parentItem, int screenX, int screenY) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     buildNativeMenu(parentItem);
 
     // Opts owner into real native dark chrome (uicolormanager.h) right

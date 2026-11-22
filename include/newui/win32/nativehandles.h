@@ -23,5 +23,8 @@ namespace newui {
         inline NativeMenuHandle toNativeMenu(HMENU menu) { return static_cast<NativeMenuHandle>(menu); }
         inline HMENU toHMENU(NativeMenuHandle handle) { return static_cast<HMENU>(handle); }
 
+        inline NativeInstanceHandle toNativeInstance(HINSTANCE instance) { return static_cast<NativeInstanceHandle>(instance); }
+        inline HINSTANCE toHINSTANCE(NativeInstanceHandle handle) { return static_cast<HINSTANCE>(handle); }
+
     } // namespace win32
 } // namespace newui

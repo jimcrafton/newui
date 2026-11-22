@@ -115,6 +115,11 @@ take/return `NativeWindowHandle`; `ContextMenu::show`, `handle()`, `MenuItem::ow
 (`toNativeMenu/toHMENU`); tests updated. Still to do: `MenuItem::bitmap()` (HBITMAP) check, `PopupTool`/`CalloutTool`
 (their `HWND`+`HINSTANCE` feed the `RootView` constructor, so do with slice 3), `ClipboardScope` (3.5, detail namespace),
 slice 3 (Frame/RootView accessors).
+Slice 2a verified on Windows. Slice 3 in tree, Windows build pending: `Frame::frameHandle()`/`RootView::windowHandle()` return
+`NativeWindowHandle`; `RootView(NativeWindowHandle, NativeInstanceHandle, ...)`, `PopupTool`/`CalloutTool` ctors likewise
+(new `NativeInstanceHandle`, `toNativeInstance/toHINSTANCE`). Every call site in src/examples/demos/unittests was wrapped with
+`newui::win32::toHWND(...)` by script (harmless where the callee takes a NativeWindowHandle). Private members (`frameHandle_`,
+`viewHwnd_`, `externalParentHwnd_`, ...), `getTarget(HWND)`, `WndProc` and `Application::instanceHandle()` stay Win32 until 3.6.
 
 ## Next actions, in order
 

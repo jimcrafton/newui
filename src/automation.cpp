@@ -1,4 +1,5 @@
 #include "newui/automation.h"
+#include "newui/win32/nativehandles.h"
 
 #include "newui/controls.h"
 #include "newui/menus.h"
@@ -185,7 +186,7 @@ std::string focusedReply(const Request& request) {
         if (focused == nullptr) {
             continue;
         }
-        HWND window = root->windowHandle();
+        HWND window = newui::win32::toHWND(root->windowHandle());
         bool inForeground = window != nullptr && (window == foreground || ::GetAncestor(window, GA_ROOT) == foreground);
         if (found == nullptr || inForeground) {
             found = focused;

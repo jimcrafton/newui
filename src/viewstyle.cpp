@@ -5,6 +5,7 @@
 
 
 #include "newui/viewstyle.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/view.h"
 #include "newui/rootview.h"
 #include "newui/color.h"
@@ -1305,7 +1306,7 @@ namespace newui {
 		}
 
 		HWND hwnd = (view() != nullptr && view()->rootView() != nullptr)
-			? view()->rootView()->windowHandle() : nullptr;
+			? newui::win32::toHWND(view()->rootView()->windowHandle()) : nullptr;
 		if (hwnd == nullptr) {
 			return;  // not attached to a live (initialize()'d) window yet
 		}

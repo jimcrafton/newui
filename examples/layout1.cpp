@@ -26,6 +26,7 @@
 // itself is the only thing being demonstrated.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/frame.h"
 #include "newui/rootview.h"
@@ -37,7 +38,7 @@
 #include <memory>
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     return newui::SyncReturn::Handled;
 }
 

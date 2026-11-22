@@ -134,7 +134,7 @@ public:
 	PosChangedDelegate onPosChanged;
 
 	//@reflect ignore=true
-	HWND frameHandle() const {
+	NativeWindowHandle frameHandle() const {
 		return frameHandle_;
 	}
 

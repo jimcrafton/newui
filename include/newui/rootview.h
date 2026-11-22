@@ -74,7 +74,7 @@ namespace newui {
         // the safe, tested case (MenuBar's own popup code, Bundle's
         // Frame-based loadRootView() overload) - both already null-check
         // it.
-        RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name);
+        RootView(NativeWindowHandle externalParentHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name);
 
         virtual ~RootView();
 
@@ -359,7 +359,7 @@ namespace newui {
         // to talk to a real Win32 API against this window directly - e.g.
         // ThemedViewStyle (viewstyle.h) opening an HTHEME via
         // OpenThemeData(), which requires a real HWND.
-        HWND windowHandle() const {
+        NativeWindowHandle windowHandle() const {
             return viewHwnd_;
         }
 

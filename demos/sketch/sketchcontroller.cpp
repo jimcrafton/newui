@@ -1,4 +1,5 @@
 #include "sketchcontroller.h"
+#include "newui/win32/nativehandles.h"
 
 #include "pdfexport.h"
 #include "tracedialog.h"
@@ -170,7 +171,7 @@ namespace sketch {
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".png";
         std::string path;
-        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showSaveFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         if (path.empty()) {
             return false;
         }
@@ -190,7 +191,7 @@ namespace sketch {
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".pdf";
         std::string path;
-        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showSaveFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         if (path.empty()) {
             return false;
         }
@@ -211,7 +212,7 @@ namespace sketch {
         std::string stem = document_.hasFilePath() ? std::filesystem::path(document_.filePath()).stem().string() : untitledName_;
         options.defaultFileName = stem + ".png";
         std::string path;
-        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showSaveFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         if (path.empty()) {
             return false;
         }
@@ -232,7 +233,7 @@ namespace sketch {
         options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp"});
         options.filters.push_back({"All Files", "*.*"});
         std::string path;
-        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showOpenFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         if (path.empty()) {
             return false;
         }
@@ -250,7 +251,7 @@ namespace sketch {
         options.filters.push_back({"Pictures", "*.png;*.jpg;*.jpeg;*.bmp;*.qoi"});
         options.filters.push_back({"All Files", "*.*"});
         std::string path;
-        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showOpenFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         if (path.empty()) {
             return false;
         }
@@ -345,7 +346,7 @@ namespace sketch {
 
     newui::UnsavedChangesChoice SketchDocumentController::askUnsavedChanges(newui::Document& document) {
         std::string name = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : untitledName_;
-        newui::DialogResult answer = newui::Dialog::showMessageBox(frame_.frameHandle(), "Save changes to " + name + "?", "sketch",
+        newui::DialogResult answer = newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()), "Save changes to " + name + "?", "sketch",
             newui::MessageBoxButtons::YesNoCancel, newui::MessageBoxIcon::Question);
         return answer == newui::DialogResult::Yes ? newui::UnsavedChangesChoice::Save
             : answer == newui::DialogResult::No ? newui::UnsavedChangesChoice::Discard
@@ -357,7 +358,7 @@ namespace sketch {
         options.title = "Save As";
         options.defaultFileName = document.hasFilePath() ? std::filesystem::path(document.filePath()).filename().string() : untitledName_ + ".svg";
         std::string path;
-        newui::Dialog::showSaveFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showSaveFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         return path;
     }
 
@@ -365,7 +366,7 @@ namespace sketch {
         newui::FileDialogOptions options = fileOptions();
         options.title = "Open";
         std::string path;
-        newui::Dialog::showOpenFile(frame_.frameHandle(), options, path);
+        newui::Dialog::showOpenFile(newui::win32::toHWND(frame_.frameHandle()), options, path);
         return path;
     }
 
@@ -374,7 +375,7 @@ namespace sketch {
             errorReporter_(message);
             return;
         }
-        newui::Dialog::showMessageBox(frame_.frameHandle(), message, "sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
+        newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()), message, "sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Error);
     }
 
 }

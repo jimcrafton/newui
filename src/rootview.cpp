@@ -164,8 +164,8 @@ namespace newui {
 		initDefaultBackground();
 	}
 
-	RootView::RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
-		: externalParentHwnd_(externalParentHwnd), externalInstanceHandle_(instanceHandle) {
+	RootView::RootView(NativeWindowHandle externalParentHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name)
+		: externalParentHwnd_(newui::win32::toHWND(externalParentHwnd)), externalInstanceHandle_(win32::toHINSTANCE(instanceHandle)) {
 		surface_ = createPresentSurface(defaultPresentBackend());
 		bounds_ = bounds;
 		name_ = name;
@@ -926,10 +926,10 @@ namespace newui {
 
 							DWORD rawEffect = DROPEFFECT_NONE;
 							if (providingFiles) {
-								StartVirtualFileDrag(windowHandle(), std::move(files), ptClient, DROPEFFECT_COPY, &rawEffect);
+								StartVirtualFileDrag(newui::win32::toHWND(windowHandle()), std::move(files), ptClient, DROPEFFECT_COPY, &rawEffect);
 							}
 							else {
-								StartDragOperation(windowHandle(), text, ptClient, DROPEFFECT_COPY, &rawEffect);
+								StartDragOperation(newui::win32::toHWND(windowHandle()), text, ptClient, DROPEFFECT_COPY, &rawEffect);
 							}
 							dragSource->onDragComplete(*dragSource, toDropEffect(rawEffect));
 						}
@@ -1638,7 +1638,7 @@ namespace newui {
 	{
 		bool result = true;
 
-		HWND parent = parentFrame_ ? parentFrame_->frameHandle() : externalParentHwnd_;
+		HWND parent = parentFrame_ ? newui::win32::toHWND(parentFrame_->frameHandle()) : externalParentHwnd_;
 		HINSTANCE hinst = parentFrame_ ? Application::instance().instanceHandle() : externalInstanceHandle_;
 
 		if (nullptr == parent) {

@@ -1,4 +1,5 @@
 #include "manyrowswindow.h"
+#include "newui/win32/nativehandles.h"
 
 #include "menubinding.h"
 #include "textformat.h"
@@ -144,7 +145,7 @@ namespace manyrows {
 
     void ManyRowsWindow::bindHelpMenu() {
         bindMenuItem(menuBar_, "Help", "Keyboard Shortcuts", [this](newui::MenuItem&) {
-            newui::Dialog::showMessageBox(frame_.frameHandle(),
+            newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()),
                 "Moving and selecting\n"
                 "  Arrows, Tab, PgUp / PgDn, Home / End, Ctrl+arrows move; Shift extends the selection\n"
                 "  Ctrl+A selects all; click a header to select a whole column or row\n"
@@ -163,7 +164,7 @@ namespace manyrows {
                 "Keyboard shortcuts", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Information);
         });
         bindMenuItem(menuBar_, "Help", "About manyrows", [this](newui::MenuItem&) {
-            newui::Dialog::showMessageBox(frame_.frameHandle(),
+            newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()),
                 "manyrows - a million-row table demo built with newui.\n\n"
                 "A virtualized table over 1,000,000 generated rows (or a CSV / XLS / XLSX file), with in-cell editing, undo / redo,\n"
                 "clipboard, fill, sort and filter. The lite version shows just the table.",

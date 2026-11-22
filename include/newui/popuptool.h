@@ -57,7 +57,7 @@ namespace newui {
         // requires for its own `parent` argument. Caller must still call
         // initialize() explicitly afterward, same as any other
         // standalone RootView - see RootView's own constructor comment.
-        PopupTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name);
+        PopupTool(NativeWindowHandle ownerHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name);
 
         ~PopupTool() override;
 
@@ -227,7 +227,7 @@ namespace newui {
     class CalloutTool : public PopupTool {
     public:
         // Same constructor shape as PopupTool's own (above).
-        CalloutTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name);
+        CalloutTool(NativeWindowHandle ownerHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name);
 
         ~CalloutTool() override;
 

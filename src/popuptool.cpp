@@ -1,4 +1,5 @@
 #include "newui/popuptool.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/color.h"
 #include "newui/keyboard_constants.h"
 #include "newui/runloop.h"
@@ -6,8 +7,8 @@
 
 namespace newui {
 
-    PopupTool::PopupTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
-        : RootView(ownerHwnd, instanceHandle, bounds, name), ownerHwnd_(ownerHwnd) {
+    PopupTool::PopupTool(NativeWindowHandle ownerHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name)
+        : RootView(ownerHwnd, instanceHandle, bounds, name), ownerHwnd_(newui::win32::toHWND(ownerHwnd)) {
         // A layered popup is presented via UpdateLayeredWindow() (present()), which a flip-model
         // swap chain can't do - so whatever the process-wide default is, this stays GDI.
         setPresentBackend(PresentBackend::Gdi);
@@ -43,7 +44,7 @@ namespace newui {
     void PopupTool::postCreate() {
         RootView::postCreate();
 
-        if (windowHandle() == nullptr) {
+        if (newui::win32::toHWND(windowHandle()) == nullptr) {
             return;
         }
 
@@ -175,7 +176,7 @@ namespace newui {
         // (or nothing) still holds it - never pull it from another window the user went to.
         if (!dismissedByFocusLoss_ && ownerHwnd_ != nullptr && ::IsWindow(ownerHwnd_)) {
             HWND focused = ::GetFocus();
-            if (focused == nullptr || focused == windowHandle()) {
+            if (focused == nullptr || focused == newui::win32::toHWND(windowHandle())) {
                 ::SetFocus(ownerHwnd_);
             }
         }
@@ -185,7 +186,7 @@ namespace newui {
     }
 
     void PopupTool::present() {
-        HWND hwnd = windowHandle();
+        HWND hwnd = newui::win32::toHWND(windowHandle());
         if (hwnd == nullptr || !underlay_) {
             return;
         }
@@ -227,7 +228,7 @@ namespace newui {
         ::UpdateLayeredWindow(hwnd, nullptr, &ptDst, &szWindow, img.memDC(), &ptSrc, 0, &blend, ULW_ALPHA);
     }
 
-    CalloutTool::CalloutTool(HWND ownerHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
+    CalloutTool::CalloutTool(NativeWindowHandle ownerHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name)
         : PopupTool(ownerHwnd, instanceHandle, bounds, name) {
     }
 
@@ -237,7 +238,7 @@ namespace newui {
     void CalloutTool::postCreate() {
         PopupTool::postCreate();
 
-        if (windowHandle() == nullptr) {
+        if (newui::win32::toHWND(windowHandle()) == nullptr) {
             return;
         }
 

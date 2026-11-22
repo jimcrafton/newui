@@ -1,4 +1,5 @@
 #include "stylepanel.h"
+#include "newui/win32/nativehandles.h"
 
 #include "numberscrubber.h"
 
@@ -1360,7 +1361,7 @@ namespace sketch {
         POINT cursor{0, 0};
         ::GetCursorPos(&cursor);
         ContextMenu popup;
-        popup.show(root_.windowHandle(), menu, cursor.x, cursor.y);
+        popup.show(newui::win32::toHWND(root_.windowHandle()), menu, cursor.x, cursor.y);
     }
 
     void StylePanel::refreshEffectOptions(const SketchObject* first) {

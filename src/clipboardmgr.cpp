@@ -1,4 +1,5 @@
 #include "newui/clipboardmgr.h"
+#include "newui/win32/nativehandles.h"
 
 #include "newui/dibimage.h"
 #include "newui/rootview.h"
@@ -54,7 +55,7 @@ namespace detail {
         if (!owner || !owner->rootView()) {
             return nullptr;
         }
-        return owner->rootView()->windowHandle();
+        return newui::win32::toHWND(owner->rootView()->windowHandle());
     }
 
     namespace {

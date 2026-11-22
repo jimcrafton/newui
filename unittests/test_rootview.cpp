@@ -1,4 +1,5 @@
 #include "newui/rootview.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/subview.h"
 #include "newui/controls.h"
 #include "newui/keyboard_constants.h"
@@ -2331,8 +2332,8 @@ TEST(RootViewStandaloneConstruction, InitializeSucceedsAgainstAnExternalParentHw
     EXPECT_EQ(root.getFrame(), nullptr);
 
     ASSERT_TRUE(root.initialize());
-    EXPECT_NE(root.windowHandle(), nullptr);
-    EXPECT_EQ(::GetParent(root.windowHandle()), externalParent);
+    EXPECT_NE(newui::win32::toHWND(root.windowHandle()), nullptr);
+    EXPECT_EQ(::GetParent(newui::win32::toHWND(root.windowHandle())), externalParent);
 
     root.destroy();
     ::DestroyWindow(externalParent);
@@ -2342,7 +2343,7 @@ TEST(RootViewStandaloneConstruction, InitializeFailsWithNoParentAtAll) {
     newui::RootView root(nullptr, nullptr, newui::Rect(0, 0, 100, 100), "standaloneRootNoParent");
 
     EXPECT_FALSE(root.initialize());
-    EXPECT_EQ(root.windowHandle(), nullptr);
+    EXPECT_EQ(newui::win32::toHWND(root.windowHandle()), nullptr);
 }
 
 TEST(DesignTimeFlagsTest, DefaultToNoneAndCombineIndependently) {

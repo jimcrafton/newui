@@ -19,6 +19,7 @@
 // unlocked - try clicking the other NoteField while locked.
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/action.h"
 #include "newui/application.h"
 #include "newui/color.h"
@@ -45,7 +46,7 @@ namespace {
 newui::Frame* g_demoFrame = nullptr;
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     return newui::SyncReturn::Handled;
 }
 
@@ -233,8 +234,8 @@ int main() {
     auto fileMenu = std::make_unique<newui::MenuItem>("File");
     fileMenu->addChild(std::make_unique<newui::MenuItem>("Exit"))->onClick.add(
         [](newui::MenuItem&) {
-            if (g_demoFrame != nullptr && g_demoFrame->frameHandle() != nullptr) {
-                ::SendMessage(g_demoFrame->frameHandle(), WM_CLOSE, 0, 0);
+            if (g_demoFrame != nullptr && newui::win32::toHWND(g_demoFrame->frameHandle()) != nullptr) {
+                ::SendMessage(newui::win32::toHWND(g_demoFrame->frameHandle()), WM_CLOSE, 0, 0);
             }
             return newui::SyncReturn::Handled;
         });

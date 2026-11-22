@@ -78,6 +78,7 @@
 // unittests/test_shapes.cpp already do this).
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 
 // Defined in the reflectgen-generated .cpp (compiled into the `newui`
 // target this example links against - see shapes1.cpp's own comment on
@@ -120,7 +121,7 @@ private:
 };
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
     return newui::SyncReturn::Handled;
 }
 

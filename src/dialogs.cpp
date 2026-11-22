@@ -31,7 +31,7 @@ namespace {
         }
         if (position == DialogPosition::CenterOnFocus) {
             Frame* frame = Application::instance().getFrame();
-            if (frame != nullptr && frame->frameHandle() == owner) {
+            if (frame != nullptr && newui::win32::toHWND(frame->frameHandle()) == owner) {
                 if (SubView* focused = frame->rootView().focusedSubView()) {
                     Rect bounds = focused->screenBounds();
                     if (bounds.width() > 0.0f && bounds.height() > 0.0f) {
@@ -196,7 +196,7 @@ namespace {
 
 DialogResult Dialog::showMessageBox(NativeWindowHandle ownerNative, const std::string& text, const std::string& title,
                                      MessageBoxButtons buttons, MessageBoxIcon icon, DialogPosition position) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     UINT flags = 0;
     switch (buttons) {
         case MessageBoxButtons::Ok:              flags |= MB_OK; break;
@@ -235,7 +235,7 @@ DialogResult Dialog::showMessageBox(NativeWindowHandle ownerNative, const std::s
 }
 
 bool Dialog::showOpenFile(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -257,7 +257,7 @@ bool Dialog::showOpenFile(NativeWindowHandle ownerNative, const FileDialogOption
 }
 
 bool Dialog::showOpenFileMulti(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::vector<std::string>& outPaths) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -303,7 +303,7 @@ bool Dialog::showOpenFileMulti(NativeWindowHandle ownerNative, const FileDialogO
 }
 
 bool Dialog::showSaveFile(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -325,7 +325,7 @@ bool Dialog::showSaveFile(NativeWindowHandle ownerNative, const FileDialogOption
 }
 
 bool Dialog::showBrowseForFolder(NativeWindowHandle ownerNative, const FileDialogOptions& options, std::string& outPath) {
-    HWND owner = win32::toHWND(ownerNative);
+    HWND owner = newui::win32::toHWND(ownerNative);
     ComScope com;
     if (!com.valid()) {
         return false;
@@ -372,8 +372,8 @@ Dialog::~Dialog() {
     // now instead of a member - never sees a live rootView_ next to a live frameHandle_. A Dialog
     // that was never shown at all needs no such help: frameHandle_ is still null, and
     // Frame::~Frame() itself already knows a never-created window has nothing to tear down.
-    if (frameHandle() != nullptr) {
-        ::DestroyWindow(frameHandle());
+    if (newui::win32::toHWND(frameHandle()) != nullptr) {
+        ::DestroyWindow(newui::win32::toHWND(frameHandle()));
     }
 }
 
@@ -409,7 +409,7 @@ bool Dialog::initialize()
     const int width = static_cast<int>(bounds_.size().width);
     const int height = static_cast<int>(bounds_.size().height);
     if (modalOwner_ != nullptr) {
-        POINT at = centeredOn(anchorRect(win32::toHWND(modalOwner_), position_), width, height);
+        POINT at = centeredOn(anchorRect(newui::win32::toHWND(modalOwner_), position_), width, height);
         x = at.x;
         y = at.y;
     }
@@ -417,7 +417,7 @@ bool Dialog::initialize()
     auto hwnd = ::CreateWindowExA(
         dwExStyle, className.c_str(), title_.c_str(), dialogStyle,
         x, y, width, height,
-        win32::toHWND(modalOwner_),
+        newui::win32::toHWND(modalOwner_),
         NULL,
          ::GetModuleHandleA(nullptr),
         this
@@ -446,7 +446,7 @@ bool Dialog::ensureInitialized() {
     if (closed_) {
         return false;  // single-show - see class comment in dialogs.h
     }
-    if (frameHandle() != nullptr) {
+    if (newui::win32::toHWND(frameHandle()) != nullptr) {
         return true;
     }
     return initialize();
@@ -493,7 +493,7 @@ bool Dialog::show() {
 }
 
 DialogResult Dialog::showModal(Frame* owner) {
-    HWND ownerHandle = (owner != nullptr) ? owner->frameHandle() : nullptr;
+    HWND ownerHandle = (owner != nullptr) ? newui::win32::toHWND(owner->frameHandle()) : nullptr;
     
 	return showModal(ownerHandle);
 }
@@ -501,7 +501,7 @@ DialogResult Dialog::showModal(Frame* owner) {
 
 DialogResult Dialog::showModal(View* view)
 {
-    return showModal(view->rootView()->windowHandle());
+    return showModal(newui::win32::toHWND(view->rootView()->windowHandle()));
 }
 
 
@@ -523,7 +523,7 @@ DialogResult Dialog::showModal(NativeWindowHandle hwnd, RunLoop* runLoop) {
 
 
     bool completedNormally = loopToUse->runModal(
-        frameHandle(), hwnd, [this]() { return closed_; });
+        newui::win32::toHWND(frameHandle()), hwnd, [this]() { return closed_; });
 
     if (!completedNormally) {
         // runModal() gave up because WM_QUIT reached this thread (the app
@@ -545,14 +545,14 @@ void Dialog::close(DialogResult result) {
         return;  // first close() (or the user closing the window) already won
     }
     result_ = result;
-    if (frameHandle() != nullptr) {
+    if (newui::win32::toHWND(frameHandle()) != nullptr) {
         // Async on purpose - lets this run from inside a handler that's
         // itself on the frame's message-dispatch call stack (e.g. a
         // button's onClicked) without reentering DestroyWindow from
         // there. Funnels through the exact same WM_CLOSE path a native X
         // click takes, so handleFrameClosed() above is the single place
         // that actually finalizes things.
-        ::PostMessage(frameHandle(), WM_CLOSE, 0, 0);
+        ::PostMessage(newui::win32::toHWND(frameHandle()), WM_CLOSE, 0, 0);
     } else {
         closed_ = true;
         onClosed(*this);

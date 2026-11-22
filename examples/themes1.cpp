@@ -42,6 +42,7 @@
 
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/controls.h"
 #include "newui/frame.h"
@@ -62,7 +63,7 @@
 #include <string>
 
 newui::SyncReturn FrameClosed(newui::Frame& frame) {
-    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+    printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
 
     return newui::SyncReturn::Handled;
 }
@@ -157,8 +158,8 @@ newui::SyncReturn MenuItemClicked(newui::MenuItem& item) {
 newui::SyncReturn ExitClicked(newui::MenuItem& item) {
     printf("Menu item clicked: \"%s\" - closing the window\n", item.text().c_str());
     fflush(stdout);
-    if (g_demoFrame != nullptr && g_demoFrame->frameHandle() != nullptr) {
-        ::SendMessage(g_demoFrame->frameHandle(), WM_CLOSE, 0, 0);
+    if (g_demoFrame != nullptr && newui::win32::toHWND(g_demoFrame->frameHandle()) != nullptr) {
+        ::SendMessage(newui::win32::toHWND(g_demoFrame->frameHandle()), WM_CLOSE, 0, 0);
     }
     return newui::SyncReturn::Handled;
 }

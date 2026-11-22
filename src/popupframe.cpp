@@ -1,4 +1,5 @@
 #include "newui/popupframe.h"
+#include "newui/win32/nativehandles.h"
 
 #include <dwmapi.h>
 
@@ -55,7 +56,7 @@ namespace newui {
         }
 
         // frameHandle() was set in Frame::WndProc during WM_NCCREATE.
-        if (hwnd != frameHandle()) {
+        if (hwnd != newui::win32::toHWND(frameHandle())) {
             return false;
         }
 
@@ -64,15 +65,15 @@ namespace newui {
         // older builds, same "square corners, nothing else different"
         // fallback every other app not opting in already gets there.
         DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
-        ::DwmSetWindowAttribute(frameHandle(), DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+        ::DwmSetWindowAttribute(newui::win32::toHWND(frameHandle()), DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
         return true;
     }
 
     void PopupFrame::moveTo(const Rect& screenBounds) {
         setBounds(screenBounds);
-        if (frameHandle() != nullptr) {
-            ::SetWindowPos(frameHandle(), NULL,
+        if (newui::win32::toHWND(frameHandle()) != nullptr) {
+            ::SetWindowPos(newui::win32::toHWND(frameHandle()), NULL,
                 int(screenBounds.left()), int(screenBounds.top()),
                 int(screenBounds.size().width), int(screenBounds.size().height),
                 SWP_NOZORDER | SWP_NOACTIVATE);
@@ -80,26 +81,26 @@ namespace newui {
     }
 
     void PopupFrame::show() {
-        if (frameHandle() == nullptr) {
+        if (newui::win32::toHWND(frameHandle()) == nullptr) {
             return;
         }
         // SW_SHOWNOACTIVATE, never SW_SHOW - this window must not steal
         // activation from owner_, consistent with WS_EX_NOACTIVATE.
-        ::ShowWindow(frameHandle(), SW_SHOWNOACTIVATE);
-        ::RedrawWindow(frameHandle(), NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
+        ::ShowWindow(newui::win32::toHWND(frameHandle()), SW_SHOWNOACTIVATE);
+        ::RedrawWindow(newui::win32::toHWND(frameHandle()), NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
         installOutsideClickHook();
     }
 
     void PopupFrame::hide() {
-        if (frameHandle() == nullptr) {
+        if (newui::win32::toHWND(frameHandle()) == nullptr) {
             return;
         }
         removeOutsideClickHook();
-        ::ShowWindow(frameHandle(), SW_HIDE);
+        ::ShowWindow(newui::win32::toHWND(frameHandle()), SW_HIDE);
     }
 
     bool PopupFrame::isVisible() const {
-        return frameHandle() != nullptr && ::IsWindowVisible(frameHandle()) != FALSE;
+        return newui::win32::toHWND(frameHandle()) != nullptr && ::IsWindowVisible(newui::win32::toHWND(frameHandle())) != FALSE;
     }
 
     void PopupFrame::installOutsideClickHook() {
@@ -140,7 +141,7 @@ namespace newui {
                 case WM_MBUTTONDOWN: {
                     auto* hookStruct = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
                     RECT windowRect = {};
-                    HWND popupHwnd = t_hookOwner->frameHandle();
+                    HWND popupHwnd = newui::win32::toHWND(t_hookOwner->frameHandle());
                     if (popupHwnd != nullptr && ::GetWindowRect(popupHwnd, &windowRect)) {
                         if (!::PtInRect(&windowRect, hookStruct->pt)) {
                             // Don't act on window/hook state directly from

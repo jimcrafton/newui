@@ -1,4 +1,5 @@
 #include "newui/popuptool.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/runloop.h"
 
 #include <gtest/gtest.h>
@@ -58,7 +59,7 @@ TEST(PopupTool, PopupHoldsKeyboardFocusRightAfterInitialize) {
         HWND owner = makeOwner();
         auto* popup = new newui::CalloutTool(owner, ::GetModuleHandleA(nullptr), newui::Rect(10, 10, 120, 80), "p");
         if (popup->initialize()) {
-            popupHwnd = popup->windowHandle();
+            popupHwnd = newui::win32::toHWND(popup->windowHandle());
             focused = ::GetFocus();
         }
         popup->dismiss();
@@ -77,7 +78,7 @@ TEST(PopupTool, EscapeKeyDownDismisses) {
         auto* popup = new newui::CalloutTool(owner, ::GetModuleHandleA(nullptr), newui::Rect(10, 10, 120, 80), "p");
         if (popup->initialize()) {
             popup->onDismissed.add(&CountDismissed);
-            ::SendMessage(popup->windowHandle(), WM_KEYDOWN, VK_ESCAPE, 0);
+            ::SendMessage(newui::win32::toHWND(popup->windowHandle()), WM_KEYDOWN, VK_ESCAPE, 0);
             countRightAfterKey = g_dismissedCount;  // teardown is posted, not synchronous
         }
         ::DestroyWindow(owner);

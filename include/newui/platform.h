@@ -47,4 +47,7 @@ namespace newui {
     // Opaque native popup-menu handle: HMENU on Windows, NSMenu* on macOS. Null means "no menu built".
     using NativeMenuHandle = void*;
 
+    // Opaque application/module instance: HINSTANCE on Windows. Other platforms have no equivalent; pass nullptr.
+    using NativeInstanceHandle = void*;
+
 } // namespace newui

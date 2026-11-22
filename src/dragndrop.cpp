@@ -1,4 +1,5 @@
 #include "newui/dragndrop.h"
+#include "newui/win32/nativehandles.h"
 
 #include "newui/dibimage.h"
 #include "newui/enum_format_etc.h"
@@ -480,7 +481,7 @@ namespace {
 
     Point toClientPoint(RootView& rootView, POINTL screenPt) {
         POINT pt{ screenPt.x, screenPt.y };
-        ::ScreenToClient(rootView.windowHandle(), &pt);
+        ::ScreenToClient(newui::win32::toHWND(rootView.windowHandle()), &pt);
         return Point(static_cast<float>(pt.x), static_cast<float>(pt.y));
     }
 
@@ -580,7 +581,7 @@ STDMETHODIMP COMDropTarget::DragEnter(IDataObject* dataObject, DWORD, POINTL pt,
 
     if (dropTargetHelper_) {
         POINT screenPt{ pt.x, pt.y };
-        dropTargetHelper_->DragEnter(rootView_.windowHandle(), dataObject, &screenPt, effect != nullptr ? *effect : DROPEFFECT_NONE);
+        dropTargetHelper_->DragEnter(newui::win32::toHWND(rootView_.windowHandle()), dataObject, &screenPt, effect != nullptr ? *effect : DROPEFFECT_NONE);
     }
     return hr;
 }

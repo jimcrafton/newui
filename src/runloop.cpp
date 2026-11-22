@@ -356,8 +356,8 @@ namespace newui {
     {
         checkCalledFromLoopThread("runModal");
 
-        HWND modalHandle = win32::toHWND(modalNative);
-        HWND ownerHandle = win32::toHWND(ownerNative);
+        HWND modalHandle = newui::win32::toHWND(modalNative);
+        HWND ownerHandle = newui::win32::toHWND(ownerNative);
 
         onModalStart(*this);
 

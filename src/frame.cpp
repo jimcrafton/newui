@@ -1,4 +1,5 @@
 #include "newui/frame.h"
+#include "newui/win32/nativehandles.h"
 #include <algorithm>
 #include <iostream>
 #include "newui/application.h"
@@ -187,8 +188,8 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 
 		// The frame itself never reads keys: whatever focuses it (a modal loop showing a dialog, a click on the title bar) hands the focus to the root view.
 		case WM_SETFOCUS: {
-			if (rootView_ != nullptr && rootView_->windowHandle() != nullptr && ::IsWindow(rootView_->windowHandle())) {
-				::SetFocus(rootView_->windowHandle());
+			if (rootView_ != nullptr && newui::win32::toHWND(rootView_->windowHandle()) != nullptr && ::IsWindow(newui::win32::toHWND(rootView_->windowHandle()))) {
+				::SetFocus(newui::win32::toHWND(rootView_->windowHandle()));
 				result = true;
 			}
 		}

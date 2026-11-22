@@ -1,4 +1,5 @@
 #include "sketchwindow.h"
+#include "newui/win32/nativehandles.h"
 
 #include <newui/dialogs.h>
 #include <newui/keyboard_constants.h>
@@ -428,7 +429,7 @@ namespace sketch {
             });
         }
         onMenuItem("Help", "About sketch", [this](newui::MenuItem&) {
-            newui::Dialog::showMessageBox(frame_.frameHandle(),
+            newui::Dialog::showMessageBox(newui::win32::toHWND(frame_.frameHandle()),
                 "sketch - a small vector editor built with newui.\n\nSVG files, RGB and CMYK documents, gradients, undo/redo.",
                 "About sketch", newui::MessageBoxButtons::Ok, newui::MessageBoxIcon::Information);
         });

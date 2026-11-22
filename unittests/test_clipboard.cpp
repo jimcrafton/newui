@@ -1,4 +1,5 @@
 #include "newui/clipboardmgr.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/frame.h"
 #include "newui/rootview.h"
 
@@ -122,7 +123,7 @@ TEST(ClipboardManager, DelayedRendererProducesDataOnlyWhenAskedFor) {
     // does - a unit test has no second real process available to
     // actually trigger the message, but WM_RENDERFORMAT's own contract
     // (clipboard already open) is easy to reproduce directly.
-    ASSERT_TRUE(::OpenClipboard(frame.rootView().windowHandle()));
+    ASSERT_TRUE(::OpenClipboard(newui::win32::toHWND(frame.rootView().windowHandle())));
     newui::ClipboardManager::handleRenderFormat(format);
     ::CloseClipboard();
 
@@ -137,7 +138,7 @@ TEST(ClipboardManager, DelayedRendererProducesDataOnlyWhenAskedFor) {
     // case is the real caller) - DestroyWindow() is the normal Win32
     // teardown path, and Frame's destructor throws if frameHandle_ is
     // still live when it runs.
-    ::DestroyWindow(frame.frameHandle());
+    ::DestroyWindow(newui::win32::toHWND(frame.frameHandle()));
 }
 
 TEST(ClipboardManager, HandleRenderAllFormatsRendersEveryRegisteredFormat) {
@@ -155,7 +156,7 @@ TEST(ClipboardManager, HandleRenderAllFormatsRendersEveryRegisteredFormat) {
     // Unlike handleRenderFormat() above, WM_RENDERALLFORMATS' own
     // contract is that the *handler* opens the clipboard itself -
     // handleRenderAllFormats() does that internally.
-    newui::ClipboardManager::handleRenderAllFormats(frame.rootView().windowHandle());
+    newui::ClipboardManager::handleRenderAllFormats(newui::win32::toHWND(frame.rootView().windowHandle()));
 
     std::vector<std::uint8_t> read;
     ASSERT_TRUE(newui::ClipboardManager::getCustomData(format, read));
@@ -166,7 +167,7 @@ TEST(ClipboardManager, HandleRenderAllFormatsRendersEveryRegisteredFormat) {
     // case is the real caller) - DestroyWindow() is the normal Win32
     // teardown path, and Frame's destructor throws if frameHandle_ is
     // still live when it runs.
-    ::DestroyWindow(frame.frameHandle());
+    ::DestroyWindow(newui::win32::toHWND(frame.frameHandle()));
 }
 
 TEST(ClipboardManager, ClearDelayedRendererStopsItFromBeingInvoked) {
@@ -183,12 +184,12 @@ TEST(ClipboardManager, ClearDelayedRendererStopsItFromBeingInvoked) {
 
     newui::ClipboardManager::clearDelayedRenderer(format);
 
-    ASSERT_TRUE(::OpenClipboard(frame.rootView().windowHandle()));
+    ASSERT_TRUE(::OpenClipboard(newui::win32::toHWND(frame.rootView().windowHandle())));
     newui::ClipboardManager::handleRenderFormat(format);
     ::CloseClipboard();
 
     EXPECT_FALSE(rendererCalled);
-    ::DestroyWindow(frame.frameHandle());
+    ::DestroyWindow(newui::win32::toHWND(frame.frameHandle()));
 }
 
 // --- Phase 4: MIME type mapping layer ---

@@ -20,6 +20,7 @@
 // kDefaultSvgRasterSize x kDefaultSvgRasterSize default (svgimage.h).
 
 #include "newui/newui.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/color.h"
@@ -43,7 +44,7 @@ namespace {
     const char* kSvgFileName = "peacockspider.svg";
 
     newui::SyncReturn FrameClosed(newui::Frame& frame) {
-        printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
+        printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, newui::win32::toHWND(frame.frameHandle()));
         return newui::SyncReturn::Handled;
     }
 
