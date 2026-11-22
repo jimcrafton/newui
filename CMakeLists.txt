@@ -164,7 +164,7 @@ add_library(newui STATIC
     "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
     "include/newui/dibimage.h" "src/dibimage.cpp"
     "include/newui/dragndrop.h" "src/dragndrop.cpp"
-    "include/newui/enum_format_etc.h" "src/enum_format_etc.cpp"
+    "include/newui/win32/enum_format_etc.h" "include/newui/win32/dragndrop_com.h" "src/enum_format_etc.cpp"
     "include/newui/component.h"
     "include/newui/componentsettings.h" "src/componentsettings.cpp"
     "include/newui/binding.h" "src/binding.cpp"
