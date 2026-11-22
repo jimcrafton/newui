@@ -6,6 +6,7 @@
 
 #include "newui/font.h"
 #include "newui/fontmanager.h"
+#include "newui/win32/nativehandles.h"
 
 namespace newui {
 
@@ -44,7 +45,8 @@ namespace newui {
 
     }
 
-    DisplayMetrics DisplayMetrics::forWindow(HWND hwnd) {
+    DisplayMetrics DisplayMetrics::forWindow(NativeView view) {
+        HWND hwnd = win32::toHWND(view);
         unsigned dpi = kBaselineDpi;
         if (hwnd != nullptr) {
             UINT hwndDpi = ::GetDpiForWindow(hwnd);

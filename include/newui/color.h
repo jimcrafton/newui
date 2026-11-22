@@ -532,16 +532,9 @@ namespace newui {
         // Reads one of the current Windows UI theme's standard colors via
         // GetSysColor(), after translating color from our own SystemColor
         // numbering to the Win32 COLOR_* constant it corresponds to (see
-        // toWin32SysColorIndex()). Always fully opaque - GetSysColor()'s
+        // toWin32SysColorIndex() in color.cpp). Always fully opaque - GetSysColor()'s
         // COLORREF result carries no alpha, so a is forced to 1.0.
-        static Color fromSystemColor(SystemColor color) noexcept {
-            COLORREF ref = ::GetSysColor(toWin32SysColorIndex(color));
-            return Color(
-                float(GetRValue(ref)) / 255.0f,
-                float(GetGValue(ref)) / 255.0f,
-                float(GetBValue(ref)) / 255.0f,
-                1.0f);
-        }
+        static Color fromSystemColor(SystemColor color) noexcept;
 
         // Case-insensitive CSS named-color lookup (the 147 CSS Color
         // Module Level 4 keywords, plus "transparent"), binary-searched
@@ -756,47 +749,6 @@ namespace newui {
         }
 
     private:
-        // Translates our own SystemColor numbering (see color_constants.h)
-        // to the Win32 COLOR_* constant it corresponds to, for
-        // fromSystemColor() to pass to GetSysColor(). Kept as a switch
-        // (rather than baking Windows' own numbering into SystemColor) so
-        // color_constants.h doesn't need windows.h just to declare the enum.
-        static int toWin32SysColorIndex(SystemColor color) noexcept {
-            switch (color) {
-                case SystemColor::ScrollBar: return COLOR_SCROLLBAR;
-                case SystemColor::Desktop: return COLOR_DESKTOP;
-                case SystemColor::ActiveCaption: return COLOR_ACTIVECAPTION;
-                case SystemColor::InactiveCaption: return COLOR_INACTIVECAPTION;
-                case SystemColor::Menu: return COLOR_MENU;
-                case SystemColor::Window: return COLOR_WINDOW;
-                case SystemColor::WindowFrame: return COLOR_WINDOWFRAME;
-                case SystemColor::MenuText: return COLOR_MENUTEXT;
-                case SystemColor::WindowText: return COLOR_WINDOWTEXT;
-                case SystemColor::CaptionText: return COLOR_CAPTIONTEXT;
-                case SystemColor::ActiveBorder: return COLOR_ACTIVEBORDER;
-                case SystemColor::InactiveBorder: return COLOR_INACTIVEBORDER;
-                case SystemColor::AppWorkspace: return COLOR_APPWORKSPACE;
-                case SystemColor::Highlight: return COLOR_HIGHLIGHT;
-                case SystemColor::HighlightText: return COLOR_HIGHLIGHTTEXT;
-                case SystemColor::ButtonFace: return COLOR_BTNFACE;
-                case SystemColor::ButtonShadow: return COLOR_BTNSHADOW;
-                case SystemColor::GrayText: return COLOR_GRAYTEXT;
-                case SystemColor::ButtonText: return COLOR_BTNTEXT;
-                case SystemColor::InactiveCaptionText: return COLOR_INACTIVECAPTIONTEXT;
-                case SystemColor::ButtonHighlight: return COLOR_BTNHIGHLIGHT;
-                case SystemColor::DarkShadow3D: return COLOR_3DDKSHADOW;
-                case SystemColor::Light3D: return COLOR_3DLIGHT;
-                case SystemColor::InfoText: return COLOR_INFOTEXT;
-                case SystemColor::InfoBackground: return COLOR_INFOBK;
-                case SystemColor::Hotlight: return COLOR_HOTLIGHT;
-                case SystemColor::GradientActiveCaption: return COLOR_GRADIENTACTIVECAPTION;
-                case SystemColor::GradientInactiveCaption: return COLOR_GRADIENTINACTIVECAPTION;
-                case SystemColor::MenuHighlight: return COLOR_MENUHILIGHT;
-                case SystemColor::MenuBar: return COLOR_MENUBAR;
-            }
-            return COLOR_WINDOW;  // unreachable for a valid SystemColor
-        }
-
         static float clamp01(float v) noexcept {
             return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
         }

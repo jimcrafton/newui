@@ -10,6 +10,8 @@
 
 
 namespace newui {
+
+    static_assert(kTaskMessage == WM_APP + 1, "kTaskMessage must equal WM_APP + 1");
     std::mutex g_runLoopMapMutex;
     std::unordered_map<size_t, RunLoop*> g_runLoopMap;
 

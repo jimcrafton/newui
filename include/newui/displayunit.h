@@ -4,6 +4,7 @@
 
 #include "newui/geometry.h"
 #include "newui/newui.h"
+#include "newui/platform.h"
 
 namespace newui {
 
@@ -39,7 +40,7 @@ namespace newui {
         // DPI's scaled point size, measured for the Dlu base metrics. hwnd
         // may be nullptr (e.g. a RootView with no HWND yet) - treated the
         // same as forDpi(96).
-        static DisplayMetrics forWindow(HWND hwnd);
+        static DisplayMetrics forWindow(NativeView view);
 
         // Synthesizes metrics for a given DPI without touching a real
         // window - for unit tests (forDpi(192) to check 2x scaling math)

@@ -1,10 +1,11 @@
 #pragma once
-#include <newui/newui.h>
+#include <cstdint>
 
 
 namespace newui {
 
-	static constexpr UINT kTaskMessage = WM_APP + 1;
+	// Equals WM_APP + 1 on Windows (runloop.cpp static_asserts that); a plain value here so this header needs no <windows.h>.
+	static constexpr unsigned int kTaskMessage = 0x8000 + 1;
 
 }
 

@@ -1717,7 +1717,7 @@ namespace newui {
 	}
 
 	void RootView::refreshDisplayMetrics() {
-		displayMetrics_ = DisplayMetrics::forWindow(viewHwnd_);
+		displayMetrics_ = DisplayMetrics::forWindow(win32::toNativeView(viewHwnd_));
 		onDisplayMetricsChanged(*this);
 	}
 

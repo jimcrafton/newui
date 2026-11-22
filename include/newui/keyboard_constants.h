@@ -148,7 +148,5 @@ namespace newui {
 #define KB_PREVIOUS_STATE		30
 #define KB_IS_EXTENDED_KEY		24
 
-#define SHIFT_KEY_DOWN \
-	((GetKeyState( VK_SHIFT) & 15 ) == 1)
 
 
