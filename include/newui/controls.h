@@ -175,6 +175,10 @@ namespace newui {
         // LabelStyle handles for a plain ViewStyle, viewstyle.h).
         void setTextColor(BLRgba32 color);
 
+        // A UIColorRole name the text follows, read again on every theme change (see Label::setTextRole()).
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role);
+
         // Centered both ways by default. Left / Right and Top / Bottom keep the text a few pixels in from the edge.
         TextAlignment textAlignment() const { return textAlignment_; }
         void setTextAlignment(TextAlignment value) { textAlignment_ = value; style().markDirty(); }
@@ -231,8 +235,12 @@ namespace newui {
         SyncReturn handleClicked(Control& sender);
         SyncReturn handleStateChanged(Control& sender);
 
+        void themeChanged() override;
+
         std::string text_;
         BLVar textColor_;
+        std::string textRole_;
+        bool textColorFromRole_ = true;   // false once setTextColor() gave it a color of its own
         bool isToggleButton_ = false;
         bool checked_ = false;
         bool pressing_ = false;
@@ -373,6 +381,11 @@ namespace newui {
         void setLinkColor(BLRgba32 color);
         void setHoveredLinkColor(BLRgba32 color);
 
+        // A UIColorRole name ("MutedText", "HighlightBackground", ...) the text follows, read again on every theme change
+        // (LabelStyle::textRole()). Empty goes back to the state-driven color. A color set with setTextColor() replaces it.
+        const std::string& textRole() const { return labelStyle_->textRole(); }
+        void setTextRole(const std::string& role);
+
         typedef Delegate<Label> LinkClickedDelegate;
         LinkClickedDelegate onLinkClicked;
 
@@ -388,6 +401,7 @@ namespace newui {
         SyncReturn handleMouseLeft(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleStateChanged(Control& sender);
         SyncReturn handleClicked(Control& sender);
+        void themeChanged() override;
 
         std::string text_;
         bool hotLink_ = false;
@@ -396,6 +410,10 @@ namespace newui {
         BLVar textColor_;
         BLVar linkColor_;
         BLVar hoveredLinkColor_;
+        // false once the matching setter gave the color a value of its own; only a role color is read again on a theme change
+        bool textColorFromRole_ = true;
+        bool linkColorFromRole_ = true;
+        bool hoveredLinkColorFromRole_ = true;
         LabelStyle* labelStyle_ = nullptr;
     };
 
@@ -430,13 +448,19 @@ namespace newui {
         // Drawn on top of the border - see this class's own comment.
         void setTextColor(BLRgba32 color);
 
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role);
+
         void paint(BLContext& ctx) override;
 
     private:
         SyncReturn handleStateChanged(Control& sender);
+        void themeChanged() override;
 
         std::string text_;
         BLVar textColor_;
+        std::string textRole_;
+        bool textColorFromRole_ = true;
     };
 
     // A read-only status Control - not really interactive (still inherits
@@ -1279,6 +1303,9 @@ namespace newui {
 
         void setTextColor(BLRgba32 color);
 
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role);
+
         // Resources/-relative path (Bundle::resourcePath()) - "" means no
         // icon (text-only, unchanged behavior). Painted via Item::
         // paintItemIcon() (items.h), same shared cache/blit every other
@@ -1318,9 +1345,12 @@ namespace newui {
         SyncReturn handlePressEnd(View& sender, const Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
         SyncReturn handleClicked(Control& sender);
         SyncReturn handleStateChanged(Control& sender);
+        void themeChanged() override;
 
         std::string text_;
         BLVar textColor_;
+        std::string textRole_;
+        bool textColorFromRole_ = true;
         std::string icon_;
         float iconSize_ = kIconSize;
         TextAlignment textAlignment_ = TextAlignment::Center;
@@ -1394,11 +1424,18 @@ namespace newui {
 
         void setTextColor(BLRgba32 color);
 
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role);
+
         void paint(BLContext& ctx) override;
 
     private:
+        void themeChanged() override;
+
         std::string text_;
         BLVar textColor_;
+        std::string textRole_;
+        bool textColorFromRole_ = true;
     };
 
     // A horizontal strip of StatusPanes along the bottom of a window - FlexLayout-based, same
@@ -1582,7 +1619,12 @@ namespace newui {
         void setFont(const Font& font) { font_ = font; owner_.style().markDirty(); }
 
         const Color& textColor() const { return textColor_; }
-        void setTextColor(const Color& color) { textColor_ = color; owner_.style().markDirty(); }
+        void setTextColor(const Color& color) { textColor_ = color; textColorFromRole_ = false; textRole_.clear(); owner_.style().markDirty(); }
+        // A UIColorRole name the text follows, read again on every theme change (see Label::setTextRole()).
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role);
+        // The owner's themeChanged(): reads the role color again unless setTextColor() gave it one of its own.
+        void themeChanged();
 
         // Per-range colors over textColor() (text::TextColorRun) - e.g. syntax highlighting; empty =
         // plain text. Edits move them along (see adjustRunsForEdit()), so they stay on the right
@@ -1933,8 +1975,11 @@ namespace newui {
         float preferredColumnX_ = 0.0f;
         bool hasPreferredColumnX_ = false;
 
+
         Font font_;
         Color textColor_;
+        std::string textRole_;
+        bool textColorFromRole_ = true;   // false once setTextColor() gave it a color of its own
         std::vector<text::TextColorRun> colorRuns_;
         std::vector<text::TextFontRun> fontRuns_;
         std::vector<text::TextDecoration> decorations_;
@@ -1988,6 +2033,9 @@ namespace newui {
         // forward (e.g. ensureLayoutUpToDate(), caretDocumentRect()).
         TextController& controller() { return *controller_; }
         const TextController& controller() const { return *controller_; }
+
+        // Hands the theme change on to the controller, which holds the text color.
+        void themeChanged() override;
 
         // Swaps in a different TextController - e.g. a custom subclass
         // overriding one of its handleXxx()/moveCaret()-style hooks for
@@ -2049,6 +2097,8 @@ namespace newui {
 
         const Color& textColor() const { return controller_->textColor(); }
         void setTextColor(const Color& color) { controller_->setTextColor(color); }
+        const std::string& textRole() const { return controller_->textRole(); }
+        void setTextRole(const std::string& role) { controller_->setTextRole(role); }
 
         typedef Delegate<TextField> ReturnPressedDelegate;
         // Fired when Enter/Return is pressed while this TextField has
@@ -2143,6 +2193,9 @@ namespace newui {
         TextController& controller() { return *controller_; }
         const TextController& controller() const { return *controller_; }
 
+        // Hands the theme change on to the controller, which holds the text color.
+        void themeChanged() override;
+
         // Swaps in a different TextController - see TextField::
         // setController()'s own doc comment for the general contract
         // (caller builds it, this only takes ownership). Also re-does
@@ -2222,6 +2275,8 @@ namespace newui {
 
         const Color& textColor() const { return controller_->textColor(); }
         void setTextColor(const Color& color) { controller_->setTextColor(color); }
+        const std::string& textRole() const { return controller_->textRole(); }
+        void setTextRole(const std::string& role) { controller_->setTextRole(role); }
 
         // See TextController::setColorRuns().
         //@reflect ignore=true

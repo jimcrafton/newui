@@ -199,6 +199,13 @@ namespace newui {
         // it's called - through a View& included.
         virtual void updateLayout();
 
+        // The system or the application changed the theme (UIColorManager::onThemeChanged): RootView walks its tree and
+        // calls this on every view, so the view recalibrates whatever it derived from the theme. The default tells the
+        // view's style (ViewStyle::themeChanged()); a control that took a UIColorManager color when it was built
+        // overrides it to read the color again and calls this first. A view that asks UIColorManager while it paints
+        // needs nothing more.
+        virtual void themeChanged();
+
         // True while this View's updateLayout() is running. A child's setVisible() re-runs its parent's
         // layout (a hidden child is left out of it), but not from inside a pass that is already
         // positioning it - Layout::arrange() implementations (CardLayout) and ScrollView toggle child

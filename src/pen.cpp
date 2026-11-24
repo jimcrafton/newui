@@ -4,6 +4,21 @@
 
 namespace newui {
 
+    double performanceSeconds(unsigned long long ticks) {
+        static const double frequency = []() {
+            LARGE_INTEGER f;
+            ::QueryPerformanceFrequency(&f);
+            return f.QuadPart > 0 ? double(f.QuadPart) : 1.0;
+        }();
+        return double(ticks) / frequency;
+    }
+
+    double performanceNowSeconds() {
+        LARGE_INTEGER now;
+        ::QueryPerformanceCounter(&now);
+        return performanceSeconds(static_cast<unsigned long long>(now.QuadPart));
+    }
+
     PenState penStateFrom(const PenInfo& info, const Point& clientPosition) {
         PenState state;
         state.inRange = (info.pointerFlags & POINTER_FLAG_INRANGE) != 0;
@@ -17,6 +32,7 @@ namespace newui {
         state.tiltY = (info.penMask & PEN_MASK_TILT_Y) != 0 ? info.tiltY : 0;
         state.twist = (info.penMask & PEN_MASK_ROTATION) != 0 ? int(info.rotation) : 0;
         state.position = clientPosition;
+        state.timeSeconds = info.performanceCount != 0 ? performanceSeconds(info.performanceCount) : 0.0;
         return state;
     }
 

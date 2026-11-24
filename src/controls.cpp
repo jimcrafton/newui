@@ -213,7 +213,25 @@ namespace newui {
 
     void Button::setTextColor(BLRgba32 color) {
         textColor_ = color;
+        textColorFromRole_ = false;
+        textRole_.clear();
         style().markDirty();
+    }
+
+    void Button::setTextRole(const std::string& role) {
+        textRole_ = role;
+        textColorFromRole_ = textRole_.empty();
+        themeChanged();
+    }
+
+    void Button::themeChanged() {
+        Control::themeChanged();
+        Color roleColor;
+        if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, roleColor)) {
+            textColor_ = roleColor.toBLRgba32();
+        } else if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+        }
     }
 
     void Button::setChecked(bool value) {
@@ -521,17 +539,44 @@ namespace newui {
 
     void Label::setTextColor(BLRgba32 color) {
         textColor_ = color;
+        textColorFromRole_ = false;
+        labelStyle_->setTextRole("");
         updateTextColor(true);
+    }
+
+    void Label::setTextRole(const std::string& role) {
+        labelStyle_->setTextRole(role);
+        if (role.empty()) {
+            updateTextColor(true);
+        } else {
+            style().markDirty();   // updateTextColor() leaves a color the style holds by itself alone
+        }
     }
 
     void Label::setLinkColor(BLRgba32 color) {
         linkColor_ = color;
+        linkColorFromRole_ = false;
         updateTextColor(true);
     }
 
     void Label::setHoveredLinkColor(BLRgba32 color) {
         hoveredLinkColor_ = color;
+        hoveredLinkColorFromRole_ = false;
         updateTextColor(true);
+    }
+
+    void Label::themeChanged() {
+        Control::themeChanged();
+        if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+        }
+        if (linkColorFromRole_) {
+            linkColor_ = UIColorManager::colorFor(UIColorRole::LinkText).toBLRgba32();
+        }
+        if (hoveredLinkColorFromRole_) {
+            hoveredLinkColor_ = UIColorManager::colorFor(UIColorRole::LinkHoverText).toBLRgba32();
+        }
+        updateTextColor();   // not forced: a color the style was given by hand (a file's textColor, say) stays
     }
 
     namespace {
@@ -632,7 +677,25 @@ namespace newui {
 
     void GroupBox::setTextColor(BLRgba32 color) {
         textColor_ = color;
+        textColorFromRole_ = false;
+        textRole_.clear();
         style().markDirty();
+    }
+
+    void GroupBox::setTextRole(const std::string& role) {
+        textRole_ = role;
+        textColorFromRole_ = textRole_.empty();
+        themeChanged();
+    }
+
+    void GroupBox::themeChanged() {
+        Control::themeChanged();
+        Color roleColor;
+        if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, roleColor)) {
+            textColor_ = roleColor.toBLRgba32();
+        } else if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::WindowText).toBLRgba32();
+        }
     }
 
     SyncReturn GroupBox::handleStateChanged(Control& /*sender*/) {
@@ -2116,7 +2179,25 @@ namespace newui {
 
     void ToolbarButton::setTextColor(BLRgba32 color) {
         textColor_ = color;
+        textColorFromRole_ = false;
+        textRole_.clear();
         style().markDirty();
+    }
+
+    void ToolbarButton::setTextRole(const std::string& role) {
+        textRole_ = role;
+        textColorFromRole_ = textRole_.empty();
+        themeChanged();
+    }
+
+    void ToolbarButton::themeChanged() {
+        Control::themeChanged();
+        Color roleColor;
+        if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, roleColor)) {
+            textColor_ = roleColor.toBLRgba32();
+        } else if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+        }
     }
 
     void ToolbarButton::setIcon(const std::string& resourceName) {
@@ -2352,7 +2433,25 @@ namespace newui {
 
     void StatusPane::setTextColor(BLRgba32 color) {
         textColor_ = color;
+        textColorFromRole_ = false;
+        textRole_.clear();
         style().markDirty();
+    }
+
+    void StatusPane::setTextRole(const std::string& role) {
+        textRole_ = role;
+        textColorFromRole_ = textRole_.empty();
+        themeChanged();
+    }
+
+    void StatusPane::themeChanged() {
+        SubView::themeChanged();
+        Color roleColor;
+        if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, roleColor)) {
+            textColor_ = roleColor.toBLRgba32();
+        } else if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::ControlText).toBLRgba32();
+        }
     }
 
     void StatusPane::paint(BLContext& ctx) {
@@ -2468,6 +2567,35 @@ namespace newui {
         if (Controller::model() != nullptr) {
             model().removeView(&owner_);
         }
+    }
+
+    void TextController::setTextRole(const std::string& role) {
+        textRole_ = role;
+        textColorFromRole_ = textRole_.empty();
+        themeChanged();
+        owner_.style().markDirty();
+    }
+
+    void TextController::themeChanged() {
+        Color roleColor;
+        if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, roleColor)) {
+            textColor_ = roleColor;
+        } else if (textColorFromRole_) {
+            textColor_ = UIColorManager::colorFor(UIColorRole::ControlText);
+        }
+        if (textColorFromRole_ || !textRole_.empty()) {
+            caret_.setColor(textColor_);   // the caret follows the text it sits in
+        }
+    }
+
+    void TextField::themeChanged() {
+        Control::themeChanged();
+        controller_->themeChanged();
+    }
+
+    void TextControl::themeChanged() {
+        Control::themeChanged();
+        controller_->themeChanged();
     }
 
     SyncReturn TextController::handleCaretVisibilityChanged(text::Caret& sender) {

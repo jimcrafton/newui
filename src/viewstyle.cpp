@@ -538,6 +538,18 @@ namespace newui {
 		backgroundFill_.setKind(gfx::PaintKind::Color);
 	}
 
+	void ViewStyle::applyRoles()
+	{
+		Color color;
+		if (!backgroundRole_.empty() && Color::fromUIColorRoleName(backgroundRole_, color)) {
+			backgroundFill_.setColor(color);
+			backgroundFill_.setKind(gfx::PaintKind::Color);
+		}
+		if (!borderRole_.empty() && Color::fromUIColorRoleName(borderRole_, color)) {
+			borderFill_ = color;
+		}
+	}
+
 	void ViewStyle::setBackgroundColor(const BLRgba32& color)
 	{
 		setBackgroundColor(Color(color));
@@ -818,7 +830,7 @@ namespace newui {
 		// unconditionally every paint pass now (see this method's own
 		// doc comment, viewstyle.h), so a future override drawing some
 		// other unclipped effect stays free to run regardless of focus.
-		if (view() == nullptr || !view()->isFocused()) {
+		if (!focusRing_ || view() == nullptr || !view()->isFocused()) {
 			return;
 		}
 

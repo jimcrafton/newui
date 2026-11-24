@@ -33,16 +33,11 @@ namespace {
 		return r.snappedOutwardToPixels();
 	}
 
-	// Recurses view and every descendant SubView, dropping the cached
-	// HTHEME on whichever ones are actually ThemedViewStyle - a plain
-	// ViewStyle has nothing theme-related to drop, so dynamic_cast simply
-	// skips it. Used by RootView::refreshThemes() below.
-	void closeThemedStyles(newui::View& view) {
-		if (auto* themed = dynamic_cast<newui::ThemedViewStyle*>(&view.style())) {
-			themed->closeTheme();
-		}
+	// Calls themeChanged() on view and then on every descendant SubView. Used by RootView::refreshThemes() below.
+	void themeChangedIn(newui::View& view) {
+		view.themeChanged();
 		for (newui::SubView* child : view.childViews()) {
-			closeThemedStyles(*child);
+			themeChangedIn(*child);
 		}
 	}
 
@@ -160,6 +155,7 @@ namespace newui {
 		// addChild()).
 		setRootView(this);
 		initDefaultBackground();
+		subscribeToThemeChanges();
 	}
 
 	RootView::RootView(HWND externalParentHwnd, HINSTANCE instanceHandle, const newui::Rect& bounds, const std::string& name)
@@ -171,6 +167,16 @@ namespace newui {
 		// Same reasoning as the Frame-owned constructor above.
 		setRootView(this);
 		initDefaultBackground();
+		subscribeToThemeChanges();
+	}
+
+	void RootView::subscribeToThemeChanges() {
+		themeConnection_ = UIColorManager::instance().onThemeChanged.add(this, &RootView::handleThemeChanged);
+	}
+
+	SyncReturn RootView::handleThemeChanged(UIColorManager&) {
+		refreshThemes();
+		return SyncReturn::Ignored;
 	}
 
 	// Unlike a mid-tree SubView (which should stay transparent by default
@@ -193,6 +199,7 @@ namespace newui {
 	}
 
 	RootView::~RootView() {
+		UIColorManager::instance().onThemeChanged.remove(themeConnection_);
 		// See aliveFlag_'s own doc comment (rootview.h) - a repaint task
 		// posted via scheduleRepaint() can still be sitting in RunLoop's
 		// idle queue after this point; this is what tells it to no-op
@@ -284,7 +291,7 @@ namespace newui {
 	}
 
 	void RootView::refreshThemes() {
-		closeThemedStyles(*this);
+		themeChangedIn(*this);
 		markDirty();
 	}
 
@@ -1166,6 +1173,7 @@ namespace newui {
 		info.rotation = penInfo.rotation;
 		info.tiltX = penInfo.tiltX;
 		info.tiltY = penInfo.tiltY;
+		info.performanceCount = static_cast<unsigned long long>(penInfo.pointerInfo.PerformanceCount);
 		penState_ = penStateFrom(info, Point(float(client.x), float(client.y)));
 	}
 

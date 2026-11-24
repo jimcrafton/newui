@@ -223,6 +223,26 @@ namespace newui {
         const Color& borderFill() const { return borderFill_; }
         void setBorderFill(const Color& color) { borderFill_ = color; }
 
+        // A UIColorRole name ("ControlBackground", "TitleBackground", ...; empty = none) the background or the border follows:
+        // the colour is read from UIColorManager when the role is set and again in every themeChanged(). While a role is set
+        // it wins over a colour set directly; set it to "" to drop it.
+        // Whether the default postPaint() draws the keyboard focus ring while the view is focused. A view that is always focused
+        // (a drawing canvas) turns it off.
+        bool focusRing() const { return focusRing_; }
+        void setFocusRing(bool show) { focusRing_ = show; }
+
+        const std::string& backgroundRole() const { return backgroundRole_; }
+        void setBackgroundRole(const std::string& role) {
+            backgroundRole_ = role;
+            applyRoles();
+        }
+
+        const std::string& borderRole() const { return borderRole_; }
+        void setBorderRole(const std::string& role) {
+            borderRole_ = role;
+            applyRoles();
+        }
+
         float borderWidth() const { return borderWidth_; }
         void setBorderWidth(float width) { borderWidth_ = width; }
 
@@ -439,7 +459,19 @@ namespace newui {
 
         void markDirty();
 
+        // The theme changed (View::themeChanged()): drop whatever was derived from it. Painting asks UIColorManager each
+        // time, so the default only repaints; a style that caches theme data overrides it.
+        virtual void themeChanged() {
+            applyRoles();
+            markDirty();
+        }
+
     private:
+        void applyRoles();
+
+        std::string backgroundRole_;
+        std::string borderRole_;
+        bool focusRing_ = true;
         Color borderFill_ = Color::null();
         float borderWidth_ = 0.0f;
         Color highlightFill_ = Color::null();
@@ -543,6 +575,17 @@ namespace newui {
         const Color& textColor() const { return textColor_; }
         void setTextColor(const Color& color) { textColor_ = color; }
 
+        // A UIColorRole name the text follows (see ViewStyle::backgroundRole()); while set it wins over setTextColor().
+        const std::string& textRole() const { return textRole_; }
+        void setTextRole(const std::string& role) {
+            textRole_ = role;
+            applyTextRole();
+        }
+        void themeChanged() override {
+            applyTextRole();
+            ViewStyle::themeChanged();
+        }
+
         // Off by default - the original, single-line-centered behavior
         // every existing Label still gets unchanged. When on, paint()
         // (viewstyle.cpp) greedily breaks text() across as many lines as
@@ -567,7 +610,15 @@ namespace newui {
         void paint(BLContext& ctx, const Size& size, bool highlighted, Rect& clientBounds) const override;
 
     private:
+        void applyTextRole() {
+            Color color;
+            if (!textRole_.empty() && Color::fromUIColorRoleName(textRole_, color)) {
+                textColor_ = color;
+            }
+        }
+
         std::string text_;
+        std::string textRole_;
         Color textColor_ = Color::null();
         bool wordWrap_ = false;
         TextAlignment textAlignment_ = TextAlignment::Center;
@@ -763,6 +814,11 @@ namespace newui {
         ThemedViewStyle& operator=(const ThemedViewStyle&) = delete;
 
         void closeTheme();
+
+        void themeChanged() override {
+            closeTheme();
+            ViewStyle::themeChanged();
+        }
 
         // Queries GetThemeBackgroundContentRect() for the real deflation
         // this theme part's chrome needs - but only if a theme is already

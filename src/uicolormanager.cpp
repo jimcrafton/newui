@@ -169,7 +169,7 @@ namespace newui {
 
 	namespace {
 		// Per role: 0 = none, else (1 << 32) | 0xRRGGBB.
-		constexpr std::size_t kRoleCount = static_cast<std::size_t>(UIColorRole::LinkHoverText) + 1;
+		constexpr std::size_t kRoleCount = static_cast<std::size_t>(UIColorRole::DimensionColor) + 1;
 		std::atomic<std::uint64_t> g_colorOverride[kRoleCount];
 
 		std::uint32_t channel(float v) {
@@ -270,6 +270,33 @@ namespace newui {
 		// makes this respond to it; querying still means the light-mode
 		// starting point (and therefore the derived dark one) reflects
 		// the real current visual style instead of a hand-guessed value.
+		// The application roles have no system counterpart: each is derived from one that has, in the current mode.
+		switch (role) {
+			case UIColorRole::TitleBackground:
+			case UIColorRole::ContentBackground: {
+				HSLColor hsl = colorFor(UIColorRole::ControlBackground).toHSL();
+				const float step = role == UIColorRole::TitleBackground ? 0.04f : 0.08f;
+				const float lightness = isDarkMode() ? hsl.l + step : hsl.l - step;
+				hsl.l = lightness < 0.0f ? 0.0f : (lightness > 1.0f ? 1.0f : lightness);
+				return Color::fromHSL(hsl);
+			}
+
+			case UIColorRole::MutedText: {
+				const Color text = colorFor(UIColorRole::ControlText);
+				const Color background = colorFor(UIColorRole::ControlBackground);
+				return Color(text.r * 0.6f + background.r * 0.4f, text.g * 0.6f + background.g * 0.4f, text.b * 0.6f + background.b * 0.4f);
+			}
+
+			case UIColorRole::IconColor:
+				return colorFor(UIColorRole::ControlText);
+
+			case UIColorRole::DimensionColor:
+				return colorFor(UIColorRole::LinkText);
+
+			default:
+				break;
+		}
+
 		Color base;
 		switch (role) {
 			case UIColorRole::WindowBackground:

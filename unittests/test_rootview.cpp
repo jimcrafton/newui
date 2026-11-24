@@ -3,6 +3,7 @@
 #include "newui/controls.h"
 #include "newui/keyboard_constants.h"
 #include "newui/uiinputmanager.h"
+#include "newui/uicolormanager.h"
 
 #include <gtest/gtest.h>
 
@@ -3270,4 +3271,126 @@ TEST(RootViewPruning, RepaintingARegionWhoseEdgesCutThroughTextAndControlsMatche
     EXPECT_EQ(failed, 0) << failed << " of " << checked << " pruned regions differ from a full repaint by more than "
         << kPruneTolerance << " levels; first: " << firstFailure;
     EXPECT_LE(largest, kPruneTolerance);
+}
+
+// ---- UIColorManager::notifyThemeChanged(): each RootView tells its views, so one that took a role color at construction reads it again ----
+
+TEST(RootViewThemeChange, ControlsThatCachedARoleColorFollowAThemeChange) {
+    const newui::Color before = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText);
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* roleLabel = new newui::Label();
+    auto* handLabel = new newui::Label();
+    handLabel->setTextColor(BLRgba32(0xFF112233u));
+    auto* field = new newui::TextField();
+    auto* handField = new newui::TextField();
+    handField->setTextColor(newui::Color(BLRgba32(0xFF445566u)));
+    for (newui::SubView* view : {static_cast<newui::SubView*>(roleLabel), static_cast<newui::SubView*>(handLabel),
+                                 static_cast<newui::SubView*>(field), static_cast<newui::SubView*>(handField)}) {
+        root->addChild(view);
+    }
+
+    const newui::Color changed(0.25f, 0.5f, 0.75f, 1.0f);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::ControlText, changed);
+    newui::UIColorManager::instance().notifyThemeChanged();
+
+    EXPECT_EQ(dynamic_cast<newui::LabelStyle&>(roleLabel->style()).textColor(), newui::UIColorManager::colorFor(newui::UIColorRole::ControlText));
+    EXPECT_NE(dynamic_cast<newui::LabelStyle&>(roleLabel->style()).textColor(), before);
+    EXPECT_EQ(dynamic_cast<newui::LabelStyle&>(handLabel->style()).textColor(), newui::Color(BLRgba32(0xFF112233u)));
+    EXPECT_EQ(field->textColor(), newui::UIColorManager::colorFor(newui::UIColorRole::ControlText));
+    EXPECT_EQ(handField->textColor(), newui::Color(BLRgba32(0xFF445566u)));
+
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::ControlText, std::nullopt);
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewThemeChange, ViewsBoundToARoleFollowAThemeChange) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* panel = new newui::SubView();
+    panel->style().setBackgroundRole("TitleBackground");
+    panel->style().setBorderRole("ControlBorder");
+    auto* label = new newui::Label();
+    label->setTextRole("MutedText");
+    root->addChild(panel);
+    root->addChild(label);
+
+    const newui::Color title(0x1A334Du, false), muted(0x998066u, false), border(0xE6CCB3u, false);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::TitleBackground, title);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::MutedText, muted);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::ControlBorder, border);
+    newui::UIColorManager::instance().notifyThemeChanged();
+
+    EXPECT_EQ(panel->style().backgroundFill().color(), newui::UIColorManager::colorFor(newui::UIColorRole::TitleBackground));
+    EXPECT_EQ(panel->style().backgroundFill().color(), title);
+    EXPECT_EQ(panel->style().borderFill(), newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder));
+    EXPECT_EQ(dynamic_cast<newui::LabelStyle&>(label->style()).textColor(), newui::UIColorManager::colorFor(newui::UIColorRole::MutedText));
+
+    const newui::Color other(0x4D4D4Du, false);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::TitleBackground, other);
+    newui::UIColorManager::instance().notifyThemeChanged();
+    EXPECT_EQ(panel->style().backgroundFill().color(), newui::UIColorManager::colorFor(newui::UIColorRole::TitleBackground));
+
+    panel->style().setBackgroundRole("");
+    panel->style().setBackgroundColor(newui::Color(1.0f, 0.0f, 0.0f, 1.0f));
+    newui::UIColorManager::instance().notifyThemeChanged();
+    EXPECT_EQ(panel->style().backgroundFill().color(), newui::Color(1.0f, 0.0f, 0.0f, 1.0f));
+
+    for (newui::UIColorRole role : {newui::UIColorRole::TitleBackground, newui::UIColorRole::MutedText, newui::UIColorRole::ControlBorder}) {
+        newui::UIColorManager::setColorOverride(role, std::nullopt);
+    }
+    root->destroy();
+    delete root;
+}
+
+TEST(RootViewThemeChange, TextControlsBoundToARoleFollowAThemeChange) {
+    auto* root = new TestableRootView(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* button = new newui::Button();
+    auto* group = new newui::GroupBox();
+    auto* toolbarButton = new newui::ToolbarButton();
+    auto* pane = new newui::StatusPane();
+    auto* field = new newui::TextField();
+    auto* handField = new newui::TextField();
+    for (newui::SubView* view : {static_cast<newui::SubView*>(button), static_cast<newui::SubView*>(group), static_cast<newui::SubView*>(toolbarButton),
+                                 static_cast<newui::SubView*>(pane), static_cast<newui::SubView*>(field), static_cast<newui::SubView*>(handField)}) {
+        root->addChild(view);
+    }
+    button->setTextRole("MutedText");
+    group->setTextRole("MutedText");
+    toolbarButton->setTextRole("MutedText");
+    pane->setTextRole("MutedText");
+    field->setTextRole("MutedText");
+    handField->setTextRole("MutedText");
+    handField->setTextColor(newui::Color(BLRgba32(0xFF445566u)));
+
+    const newui::Color muted(0x998066u, false);
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::MutedText, muted);
+    newui::UIColorManager::instance().notifyThemeChanged();
+
+    const newui::Color wanted = newui::UIColorManager::colorFor(newui::UIColorRole::MutedText);
+    EXPECT_EQ(wanted, muted);
+    EXPECT_EQ(field->textColor(), wanted);
+    EXPECT_EQ(handField->textColor(), newui::Color(BLRgba32(0xFF445566u)));
+    EXPECT_TRUE(handField->textRole().empty());
+
+    field->setTextRole("");
+    newui::UIColorManager::instance().notifyThemeChanged();
+    EXPECT_EQ(field->textColor(), newui::UIColorManager::colorFor(newui::UIColorRole::ControlText));
+
+    newui::UIColorManager::setColorOverride(newui::UIColorRole::MutedText, std::nullopt);
+    root->destroy();
+    delete root;
+}
+
+TEST(UIColorManagerRoles, ApplicationRolesHaveDefaultsOfTheirOwn) {
+    for (newui::UIColorRole role : {newui::UIColorRole::TitleBackground, newui::UIColorRole::ContentBackground, newui::UIColorRole::MutedText,
+                                    newui::UIColorRole::IconColor, newui::UIColorRole::DimensionColor}) {
+        EXPECT_EQ(newui::UIColorManager::colorFor(role).a, 1.0f);
+        const newui::Color forced(0x666666u, false);
+        newui::UIColorManager::setColorOverride(role, forced);
+        EXPECT_EQ(newui::UIColorManager::colorFor(role), forced);
+        newui::UIColorManager::setColorOverride(role, std::nullopt);
+    }
+    newui::Color byName;
+    EXPECT_TRUE(newui::Color::fromUIColorRoleName("contentbackground", byName));
+    EXPECT_NE(newui::UIColorManager::colorFor(newui::UIColorRole::MutedText), newui::UIColorManager::colorFor(newui::UIColorRole::ControlText));
 }

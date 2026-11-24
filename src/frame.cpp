@@ -229,9 +229,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			// false) - it does its own default WM_THEMECHANGED handling
 			// for the window's native non-client chrome, which this
 			// doesn't touch.
-			if (nullptr != rootView_) {
-				rootView_->refreshThemes();
-			}
+			UIColorManager::instance().notifyThemeChanged();
 			Application::instance().onThemeChanged(Application::instance());
 		}
 		break;
@@ -276,9 +274,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 			// Same "refresh then notify" ordering as WM_THEMECHANGED above -
 			// an accent-color change affects themed chrome just as much as
 			// an actual theme switch does.
-			if (nullptr != rootView_) {
-				rootView_->refreshThemes();
-			}
+			UIColorManager::instance().notifyThemeChanged();
 			// wParam is already exactly the 0xAARRGGBB layout Color's
 			// (uint32_t, hasAlpha) constructor expects - see
 			// ColorizationColorChangedDelegate's doc comment in
@@ -324,9 +320,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 				// toggle to catch up. A no-op (isLoaded() stays whatever
 				// it already was) if neither file exists.
 				ThemeData::instance().reloadForCurrentMode();
-				if (nullptr != rootView_) {
-					rootView_->refreshThemes();
-				}
+				UIColorManager::instance().notifyThemeChanged();
 			}
 
 			Application::instance().onSettingChange(Application::instance(),

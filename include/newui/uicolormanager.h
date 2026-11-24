@@ -2,6 +2,7 @@
 
 #include <newui/newui.h>
 #include <newui/color.h>
+#include <newui/delegate.h>
 
 #include <optional>
 
@@ -36,6 +37,14 @@ namespace newui {
         // is (see colorFor()'s own comment).
         LinkText,
         LinkHoverText,
+
+        // Roles for an application's own surfaces. The defaults follow the system light/dark mode; a host with a palette of its
+        // own overrides them (setColorOverride()) and calls notifyThemeChanged().
+        TitleBackground,     // a raised strip on a panel: title bars, header bars
+        ContentBackground,   // the area the main content sits in, apart from the panels and bars around it
+        MutedText,           // secondary text
+        IconColor,           // icons and glyphs at rest
+        DimensionColor,      // measurements drawn over content (brackets, size labels)
     };
 
     // Tracks Windows' system-wide Light/Dark mode setting and hands back
@@ -78,9 +87,8 @@ namespace newui {
 
         // Makes isDarkMode() answer `dark` instead of reading the Windows setting, for a host that has a theme of
         // its own (an IDE hosting this toolkit in a pane follows the IDE's theme, not the OS's). std::nullopt goes
-        // back to the Windows setting. Any thread. Set it before the first window is built: colors that views take at
-        // construction are not revisited, only what is asked for while painting (and the themed chrome, once the
-        // host calls RootView::refreshThemes() on each root) follows a later change.
+        // back to the Windows setting. Any thread. Windows that already exist follow once the host calls
+        // notifyThemeChanged() (below), which every RootView answers by recalibrating its views.
         static void setDarkModeOverride(std::optional<bool> dark);
 
         // Makes colorFor(role) answer `color` (opaque; its alpha is dropped) whatever the mode - the host's own palette,
@@ -99,6 +107,16 @@ namespace newui {
         // back to a fixed Windows-blue accent if DWM isn't available.
         // Every other role is a fixed hand-picked light/dark pair.
         static Color colorFor(UIColorRole role);
+
+        typedef Delegate<UIColorManager> ThemeChangedDelegate;
+
+        // Fired when the system or the application changed the theme: Frame does it for WM_SETTINGCHANGE
+        // ("ImmersiveColorSet"), WM_THEMECHANGED and WM_DWMCOLORIZATIONCOLORCHANGED, and an application that switches the
+        // mode itself (setDarkModeOverride(), setColorOverride()) calls notifyThemeChanged() once it is done. Every
+        // RootView subscribes and recalibrates its views (View::themeChanged()); anything else that derives something
+        // from the theme can subscribe too. UI thread only.
+        ThemeChangedDelegate onThemeChanged;
+        void notifyThemeChanged() { onThemeChanged(*this); }
 
     private:
         UIColorManager() = default;

@@ -13,6 +13,7 @@
 #include <newui/overlay.h>
 #include <newui/pen.h>
 #include <newui/presentsurface.h>
+#include <newui/uicolormanager.h>
 
 namespace newui {
     class Frame;
@@ -591,6 +592,11 @@ namespace newui {
         // is long gone.
         std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
         void scheduleRepaint();
+
+        // UIColorManager::onThemeChanged -> refreshThemes(); subscribed by the constructors, removed by the destructor.
+        void subscribeToThemeChanges();
+        SyncReturn handleThemeChanged(UIColorManager& sender);
+        Connection themeConnection_;
 
         void resizeImageBuffer(int width, int height);
 

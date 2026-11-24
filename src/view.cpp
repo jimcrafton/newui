@@ -245,6 +245,10 @@ namespace newui {
 		}
 	}
 
+	void View::themeChanged() {
+		style().themeChanged();
+	}
+
 	void View::updateLayout() {
 		if (isDestroying()) {
 			return;

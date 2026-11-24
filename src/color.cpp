@@ -18,6 +18,11 @@ namespace newui {
             {"HighlightText", UIColorRole::HighlightText},
             {"LinkText", UIColorRole::LinkText},
             {"LinkHoverText", UIColorRole::LinkHoverText},
+            {"TitleBackground", UIColorRole::TitleBackground},
+            {"ContentBackground", UIColorRole::ContentBackground},
+            {"MutedText", UIColorRole::MutedText},
+            {"IconColor", UIColorRole::IconColor},
+            {"DimensionColor", UIColorRole::DimensionColor},
         };
 
         for (const auto& entry : kRoles) {
