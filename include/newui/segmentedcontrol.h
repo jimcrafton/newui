@@ -40,6 +40,9 @@ public:
     SegmentedControl();
     ~SegmentedControl() override {}
 
+    // As tall as a button (Font::controlHeight() of the UI font); only the width can be set.
+    Size desiredSize() const override;
+
     // Replaces the whole segment list - every segment starts enabled,
     // and selectedIndex() resets to 0. An empty list just leaves this
     // control with nothing to paint/hit-test (never a crash).

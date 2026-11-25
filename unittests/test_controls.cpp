@@ -2829,6 +2829,36 @@ TEST(ListView, WorksInsideAScrollViewSharingItsScrollbarInstead) {
 // scrolled the newly-selected row into view once it left the viewport.
 // ---------------------------------------------------------------------
 
+TEST(Controls, buttonHeightAndListRowHeightFollowTheFont) {
+    const Font font = FontManager::getSystemFont(SystemUIFont::Message);
+    EXPECT_FLOAT_EQ(font.lineHeight() + 2.0f * Font::kControlPadding, font.controlHeight());
+    EXPECT_GT(font.lineHeight(), 0.0f);
+
+    Button button;
+    ListView list;
+    EXPECT_FLOAT_EQ(font.controlHeight(), button.desiredSize().height);
+    EXPECT_FLOAT_EQ(font.controlHeight(), list.rowHeight()) << "a button and a list row of one font are the same height";
+
+    TextField field;
+    DropDownList dropDown;
+    field.setDesiredSize(Size(170.0f, 28.0f));
+    EXPECT_FLOAT_EQ(font.controlHeight(), field.desiredSize().height) << "a text field is as tall as a button";
+    EXPECT_FLOAT_EQ(170.0f, field.desiredSize().width);
+    EXPECT_FLOAT_EQ(font.controlHeight(), dropDown.desiredSize().height) << "and so is a drop-down list";
+    Slider slider;
+    SegmentedControl segments;
+    EXPECT_FLOAT_EQ(font.controlHeight(), slider.desiredSize().height) << "a horizontal slider";
+    EXPECT_FLOAT_EQ(font.controlHeight(), segments.desiredSize().height) << "and a segmented control";
+
+    button.setDesiredSize(Size(90.0f, 31.0f));
+    EXPECT_FLOAT_EQ(90.0f, button.desiredSize().width) << "the width can be set";
+    EXPECT_FLOAT_EQ(font.controlHeight(), button.desiredSize().height) << "the height cannot: it is the font's";
+
+    Font larger = font;
+    larger.setSize(font.size() * 2.0f);
+    EXPECT_GT(larger.controlHeight(), font.controlHeight());
+}
+
 TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
     auto* scrollView = new ScrollView();
     scrollView->setBounds(Rect(0, 0, 100, 60));
@@ -2865,9 +2895,9 @@ TEST(ListView, SelectingARowBelowTheViewportScrollsDownToRevealIt) {
     EXPECT_LE(rowBottom, value + pageSize + 0.01f);
     // Pinned exact value, not just the tolerant bounds above: with the
     // full 60px viewport height (no phantom horizontal bar stealing 16px
-    // for a fallback thickness), row 40 (top=800, bottom=820) must land
-    // scrolled so its bottom is flush with the viewport bottom.
-    EXPECT_FLOAT_EQ(value, 760.0f);
+    // for a fallback thickness), row 40 must land scrolled so its bottom
+    // is flush with the viewport bottom.
+    EXPECT_FLOAT_EQ(value, 41.0f * listView->rowHeight() - 60.0f);
 
     scrollView->destroy();
     delete scrollView;
@@ -2900,7 +2930,7 @@ TEST(ListView, ManuallyScrollingAwayFromASelectedRowIsNotForciblyUndoneByTheNext
 
     listView->setSelectedIndex(40u);
     listView->paint(ctx);
-    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 760.0f) << "test assumption: paint() scrolled to reveal row 40, same as the sibling test above";
+    ASSERT_FLOAT_EQ(scrollView->vBar()->value(), 41.0f * listView->rowHeight() - 60.0f) << "test assumption: paint() scrolled to reveal row 40, same as the sibling test above";
 
     // Simulates the user dragging the scrollbar thumb back to the top,
     // away from the still-selected row 40 - same handleVBarValueChanged()

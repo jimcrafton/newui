@@ -24,6 +24,11 @@ namespace {
     }
 }
 
+Size SegmentedControl::desiredSize() const {
+    const float width = hasDesiredSizeOverride() ? View::desiredSize().width : bounds().width();
+    return Size(width, FontManager::getSystemFont(SystemUIFont::Message).controlHeight());
+}
+
 SegmentedControl::SegmentedControl() {
     setVisible(true);
     setAcceptsFocus(true);

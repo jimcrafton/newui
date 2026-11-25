@@ -317,7 +317,7 @@ namespace newui {
         // that being circular (Layout is what sets bounds in the first
         // place). Returns the explicit override set via setDesiredSize(),
         // if any; otherwise falls back to computeDesiredSize() below.
-        Size desiredSize() const {
+        virtual Size desiredSize() const {
             return desiredSizeOverride_.has_value() ? *desiredSizeOverride_ : computeDesiredSize();
         }
 

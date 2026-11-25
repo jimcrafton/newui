@@ -11,6 +11,7 @@
 
 #include "newui/newui.h"
 #include "newui/component.h"
+#include "newui/font.h"
 #include "newui/geometry.h"
 #include "newui/models.h"
 
@@ -617,7 +618,7 @@ namespace newui {
         }
 
     private:
-        float defaultItemHeight_ = 20.0f;
+        float defaultItemHeight_ = FontManager::getSystemFont(SystemUIFont::Message).controlHeight();
     };
 
     // ItemController for a tree, addressed by path - the sequence of
@@ -804,7 +805,7 @@ namespace newui {
         std::set<std::vector<std::size_t>> expandedPaths_;
         mutable std::vector<std::vector<std::size_t>> visiblePaths_;
         mutable bool visibleListDirty_ = true;
-        float defaultItemHeight_ = 20.0f;
+        float defaultItemHeight_ = FontManager::getSystemFont(SystemUIFont::Message).controlHeight();
     };
 
     // ItemController for a table, addressed by (row, col).

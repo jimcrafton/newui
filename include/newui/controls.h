@@ -166,6 +166,10 @@ namespace newui {
         Button();
         virtual ~Button() {}
 
+        // A button's height is always that of its font (Font::controlHeight()), so all buttons of one font match; setDesiredSize() (or the
+        // width in a .newui file) only sets the width, which is otherwise the current one.
+        Size desiredSize() const override;
+
         const std::string& text() const { return text_; }
         void setText(const std::string& text);
 
@@ -570,6 +574,9 @@ namespace newui {
     public:
         Slider();
         virtual ~Slider() {}
+
+        // A horizontal slider is as tall as a text field next to it (Font::controlHeight() of the UI font); only its width can be set.
+        Size desiredSize() const override;
 
         typedef Delegate<Slider> ValueChangedDelegate;
         // Fired whenever value() actually changes (setValue() rounds -
@@ -2026,6 +2033,9 @@ namespace newui {
         TextField();
         virtual ~TextField() {}
 
+        // Like Button: the height is always the font's (Font::controlHeight()); only the width can be set.
+        Size desiredSize() const override;
+
         // Direct access to the owned TextController itself - most callers
         // want the narrower model()/selection()/caret()/inputTraits()/
         // font()/textColor() forwarders below instead; this is for
@@ -3024,6 +3034,9 @@ namespace newui {
     public:
         DropDownList();
         ~DropDownList() override;
+
+        // Like Button: the height is always the UI font's (Font::controlHeight()); only the width can be set.
+        Size desiredSize() const override;
 
         // The same controller the popup list uses (shared, not a copy) - so this is where to
         // customize the rows: controller().setDefaultItemClassName("MyItem"), a custom subclass via

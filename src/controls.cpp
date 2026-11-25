@@ -203,6 +203,11 @@ namespace newui {
         onStateChanged.add(this, &Button::handleStateChanged);
     }
 
+    Size Button::desiredSize() const {
+        const float width = hasDesiredSizeOverride() ? View::desiredSize().width : bounds().width();
+        return Size(width, style().font().controlHeight());
+    }
+
     void Button::setText(const std::string& text) {
         if (text_ == text) {
             return;
@@ -782,6 +787,14 @@ namespace newui {
     // -----------------------------------------------------------------
     // Slider
     // -----------------------------------------------------------------
+
+    Size Slider::desiredSize() const {
+        if (!isHorizontal()) {
+            return View::desiredSize();
+        }
+        const float width = hasDesiredSizeOverride() ? View::desiredSize().width : bounds().width();
+        return Size(width, FontManager::getSystemFont(SystemUIFont::Message).controlHeight());
+    }
 
     Slider::Slider() {
         setVisible(true);
@@ -3583,6 +3596,11 @@ namespace newui {
     // TextField
     // -----------------------------------------------------------------
 
+    Size TextField::desiredSize() const {
+        const float width = hasDesiredSizeOverride() ? View::desiredSize().width : bounds().width();
+        return Size(width, font().controlHeight());
+    }
+
     TextField::TextField() : controller_(std::make_unique<TextController>(*this)) {
         setVisible(true);
         setAcceptsFocus(true);
@@ -5388,6 +5406,11 @@ namespace newui {
     // -----------------------------------------------------------------
     // DropDownList
     // -----------------------------------------------------------------
+
+    Size DropDownList::desiredSize() const {
+        const float width = hasDesiredSizeOverride() ? View::desiredSize().width : bounds().width();
+        return Size(width, FontManager::getSystemFont(SystemUIFont::Message).controlHeight());
+    }
 
     DropDownList::DropDownList() : controller_(std::make_shared<ListController>()) {
         setVisible(true);

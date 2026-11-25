@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <string>
 
 #include <blend2d/blend2d.h>
@@ -95,6 +96,25 @@ namespace newui {
                 dirty_ = false;
             }
             return blFont_;
+        }
+
+        // Vertical space around the text of a button, a field or a list row: every control's height is this font's line plus it on both
+        // sides, so heights follow the font and the controls of one font are all the same size.
+        static constexpr float kControlPadding = 4.0f;
+
+        // ascent + descent of the resolved font, rounded up to whole pixels; 0 if the font does not resolve.
+        float lineHeight() const {
+            const BLFont* font = blFont();
+            if (font == nullptr) {
+                return 0.0f;
+            }
+            const BLFontMetrics& fm = font->metrics();
+            return float(std::ceil(fm.ascent + fm.descent));
+        }
+
+        // The height of a button, a text field or a list row set in this font.
+        float controlHeight() const {
+            return lineHeight() + 2.0f * kControlPadding;
         }
 
         // Shapes text against blFont() (BLGlyphBuffer::set_utf8_text() +
