@@ -50,7 +50,7 @@ namespace newui {
         bool isValid() const override;
         BLImage& image() override;
         void present(const newui::Rect& dirty) override;
-        void paint(HDC hdc, const newui::Rect& paintRect) override;
+        void paint(NativeDeviceContextHandle hdc, const newui::Rect& paintRect) override;
 
         // Why this surface gave up on DXGI - empty while it hasn't. (Also sent to the debugger's output
         // window when it happens.)

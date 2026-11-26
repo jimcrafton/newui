@@ -113,7 +113,7 @@ namespace newui::gfx {
         // the same HDC is returned every time after that, until this
         // Image is destroyed or moved-from. Returns nullptr if isValid()
         // is false.
-        HDC memDC();
+        NativeDeviceContextHandle memDC();
 
     private:
         // Allocates a fresh width x height DIB section and wraps its bits
@@ -129,9 +129,9 @@ namespace newui::gfx {
         void releaseGdiResources();
 
         BLImage image_;
-        HBITMAP dibSection_ = nullptr;
-        HDC memDC_ = nullptr;
-        HBITMAP oldBitmap_ = nullptr;  // memDC_'s original 1x1 monochrome bitmap - restored before DeleteDC()
+        NativeBitmapHandle dibSection_ = nullptr;
+        NativeDeviceContextHandle memDC_ = nullptr;
+        NativeBitmapHandle oldBitmap_ = nullptr;  // memDC_'s original 1x1 monochrome bitmap - restored before DeleteDC()
     };
 
     enum class GradientKind {

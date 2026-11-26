@@ -1,5 +1,6 @@
 #include "newui/graphics.h"
 #include "newui/svgimage.h"
+#include "newui/win32/nativehandles.h"
 
 #include <algorithm>
 #include <cctype>
@@ -55,7 +56,7 @@ namespace newui::gfx {
         }
 
         image_.create_from_data(width, height, BL_FORMAT_PRGB32, bits, intptr_t(dstStride));
-        dibSection_ = dib;
+        dibSection_ = newui::win32::toNativeBitmap(dib);
         return true;
     }
 
@@ -131,13 +132,13 @@ namespace newui::gfx {
 
     void Image::releaseGdiResources() {
         if (memDC_ != nullptr) {
-            ::SelectObject(memDC_, oldBitmap_);
-            ::DeleteDC(memDC_);
+            ::SelectObject(newui::win32::toHDC(memDC_), newui::win32::toHBITMAP(oldBitmap_));
+            ::DeleteDC(newui::win32::toHDC(memDC_));
             memDC_ = nullptr;
             oldBitmap_ = nullptr;
         }
         if (dibSection_ != nullptr) {
-            ::DeleteObject(dibSection_);
+            ::DeleteObject(newui::win32::toHBITMAP(dibSection_));
             dibSection_ = nullptr;
         }
         image_.reset();
@@ -168,17 +169,17 @@ namespace newui::gfx {
         return *this;
     }
 
-    HDC Image::memDC() {
+    NativeDeviceContextHandle Image::memDC() {
         if (!isValid()) {
             return nullptr;
         }
 
         if (memDC_ == nullptr) {
-            memDC_ = ::CreateCompatibleDC(nullptr);
+            memDC_ = newui::win32::toNativeDC(::CreateCompatibleDC(nullptr));
             if (memDC_ == nullptr) {
                 return nullptr;
             }
-            oldBitmap_ = static_cast<HBITMAP>(::SelectObject(memDC_, dibSection_));
+            oldBitmap_ = newui::win32::toNativeBitmap(static_cast<HBITMAP>(::SelectObject(newui::win32::toHDC(memDC_), newui::win32::toHBITMAP(dibSection_))));
         }
 
         return memDC_;

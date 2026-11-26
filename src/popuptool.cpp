@@ -225,7 +225,7 @@ namespace newui {
         blend.SourceConstantAlpha = 255;
         blend.AlphaFormat = AC_SRC_ALPHA;
 
-        ::UpdateLayeredWindow(hwnd, nullptr, &ptDst, &szWindow, img.memDC(), &ptSrc, 0, &blend, ULW_ALPHA);
+        ::UpdateLayeredWindow(hwnd, nullptr, &ptDst, &szWindow, newui::win32::toHDC(img.memDC()), &ptSrc, 0, &blend, ULW_ALPHA);
     }
 
     CalloutTool::CalloutTool(NativeWindowHandle ownerHwnd, NativeInstanceHandle instanceHandle, const newui::Rect& bounds, const std::string& name)

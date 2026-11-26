@@ -42,16 +42,16 @@ namespace newui {
         }
 
         void present(const newui::Rect& dirty) override;
-        void paint(HDC hdc, const newui::Rect& paintRect) override;
+        void paint(NativeDeviceContextHandle hdc, const newui::Rect& paintRect) override;
 
     private:
         BLImage image_;
-        HDC memDC_ = nullptr;
-        HBITMAP dibSection_ = nullptr;
+        NativeDeviceContextHandle memDC_ = nullptr;
+        NativeBitmapHandle dibSection_ = nullptr;
         // Whatever memDC_ had selected before dibSection_ - re-selected
         // before deleting dibSection_ (see release()), since deleting a
         // bitmap while it's still selected into a DC is undefined behavior.
-        HBITMAP dibSectionOldBitmap_ = nullptr;
+        NativeBitmapHandle dibSectionOldBitmap_ = nullptr;
     };
 
 }

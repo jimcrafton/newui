@@ -46,11 +46,11 @@ namespace newui {
         // The RootView's real HWND - set as soon as it exists, cleared
         // (nullptr) when it's destroyed. present()/paint() no-op sensibly
         // without one.
-        void setWindow(HWND hwnd) {
+        void setWindow(NativeWindowHandle hwnd) {
             hwnd_ = hwnd;
         }
 
-        HWND window() const {
+        NativeWindowHandle window() const {
             return hwnd_;
         }
 
@@ -82,10 +82,10 @@ namespace newui {
         // WM_PAINT: transfer paintRect of image() onto hdc, if this
         // implementation presents that way. An implementation that presents
         // outside WM_PAINT does nothing here.
-        virtual void paint(HDC hdc, const newui::Rect& paintRect) = 0;
+        virtual void paint(NativeDeviceContextHandle hdc, const newui::Rect& paintRect) = 0;
 
     private:
-        HWND hwnd_ = nullptr;
+        NativeWindowHandle hwnd_ = nullptr;
     };
 
     // Case-insensitive "gdi" / "dxgi". False (out untouched) for anything else.

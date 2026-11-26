@@ -1275,7 +1275,7 @@ namespace newui {
 
 				newui::Rect paintRect = win32::fromRECT(ps.rcPaint);
 
-				surface_->paint(hdc, paintRect);
+				surface_->paint(newui::win32::toNativeDC(hdc), paintRect);
 				::EndPaint(newui::win32::toHWND(viewHandle_), &ps);
 				result = true;
 			}

@@ -42,5 +42,8 @@ namespace newui {
         inline NativeBitmapHandle toNativeBitmap(HBITMAP bitmap) { return static_cast<NativeBitmapHandle>(bitmap); }
         inline HBITMAP toHBITMAP(NativeBitmapHandle handle) { return static_cast<HBITMAP>(handle); }
 
+        inline NativeDeviceContextHandle toNativeDC(HDC dc) { return static_cast<NativeDeviceContextHandle>(dc); }
+        inline HDC toHDC(NativeDeviceContextHandle handle) { return static_cast<HDC>(handle); }
+
     } // namespace win32
 } // namespace newui

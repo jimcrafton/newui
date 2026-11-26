@@ -1,5 +1,6 @@
 #include "newui/graphics.h"
 #include "newui/svgimage.h"
+#include "newui/win32/nativehandles.h"
 
 #include <gtest/gtest.h>
 
@@ -203,18 +204,18 @@ TEST(Image, MemDCReturnsARealDCSelectedWithTheBackingDIB) {
     newui::gfx::Image image(8, 8);
     ASSERT_TRUE(image.isValid());
 
-    HDC dc = image.memDC();
+    HDC dc = newui::win32::toHDC(image.memDC());
     ASSERT_NE(dc, nullptr);
 
     // Same HDC every call - created lazily once, then cached.
-    EXPECT_EQ(image.memDC(), dc);
+    EXPECT_EQ(newui::win32::toHDC(image.memDC()), dc);
 }
 
 TEST(Image, GdiDrawingIntoMemDCIsVisibleThroughBlImage) {
     newui::gfx::Image image(8, 8);
     ASSERT_TRUE(image.isValid());
 
-    HDC dc = image.memDC();
+    HDC dc = newui::win32::toHDC(image.memDC());
     ASSERT_NE(dc, nullptr);
 
     // A plain GDI fill (no blend2d involved at all) into memDC() should
@@ -237,14 +238,14 @@ TEST(Image, GdiDrawingIntoMemDCIsVisibleThroughBlImage) {
 TEST(Image, MoveConstructorTransfersStateAndLeavesSourceInvalid) {
     newui::gfx::Image source(4, 4);
     ASSERT_TRUE(source.isValid());
-    HDC dc = source.memDC();
+    HDC dc = newui::win32::toHDC(source.memDC());
     ASSERT_NE(dc, nullptr);
 
     newui::gfx::Image moved(std::move(source));
 
     EXPECT_TRUE(moved.isValid());
     EXPECT_EQ(moved.width(), 4);
-    EXPECT_EQ(moved.memDC(), dc);
+    EXPECT_EQ(newui::win32::toHDC(moved.memDC()), dc);
 
     EXPECT_FALSE(source.isValid());
     EXPECT_EQ(source.memDC(), nullptr);
@@ -323,7 +324,7 @@ TEST(Image, MoveAssignmentReleasesTheTargetsOwnedResourcesFirst) {
 
     newui::gfx::Image b(6, 6);
     ASSERT_TRUE(b.isValid());
-    HDC bDC = b.memDC();
+    HDC bDC = newui::win32::toHDC(b.memDC());
 
     // a's originally-owned GDI resources should be released here, not
     // leaked - no directly observable side effect beyond "doesn't
@@ -331,5 +332,5 @@ TEST(Image, MoveAssignmentReleasesTheTargetsOwnedResourcesFirst) {
     a = std::move(b);
 
     EXPECT_EQ(a.width(), 6);
-    EXPECT_EQ(a.memDC(), bDC);
+    EXPECT_EQ(newui::win32::toHDC(a.memDC()), bDC);
 }

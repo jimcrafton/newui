@@ -1,4 +1,5 @@
 #include "newui/dxgipresentsurface.h"
+#include "newui/win32/nativehandles.h"
 
 #include <cmath>
 #include <cstdint>
@@ -150,7 +151,7 @@ namespace newui {
 		if (gdi_ || image_.is_empty() || window() == nullptr) {
 			return false;
 		}
-		if (gpu_ && gpu_->hwnd == window()) {
+		if (gpu_ && gpu_->hwnd == newui::win32::toHWND(window())) {
 			return true;
 		}
 		releaseGpu();  // no swap chain yet, or one made for a different window
@@ -192,7 +193,7 @@ namespace newui {
 		sd.Scaling = DXGI_SCALING_NONE;
 		sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-		hr = factory->CreateSwapChainForHwnd(gpu->device.Get(), window(), &sd, nullptr, nullptr, &gpu->swapChain);
+		hr = factory->CreateSwapChainForHwnd(gpu->device.Get(), newui::win32::toHWND(window()), &sd, nullptr, nullptr, &gpu->swapChain);
 		if (FAILED(hr)) {
 			fallBackToGdi("couldn't create a swap chain for this window");
 			return false;
@@ -200,14 +201,14 @@ namespace newui {
 
 		// Stop DXGI from hooking this window's messages (its Alt+Enter fullscreen toggle in particular) -
 		// RootView owns its own window's behavior.
-		factory->MakeWindowAssociation(window(), DXGI_MWA_NO_WINDOW_CHANGES);
+		factory->MakeWindowAssociation(newui::win32::toHWND(window()), DXGI_MWA_NO_WINDOW_CHANGES);
 
 		if (!gpu->createTexture(width, height)) {
 			fallBackToGdi("couldn't create the upload texture");
 			return false;
 		}
 
-		gpu->hwnd = window();
+		gpu->hwnd = newui::win32::toHWND(window());
 		gpu_ = std::move(gpu);
 		needsFullUpload_ = true;
 		return true;
@@ -334,7 +335,7 @@ namespace newui {
 		fallBackToGdi(std::string(isDeviceLoss(hr) ? "device lost repeatedly" : "Present failed") + ", hr=" + hex);
 	}
 
-	void DxgiPresentSurface::paint(HDC hdc, const newui::Rect& paintRect) {
+	void DxgiPresentSurface::paint(NativeDeviceContextHandle hdc, const newui::Rect& paintRect) {
 		if (gdi_) {
 			gdi_->setWindow(window());
 			gdi_->paint(hdc, paintRect);

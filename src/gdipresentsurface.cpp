@@ -1,5 +1,6 @@
 #include "newui/gdipresentsurface.h"
 #include "newui/win32/geometryconv.h"
+#include "newui/win32/nativehandles.h"
 
 #include <cstring>
 
@@ -20,13 +21,13 @@ namespace newui {
 			// bitmap while it's still selected into a DC is undefined
 			// behavior (GDI leaves the DC referencing a half-destroyed
 			// object), same reasoning as any other GDI select/delete pair.
-			::SelectObject(memDC_, dibSectionOldBitmap_);
-			::DeleteObject(dibSection_);
+			::SelectObject(newui::win32::toHDC(memDC_), newui::win32::toHBITMAP(dibSectionOldBitmap_));
+			::DeleteObject(newui::win32::toHBITMAP(dibSection_));
 			dibSection_ = nullptr;
 			dibSectionOldBitmap_ = nullptr;
 		}
 		if (memDC_ != nullptr) {
-			::DeleteDC(memDC_);
+			::DeleteDC(newui::win32::toHDC(memDC_));
 			memDC_ = nullptr;
 		}
 	}
@@ -60,19 +61,19 @@ namespace newui {
 		bmi.bmiHeader.biCompression = BI_RGB;
 
 		void* bits = nullptr;
-		memDC_ = ::CreateCompatibleDC(nullptr);
+		memDC_ = newui::win32::toNativeDC(::CreateCompatibleDC(nullptr));
 		if (memDC_ == nullptr) {
 			return false;
 		}
 
-		dibSection_ = ::CreateDIBSection(memDC_, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+		dibSection_ = newui::win32::toNativeBitmap(::CreateDIBSection(newui::win32::toHDC(memDC_), &bmi, DIB_RGB_COLORS, &bits, nullptr, 0));
 		if (dibSection_ == nullptr || bits == nullptr) {
-			::DeleteDC(memDC_);
+			::DeleteDC(newui::win32::toHDC(memDC_));
 			memDC_ = nullptr;
 			dibSection_ = nullptr;
 			return false;
 		}
-		dibSectionOldBitmap_ = static_cast<HBITMAP>(::SelectObject(memDC_, dibSection_));
+		dibSectionOldBitmap_ = newui::win32::toNativeBitmap(static_cast<HBITMAP>(::SelectObject(newui::win32::toHDC(memDC_), newui::win32::toHBITMAP(dibSection_))));
 
 		// 32bpp is always DWORD-aligned regardless of width, so the DIB
 		// section's own row stride is exactly width * 4 - no padding to
@@ -102,11 +103,11 @@ namespace newui {
 			// Snapped outward to whole pixels: converting a fractional Rect to a RECT truncates every
 			// edge, which would leave up to a pixel of the region's right/bottom edge un-invalidated.
 			RECT r = win32::toRECT(dirty.snappedOutwardToPixels());
-			::InvalidateRect(window(), &r, FALSE);
+			::InvalidateRect(newui::win32::toHWND(window()), &r, FALSE);
 		}
 	}
 
-	void GdiPresentSurface::paint(HDC hdc, const newui::Rect& paintRect) {
+	void GdiPresentSurface::paint(NativeDeviceContextHandle hdc, const newui::Rect& paintRect) {
 		if (memDC_ == nullptr) {
 			return;
 		}
@@ -137,7 +138,7 @@ namespace newui {
 		// BITMAPINFO header and negotiates pixel format on every call, even
 		// for a 1:1 blit between two already-realized bitmap objects BitBlt
 		// doesn't need to).
-		::BitBlt(hdc, left, top, right - left, bottom - top, memDC_, left, top, SRCCOPY);
+		::BitBlt(newui::win32::toHDC(hdc), left, top, right - left, bottom - top, newui::win32::toHDC(memDC_), left, top, SRCCOPY);
 	}
 
 }

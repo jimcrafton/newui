@@ -474,7 +474,7 @@ bool DispatchMenuDrawItem(const DRAWITEMSTRUCT& dis) {
     item->onDraw.syncCall(*item, ctx, Rect(0.0f, 0.0f, float(width), float(height)));
     ctx.end();
 
-    ::BitBlt(dis.hDC, dis.rcItem.left, dis.rcItem.top, width, height, itemImage.memDC(), 0, 0, SRCCOPY);
+    ::BitBlt(dis.hDC, dis.rcItem.left, dis.rcItem.top, width, height, newui::win32::toHDC(itemImage.memDC()), 0, 0, SRCCOPY);
     return true;
 }
 

@@ -168,3 +168,8 @@ private members renamed/retyped (`Frame::frameHandle_`, `RootView::viewHandle_`,
 Still Win32 in public headers for 3.6b+: `handleMessage/WndProc/WNDPROC` (Frame, RootView, PopupFrame, ToolFrame, Dialog, Application),
 `fromWindow(HWND)`, `PresentSurface::setWindow/window/paint(HDC)` + GDI/DXGI surfaces, `graphics.h` HDC/HBITMAP, `translateKeyEventInfo`,
 `UINT commandId` (menus), `text.h systemCaretWidth`, `utils.h translateButtonMask`, `popupframe.h MouseHookProc/kDismissMessage`.
+
+3.6a verified on Windows. 3.6b in tree, Windows build pending: new `NativeDeviceContextHandle` (`platform.h`, `toNativeDC/toHDC`);
+`PresentSurface::setWindow/window/paint` and Gdi/Dxgi surfaces use `NativeWindowHandle`/`NativeDeviceContextHandle`; `Image::memDC()`
+returns `NativeDeviceContextHandle`, its `dibSection_/memDC_/oldBitmap_` and `GdiPresentSurface`'s members are opaque; call sites in
+popuptool.cpp/menus.cpp and unittests/test_graphics.cpp convert with `toHDC`.

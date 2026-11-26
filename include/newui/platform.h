@@ -53,4 +53,8 @@ namespace newui {
     // Opaque native bitmap handle: HBITMAP on Windows. Not owned by whoever holds it unless a class says so.
     using NativeBitmapHandle = void*;
 
+    // Opaque native drawing-context handle: HDC on Windows (CGContextRef on macOS). Not owned by whoever holds it
+    // unless a class says so.
+    using NativeDeviceContextHandle = void*;
+
 } // namespace newui
