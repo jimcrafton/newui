@@ -36,7 +36,7 @@ namespace newui {
         // CS_VREDRAW/CS_DBLCLKS carried over from Frame::initialize() -
         // same reasoning, unrelated to the popup-specific styling below.
         wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_DROPSHADOW;
-        wcex.lpfnWndProc = &Frame::WndProc;
+        wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&Frame::WndProc);
         wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
         wcex.lpszClassName = className.c_str();
         ::RegisterClassExA(&wcex);
@@ -176,7 +176,7 @@ namespace newui {
         return ::CallNextHookEx(NULL, code, wParam, lParam);
     }
 
-    bool PopupFrame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {
+    bool PopupFrame::handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT) {
         switch (message) {
             case WM_CREATE: {
                 // Unlike Frame::handleMessage()'s own WM_CREATE case, a

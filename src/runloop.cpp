@@ -461,7 +461,7 @@ namespace newui {
                     if (::GetKeyState(VK_CONTROL) < 0) keyMask |= kmCtrl;
                     if (::GetKeyState(VK_MENU) < 0) keyMask |= kmAlt;
                     if (::GetKeyState(VK_SHIFT) < 0) keyMask |= kmShift;
-                    RootView* target = RootView::fromWindow(msg.hwnd);
+                    RootView* target = RootView::fromWindow(newui::win32::toNativeHandle(msg.hwnd));
                     if (target == nullptr || !UIInputManager::instance().routeDialogKeyDown(*target, keyMask, 0, 1, vkEscape)) {
                         ::PostMessage(modalHandle, WM_CLOSE, 0, 0);
                     }

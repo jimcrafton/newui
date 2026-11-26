@@ -385,7 +385,7 @@ bool Dialog::initialize()
     wcex.cbSize = sizeof(wcex);
 
     wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-    wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
+    wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&Frame::WndProc);
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
     wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
@@ -452,7 +452,7 @@ bool Dialog::ensureInitialized() {
     return initialize();
 }
 
-bool Dialog::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {
+bool Dialog::handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT) {
     if (message == WM_DESTROY) {
         // Deliberately no ::PostQuitMessage(0) - see this class's own comment (dialogs.h) for why:
         // that's the one behavior that would be actively wrong to inherit unchanged from

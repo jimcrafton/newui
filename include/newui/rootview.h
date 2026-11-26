@@ -1,5 +1,6 @@
 #pragma once
 
+#include <newui/platform.h>
 #include <memory>
 #include <vector>
 
@@ -594,13 +595,13 @@ namespace newui {
 
         void resizeImageBuffer(int width, int height);
 
-        WNDPROC defaultWndProc_ = nullptr;
-        WNDPROC wndProc_ = nullptr;
+        NativeWindowProc defaultWndProc_ = nullptr;
+        NativeWindowProc wndProc_ = nullptr;
 
         bool mouseEnteredControl_ = false;
 
         PenState penState_;
-        void updatePenState(WPARAM wParam);
+        void updatePenState(NativeWParam wParam);
 
         // Registered as this window's one real IDropTarget in
         // viewCreated() (RegisterDragDrop()) and revoked in destroy()
@@ -657,13 +658,13 @@ namespace newui {
         // design-time or not (that's the whole point of selecting it).
         SubView* resolveInteractiveHit(const Point& pt, Point& outLocalPt) const;
 
-        bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
+        bool handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT);
 
-        static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+        static NativeLResult WndProc(NativeWindowHandle hWnd, NativeMessage message, NativeWParam wParam, NativeLParam lParam);
 
     public:
         // The RootView whose window is hwnd, or nullptr if hwnd is not a RootView's window (a Frame, a native control).
-        static RootView* fromWindow(HWND hwnd);
+        static RootView* fromWindow(NativeWindowHandle hwnd);
 
     private:
 

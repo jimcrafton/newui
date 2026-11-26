@@ -1,5 +1,6 @@
 #pragma once
 
+#include <newui/platform.h>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -174,7 +175,7 @@ private:
     
     std::unordered_map<std::string, std::string> customValues_;
 
-    static LRESULT CALLBACK DummyWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+    static NativeLResult DummyWndProc(NativeWindowHandle hWnd, NativeMessage message, NativeWParam wParam, NativeLParam lParam);
 
     SyncReturn runLoopEnding(RunLoop&);
     SyncReturn runLoopDone(RunLoop&);

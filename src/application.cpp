@@ -54,8 +54,9 @@ void Application::setFrame(Frame* frame) {
     frame_ = frame;
 }
 
-LRESULT CALLBACK Application::DummyWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+NativeLResult Application::DummyWndProc(NativeWindowHandle hWndHandle, NativeMessage message, NativeWParam wParam, NativeLParam lParam)
 {
+	HWND hWnd = newui::win32::toHWND(hWndHandle);
 	LRESULT result = 0;	
 
 	switch (message) {
@@ -282,7 +283,7 @@ void Application::run() {
 		wcex.cbSize = sizeof(wcex);
 
 		wcex.style = 0;
-		wcex.lpfnWndProc = (WNDPROC)Application::DummyWndProc;
+		wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&Application::DummyWndProc);
 		wcex.cbClsExtra = 0;
 		wcex.cbWndExtra = 0;
 		wcex.hInstance = newui::win32::toHINSTANCE(instanceHandle_);

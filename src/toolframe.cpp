@@ -27,7 +27,7 @@ namespace newui {
         wcex.cbSize = sizeof(wcex);
         // No CS_DROPSHADOW (PopupFrame's): a captioned, sized window already gets the system's own shadow, and the class shadow doubles it.
         wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-        wcex.lpfnWndProc = &Frame::WndProc;
+        wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&Frame::WndProc);
         wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());
         wcex.lpszClassName = className.c_str();
         ::RegisterClassExA(&wcex);
@@ -85,7 +85,7 @@ namespace newui {
         return newui::win32::toHWND(frameHandle()) != nullptr && ::IsWindowVisible(newui::win32::toHWND(frameHandle())) != FALSE;
     }
 
-    bool ToolFrame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) {
+    bool ToolFrame::handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT) {
         switch (message) {
             case WM_CREATE:
                 frameCreated();

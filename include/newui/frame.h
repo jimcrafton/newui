@@ -172,14 +172,14 @@ public:
 	// Dispatches through the vtable from the static WndProc below, so a
 	// derived class (PopupFrame) overriding this gets called automatically
 	// with no need for its own WndProc - see WndProc's own comment.
-	virtual bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT);
+	virtual bool handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT);
 
 	// Reused as-is by PopupFrame::initialize() as its own wcex.lpfnWndProc -
 	// this already does nothing Frame-specific beyond the GWLP_USERDATA/
 	// CREATESTRUCT dance and dispatching to thisPtr->handleMessage(...),
 	// which resolves virtually, so a PopupFrame registered with this same
 	// function still gets PopupFrame::handleMessage() called.
-	static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+	static NativeLResult WndProc(NativeWindowHandle hWnd, NativeMessage message, NativeWParam wParam, NativeLParam lParam);
 
 	// Both just wrap rootView_->initialize()/destroy() - nothing about
 	// either is specific to Frame's own WS_OVERLAPPEDWINDOW styling, so
@@ -203,8 +203,8 @@ public:
 	std::map<std::string, BindingSource> bindingSources_;
 
 	NativeWindowHandle frameHandle_ = nullptr;
-	WNDPROC defaultWndProc_ = nullptr;
-	WNDPROC wndProc_ = nullptr;
+	NativeWindowProc defaultWndProc_ = nullptr;
+	NativeWindowProc wndProc_ = nullptr;
 
 	void sizeChange(const Size& newSize);
 	void updateViewBounds();

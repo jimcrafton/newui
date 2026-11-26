@@ -105,8 +105,9 @@ void Frame::setBounds(const Rect& bounds)
 #define FRAME_WINDOW			WS_OVERLAPPEDWINDOW
 
 
-LRESULT CALLBACK Frame::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+NativeLResult Frame::WndProc(NativeWindowHandle hWndHandle, NativeMessage message, NativeWParam wParam, NativeLParam lParam)
 {
+	HWND hWnd = newui::win32::toHWND(hWndHandle);
 	Frame* thisPtr = nullptr;
 	if (message == WM_NCCREATE) {
 		// Extract the 'this' pointer from CREATESTRUCT passed via CreateWindowEx
@@ -158,7 +159,7 @@ void Frame::sizeChange(const Size& newSize)
 	setBounds(tmp);
 }
 
-bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT)
+bool Frame::handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT)
 {
 	bool result = false;
 	outLRESULT = 0;
@@ -408,7 +409,7 @@ bool Frame::initialize()
 	wcex.cbSize = sizeof(wcex);
 
 	wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-	wcex.lpfnWndProc = (WNDPROC)Frame::WndProc;
+	wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&Frame::WndProc);
 	wcex.cbClsExtra = 0;
 	wcex.cbWndExtra = 0;
 	wcex.hInstance = newui::win32::toHINSTANCE(Application::instance().instanceHandle());

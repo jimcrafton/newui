@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/platform.h>
 #include <newui/geometry.h>
 #include <newui/color.h>
 

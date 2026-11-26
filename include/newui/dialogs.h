@@ -225,7 +225,7 @@ namespace newui {
         // Overrides Frame::handleMessage()'s own WM_DESTROY case to skip its unconditional
         // ::PostQuitMessage(0) - see this class's own comment above for why. Forwards every other
         // message unchanged.
-        bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
+        bool handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT) override;
 
     private:
         bool ensureInitialized();

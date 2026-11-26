@@ -30,6 +30,8 @@
 
 #define NEWUI_PLATFORM_APPLE (NEWUI_PLATFORM_MACOS || NEWUI_PLATFORM_IOS)
 
+#include <cstdint>
+
 namespace newui {
 
     // Opaque native window/view handle. A plain void* so public headers can pass it around without seeing
@@ -56,5 +58,15 @@ namespace newui {
     // Opaque native drawing-context handle: HDC on Windows (CGContextRef on macOS). Not owned by whoever holds it
     // unless a class says so.
     using NativeDeviceContextHandle = void*;
+
+    // Opaque window-message plumbing. On Windows these are bit-compatible with UINT / WPARAM / LPARAM / LRESULT
+    // (64-bit builds), so Win32 message handlers keep their bodies unchanged.
+    using NativeMessage = std::uint32_t;
+    using NativeWParam = std::uintptr_t;
+    using NativeLParam = std::intptr_t;
+    using NativeLResult = std::intptr_t;
+
+    // Opaque native window procedure (WNDPROC on Windows). Null means "none".
+    using NativeWindowProc = void*;
 
 } // namespace newui

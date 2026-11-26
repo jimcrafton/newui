@@ -1154,7 +1154,7 @@ namespace newui {
 		}
 	}
 
-	void RootView::updatePenState(WPARAM wParam)
+	void RootView::updatePenState(NativeWParam wParam)
 	{
 		const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
 		POINTER_INPUT_TYPE type = PT_POINTER;
@@ -1180,7 +1180,7 @@ namespace newui {
 		penState_ = penStateFrom(info, Point(float(client.x), float(client.y)));
 	}
 
-	bool RootView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT)
+	bool RootView::handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT)
 	{
 		bool result = false;
 		outLRESULT = 0;
@@ -1595,16 +1595,18 @@ namespace newui {
 		return result;
 	}
 
-	RootView* RootView::fromWindow(HWND hwnd)
+	RootView* RootView::fromWindow(NativeWindowHandle handle)
 	{
+		HWND hwnd = newui::win32::toHWND(handle);
 		if (hwnd == nullptr || !::IsWindow(hwnd) || ::GetWindowLongPtrA(hwnd, GWLP_WNDPROC) != reinterpret_cast<LONG_PTR>(&RootView::WndProc)) {
 			return nullptr;
 		}
 		return reinterpret_cast<RootView*>(::GetWindowLongPtr(hwnd, GWLP_USERDATA));
 	}
 
-	LRESULT CALLBACK RootView::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+	NativeLResult RootView::WndProc(NativeWindowHandle hWndHandle, NativeMessage message, NativeWParam wParam, NativeLParam lParam)
 	{
+		HWND hWnd = newui::win32::toHWND(hWndHandle);
 		RootView* thisPtr = nullptr;
 		if (message == WM_NCCREATE) {
 			// Extract the 'this' pointer from CREATESTRUCT passed via CreateWindowEx
@@ -1666,7 +1668,7 @@ namespace newui {
 		wcex.cbSize = sizeof(wcex);
 
 		wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-		wcex.lpfnWndProc = (WNDPROC)RootView::WndProc;
+		wcex.lpfnWndProc = reinterpret_cast<WNDPROC>(&RootView::WndProc);
 		wcex.cbClsExtra = 0;
 		wcex.cbWndExtra = 0;
 		wcex.hInstance = hinst;

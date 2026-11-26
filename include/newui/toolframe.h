@@ -38,7 +38,7 @@ namespace newui {
         ClosedDelegate onClosed;
 
     protected:
-        bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
+        bool handleMessage(NativeMessage message, NativeWParam wParam, NativeLParam lParam, NativeLResult& outLRESULT) override;
 
     private:
         NativeWindowHandle owner_ = nullptr;
