@@ -1,5 +1,6 @@
 #include "newui/newui.h"
 #include "newui/utils.h"
+#include "newui/win32/nativehandles.h"
 #include "newui/keyboard_constants.h"
 #include "newui/mouse_constants.h"
 #include <bitset>
@@ -677,7 +678,7 @@ namespace newui {
 	}
 
 
-	std::uint32_t translateButtonMask(UINT win32ButtonMask)
+	std::uint32_t translateButtonMask(std::uint32_t win32ButtonMask)
 	{
 		std::uint32_t result = mbmUndefined;
 
@@ -696,7 +697,7 @@ namespace newui {
 		return result;
 	}
 
-	std::uint32_t translateKeyMask(UINT win32KeyMask)
+	std::uint32_t translateKeyMask(std::uint32_t win32KeyMask)
 	{
 		std::uint32_t result = kmUndefined;
 
@@ -716,8 +717,9 @@ namespace newui {
 	}
 
 
-	bool translateKeyEventInfo(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, KeyboardEventInfo& outInfo)
+	bool translateKeyEventInfo(NativeWindowHandle hwndHandle, NativeMessage message, NativeWParam wParam, NativeLParam lParam, KeyboardEventInfo& outInfo)
 	{
+		HWND hwnd = newui::win32::toHWND(hwndHandle);
 		BYTE keyState[256];
 
 		memset(keyState, 0, sizeof(keyState));

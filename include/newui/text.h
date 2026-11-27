@@ -244,7 +244,7 @@ namespace newui::text {
         // than cached, matching UIColorManager::isDarkMode()'s own "ask
         // Windows live" convention - cheap, and can change at runtime via
         // WM_SETTINGCHANGE.
-        static UINT systemCaretWidth();
+        static std::uint32_t systemCaretWidth();
 
     private:
         // The postDelayed() task - toggles visible_ and always returns

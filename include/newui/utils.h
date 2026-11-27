@@ -93,15 +93,15 @@ namespace newui {
 		int repeatCount = 0;
 		int isExtendedKey = 0;
 		int keyMask = 0;
-		WORD character = 0;
+		std::uint16_t character = 0;
 	};
 
 
 	std::uint32_t translateVirtualKey(int vkCode, int charCode);
-	std::uint32_t translateButtonMask(UINT win32ButtonMask);
-	std::uint32_t translateKeyMask(UINT win32KeyMask);
+	std::uint32_t translateButtonMask(std::uint32_t win32ButtonMask);
+	std::uint32_t translateKeyMask(std::uint32_t win32KeyMask);
 
 	std::uint32_t translateCharToVKCode(int charCode);
 
-	bool translateKeyEventInfo(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, KeyboardEventInfo& outInfo);
+	bool translateKeyEventInfo(NativeWindowHandle hwnd, NativeMessage message, NativeWParam wParam, NativeLParam lParam, KeyboardEventInfo& outInfo);
 }

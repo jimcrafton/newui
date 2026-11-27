@@ -378,7 +378,7 @@ bool ContextMenu::show(NativeWindowHandle ownerNative, MenuItem& parentItem, int
     return clicked;
 }
 
-bool ContextMenu::dispatchCommand(UINT id) {
+bool ContextMenu::dispatchCommand(std::uint32_t id) {
     auto it = commandMap_.find(id);
     if (it == commandMap_.end()) {
         return false;

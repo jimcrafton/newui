@@ -182,7 +182,7 @@ namespace newui::text {
         ctx.restore();
     }
 
-    UINT Caret::systemCaretWidth() {
+    std::uint32_t Caret::systemCaretWidth() {
         UINT width = 1;
         ::SystemParametersInfo(SPI_GETCARETWIDTH, 0, &width, 0);
         return width;

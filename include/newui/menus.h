@@ -268,7 +268,7 @@ namespace newui {
         // the stack (see ContextMenu::show()'s doc comment). Not reflected:
         // runtime-only, never saved or edited.
         //@reflect ignore=true
-        UINT commandId() const {
+        std::uint32_t commandId() const {
             return commandId_;
         }
 
@@ -281,7 +281,7 @@ namespace newui {
 
         std::vector<MenuItem*> children_;
         MenuItem* parent_ = nullptr;
-        UINT commandId_ = 0;
+        std::uint32_t commandId_ = 0;
         Action* action_ = nullptr;
 
         // The exact HMENU this item was inserted into during the most
@@ -343,7 +343,7 @@ namespace newui {
         // about-to-be-destroyed native menu - the model update is what
         // matters, so the next show() over the same parent reflects it).
         // Returns false if id isn't currently known.
-        bool dispatchCommand(UINT id);
+        bool dispatchCommand(std::uint32_t id);
 
         // Explicit model+native update - so a click handler that wants
         // checkbox-style toggle behavior writes
@@ -376,8 +376,8 @@ namespace newui {
 
     private:
         NativeMenuHandle hmenu_ = nullptr;
-        std::unordered_map<UINT, MenuItem*> commandMap_;
-        UINT nextCommandId_ = 1000;  // stays clear of low ids - same
+        std::unordered_map<std::uint32_t, MenuItem*> commandMap_;
+        std::uint32_t nextCommandId_ = 1000;  // stays clear of low ids - same
                                       // defensive-headroom habit as
                                       // custom_message_constants.h's
                                       // WM_APP + 1

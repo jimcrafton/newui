@@ -113,21 +113,22 @@ namespace newui {
         // same process (not a separate DLL injected into others). See
         // mouseHook_'s own doc comment (popupframe.h) for why a plain
         // (thread-scoped) WH_MOUSE hook isn't enough here.
-        mouseHook_ = ::SetWindowsHookExA(WH_MOUSE_LL, &PopupFrame::MouseHookProc, NULL, 0);
+        mouseHook_ = (void*)::SetWindowsHookExA(WH_MOUSE_LL, reinterpret_cast<HOOKPROC>(&PopupFrame::MouseHookProc), NULL, 0);
     }
 
     void PopupFrame::removeOutsideClickHook() {
         if (mouseHook_ == nullptr) {
             return;
         }
-        ::UnhookWindowsHookEx(mouseHook_);
+        ::UnhookWindowsHookEx(static_cast<HHOOK>(mouseHook_));
         mouseHook_ = nullptr;
         if (t_hookOwner == this) {
             t_hookOwner = nullptr;
         }
     }
 
-    LRESULT CALLBACK PopupFrame::MouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
+    NativeLResult PopupFrame::MouseHookProc(int code, NativeWParam wParam, NativeLParam lParam) {
+        static_assert(kDismissMessage == WM_APP + 0x317, "kDismissMessage must stay WM_APP + 0x317");
         // HC_ACTION is the only code carrying real message data - other
         // (rare, undocumented-use) codes must be passed straight through
         // without inspecting lParam. WH_MOUSE_LL only ever delivers the

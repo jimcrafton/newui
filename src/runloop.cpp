@@ -156,7 +156,7 @@ namespace newui {
 						case WM_KEYDOWN:  case WM_SYSKEYDOWN: {
 
 							KeyboardEventInfo keyData = {};
-							translateKeyEventInfo(msg.hwnd, msg.message, msg.wParam, msg.lParam, keyData);
+							translateKeyEventInfo(newui::win32::toNativeHandle(msg.hwnd), msg.message, msg.wParam, msg.lParam, keyData);
 
 							int  keyCharVal = 0;
 							int eventType = keUndefined;

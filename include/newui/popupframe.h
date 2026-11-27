@@ -89,17 +89,17 @@ namespace newui {
         // GetWindowRect() and never calls SetCapture/eats the message, so
         // normal child-HWND click routing inside the popup - and every
         // other application's own input - is unaffected.
-        HHOOK mouseHook_ = nullptr;
+        void* mouseHook_ = nullptr;   // HHOOK on Windows
         void installOutsideClickHook();
         void removeOutsideClickHook();
-        static LRESULT CALLBACK MouseHookProc(int code, WPARAM wParam, LPARAM lParam);
+        static NativeLResult MouseHookProc(int code, NativeWParam wParam, NativeLParam lParam);
 
         // dismiss() posts this to itself from MouseHookProc rather than
         // acting directly inside the hook - a hook procedure should stay
         // minimal and not reenter window/message state from within
         // another thread's (or even this same thread's, mid-dispatch)
         // hook chain.
-        static constexpr UINT kDismissMessage = WM_APP + 0x317;
+        static constexpr NativeMessage kDismissMessage = 0x8000 + 0x317;   // WM_APP + 0x317
     };
 
 }

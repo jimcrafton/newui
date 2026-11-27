@@ -173,3 +173,10 @@ Still Win32 in public headers for 3.6b+: `handleMessage/WndProc/WNDPROC` (Frame,
 `PresentSurface::setWindow/window/paint` and Gdi/Dxgi surfaces use `NativeWindowHandle`/`NativeDeviceContextHandle`; `Image::memDC()`
 returns `NativeDeviceContextHandle`, its `dibSection_/memDC_/oldBitmap_` and `GdiPresentSurface`'s members are opaque; call sites in
 popuptool.cpp/menus.cpp and unittests/test_graphics.cpp convert with `toHDC`.
+
+3.6b verified on Windows (2026-11-26). 3.6c in tree, verified building on Windows (examples/demos included): `platform.h` gained
+`NativeMessage/NativeWParam/NativeLParam/NativeLResult/NativeWindowProc` (bit-compatible with UINT/WPARAM/LPARAM/LRESULT/WNDPROC on x64 only);
+`handleMessage`, `Frame/RootView::WndProc`, `Application::DummyWndProc`, `RootView::fromWindow`, `updatePenState`, the `WNDPROC` members use them
+(definitions convert to `HWND` at the top; `lpfnWndProc` sites use `reinterpret_cast<WNDPROC>`). `platform.h` is now included from `newui.h`
+and every header that uses a `Native*` type. `Image::memDC()` needs `//@reflect ignore=true`. Next: small leaks (`translateKeyEventInfo`, menu
+`UINT commandId`, `systemCaretWidth`, `translateButtonMask`, `popupframe.h MouseHookProc/mouseHook_`), then 3.7, then 3.3.
