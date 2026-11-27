@@ -114,6 +114,7 @@ namespace newui::gfx {
         // the same HDC is returned every time after that, until this
         // Image is destroyed or moved-from. Returns nullptr if isValid()
         // is false.
+        //@reflect ignore=true
         NativeDeviceContextHandle memDC();
 
     private:
