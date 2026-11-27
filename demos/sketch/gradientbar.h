@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/color.h>
+#include "newui/win32/winheaders.h"
 #include <newui/delegate.h>
 #include <newui/subview.h>
 

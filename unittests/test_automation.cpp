@@ -1,4 +1,5 @@
 #include "newui/automation.h"
+#include "newui/win32/winheaders.h"
 #include "newui/controls.h"
 #include "newui/menus.h"
 #include "newui/rootview.h"

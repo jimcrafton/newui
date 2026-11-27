@@ -24,6 +24,7 @@
 // file's own HelpSlideState/SyncHelpSlide()/main() for the setup.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/animation.h"
 #include "newui/application.h"

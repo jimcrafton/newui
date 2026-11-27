@@ -1,4 +1,5 @@
 #include "newui/filewatcher.h"
+#include "newui/win32/winheaders.h"
 #include "newui/runloop.h"
 
 #include <gtest/gtest.h>

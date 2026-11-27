@@ -1,7 +1,5 @@
 #pragma once
 
-#define NOMINMAX
-#include <windows.h>
 
 #include <newui/platform.h>
 #include <blend2d/blend2d.h>

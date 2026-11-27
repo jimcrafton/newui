@@ -3,6 +3,7 @@
 #include "manyrowsmodel.h"
 
 #include <newui/controllers.h>
+#include "newui/win32/winheaders.h"
 #include <newui/fontmanager.h>
 #include <newui/uicolormanager.h>
 

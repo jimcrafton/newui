@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/items.h>
+#include "newui/win32/winheaders.h"
 
 namespace newui {
     class Model;

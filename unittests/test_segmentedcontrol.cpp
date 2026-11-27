@@ -1,4 +1,5 @@
 #include "newui/segmentedcontrol.h"
+#include "newui/win32/winheaders.h"
 
 #include <gtest/gtest.h>
 

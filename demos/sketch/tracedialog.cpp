@@ -1,6 +1,7 @@
 #include "tracedialog.h"
 
 #include <newui/bundle.h>
+#include "newui/win32/winheaders.h"
 #include <newui/controls.h>
 #include <newui/dialogs.h>
 #include <newui/models.h>

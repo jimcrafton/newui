@@ -1,4 +1,5 @@
 #include "newui/textfolding.h"
+#include "newui/win32/winheaders.h"
 #include "newui/utils.h"
 #include "newui/fontmanager.h"
 #include "newui/uicolormanager.h"

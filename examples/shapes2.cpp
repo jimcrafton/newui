@@ -78,6 +78,7 @@
 // unittests/test_shapes.cpp already do this).
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 
 // Defined in the reflectgen-generated .cpp (compiled into the `newui`

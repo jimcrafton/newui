@@ -1,6 +1,7 @@
 ﻿#include "canvasview.h"
 
 #include <newui/bundle.h>
+#include "newui/win32/winheaders.h"
 
 #include <newui/newui.h>
 #include <newui/color.h>

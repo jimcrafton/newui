@@ -5,6 +5,7 @@
 #include "sketchdocument.h"
 
 #include <newui/runloop.h>
+#include "newui/win32/winheaders.h"
 
 namespace sketch {
 

@@ -3,6 +3,7 @@
 #include "sketchdocument.h"
 
 #include <newui/controls.h>
+#include "newui/win32/winheaders.h"
 #include <newui/delegate.h>
 #include <newui/rootview.h>
 #include <newui/segmentedcontrol.h>

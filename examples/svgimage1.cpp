@@ -20,6 +20,7 @@
 // kDefaultSvgRasterSize x kDefaultSvgRasterSize default (svgimage.h).
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"

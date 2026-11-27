@@ -37,6 +37,7 @@
 // step, same as a real app's asset pipeline would.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"

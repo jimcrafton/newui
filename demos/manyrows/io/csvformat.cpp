@@ -1,6 +1,7 @@
 #include "io/csvformat.h"
 
 #include <newui/utils.h>
+#include "newui/win32/winheaders.h"
 
 #include <cctype>
 #include <cmath>

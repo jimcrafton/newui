@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <newui/pen.h>
+#include "newui/win32/winheaders.h"
 
 #include <windows.h>
 

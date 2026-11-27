@@ -14,6 +14,7 @@
 #include "numberscrubber.h"
 
 #include <newui/keyboard_constants.h>
+#include "newui/win32/winheaders.h"
 #include <newui/mouse_constants.h>
 #include "sketchbin.h"
 

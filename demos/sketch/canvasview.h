@@ -5,6 +5,7 @@
 #include "sketchdocument.h"
 
 #include <newui/subview.h>
+#include "newui/win32/winheaders.h"
 
 #include <functional>
 #include <map>

@@ -5,6 +5,7 @@
 #include "sketchobject.h"
 
 #include <newui/delegate.h>
+#include "newui/win32/winheaders.h"
 #include <newui/models.h>
 #include <newui/undostack.h>
 

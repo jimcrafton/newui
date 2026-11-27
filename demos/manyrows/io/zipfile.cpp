@@ -1,6 +1,7 @@
 #include "io/zipfile.h"
 
 #include <newui/utils.h>
+#include "newui/win32/winheaders.h"
 
 #include <zlib.h>
 

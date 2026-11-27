@@ -1,4 +1,5 @@
 #include "newui/componentsettings.h"
+#include "newui/win32/winheaders.h"
 #include "newui/component.h"
 #include "newui/controls.h"
 #include "newui/utils.h"

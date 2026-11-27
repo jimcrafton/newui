@@ -19,6 +19,7 @@
 //    surface gets resize(0, 0) and then a real size again on restore.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/controls.h"
 #include "newui/layout.h"
 #include "newui/models.h"

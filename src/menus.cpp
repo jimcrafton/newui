@@ -1,4 +1,5 @@
 #include "newui/menus.h"
+#include "newui/win32/menus_win32.h"
 #include "newui/application.h"
 #include "newui/rootview.h"
 #include "newui/frame.h"

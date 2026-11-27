@@ -1,6 +1,7 @@
 #include "layertree.h"
 
 #include <newui/color.h>
+#include "newui/win32/winheaders.h"
 #include <newui/fontmanager.h>
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>

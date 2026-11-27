@@ -1,4 +1,5 @@
 #include "newui/svgimage.h"
+#include "newui/win32/winheaders.h"
 
 #include <gtest/gtest.h>
 

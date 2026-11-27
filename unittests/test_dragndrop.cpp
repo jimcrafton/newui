@@ -1,4 +1,5 @@
 #include "newui/win32/enum_format_etc.h"
+#include "newui/win32/winheaders.h"
 #include "newui/dragndrop.h"
 #include "newui/win32/dragndrop_com.h"
 #include "newui/dibimage.h"

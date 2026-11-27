@@ -1,5 +1,6 @@
 #include "stylepanel.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/winheaders.h"
 
 #include "numberscrubber.h"
 

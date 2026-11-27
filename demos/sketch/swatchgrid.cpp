@@ -1,6 +1,7 @@
 #include "swatchgrid.h"
 
 #include <newui/color.h>
+#include "newui/win32/winheaders.h"
 #include <newui/mouse_constants.h>
 #include <newui/uicolormanager.h>
 

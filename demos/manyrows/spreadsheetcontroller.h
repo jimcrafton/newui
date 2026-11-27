@@ -5,6 +5,7 @@
 #include "timedtableview.h"
 
 #include <newui/controllers.h>
+#include "newui/win32/winheaders.h"
 #include <newui/controls.h>
 #include <newui/delegate.h>
 #include <newui/menus.h>

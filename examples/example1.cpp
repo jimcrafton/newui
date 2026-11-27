@@ -3,6 +3,7 @@
 #define _CRTDBG_MAP_ALLOC
 #include <stdlib.h>
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/winheaders.h"
 #include <crtdbg.h>
 
 

@@ -17,6 +17,7 @@
 
 #ifdef SKETCH_GUI_AUTOMATION
 #include "newui/automation.h"
+#include "newui/win32/winheaders.h"
 #endif
 #include "newui/application.h"
 #include "newui/bundle.h"

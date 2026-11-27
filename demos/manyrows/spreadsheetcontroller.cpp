@@ -5,6 +5,7 @@
 #include "textformat.h"
 
 #include <newui/clipboardmgr.h>
+#include "newui/win32/winheaders.h"
 #include <newui/keyboard_constants.h>
 #include <newui/rootview.h>
 #include <newui/utils.h>

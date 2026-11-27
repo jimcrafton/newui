@@ -6,6 +6,7 @@
 // run()/post()/postIdle() all need the loop already pumping messages.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/runloop.h"
 
 #include <chrono>

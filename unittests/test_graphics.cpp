@@ -1,4 +1,5 @@
 #include "newui/graphics.h"
+#include "newui/win32/winheaders.h"
 #include "newui/svgimage.h"
 #include "newui/win32/nativehandles.h"
 

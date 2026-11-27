@@ -1,4 +1,5 @@
 #include "newui/dialogs.h"
+#include "newui/win32/winheaders.h"
 #include "newui/reflectionio.h"
 #include "newui/subview.h"
 #include "newui/win32/nativehandles.h"

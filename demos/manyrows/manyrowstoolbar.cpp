@@ -1,6 +1,7 @@
 #include "manyrowstoolbar.h"
 
 #include <newui/rootview.h>
+#include "newui/win32/winheaders.h"
 
 namespace manyrows {
 

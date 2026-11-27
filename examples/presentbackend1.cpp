@@ -10,6 +10,7 @@
 // upload path, not just full frames.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/application.h"
 #include "newui/controls.h"
 #include "newui/frame.h"

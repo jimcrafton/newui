@@ -3,6 +3,7 @@
 #include "manyrowsmodel.h"
 
 #include <newui/models.h>
+#include "newui/win32/winheaders.h"
 
 #include <string>
 

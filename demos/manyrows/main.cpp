@@ -8,6 +8,7 @@
 // `manyrows.exe --check` loads, lays out, prints the view tree and the model shape, then exits (smoke test).
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/frame.h"

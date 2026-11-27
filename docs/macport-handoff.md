@@ -180,3 +180,15 @@ popuptool.cpp/menus.cpp and unittests/test_graphics.cpp convert with `toHDC`.
 (definitions convert to `HWND` at the top; `lpfnWndProc` sites use `reinterpret_cast<WNDPROC>`). `platform.h` is now included from `newui.h`
 and every header that uses a `Native*` type. `Image::memDC()` needs `//@reflect ignore=true`. Next: small leaks (`translateKeyEventInfo`, menu
 `UINT commandId`, `systemCaretWidth`, `translateButtonMask`, `popupframe.h MouseHookProc/mouseHook_`), then 3.7, then 3.3.
+
+3.6c and the small leaks verified on Windows (2026-11-26): `translateKeyEventInfo`/`translateButtonMask`/`translateKeyMask`, menu `commandId`/`dispatchCommand`,
+`Caret::systemCaretWidth`, `PopupFrame::mouseHook_/MouseHookProc/kDismissMessage` are now opaque (`utils.h` includes `platform.h`). Remaining: 3.7, then 3.3
+(drop `<windows.h>` from `newui.h`).
+
+3.3 in tree, Windows build pending (2026-11-26): `newui.h` no longer includes `<windows.h>`; the SDK setup moved to `include/newui/win32/winheaders.h`
+(pulled in by `nativehandles.h`, the PCH `src/newuicommon_precomp.h`, `src/main.cpp`, and an explicit include added to every example/demo/unittest
+file). `viewstyle.h` lost its uxtheme classes: `ThemedViewStyle` and every `Themed*/Fluent*` style are in `include/newui/win32/themedstyles.h`.
+`DispatchMenuMeasureItem/DrawItem` moved to `include/newui/win32/menus_win32.h`. Mac check: every public header parses standalone with Apple Clang
+(no windows.h) EXCEPT `controls.h` (and `textfolding.h` through it), which still includes `win32/themedstyles.h` and exposes `Themed*Style` types in its
+public API (`Progress::fillState`, `ScrollBar`/`Edit`/`TabControl` members). That needs a design decision (platform-neutral style layer) before the Mac
+control port. Check script: scratchpad `hdrcheck.sh` (syntax-checks each header with `clang++ -fsyntax-only`, repo path quoted).

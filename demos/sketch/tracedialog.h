@@ -3,6 +3,7 @@
 #include "imagetrace.h"
 
 #include <newui/frame.h>
+#include "newui/win32/winheaders.h"
 
 #include <string>
 

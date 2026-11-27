@@ -8,6 +8,7 @@
 #include "textoutline.h"
 
 #include <newui/shapes.h>
+#include "newui/win32/winheaders.h"
 
 #include <algorithm>
 #include <cmath>

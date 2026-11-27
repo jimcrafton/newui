@@ -1,4 +1,5 @@
 #include "newui/viewbuilder.h"
+#include "newui/win32/winheaders.h"
 #include "newui/subview.h"
 #include "newui/controls.h"
 

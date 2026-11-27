@@ -1,4 +1,5 @@
 #include "newui/controllers.h"
+#include "newui/win32/winheaders.h"
 #include "newui/models.h"
 
 #include <fstream>

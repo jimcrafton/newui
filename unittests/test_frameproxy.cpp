@@ -1,4 +1,5 @@
 #include "newui/frameproxy.h"
+#include "newui/win32/winheaders.h"
 #include "newui/frame.h"
 #include "newui/reflection.h"
 

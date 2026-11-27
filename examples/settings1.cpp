@@ -11,6 +11,7 @@
 //   - setAutosaveInterval() also stores every few seconds, so settings survive a crash.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/application.h"
 #include "newui/componentsettings.h"
 #include "newui/controls.h"

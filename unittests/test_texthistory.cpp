@@ -1,4 +1,5 @@
 #include "newui/texthistory.h"
+#include "newui/win32/winheaders.h"
 #include "newui/utils.h"
 
 #include "newui/clipboardmgr.h"

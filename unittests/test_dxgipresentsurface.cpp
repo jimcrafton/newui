@@ -1,4 +1,5 @@
 #include "newui/dxgipresentsurface.h"
+#include "newui/win32/winheaders.h"
 #include "newui/gdipresentsurface.h"
 #include "newui/popuptool.h"
 #include "newui/rootview.h"

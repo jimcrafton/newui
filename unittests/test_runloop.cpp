@@ -1,4 +1,5 @@
 #include "newui/action.h"
+#include "newui/win32/winheaders.h"
 #include "newui/delegate.h"
 #include "newui/keyboard_constants.h"
 #include "newui/runloop.h"

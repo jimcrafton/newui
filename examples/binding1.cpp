@@ -9,6 +9,7 @@
 //   - The volume label follows the slider (control to control binding) with no code at all.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/application.h"
 #include "newui/binding.h"
 #include "newui/bundle.h"

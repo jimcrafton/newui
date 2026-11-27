@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/menus.h>
+#include "newui/win32/winheaders.h"
 
 #include <functional>
 

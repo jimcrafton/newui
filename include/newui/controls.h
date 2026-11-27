@@ -16,6 +16,7 @@
 #include <newui/text.h>
 #include <newui/textstyle.h>
 #include <newui/viewstyle.h>
+#include <newui/win32/themedstyles.h>   // TODO(macport): controls.h still exposes the uxtheme-backed Themed*Style family
 
 #include <blend2d/blend2d.h>
 

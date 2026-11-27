@@ -1,4 +1,5 @@
 #include "newui/color.h"
+#include "newui/win32/winheaders.h"
 #include "newui/uicolormanager.h"
 
 #include <gtest/gtest.h>

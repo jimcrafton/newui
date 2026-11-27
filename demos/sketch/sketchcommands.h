@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/controllers.h>
+#include "newui/win32/winheaders.h"
 
 #include <functional>
 #include <map>

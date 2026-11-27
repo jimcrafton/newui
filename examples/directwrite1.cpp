@@ -23,6 +23,7 @@
 // alongside the one FontManager/Font already provide via Blend2D.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/color.h"

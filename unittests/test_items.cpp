@@ -1,4 +1,5 @@
 #include "newui/items.h"
+#include "newui/win32/winheaders.h"
 #include "newui/bundle.h"
 #include "newui/controllers.h"
 #include "newui/models.h"

@@ -1,5 +1,6 @@
 #include "sketchcontroller.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/winheaders.h"
 
 #include "pdfexport.h"
 #include "tracedialog.h"

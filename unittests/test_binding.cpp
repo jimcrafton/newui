@@ -1,4 +1,5 @@
 #include "newui/binding.h"
+#include "newui/win32/winheaders.h"
 #include "newui/bundle.h"
 #include "newui/controls.h"
 #include "newui/frame.h"

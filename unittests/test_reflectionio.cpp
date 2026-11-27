@@ -22,6 +22,7 @@
 // test_shapes.cpp's own copy of this comment / feedback_no_std_minmax
 // (memory) / utils.h's own doc comment for why.
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
 #include "newui/color.h"

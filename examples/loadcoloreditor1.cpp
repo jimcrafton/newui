@@ -9,6 +9,7 @@
 // SV blend / checkerboard alpha this format has no equivalent for.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/application.h"
 #include "newui/bundle.h"

@@ -1,6 +1,7 @@
 #include "pagepreview.h"
 
 #include <newui/fontmanager.h>
+#include "newui/win32/winheaders.h"
 
 #include <cmath>
 #include <stdexcept>

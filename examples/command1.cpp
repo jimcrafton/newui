@@ -19,6 +19,7 @@
 // unlocked - try clicking the other NoteField while locked.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/action.h"
 #include "newui/application.h"

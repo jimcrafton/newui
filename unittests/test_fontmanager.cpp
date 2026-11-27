@@ -1,4 +1,5 @@
 #include "newui/fontmanager.h"
+#include "newui/win32/winheaders.h"
 #include "newui/text.h"
 #include "newui/utils.h"
 

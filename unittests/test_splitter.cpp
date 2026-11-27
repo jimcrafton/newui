@@ -1,4 +1,5 @@
 #include "newui/splitter.h"
+#include "newui/win32/winheaders.h"
 #include "newui/subview.h"
 #include "newui/layout.h"
 

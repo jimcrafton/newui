@@ -1,6 +1,7 @@
 #include "canvasview.h"
 
 #include <newui/keyboard_constants.h>
+#include "newui/win32/winheaders.h"
 
 #include <algorithm>
 #include <cmath>

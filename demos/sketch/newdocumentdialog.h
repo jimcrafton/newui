@@ -3,6 +3,7 @@
 #include "newdocumentmodel.h"
 
 #include <newui/frame.h>
+#include "newui/win32/winheaders.h"
 
 namespace sketch {
 

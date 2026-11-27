@@ -3,6 +3,7 @@
 #include "numberscrubber.h"
 
 #include <newui/utils.h>
+#include "newui/win32/winheaders.h"
 
 #include <cmath>
 #include <cstdio>

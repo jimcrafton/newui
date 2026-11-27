@@ -1,4 +1,5 @@
 #include "newui/utils.h"
+#include "newui/win32/winheaders.h"
 
 #include <gtest/gtest.h>
 

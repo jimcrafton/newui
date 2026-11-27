@@ -1,5 +1,6 @@
 #include "manyrowswindow.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/winheaders.h"
 
 #include "menubinding.h"
 #include "textformat.h"

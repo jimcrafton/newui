@@ -13,6 +13,7 @@
 // Windows / platform (macros must be defined before windows.h; newui.h
 // already does this)
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 
 // Standard library
 #include <algorithm>

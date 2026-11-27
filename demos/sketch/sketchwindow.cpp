@@ -1,5 +1,6 @@
 #include "sketchwindow.h"
 #include "newui/win32/nativehandles.h"
+#include "newui/win32/winheaders.h"
 
 #include <newui/dialogs.h>
 #include <newui/keyboard_constants.h>

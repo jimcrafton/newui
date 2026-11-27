@@ -1,4 +1,5 @@
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/animation.h"
 
 #include "newui/geometry.h"

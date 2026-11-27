@@ -4,6 +4,7 @@
 #include <iostream>
 #include "newui/application.h"
 #include "newui/menus.h"
+#include "newui/win32/menus_win32.h"
 #include "newui/themedata.h"
 #include "newui/uicolormanager.h"
 

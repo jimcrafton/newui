@@ -1,4 +1,5 @@
 #include "newui/piecetree.h"
+#include "newui/win32/winheaders.h"
 #include "newui/utils.h"
 
 #include <gtest/gtest.h>

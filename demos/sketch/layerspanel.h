@@ -4,6 +4,7 @@
 #include "sketchdocument.h"
 
 #include <newui/controllers.h>
+#include "newui/win32/winheaders.h"
 #include <newui/controls.h>
 #include <newui/rootview.h>
 

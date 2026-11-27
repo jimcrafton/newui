@@ -23,6 +23,7 @@
 // top comment for why that's enough to cover every field, not just one.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/reflection.h"
 
 #include <any>

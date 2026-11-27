@@ -1,4 +1,5 @@
 #include "newui/popuptool.h"
+#include "newui/win32/winheaders.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/runloop.h"
 

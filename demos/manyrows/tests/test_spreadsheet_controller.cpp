@@ -1,6 +1,7 @@
 #include "spreadsheetcontroller.h"
 
 #include <newui/keyboard_constants.h>
+#include "newui/win32/winheaders.h"
 
 #include <gtest/gtest.h>
 

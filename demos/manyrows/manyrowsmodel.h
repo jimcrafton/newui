@@ -4,6 +4,7 @@
 #include "rowindex.h"
 
 #include <newui/models.h>
+#include "newui/win32/winheaders.h"
 
 #include <cstdint>
 #include <optional>

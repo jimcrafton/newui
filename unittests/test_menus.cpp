@@ -1,4 +1,6 @@
 #include "newui/menus.h"
+#include "newui/win32/winheaders.h"
+#include "newui/win32/menus_win32.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/viewstyle.h"
 #include "newui/layout.h"

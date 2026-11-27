@@ -25,6 +25,7 @@
 // inside json5's own header (reflectionio.h's dependency) then fails to
 // compile. See feedback_no_std_minmax (memory) / utils.h's own doc comment.
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
 #include "newui/shapes.h"

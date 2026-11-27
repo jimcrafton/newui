@@ -6,6 +6,7 @@
 #include "shapetools.h"
 
 #include <newui/fontmanager.h>
+#include "newui/win32/winheaders.h"
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
 

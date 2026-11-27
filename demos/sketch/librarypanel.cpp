@@ -1,6 +1,7 @@
 #include "librarypanel.h"
 
 #include <newui/models.h>
+#include "newui/win32/winheaders.h"
 #include <newui/utils.h>
 
 #include <algorithm>

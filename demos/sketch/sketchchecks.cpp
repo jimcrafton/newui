@@ -8,6 +8,7 @@
 #include "swatchgrid.h"
 
 #include <newui/controls.h>
+#include "newui/win32/winheaders.h"
 #include <newui/keyboard_constants.h>
 #include <newui/mouse_constants.h>
 #include <newui/utils.h>

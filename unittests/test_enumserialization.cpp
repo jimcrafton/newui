@@ -10,6 +10,7 @@
 // skipped.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/reflection.h"
 #include "newui/reflectionio.h"
 

@@ -9,6 +9,7 @@
 // `manyrows_lite.exe --check` loads and lays out the window, prints the model shape, then exits.
 
 #include "newui/newui.h"
+#include "newui/win32/winheaders.h"
 #include "newui/application.h"
 #include "newui/bundle.h"
 #include "newui/controls.h"

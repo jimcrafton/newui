@@ -1,4 +1,5 @@
 #include <iostream>
+#include "newui/win32/winheaders.h"
 
 #include "newui/newui.h"
 #include "newui/reflection.h"
