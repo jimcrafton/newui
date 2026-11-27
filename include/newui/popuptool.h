@@ -1,5 +1,6 @@
 #pragma once
 
+#include <newui/platform.h>
 #include <memory>
 #include <string>
 

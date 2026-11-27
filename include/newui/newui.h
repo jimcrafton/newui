@@ -22,6 +22,7 @@
 #include <ole2.h>
 
 
+#include <newui/platform.h>
 #include <string>
 #include <cstdint>
 #include <stdexcept>
