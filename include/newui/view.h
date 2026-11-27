@@ -713,6 +713,11 @@ namespace newui {
         // RootView::getFrame() (rootview.h) is already ignore-annotated
         // for.
         //@reflect ignore=true
+        // This View as a RootView, or nullptr. Used instead of dynamic_cast so the shared View code doesn't need
+        // RootView's type info (and with it the platform window code) to link.
+        //@reflect ignore=true
+        virtual RootView* asRootView() { return nullptr; }
+
         RootView* rootView() {
             return rootView_;
         }

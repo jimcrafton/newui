@@ -1,8 +1,6 @@
 #include "newui/view.h"
-#include "newui/win32/nativehandles.h"
 #include "newui/subview.h"
 #include "newui/rootview.h"
-#include "newui/win32/geometryconv.h"
 #include <cassert>
 
 namespace newui {
@@ -83,32 +81,6 @@ namespace newui {
 	{
 		Point origin = localToRoot(Point(0.0f, 0.0f));
 		return Point(rootPt.x - origin.x, rootPt.y - origin.y);
-	}
-
-	Point View::localToScreen(const Point& localPt) const
-	{
-		Point rootPt = localToRoot(localPt);
-		const RootView* root = rootView();
-		HWND hwnd = (root != nullptr) ? newui::win32::toHWND(root->windowHandle()) : nullptr;
-		if (hwnd == nullptr) {
-			return rootPt;
-		}
-		POINT pt = win32::toPOINT(rootPt);
-		::ClientToScreen(hwnd, &pt);
-		return win32::fromPOINT(pt);
-	}
-
-	Point View::screenToLocal(const Point& screenPt) const
-	{
-		const RootView* root = rootView();
-		HWND hwnd = (root != nullptr) ? newui::win32::toHWND(root->windowHandle()) : nullptr;
-		Point rootPt = screenPt;
-		if (hwnd != nullptr) {
-			POINT pt = win32::toPOINT(screenPt);
-			::ScreenToClient(hwnd, &pt);
-			rootPt = win32::fromPOINT(pt);
-		}
-		return rootToLocal(rootPt);
 	}
 
 	Rect View::localToScreen(const Rect& localRect) const
@@ -214,8 +186,7 @@ namespace newui {
 			return true;
 		}
 
-		RootView* rootView = dynamic_cast<RootView*>(this);
-		if (rootView != nullptr) {
+		if (asRootView() != nullptr) {
 			return false;  // a RootView can never be anyone's child
 		}
 		SubView* self = dynamic_cast<SubView*>(this);

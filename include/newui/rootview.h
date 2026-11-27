@@ -101,7 +101,12 @@ namespace newui {
         RedrawNeededDelegate onRedrawNeeded;
 
         void markDirty();
-        void markDirty(const View* fromView, const newui::Rect& rect);
+        // virtual (as are notifySubViewRemoved()/generateDefaultName() below) so shared View code calls them
+        // without linking against rootview.cpp.
+        virtual void markDirty(const View* fromView, const newui::Rect& rect);
+
+        //@reflect ignore=true
+        RootView* asRootView() override { return this; }
 
         // Repaints this RootView's entire tree into getImageBuffer() and
         // calls presentRepaintedBuffer(), synchronously, right now -
@@ -353,7 +358,7 @@ namespace newui {
         // was) deleted. No got/lostFocus or entered/left events fire for
         // this - the view is on its way out, nothing left to safely
         // notify.
-        void notifySubViewRemoved(SubView* removedSubtreeRoot);
+        virtual void notifySubViewRemoved(SubView* removedSubtreeRoot);
 
         // The live Win32 window handle backing this RootView, or nullptr
         // before initialize() has created it. Needed by anything that has
@@ -437,7 +442,7 @@ namespace newui {
         // View::propagateRootView() for any newly attached View whose
         // name() is still "" - not normally called directly.
         //@reflect ignore=true
-        std::string generateDefaultName(const View& view);
+        virtual std::string generateDefaultName(const View& view);
 
         // Backs generateDefaultName() (and, via View::propagateRootView()/
         // setName(), reserves every hand-set name too, so a later

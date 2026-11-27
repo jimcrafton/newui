@@ -113,7 +113,8 @@ add_library(newui STATIC
     "include/newui/mouse_constants.h"
     "include/newui/color.h" "src/color.cpp"
     "include/newui/color_constants.h"
-    "include/newui/viewstyle.h" "include/newui/fontmanager.h"
+    "include/newui/viewstyle.h" "src/viewstyle.cpp" "include/newui/fontmanager.h"
+    "src/view.cpp"
     "include/newui/font.h"
     "include/newui/property.h"
     "src/property.cpp"
@@ -129,7 +130,7 @@ add_library(newui STATIC
     "include/newui/namemanager.h" "src/namemanager.cpp"
     "include/newui/filewatcher.h"
     "include/newui/reflection.h" "src/reflection.cpp"
-    "include/newui/cursor.h"
+    "include/newui/cursor.h" "src/cursor.cpp"
     "include/newui/graphics.h" "src/graphics.cpp"
     "include/newui/menus.h"
     "include/newui/dialogs.h"
@@ -182,12 +183,12 @@ if(WIN32)
         src/fontmanager.cpp
         "src/runloop.cpp"
         "src/utils.cpp"
-        "src/view.cpp"
+        "src/win32/view_win32.cpp"
         "src/win32/displaymetrics_win32.cpp"
-        "src/viewstyle.cpp"
+        "src/win32/themedstyles.cpp"
         "src/bundle.cpp"
         "src/filewatcher.cpp"
-        "src/cursor.cpp"
+        "src/win32/cursor_win32.cpp"
         "src/win32/graphics_win32.cpp"
         "src/menus.cpp"
         "src/dialogs.cpp"
@@ -205,6 +206,13 @@ if(WIN32)
         "include/newui/win32/enum_format_etc.h" "include/newui/win32/dragndrop_com.h" "src/enum_format_etc.cpp"
         "src/toolframe.cpp"
         "src/uiinputmanager.cpp")
+endif()
+
+# Placeholders for what has no Apple implementation yet.
+if(APPLE)
+    target_sources(newui PRIVATE
+        "src/apple/cursor_stub.cpp"
+        "src/apple/view_stub.cpp")
 endif()
 
 add_dependencies(newui newui_version)

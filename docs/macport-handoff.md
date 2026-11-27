@@ -221,8 +221,15 @@ Done and verified on this Mac (Xcode 26.6, CMake 4.4.5, `out/macos`, Debug): `li
 * Windows build and tests OK with these changes (2026-11-26).
 * Not checked: generated registration `.cpp` diff vs Windows; Release config; the 493 compiler warnings.
 
-Next step done (2026-11-26), Windows build pending: pure code moved out of Windows-only files - new `src/stringutils.cpp` (UTF-8/16,
+Next step done (2026-11-26), Windows build OK: pure code moved out of Windows-only files - new `src/stringutils.cpp` (UTF-8/16,
 `normalizePath`, type names), `src/compositing.cpp` (`toBLCompOp`), `src/displayunit.cpp` and `src/graphics.cpp` and `src/pen.cpp` are now shared,
 with their Windows halves in new `src/win32/graphics_win32.cpp` and `displaymetrics_win32.cpp` (`DisplayMetrics::forWindow/forDpi`). Mac tests add
 piecetree, enumserialization, delegateserialization (106 total at time of writing: check ctest). Remaining link blockers: `FontManager`
 (property, shapes, font, displayunit), `View`/`Cursor`/`RootView` (layout, viewpath, splitter, proxies, segmentedcontrol), `UIColorManager`, `RunLoop`.
+
+Round 1 of the `view.cpp` split (2026-11-26), Windows build pending. `view.cpp`, `viewstyle.cpp`, `cursor.cpp` are shared; Windows halves are
+`src/win32/view_win32.cpp` (screen conversions), `themedstyles.cpp` (Themed*/Fluent* + their pixel helpers), `cursor_win32.cpp`; Apple
+placeholders in `src/apple/` (`view_stub.cpp` aborts, `cursor_stub.cpp` returns no handle). Seam: new `View::asRootView()` replaces the
+`dynamic_cast<RootView*>`; `RootView::markDirty(view, rect)`, `notifySubViewRemoved`, `generateDefaultName` are virtual. Mac: build OK, ctest 106.
+Round 2 (agreed): Core Text `FontManager` + fixed-palette `UIColorManager` on Apple, `forDpi` into shared code, and an Apple `gfx::Image` backing (`createDibBackedImage`, `releaseGdiResources`). Full `rootview.cpp` split is
+left to Phase 1.
