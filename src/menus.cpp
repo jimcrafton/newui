@@ -4,6 +4,7 @@
 #include "newui/rootview.h"
 #include "newui/frame.h"
 #include "newui/viewstyle.h"
+#include "newui/win32/themedstyles.h"
 #include "newui/layout.h"
 #include "newui/fontmanager.h"
 #include "newui/font.h"

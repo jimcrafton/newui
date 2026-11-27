@@ -3,6 +3,7 @@
 #include "newui/win32/menus_win32.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/viewstyle.h"
+#include "newui/win32/themedstyles.h"
 #include "newui/layout.h"
 
 #include <gtest/gtest.h>

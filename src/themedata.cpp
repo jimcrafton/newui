@@ -1,6 +1,7 @@
 #include "newui/themedata.h"
 #include "newui/bundle.h"
 #include "newui/viewstyle.h"  // real BP_*/PBS_*/etc. symbols the tables below use
+#include "newui/win32/themedstyles.h"
 
 #include <json5/json5.hpp>
 #include <json5/json5_input.hpp>

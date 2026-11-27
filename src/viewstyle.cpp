@@ -5,6 +5,7 @@
 
 
 #include "newui/viewstyle.h"
+#include "newui/win32/themedstyles.h"
 #include "newui/win32/nativehandles.h"
 #include "newui/view.h"
 #include "newui/rootview.h"
