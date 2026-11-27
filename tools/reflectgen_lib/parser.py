@@ -41,7 +41,22 @@ _CPP_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # bindings' C API is stable across libclang versions, so a newer bindings
 # release against an older installed libclang.dll (as here: bindings 21.x,
 # system LLVM 19.1.0) works fine.
-DEFAULT_LIBCLANG_PATH = r"C:\Program Files\LLVM\bin\libclang.dll"
+def default_libclang_path():
+    """The system libclang to use when LIBCLANG_PATH isn't set: the LLVM install on Windows, Xcode's own
+    libclang.dylib on macOS (asked of xcode-select, so it follows whichever Xcode is selected)."""
+    if sys.platform != "darwin":
+        return r"C:\Program Files\LLVM\bin\libclang.dll"
+    try:
+        developer_dir = subprocess.run(
+            ["xcode-select", "-p"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    candidates = (
+        os.path.join(developer_dir, "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib", "libclang.dylib"),
+        os.path.join(developer_dir, "usr", "lib", "libclang.dylib"),  # Command Line Tools layout
+    )
+    return next((c for c in candidates if os.path.isfile(c)), "")
 
 # Where a downloaded fallback native library (see fetch_fallback_libclang()
 # below) is cached, so it's only ever downloaded once per venv. Lives next
@@ -50,7 +65,7 @@ DEFAULT_LIBCLANG_PATH = r"C:\Program Files\LLVM\bin\libclang.dll"
 # installed (both occupy the same clang/ import path), so instead this
 # pulls just the native library out of libclang's wheel by hand.
 FALLBACK_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "libclang-fallback")
-FALLBACK_LIB_NAME = "libclang.dll" if os.name == "nt" else "libclang.so"
+FALLBACK_LIB_NAME = "libclang.dll" if os.name == "nt" else ("libclang.dylib" if sys.platform == "darwin" else "libclang.so")
 
 
 def fetch_fallback_libclang():
@@ -102,7 +117,7 @@ def fetch_fallback_libclang():
 
 
 def configure_libclang():
-    path = os.environ.get("LIBCLANG_PATH", DEFAULT_LIBCLANG_PATH)
+    path = os.environ.get("LIBCLANG_PATH") or default_libclang_path()
     if not os.path.isfile(path):
         path = fetch_fallback_libclang()
 
@@ -136,7 +151,10 @@ def qualified_name(cursor):
     node = cursor
     while node is not None and node.kind != CursorKind.TRANSLATION_UNIT:
         if node.kind in (CursorKind.NAMESPACE, CursorKind.CLASS_DECL, CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL):
-            parts.append(node.spelling)
+            # libc++ puts everything in an inline namespace (std::__1::vector). It is never written in source and
+            # would break both the "std::..." comparisons below and re-qualified spellings, so leave it out.
+            if not (node.kind == CursorKind.NAMESPACE and node.spelling.startswith("__")):
+                parts.append(node.spelling)
         node = node.semantic_parent
     return "::".join(reversed(parts))
 

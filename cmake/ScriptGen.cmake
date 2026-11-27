@@ -20,7 +20,11 @@
 
 set(NEWUI_SCRIPTGEN_DIR ${CMAKE_CURRENT_LIST_DIR}/../tools/scriptgen)
 set(NEWUI_SCRIPTGEN_LIB_DIR ${CMAKE_CURRENT_LIST_DIR}/../tools/reflectgen_lib)
-set(NEWUI_SCRIPTGEN_PYTHON ${CMAKE_CURRENT_LIST_DIR}/../tools/reflectgen/.venv/Scripts/python.exe)
+if(CMAKE_HOST_WIN32)
+    set(NEWUI_SCRIPTGEN_PYTHON ${CMAKE_CURRENT_LIST_DIR}/../tools/reflectgen/.venv/Scripts/python.exe)
+else()
+    set(NEWUI_SCRIPTGEN_PYTHON ${CMAKE_CURRENT_LIST_DIR}/../tools/reflectgen/.venv/bin/python3)
+endif()
 
 function(newui_add_scriptgen_output target)
     cmake_parse_arguments(ARG "STRICT" "CXX_STANDARD;REGISTER_FUNCTION;STUBS" "SCAN_DIRS;INCLUDE_DIRS" ${ARGN})

@@ -1,5 +1,24 @@
 find_package(Threads REQUIRED)
 
+# Off Windows only the tests whose code is already in the shared core are built (TODO(macport): add files here as
+# their sources move out of the Windows-only list in the top-level CMakeLists.txt).
+if(NOT WIN32)
+    add_executable(newui_tests
+        test_version.cpp
+        test_delegate.cpp
+        test_curveinterpolation.cpp
+        test_namemanager.cpp
+        test_command.cpp
+        test_undostack.cpp
+    )
+    target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)
+    include(GoogleTest)
+    # PRE_TEST: Xcode code-signs after post-build rules, and Apple Silicon kills an unsigned binary, so discovery
+    # can't run as part of the build.
+    gtest_discover_tests(newui_tests DISCOVERY_MODE PRE_TEST)
+    return()
+endif()
+
 add_executable(newui_tests
     test_version.cpp
     test_automation.cpp

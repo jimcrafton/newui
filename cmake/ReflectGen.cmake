@@ -40,13 +40,17 @@
 
 set(NEWUI_REFLECTGEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen)
 set(NEWUI_REFLECTGEN_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen_lib)
-set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/Scripts/python.exe)
+if(CMAKE_HOST_WIN32)
+    set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/Scripts/python.exe)
+else()
+    set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/bin/python3)
+endif()
 
 if(NOT EXISTS ${NEWUI_REFLECTGEN_PYTHON})
     message(FATAL_ERROR
         "reflectgen: '${NEWUI_REFLECTGEN_PYTHON}' not found - run the setup steps in "
-        "tools/reflectgen/README.md ('python -m venv .venv' then "
-        "'.venv\\Scripts\\pip install -r requirements.txt' from tools/reflectgen) "
+        "tools/reflectgen/README.md ('python -m venv .venv' then 'pip install -r requirements.txt' "
+        "with that venv's pip, from tools/reflectgen) "
         "before configuring.")
 endif()
 
@@ -72,6 +76,37 @@ set(NEWUI_REFLECTGEN_BASE_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/json5/include
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/blend2d
 )
+
+# libclang, called from Python, doesn't know where Apple's SDK or libc++ headers are (without these every parse
+# fails on <cstdint>). Headers that only parse for Windows are left out of the Apple scan.
+set(NEWUI_REFLECTGEN_PLATFORM_CLANG_ARGS)
+set(NEWUI_REFLECTGEN_PLATFORM_EXCLUDES)
+if(APPLE)
+    if(CMAKE_OSX_SYSROOT)
+        set(newui_sdk ${CMAKE_OSX_SYSROOT})
+    else()
+        set(newui_sdk macosx)
+    endif()
+    execute_process(COMMAND xcrun --sdk ${newui_sdk} --show-sdk-path
+        OUTPUT_VARIABLE newui_sdk_path OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE newui_sdk_result)
+    if(NOT newui_sdk_result EQUAL 0)
+        message(FATAL_ERROR "reflectgen: 'xcrun --sdk ${newui_sdk} --show-sdk-path' failed")
+    endif()
+    set(NEWUI_REFLECTGEN_PLATFORM_CLANG_ARGS
+        -isysroot ${newui_sdk_path} -isystem ${newui_sdk_path}/usr/include/c++/v1)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        if(newui_sdk_path MATCHES "iPhoneSimulator")
+            list(APPEND NEWUI_REFLECTGEN_PLATFORM_CLANG_ARGS -target arm64-apple-ios16.0-simulator)
+        else()
+            list(APPEND NEWUI_REFLECTGEN_PLATFORM_CLANG_ARGS -target arm64-apple-ios16.0)
+        endif()
+    endif()
+    # TODO(macport): controls.h/textfolding.h come back once the Themed*Style family has a neutral interface.
+    set(NEWUI_REFLECTGEN_PLATFORM_EXCLUDES
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/newui/win32
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/newui/controls.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/newui/textfolding.h)
+endif()
 
 # Default OFF - scan-all is the real default (see reflection.md and this
 # file's own HANDOFF.md entry): every real header under include/newui is
@@ -175,6 +210,23 @@ function(newui_add_reflectgen_output target)
         list(APPEND include_args --clang-arg=-I${dir})
     endforeach()
 
+    foreach(arg ${NEWUI_REFLECTGEN_PLATFORM_CLANG_ARGS})
+        list(APPEND include_args --clang-arg=${arg})
+    endforeach()
+
+    set(exclude_args)
+    foreach(path ${NEWUI_REFLECTGEN_PLATFORM_EXCLUDES})
+        list(APPEND exclude_args --exclude ${path})
+    endforeach()
+
+    # The probe runs on the build machine, so it can't run when cross-compiling for iOS.
+    set(probe_args)
+    set(probe_depends)
+    if(TARGET reflectgen_sizeof_probe)
+        set(probe_args --sizeof-probe $<TARGET_FILE:reflectgen_sizeof_probe>)
+        set(probe_depends reflectgen_sizeof_probe)
+    endif()
+
     add_custom_command(
         OUTPUT ${output}
         COMMAND ${NEWUI_REFLECTGEN_PYTHON}
@@ -185,7 +237,8 @@ function(newui_add_reflectgen_output target)
             ${require_marker_arg}
             ${include_args}
             ${register_function_args}
-            --sizeof-probe $<TARGET_FILE:reflectgen_sizeof_probe>
+            ${exclude_args}
+            ${probe_args}
         DEPENDS
             ${candidate_headers}
             ${NEWUI_REFLECTGEN_DIR}/generate_reflection.py
@@ -193,7 +246,7 @@ function(newui_add_reflectgen_output target)
             ${NEWUI_REFLECTGEN_DIR}/reflectgen.py
             ${NEWUI_REFLECTGEN_LIB_DIR}/parser.py
             ${NEWUI_REFLECTGEN_LIB_DIR}/driver.py
-            reflectgen_sizeof_probe
+            ${probe_depends}
         COMMENT "reflectgen: discovering + regenerating ${output}"
         VERBATIM
     )

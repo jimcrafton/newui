@@ -47,6 +47,9 @@ def main():
     parser.add_argument("--python", required=True, help="python executable to invoke both sub-scripts with")
     parser.add_argument("--scan-dir", action="append", required=True, dest="scan_dirs",
                          help="directory to scan (repeatable)")
+    parser.add_argument("--exclude", action="append", default=[], dest="excludes",
+                         help="header, or directory, to leave out of the scan results (repeatable) - used for "
+                              "headers that only parse for another platform")
     parser.add_argument("-o", "--output", required=True, help="final generated .cpp path")
     parser.add_argument("--require-marker", action="store_true",
                          help="forwarded to discover_reflectable.py - see its own --help")
@@ -72,6 +75,13 @@ def main():
     subprocess.run(discover_cmd, check=True)
 
     headers = read_cmake_list(headers_cmake)
+
+    def key(path):
+        return os.path.normcase(os.path.abspath(path))
+
+    excluded = [key(e) for e in args.excludes]
+    headers = [h for h in headers
+               if not any(key(h) == e or key(h).startswith(e + os.sep) for e in excluded)]
 
     if not headers:
         # reflectgen.py requires at least one input file (argparse

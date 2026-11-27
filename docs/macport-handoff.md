@@ -192,3 +192,30 @@ file). `viewstyle.h` lost its uxtheme classes: `ThemedViewStyle` and every `Them
 (no windows.h) EXCEPT `controls.h` (and `textfolding.h` through it), which still includes `win32/themedstyles.h` and exposes `Themed*Style` types in its
 public API (`Progress::fillState`, `ScrollBar`/`Edit`/`TabControl` members). That needs a design decision (platform-neutral style layer) before the Mac
 control port. Check script: scratchpad `hdrcheck.sh` (syntax-checks each header with `clang++ -fsyntax-only`, repo path quoted).
+
+3.3 verified building on Windows (2026-11-26) after adding `win32/themedstyles.h` includes to `viewstyle/rootview/menus/themedata.cpp` and
+`test_viewstyle/test_menus.cpp`. Unit tests and example hand-tests not yet reported. Open: platform-neutral style layer for `controls.h`;
+3.7 (new async APIs); then Step 4 (first Mac build).
+
+3.6c, small leaks and 3.3: unit tests and example hand-tests OK on Windows (2026-11-26). Starting Step 4.
+
+## Step 4 started (2026-11-26): first Mac build
+
+Done and verified on this Mac (Xcode 26.6, CMake 4.4.5, `out/macos`, Debug): `libnewui.a` builds; `ctest` 78/78 pass.
+
+    python3 -m venv tools/reflectgen/.venv && tools/reflectgen/.venv/bin/pip install -r tools/reflectgen/requirements.txt   # once
+    cmake -S . -B out/macos -G Xcode
+    cmake --build out/macos --config Debug -- -quiet
+    ctest --test-dir out/macos -C Debug
+    git checkout VERSION.state   # every build bumps this tracked file
+
+* 4.1: `CMakeLists.txt` splits `newui` into a shared list and an `if(WIN32)` list (a `.cpp` moves up once it no longer needs `<windows.h>`);
+  PCH, Windows libs, app/examples/demos/automation are WIN32-only. reflectgen/scriptgen use `.venv/bin/python3` off Windows, Xcode's
+  `libclang.dylib` (`xcode-select`), SDK flags, and a new `generate_reflection.py --exclude` (Apple skips `include/newui/win32`,
+  `controls.h`, `textfolding.h`). `reflectgen_lib` ignores libc++'s inline namespace (`std::__1`). `winheaders.h` is empty off Windows.
+* 4.2: sizeof probe builds on macOS; skipped for iOS (iOS configure untested).
+* 4.3: library builds, but there are NO Apple stub peers yet; the 30 Windows-dependent `.cpp` files are simply left out.
+* 4.4: Mac `newui_tests` = version, delegate, curveinterpolation, namemanager, command, undostack. Others need either a left-out source
+  (link: `utf16ToUtf8`/`utf8ToUtf16` in `utils.cpp`, `toBLCompOp`, `View`, `DisplayValue`, `FontManager`, `UIColorManager`, `RunLoop`) or have
+  Windows code in the test file. Next: move the pure helpers in `utils.cpp` into a shared file, then `displayunit`, `pen`, `view`.
+* Not checked: Windows build after these changes; generated registration `.cpp` diff vs Windows; Release config; the 493 compiler warnings.

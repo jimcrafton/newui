@@ -95,76 +95,67 @@ include(cmake/ReflectGen.cmake)
 # newui_add_reflectgen_output(newui) below so its DEPENDS on the probe
 # target resolves - see reflectgen.py's --sizeof-probe / that target's own
 # CMakeLists.txt for what it's for.
-add_subdirectory(tools/reflectgen/src)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_subdirectory(tools/reflectgen/src)
+endif()
 
+# Shared core: compiles on every platform. A file moves here from the Windows list below once it no longer
+# needs <windows.h> (or its platform part has moved to src/win32, src/macos, ...).
 add_library(newui STATIC
     src/newui.cpp
-    src/application.cpp
-    src/frame.cpp
-    "src/rootview.cpp"
-    "include/newui/pen.h" "src/pen.cpp"
+    "include/newui/pen.h"
     "include/newui/presentsurface.h"
-    "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
-    "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
-    "src/presentsurface.cpp"
     src/subview.cpp
-    src/fontmanager.cpp
-    "src/runloop.cpp" 
-    "include/newui/keyboard_constants.h" 
-    "include/newui/utils.h" 
-    "src/utils.cpp" 
-    "src/view.cpp"
-    "include/newui/displayunit.h" "src/displayunit.cpp"
+    "include/newui/keyboard_constants.h"
+    "include/newui/utils.h"
+    "include/newui/displayunit.h"
     "include/newui/mouse_constants.h"
     "include/newui/color.h" "src/color.cpp"
     "include/newui/color_constants.h"
-    "include/newui/viewstyle.h" "include/newui/fontmanager.h" 
-    "include/newui/font.h" 
-    "include/newui/property.h" 
-    "src/property.cpp" 
-    "include/newui/custom_message_constants.h" 
-    "include/newui/animation.h" 
-    "src/animation.cpp" 
-    "include/newui/animationframe.h" 
-    "include/newui/curveinterpolation.h" 
-    "src/viewstyle.cpp" 
-    "include/newui/layout.h" 
+    "include/newui/viewstyle.h" "include/newui/fontmanager.h"
+    "include/newui/font.h"
+    "include/newui/property.h"
+    "src/property.cpp"
+    "include/newui/custom_message_constants.h"
+    "include/newui/animation.h"
+    "src/animation.cpp"
+    "include/newui/animationframe.h"
+    "include/newui/curveinterpolation.h"
+    "include/newui/layout.h"
     "src/layout.cpp"
-    "include/newui/bundle.h" "src/bundle.cpp"
+    "include/newui/bundle.h"
     "include/newui/viewpath.h" "src/viewpath.cpp"
     "include/newui/namemanager.h" "src/namemanager.cpp"
-    "include/newui/filewatcher.h" "src/filewatcher.cpp"
+    "include/newui/filewatcher.h"
     "include/newui/reflection.h" "src/reflection.cpp"
-    "include/newui/cursor.h" "src/cursor.cpp"
-    "include/newui/graphics.h" "src/graphics.cpp"
-    "include/newui/menus.h" "src/menus.cpp"
-    "include/newui/dialogs.h" "src/dialogs.cpp"
-    "include/newui/popupframe.h" "src/popupframe.cpp"
-    "include/newui/uicolormanager.h" "src/uicolormanager.cpp"
+    "include/newui/cursor.h"
+    "include/newui/graphics.h"
+    "include/newui/menus.h"
+    "include/newui/dialogs.h"
+    "include/newui/popupframe.h"
+    "include/newui/uicolormanager.h"
     "include/newui/models.h" "src/models.cpp"
     "include/newui/items.h" "src/items.cpp"
-    "include/newui/controllers.h" "src/controllers.cpp"
+    "include/newui/controllers.h"
     "include/newui/groupedlist.h" "src/groupedlist.cpp"
     "include/newui/rootcontroller.h"
-    "include/newui/controls.h" "src/controls.cpp"
+    "include/newui/controls.h"
     "include/newui/shapes.h" "src/shapes.cpp"
     "include/newui/themedata.h"
-    "src/themedata.cpp"
     "include/newui/reflectionio.h"
-    "include/newui/text.h" "src/text.cpp"
+    "include/newui/text.h"
     "include/newui/piecetree.h" "src/piecetree.cpp"
     "include/newui/texthistory.h" "src/texthistory.cpp"
     "include/newui/textstyle.h" "src/textstyle.cpp"
-    "include/newui/textfolding.h" "src/textfolding.cpp"
+    "include/newui/textfolding.h"
     "include/newui/overlay.h" "src/overlay.cpp"
     "include/newui/underlay.h" "src/underlay.cpp"
-    "include/newui/popuptool.h" "src/popuptool.cpp"
+    "include/newui/popuptool.h"
     "include/newui/action.h"
     "include/newui/command.h" "src/command.cpp"
-    "include/newui/clipboardmgr.h" "src/clipboardmgr.cpp"
-    "include/newui/dibimage.h" "src/dibimage.cpp"
-    "include/newui/dragndrop.h" "src/dragndrop.cpp"
-    "include/newui/win32/enum_format_etc.h" "include/newui/win32/dragndrop_com.h" "src/enum_format_etc.cpp"
+    "include/newui/clipboardmgr.h"
+    "include/newui/dibimage.h"
+    "include/newui/dragndrop.h"
     "include/newui/component.h"
     "include/newui/componentsettings.h" "src/componentsettings.cpp"
     "include/newui/binding.h" "src/binding.cpp"
@@ -173,11 +164,48 @@ add_library(newui STATIC
     "include/newui/frameproxy.h" "src/frameproxy.cpp"
     "include/newui/rootviewproxy.h" "src/rootviewproxy.cpp"
     "include/newui/splitter.h" "src/splitter.cpp"
-    "include/newui/toolframe.h" "src/toolframe.cpp"
+    "include/newui/toolframe.h"
     "include/newui/segmentedcontrol.h" "src/segmentedcontrol.cpp"
     "include/newui/svgimage.h" "src/svgimage.cpp"
-    "include/newui/uiinputmanager.h" "src/uiinputmanager.cpp"
+    "include/newui/uiinputmanager.h"
     ${REFLECTION_GENERATED_CPP})
+
+if(WIN32)
+    target_sources(newui PRIVATE
+        src/application.cpp
+        src/frame.cpp
+        "src/rootview.cpp"
+        "src/pen.cpp"
+        "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
+        "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
+        "src/presentsurface.cpp"
+        src/fontmanager.cpp
+        "src/runloop.cpp"
+        "src/utils.cpp"
+        "src/view.cpp"
+        "src/displayunit.cpp"
+        "src/viewstyle.cpp"
+        "src/bundle.cpp"
+        "src/filewatcher.cpp"
+        "src/cursor.cpp"
+        "src/graphics.cpp"
+        "src/menus.cpp"
+        "src/dialogs.cpp"
+        "src/popupframe.cpp"
+        "src/uicolormanager.cpp"
+        "src/controllers.cpp"
+        "src/controls.cpp"
+        "src/themedata.cpp"
+        "src/text.cpp"
+        "src/textfolding.cpp"
+        "src/popuptool.cpp"
+        "src/clipboardmgr.cpp"
+        "src/dibimage.cpp"
+        "src/dragndrop.cpp"
+        "include/newui/win32/enum_format_etc.h" "include/newui/win32/dragndrop_com.h" "src/enum_format_etc.cpp"
+        "src/toolframe.cpp"
+        "src/uiinputmanager.cpp")
+endif()
 
 add_dependencies(newui newui_version)
 
@@ -213,7 +241,10 @@ target_include_directories(newui PRIVATE
 # used by UIColorManager::colorFor() for the real Windows accent color.
 # Shlwapi: SHCreateMemStream, used by VirtualFileDataObject (dragndrop.cpp)
 # to hand Explorer an in-memory CFSTR_FILECONTENTS IStream per virtual file.
-target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib d3d11.lib dxgi.lib dxguid.lib)
+target_link_libraries(newui PUBLIC blend2d::blend2d)
+if(WIN32)
+    target_link_libraries(newui PUBLIC Comctl32.lib Uxtheme.lib Ole32.lib Uuid.lib Shell32.lib Advapi32.lib Dwmapi.lib Shlwapi.lib d3d11.lib dxgi.lib dxguid.lib)
+endif()
 
 # Precompiled header
 # ===================
@@ -223,7 +254,10 @@ target_link_libraries(newui PUBLIC blend2d::blend2d Comctl32.lib Uxtheme.lib Ole
 # actively-developed local headers (view.h, subview.h, rootview.h, etc.)
 # are deliberately left out of it. PRIVATE so PCH usage doesn't leak into
 # targets that link against newui.
-target_precompile_headers(newui PRIVATE src/newuicommon_precomp.h)
+# The precompiled header pulls in <windows.h>, so it is Windows-only.
+if(WIN32)
+    target_precompile_headers(newui PRIVATE src/newuicommon_precomp.h)
+endif()
 
 # Resource bundles
 # =================
@@ -260,6 +294,10 @@ function(newui_add_bundle_info target infoJsonPath)
     endif()
 endfunction()
 
+# The app, examples, demos, automation and unit tests are still Windows-only (TODO(macport): Step 4.4 brings the
+# platform-neutral tests over).
+if(WIN32)
+
 add_executable(newui_app
     src/main.cpp
  "src/runloop.cpp" "include/newui/keyboard_constants.h" "include/newui/utils.h" "src/utils.cpp" "src/view.cpp" "include/newui/mouse_constants.h" "include/newui/color_constants.h" "include/newui/custom_message_constants.h" "src/viewstyle.cpp" "include/newui/reflectionio.h")
@@ -268,6 +306,8 @@ target_link_libraries(newui_app PRIVATE newui)
 
 add_subdirectory(examples)
 add_subdirectory(demos)
+
+endif() # WIN32
 
 # GoogleTest - Testing Framework
 # ==============================
@@ -280,8 +320,10 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(3rdparty/googletest)
 
 enable_testing()
+if(WIN32)
 # Opt-in GUI-test automation (see include/newui/automation.h): only test builds link this.
 add_library(newui_automation STATIC include/newui/automation.h src/automation.cpp)
 target_link_libraries(newui_automation PUBLIC newui)
+endif() # WIN32
 
 add_subdirectory(unittests)
