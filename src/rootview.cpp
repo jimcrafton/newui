@@ -723,6 +723,12 @@ namespace newui {
 			return;
 		}
 
+		if (lastTapTarget_ != nullptr && isWithinSubtree(lastTapTarget_, removedSubtreeRoot)) {
+			lastTapTarget_ = nullptr;
+		}
+		if (directPenTarget_ != nullptr && isWithinSubtree(directPenTarget_, removedSubtreeRoot)) {
+			directPenTarget_ = nullptr;
+		}
 		if (hoveredSubView_ != nullptr && isWithinSubtree(hoveredSubView_, removedSubtreeRoot)) {
 			hoveredSubView_ = nullptr;
 		}
@@ -1150,7 +1156,81 @@ namespace newui {
 		}
 	}
 
-	void RootView::updatePenState(WPARAM wParam)
+	bool RootView::penMessage(UINT message, const PenState& state)
+	{
+		std::uint32_t keys = 0;
+		if (::GetKeyState(VK_SHIFT) < 0) {
+			keys |= MK_SHIFT;
+		}
+		if (::GetKeyState(VK_CONTROL) < 0) {
+			keys |= MK_CONTROL;
+		}
+		if (message == WM_POINTERDOWN) {
+			directPen_ = false;   // the previous contact's end never arrived
+		}
+		if (directPen_) {
+			if (message == WM_POINTERUPDATE && state.inContact) {
+				directPenPoint_ = state.position;
+				directPenTap_ = directPenTap_ && withinTapSlop(directPenPressPoint_, state.position);
+				mouseMove(state.position, mbmLeftButton, translateKeyMask(keys));
+				return true;
+			}
+			// An update with the tip lifted means the up was missed: it ends the contact too, or the mouse stays ignored.
+			if (message == WM_POINTERUP || message == WM_POINTERUPDATE || message == WM_POINTERCAPTURECHANGED) {
+				directPen_ = false;
+				if (directPenTap_ && message == WM_POINTERUP && withinTapSlop(directPenPressPoint_, state.position)) {
+					lastTapTarget_ = directPenTarget_;
+					lastTapPoint_ = directPenPressPoint_;
+					lastTapSeconds_ = directPenPressSeconds_;
+				}
+				mouseUp(message == WM_POINTERCAPTURECHANGED ? directPenPoint_ : state.position, mbmLeftButton, translateKeyMask(keys));
+				return true;
+			}
+			return false;
+		}
+		if (message != WM_POINTERDOWN || !state.inContact || state.barrel || state.eraser) {
+			return false;
+		}
+		Point localPt;
+		SubView* target = resolveInteractiveHit(state.position, localPt);
+		if (target == nullptr || !target->takesPenDirectly(localPt)) {
+			return false;
+		}
+		// DoDragDrop() does not work with a pen whose pointer messages are handled.
+		const DropSource* source = target->dragSource();
+		if (source != nullptr && (!source->onProvideFiles.empty() || !source->onProvideText.empty())) {
+			return false;
+		}
+		const double now = state.timeSeconds > 0.0 ? state.timeSeconds : performanceNowSeconds();
+		const bool secondTap = lastTapTarget_ == target && now - lastTapSeconds_ <= ::GetDoubleClickTime() / 1000.0
+			&& withinTapSlop(lastTapPoint_, state.position);
+		lastTapTarget_ = nullptr;
+		directPen_ = true;
+		directPenPoint_ = state.position;
+		directPenPressPoint_ = state.position;
+		directPenPressSeconds_ = now;
+		directPenTarget_ = target;
+		directPenTap_ = !secondTap;
+		if (secondTap) {
+			mouseDblClick(state.position, mbmLeftButton, translateKeyMask(keys));
+		} else {
+			mouseDown(state.position, mbmLeftButton, translateKeyMask(keys));
+		}
+		// As for a mouse press: the handler may have closed this window, which must then not take the focus.
+		if (viewHwnd_ != nullptr && ::IsWindowVisible(viewHwnd_)) {
+			::SetFocus(viewHwnd_);
+		}
+		return true;
+	}
+
+	bool RootView::withinTapSlop(const Point& a, const Point& b) const
+	{
+		// Wider than the mouse's double-click rectangle: a pen tip does not land twice on the same pixels.
+		const float slop = 16.0f * displayMetrics_.dpiScale();
+		return std::abs(a.x - b.x) <= slop && std::abs(a.y - b.y) <= slop;
+	}
+
+	bool RootView::updatePenState(WPARAM wParam)
 	{
 		const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
 		POINTER_INPUT_TYPE type = PT_POINTER;
@@ -1159,7 +1239,7 @@ namespace newui {
 			if (type != PT_PEN) {
 				penState_ = PenState();
 			}
-			return;
+			return false;
 		}
 
 		POINT client = penInfo.pointerInfo.ptPixelLocation;
@@ -1175,6 +1255,7 @@ namespace newui {
 		info.tiltY = penInfo.tiltY;
 		info.performanceCount = static_cast<unsigned long long>(penInfo.pointerInfo.PerformanceCount);
 		penState_ = penStateFrom(info, Point(float(client.x), float(client.y)));
+		return true;
 	}
 
 	bool RootView::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT)
@@ -1278,6 +1359,14 @@ namespace newui {
 			}
 			break;
 
+			case WM_SHOWWINDOW: {
+				if (wParam == FALSE) {
+					directPen_ = false;   // a window hidden under the pen may never hear it lift
+				}
+				result = false;
+			}
+			break;
+
 			case WM_ERASEBKGND: {
 				// surface_->paint() (WM_PAINT above) always covers
 				// the whole client area from the surface's buffer - a separate erase
@@ -1290,9 +1379,17 @@ namespace newui {
 			break;
 
 			case WM_POINTERENTER: case WM_POINTERUPDATE: case WM_POINTERDOWN: case WM_POINTERUP: case WM_POINTERLEAVE: {
-				updatePenState(wParam);
-				// Left unhandled on purpose: the default procedure turns a pen's pointer messages into the mouse
-				// messages the rest of this handler already routes.
+				// Unless a view takes the pen directly (penMessage), left unhandled on purpose: the default procedure
+				// turns a pen's pointer messages into the mouse messages the rest of this handler already routes.
+				result = updatePenState(wParam) && penMessage(message, penState_);
+			}
+			break;
+
+			case WM_POINTERCAPTURECHANGED: {
+				POINTER_INPUT_TYPE type = PT_POINTER;
+				if (::GetPointerType(GET_POINTERID_WPARAM(wParam), &type) && type == PT_PEN) {
+					penMessage(message, penState_);
+				}
 				result = false;
 			}
 			break;
@@ -1389,6 +1486,13 @@ namespace newui {
 			break;
 
 			case WM_MOUSEMOVE: {
+				if (directPen_) {
+					// Windows still sends mouse moves while the pen is taken directly, with a cursor position left
+					// behind at the press: passing them on would drag the stroke back to its start.
+					result = true;
+					break;
+				}
+
 				Point pt(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
 
 				auto btnMask = translateButtonMask(wParam);

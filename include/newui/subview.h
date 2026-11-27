@@ -49,6 +49,13 @@ public:
 		return parentView_;
 	}
 
+	// True when a pen tip pressing at localPt should reach this view straight from the pointer messages
+	// (RootView::penMessage()), without the wait for Windows' mouse messages. A view with a drag source never does.
+	//@reflect ignore=true
+	virtual bool takesPenDirectly(const Point& localPt) const {
+		return true;
+	}
+
 	virtual bool initialize() override;
 	virtual void destroy() override;
 

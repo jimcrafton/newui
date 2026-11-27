@@ -6078,6 +6078,9 @@ void TabControl::pageAdded(SubView* page) {
 }
 
 void TabControl::pageRemoved(std::size_t index) {
+    if (isDestroying()) {
+        return;   // the strip, destroyed before the pages, is already gone
+    }
     const auto& buttons = stripRow_->childViews();
     if (index >= buttons.size()) {
         return;

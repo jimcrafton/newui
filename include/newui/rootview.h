@@ -460,6 +460,13 @@ namespace newui {
             return penState_;
         }
 
+        // Handles a pen pointer message (WM_POINTER*) with the pen state read from it. A tip press on a view whose
+        // takesPenDirectly() says yes, and which has no drag source, is delivered, until the pen lifts, as left-button
+        // mouse events straight from the pointer messages; a second tap in place is a double-click. True then, and
+        // Windows makes no mouse messages of its own. False: not taken.
+        //@reflect ignore=true
+        bool penMessage(UINT message, const PenState& state);
+
     protected:
         // Win32-message-driven event entry points - protected (not
         // private) purely for testability, so a test-local subclass can
@@ -606,7 +613,17 @@ namespace newui {
         bool mouseEnteredControl_ = false;
 
         PenState penState_;
-        void updatePenState(WPARAM wParam);
+        bool updatePenState(WPARAM wParam);   // false when the message is not a pen's
+        bool directPen_ = false;              // a contact taken by penMessage() is down
+        Point directPenPoint_;
+        Point directPenPressPoint_;
+        double directPenPressSeconds_ = 0.0;
+        SubView* directPenTarget_ = nullptr;  // only compared, to tell a second tap on the same view
+        bool directPenTap_ = false;           // the contact has not strayed from its press point
+        SubView* lastTapTarget_ = nullptr;
+        Point lastTapPoint_;
+        double lastTapSeconds_ = 0.0;
+        bool withinTapSlop(const Point& a, const Point& b) const;
 
         // Registered as this window's one real IDropTarget in
         // viewCreated() (RegisterDragDrop()) and revoked in destroy()
