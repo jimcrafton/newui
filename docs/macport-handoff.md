@@ -218,4 +218,11 @@ Done and verified on this Mac (Xcode 26.6, CMake 4.4.5, `out/macos`, Debug): `li
 * 4.4: Mac `newui_tests` = version, delegate, curveinterpolation, namemanager, command, undostack. Others need either a left-out source
   (link: `utf16ToUtf8`/`utf8ToUtf16` in `utils.cpp`, `toBLCompOp`, `View`, `DisplayValue`, `FontManager`, `UIColorManager`, `RunLoop`) or have
   Windows code in the test file. Next: move the pure helpers in `utils.cpp` into a shared file, then `displayunit`, `pen`, `view`.
-* Not checked: Windows build after these changes; generated registration `.cpp` diff vs Windows; Release config; the 493 compiler warnings.
+* Windows build and tests OK with these changes (2026-11-26).
+* Not checked: generated registration `.cpp` diff vs Windows; Release config; the 493 compiler warnings.
+
+Next step done (2026-11-26), Windows build pending: pure code moved out of Windows-only files - new `src/stringutils.cpp` (UTF-8/16,
+`normalizePath`, type names), `src/compositing.cpp` (`toBLCompOp`), `src/displayunit.cpp` and `src/graphics.cpp` and `src/pen.cpp` are now shared,
+with their Windows halves in new `src/win32/graphics_win32.cpp` and `displaymetrics_win32.cpp` (`DisplayMetrics::forWindow/forDpi`). Mac tests add
+piecetree, enumserialization, delegateserialization (106 total at time of writing: check ctest). Remaining link blockers: `FontManager`
+(property, shapes, font, displayunit), `View`/`Cursor`/`RootView` (layout, viewpath, splitter, proxies, segmentedcontrol), `UIColorManager`, `RunLoop`.

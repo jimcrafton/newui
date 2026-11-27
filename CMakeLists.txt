@@ -103,12 +103,13 @@ endif()
 # needs <windows.h> (or its platform part has moved to src/win32, src/macos, ...).
 add_library(newui STATIC
     src/newui.cpp
-    "include/newui/pen.h"
+    "include/newui/pen.h" "src/pen.cpp"
     "include/newui/presentsurface.h"
     src/subview.cpp
     "include/newui/keyboard_constants.h"
-    "include/newui/utils.h"
-    "include/newui/displayunit.h"
+    "include/newui/utils.h" "src/stringutils.cpp"
+    "include/newui/displayunit.h" "src/displayunit.cpp"
+    "src/compositing.cpp"
     "include/newui/mouse_constants.h"
     "include/newui/color.h" "src/color.cpp"
     "include/newui/color_constants.h"
@@ -129,7 +130,7 @@ add_library(newui STATIC
     "include/newui/filewatcher.h"
     "include/newui/reflection.h" "src/reflection.cpp"
     "include/newui/cursor.h"
-    "include/newui/graphics.h"
+    "include/newui/graphics.h" "src/graphics.cpp"
     "include/newui/menus.h"
     "include/newui/dialogs.h"
     "include/newui/popupframe.h"
@@ -175,7 +176,6 @@ if(WIN32)
         src/application.cpp
         src/frame.cpp
         "src/rootview.cpp"
-        "src/pen.cpp"
         "include/newui/gdipresentsurface.h" "src/gdipresentsurface.cpp"
         "include/newui/dxgipresentsurface.h" "src/dxgipresentsurface.cpp"
         "src/presentsurface.cpp"
@@ -183,12 +183,12 @@ if(WIN32)
         "src/runloop.cpp"
         "src/utils.cpp"
         "src/view.cpp"
-        "src/displayunit.cpp"
+        "src/win32/displaymetrics_win32.cpp"
         "src/viewstyle.cpp"
         "src/bundle.cpp"
         "src/filewatcher.cpp"
         "src/cursor.cpp"
-        "src/graphics.cpp"
+        "src/win32/graphics_win32.cpp"
         "src/menus.cpp"
         "src/dialogs.cpp"
         "src/popupframe.cpp"

@@ -10,6 +10,9 @@ if(NOT WIN32)
         test_namemanager.cpp
         test_command.cpp
         test_undostack.cpp
+        test_piecetree.cpp
+        test_enumserialization.cpp
+        test_delegateserialization.cpp
     )
     target_link_libraries(newui_tests PRIVATE newui GTest::gtest_main Threads::Threads)
     include(GoogleTest)
