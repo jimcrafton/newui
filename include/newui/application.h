@@ -1,11 +1,15 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "newui/color.h"
+#include "newui/component.h"
 #include "newui/newui.h"
 #include "newui/delegate.h"
 #include "newui/runloop.h"
@@ -64,6 +68,25 @@ public:
     }
 
 
+    // new T(args...), owned by the application: the normal way to make a frame. Freed by free() / release() on it, after
+    // its window is destroyed by something else (see Frame), or when run() ends. T needs frame.h at the call.
+    //
+    //     auto* main = app.createFrame<Frame>();
+    //     main->addComponent(new MyFrameController(*main));
+    //     app.setFrame(main);
+    //     app.run();
+    template<typename T, typename... A>
+    T* createFrame(A&&... args) {
+        return frameOwner().createOwned<T>(std::forward<A>(args)...);
+    }
+    // The frames the application owns, oldest first.
+    //@reflect ignore=true
+    std::vector<Frame*> frames() const;
+    // Frees every frame the application owns, newest first. run() does this once its loop ends.
+    //@reflect ignore=true
+    void freeFrames();
+
+    // The main frame: run() creates its window, and destroying that window quits the loop. Not owned.
     void setFrame(Frame* frame);
     Frame* getFrame() {
         return frame_;
@@ -154,6 +177,16 @@ private:
 
     static std::atomic<bool> instantiated_;
 
+    friend class Frame;
+
+    // True when losing frame's window ends the application: it is the main frame, or none is set.
+    bool quitsWith(const Frame& frame) const {
+        return frame_ == nullptr || frame_ == &frame;
+    }
+
+    Component& frameOwner();
+
+    std::unique_ptr<Component> frameOwner_;
     mutable std::mutex mutex_;
     std::string name_;
     Frame* frame_ = nullptr;

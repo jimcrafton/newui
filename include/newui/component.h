@@ -269,6 +269,9 @@ namespace newui {
         virtual void aboutToBeReleased() {}
         // Called by free() after the owned components are gone and before the object is deleted.
         virtual void tearDownForFree() {}
+        // How each owned component is freed. An override may do something first (a Frame destroys its window before its root
+        // view goes), but the component must have left this one's list by the time it returns.
+        virtual void freeOwnedComponent(Component& component) { component.free(); }
 
         // Expires lifetime(), disconnects connections(), calls beforeDestruction() (all once only) and frees what this owns,
         // last added first. For a class that is torn down by something other than free().
@@ -276,6 +279,10 @@ namespace newui {
 
         // True while free() is running on this component.
         bool isBeingFreed() const;
+
+        // Makes the calling thread the one that ownership of this component, and of everything it owns, belongs to. For a
+        // class whose thread is settled only after it owns something (a Frame: the thread that makes its window).
+        void moveOwnershipToCurrentThread();
 
         // Told when a component is added to, or is leaving, the ones this owns, and (Removing) when one asked about with
         // freeNotification() goes; an owner that also asked is told once. Not called while this is itself being freed.

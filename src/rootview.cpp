@@ -1724,7 +1724,12 @@ namespace newui {
 
 		if (thisPtr) {
 			LRESULT lres = 0;
-			if (!thisPtr->handleMessage(message, wParam, lParam, lres)) {
+			bool handled = false;
+			{
+				FrameDispatchScope dispatching(thisPtr->parentFrame_);
+				handled = thisPtr->handleMessage(message, wParam, lParam, lres);
+			}
+			if (!handled) {
 				return DefWindowProcA(hWnd, message, wParam, lParam);
 			}
 			else {

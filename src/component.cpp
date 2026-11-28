@@ -112,6 +112,15 @@ namespace newui {
         return data != nullptr && data->freeing;
     }
 
+    void Component::moveOwnershipToCurrentThread() {
+        if (Ownership* data = ownershipIfAny()) {
+            data->thread = std::this_thread::get_id();
+            for (Component* child : data->components) {
+                child->moveOwnershipToCurrentThread();
+            }
+        }
+    }
+
     void Component::addComponent(Component* child) {
         if (child == nullptr) {
             refuse("addComponent(nullptr)");
@@ -213,7 +222,7 @@ namespace newui {
                 data->components.pop_back();
                 child->ownership().owner = nullptr;
             } else {
-                child->free();
+                freeOwnedComponent(*child);
             }
         }
     }

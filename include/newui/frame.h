@@ -1,6 +1,7 @@
 #pragma once
 
 #include <newui/newui.h>
+#include <newui/component.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 #include <newui/rootview.h>
@@ -9,11 +10,46 @@
 
 namespace newui {
 
+class Frame;
+
+// Marks a Frame as handling one of its window messages (its own window's, or its root view's) for as long as it lives. Used by
+// the frames' window procedures: free()ing a frame in that time is a mistake. Only the pointer is kept.
+// @reflect ignore=true
+class FrameDispatchScope {
+public:
+	explicit FrameDispatchScope(const Frame* frame);
+	~FrameDispatchScope();
+
+	FrameDispatchScope(const FrameDispatchScope&) = delete;
+	FrameDispatchScope& operator=(const FrameDispatchScope&) = delete;
+
+	// True while the calling thread is inside a scope for frame.
+	static bool contains(const Frame* frame);
+
+private:
+	bool entered_;
+};
+
+// A top-level window and its RootView. A Frame is a Component, so it can own others and be owned (component.h):
+//
+//     auto* frame = Application::instance().createFrame<Frame>();      // the application owns it
+//     frame->addComponent(new MyFrameController(*frame));              // the frame owns its controller
+//     auto* tool = frame->createOwned<ToolFrame>();                    // and its tool window
+//     tool->initialize(frame->frameHandle());                          // the native owner is a separate matter
+//
+// The frame owns its root view. free() takes the whole frame down, in this order: beforeDestruction(); what the frame owns,
+// last added first (owned tool and popup frames go while this window still exists); the native window, which frees what the
+// root view owns and then the views (WM_DESTROY); the frame object. From inside one of the frame's own event handlers use
+// release(): free() asserts there. Closing is not freeing: WM_CLOSE keeps its meaning for each kind of frame. A window destroyed
+// from outside free() (the user closing it, Windows destroying it with its owner window) tears its views down, and an owned
+// frame then release()s itself, so it does not outlive its window (a Dialog does not: its views stay readable until it is
+// freed). A Frame that nothing owns behaves as any other object, on the stack or deleted.
+//
 // @reflect proxy=FrameProxy
-class Frame {
+class Frame : public Component {
 public:
     Frame();
-    virtual ~Frame();
+    ~Frame() override;
 
 	typedef Delegate<Frame, std::string, std::string> TitleChangedDelegate;
 		
@@ -29,20 +65,16 @@ public:
 		return title_;
 	}
 
-	// Identifies this Frame's own saved-layout file - Bundle::loadFrame()/
-	// loadDialog()/loadRootView() (bundle.h) resolve "<name>.newui" from
-	// this, not getTitle() (which is the visible window caption, changes
-	// at runtime, and has no filesystem-safe-character guarantee). Plain
-	// storage, no side effects - unlike setTitle(), nothing observes this
-	// changing.
-	void setName(const std::string& name) {
-		name_ = name;
-	}
+	// name() / setName() (Component) identify this Frame's own saved-layout file - Bundle::loadFrame()/loadDialog()/
+	// loadRootView() (bundle.h) resolve "<name>.newui" from it, not from getTitle() (which is the visible window caption,
+	// changes at runtime, and has no filesystem-safe-character guarantee).
+	//@reflect ignore=true
 	std::string getName() const {
 		return name_;
 	}
 
-	virtual bool initialize();
+	// Creates the native window. True without doing anything if it already exists.
+	bool initialize() override;
 
 	void setBounds(const Rect& bounds);
 
@@ -121,9 +153,21 @@ public:
 	bool frameCreated();
 	void destroy();
 
+	// release() hides the window until it is freed.
+	void aboutToBeReleased() override;
+	void markDestroyingTree() override;
+	// Takes the native window down before the root view is freed.
+	void freeOwnedComponent(Component& component) override;
+	void tearDownForFree() override;
+	// Forgets a root view that was freed some other way.
+	void notification(Component& component, Operation operation) override;
+
+	// Called once the window has been destroyed from WM_DESTROY: an owned frame that free() did not take it down for
+	// release()s itself. Dialog turns this off.
+	virtual bool releasesWithWindow() const { return true; }
+
     protected:
     std::string title_;
-	std::string name_;
 	Rect bounds_;
 
 
@@ -137,6 +181,10 @@ public:
 
 	void sizeChange(const Size& newSize);
 	void updateViewBounds();
+
+    private:
+	// From WM_DESTROY on.
+	bool windowGoing_ = false;
 };
 
 }

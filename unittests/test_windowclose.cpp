@@ -147,79 +147,76 @@ std::atomic<int> PaneController::appeared{0};
 
 TEST_F(WindowClose, FeatureControllersAreFreedBeforeAnyViewAndHearNothingAfterwards) {
     auto* frame = new Frame();
-    {
-        MainWindowController controller(*frame);
-        ASSERT_TRUE(frame->initialize());
-        ::ShowWindow(frame->frameHandle(), SW_HIDE);
-        ASSERT_TRUE(controller.isLoaded());
-        ASSERT_TRUE(controller.first);
-        ASSERT_TRUE(controller.second);
+    auto* controller = new MainWindowController(*frame);
+    frame->addComponent(controller);
+    ASSERT_TRUE(frame->initialize());
+    ::ShowWindow(frame->frameHandle(), SW_HIDE);
+    ASSERT_TRUE(controller->isLoaded());
+    ASSERT_TRUE(controller->first);
+    ASSERT_TRUE(controller->second);
 
-        controller.view->onPing(*controller.view);
-        ASSERT_EQ(countOf("first heard ping"), 1u);
-        ASSERT_EQ(countOf("second heard ping"), 1u);
-        g_events.clear();
+    controller->view->onPing(*controller->view);
+    ASSERT_EQ(countOf("first heard ping"), 1u);
+    ASSERT_EQ(countOf("second heard ping"), 1u);
+    g_events.clear();
 
-        closeWindow(frame->frameHandle());
+    closeWindow(frame->frameHandle());
 
-        // "second" goes first: "first" still hears its ping, then neither hears the view's.
-        EXPECT_EQ(g_events, (std::vector<std::string>{
-            "will close",
-            "before second", "first heard ping", "deleted second",
-            "before first", "deleted first",
-            "before view", "deleted view"}));
-        EXPECT_FALSE(controller.first);
-        EXPECT_FALSE(controller.second);
-    }
-    delete frame;
+    // "second" goes first: "first" still hears its ping, then neither hears the view's.
+    EXPECT_EQ(g_events, (std::vector<std::string>{
+        "will close",
+        "before second", "first heard ping", "deleted second",
+        "before first", "deleted first",
+        "before view", "deleted view"}));
+    EXPECT_FALSE(controller->first);
+    EXPECT_FALSE(controller->second);
+    frame->free();
 }
 
 TEST_F(WindowClose, TheWindowIsStillUsableWhileRootOwnedControllersAreFreed) {
     auto* frame = new Frame();
-    {
-        MainWindowController controller(*frame);
-        ASSERT_TRUE(frame->initialize());
-        ::ShowWindow(frame->frameHandle(), SW_HIDE);
+    auto* controller = new MainWindowController(*frame);
+    frame->addComponent(controller);
+    ASSERT_TRUE(frame->initialize());
+    ::ShowWindow(frame->frameHandle(), SW_HIDE);
 
-        bool checked = false;
-        controller.first->onBeforeDestruction = [&]() {
-            EXPECT_TRUE(::IsWindow(frame->frameHandle()));
-            WINDOWPLACEMENT placement = {};
-            placement.length = sizeof(placement);
-            EXPECT_TRUE(::GetWindowPlacement(frame->frameHandle(), &placement));
-            EXPECT_TRUE(::IsWindow(frame->rootView().windowHandle()));
-            EXPECT_EQ(controller.view->parent(), &frame->rootView());
-            checked = true;
-        };
+    bool checked = false;
+    controller->first->onBeforeDestruction = [&]() {
+        EXPECT_TRUE(::IsWindow(frame->frameHandle()));
+        WINDOWPLACEMENT placement = {};
+        placement.length = sizeof(placement);
+        EXPECT_TRUE(::GetWindowPlacement(frame->frameHandle(), &placement));
+        EXPECT_TRUE(::IsWindow(frame->rootView().windowHandle()));
+        EXPECT_EQ(controller->view->parent(), &frame->rootView());
+        checked = true;
+    };
 
-        closeWindow(frame->frameHandle());
+    closeWindow(frame->frameHandle());
 
-        EXPECT_TRUE(checked);
-    }
-    delete frame;
+    EXPECT_TRUE(checked);
+    frame->free();
 }
 
 TEST_F(WindowClose, AVetoedCloseFreesNothing) {
     auto* frame = new Frame();
-    {
-        MainWindowController controller(*frame);
-        ASSERT_TRUE(frame->initialize());
-        ::ShowWindow(frame->frameHandle(), SW_HIDE);
-        controller.allowClose = false;
+    auto* controller = new MainWindowController(*frame);
+    frame->addComponent(controller);
+    ASSERT_TRUE(frame->initialize());
+    ::ShowWindow(frame->frameHandle(), SW_HIDE);
+    controller->allowClose = false;
 
-        closeWindow(frame->frameHandle());
+    closeWindow(frame->frameHandle());
 
-        EXPECT_TRUE(::IsWindow(frame->frameHandle()));
-        EXPECT_TRUE(controller.first);
-        EXPECT_TRUE(controller.second);
-        EXPECT_EQ(countOf("will close"), 0u);
+    EXPECT_TRUE(::IsWindow(frame->frameHandle()));
+    EXPECT_TRUE(controller->first);
+    EXPECT_TRUE(controller->second);
+    EXPECT_EQ(countOf("will close"), 0u);
 
-        controller.allowClose = true;
-        closeWindow(frame->frameHandle());
-        EXPECT_FALSE(controller.first);
-        EXPECT_EQ(countOf("deleted first"), 1u);
-    }
-    delete frame;
+    controller->allowClose = true;
+    closeWindow(frame->frameHandle());
+    EXPECT_FALSE(controller->first);
+    EXPECT_EQ(countOf("deleted first"), 1u);
+    frame->free();
 }
 
 TEST_F(WindowClose, RootOwnedViewControllersAndTheirChildrenAreFreedOnce) {

@@ -4,11 +4,42 @@
 #include "newui/themedata.h"
 #include "newui/uicolormanager.h"
 
+#include <algorithm>
+#include <cassert>
+#include <vector>
+
 namespace newui {
+
+	namespace {
+
+		// The frames the calling thread is handling a message for, outermost first.
+		std::vector<const Frame*>& dispatchingFrames() {
+			thread_local std::vector<const Frame*> frames;
+			return frames;
+		}
+
+	}
+
+	FrameDispatchScope::FrameDispatchScope(const Frame* frame) : entered_(frame != nullptr) {
+		if (entered_) {
+			dispatchingFrames().push_back(frame);
+		}
+	}
+
+	FrameDispatchScope::~FrameDispatchScope() {
+		if (entered_) {
+			dispatchingFrames().pop_back();
+		}
+	}
+
+	bool FrameDispatchScope::contains(const Frame* frame) {
+		const std::vector<const Frame*>& frames = dispatchingFrames();
+		return std::find(frames.begin(), frames.end(), frame) != frames.end();
+	}
 
 	Frame::Frame()
 	{
-		rootView_ = new RootView(this, bounds_, "rootview");
+		rootView_ = createOwned<RootView>(this, bounds_, "rootview");
 	}
 
 	bool Frame::renderAllViewsToFile(const std::string& path) {
@@ -43,8 +74,51 @@ namespace newui {
 			// no live HWND). Skips destroy()'s onDestroyed(*this) - this
 			// Frame was never actually shown, so nothing was "destroyed"
 			// in the sense any onDestroyed listener would expect.
-			rootView_->destroy();
-			delete rootView_;
+			RootView* root = rootView_;
+			root->free();
+			rootView_ = nullptr;
+		}
+
+		if (Application::instance().getFrame() == this) {
+			Application::instance().setFrame(nullptr);
+		}
+	}
+
+	void Frame::aboutToBeReleased() {
+		if (!windowGoing_ && frameHandle_ != nullptr) {
+			::ShowWindow(frameHandle_, SW_HIDE);
+		}
+	}
+
+	void Frame::markDestroyingTree() {
+		if (isBeingFreed() && FrameDispatchScope::contains(this)) {
+			assert(false && "newui::Frame free()d from inside its own event handler - use release()");
+		}
+		Component::markDestroyingTree();
+	}
+
+	void Frame::freeOwnedComponent(Component& component) {
+		Component* const target = &component;
+		if (target == rootView_ && frameHandle_ != nullptr) {
+			::DestroyWindow(frameHandle_);
+			if (rootView_ != target) {
+				return;  // WM_DESTROY has freed it
+			}
+		}
+		component.free();
+		if (target == rootView_) {
+			rootView_ = nullptr;  // an owner being freed is not told that a component has gone
+		}
+	}
+
+	void Frame::tearDownForFree() {
+		if (frameHandle_ != nullptr) {
+			::DestroyWindow(frameHandle_);
+		}
+	}
+
+	void Frame::notification(Component& component, Operation operation) {
+		if (operation == Operation::Removing && &component == rootView_) {
 			rootView_ = nullptr;
 		}
 	}
@@ -100,14 +174,37 @@ LRESULT CALLBACK Frame::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
 
 		// Save the handle inside the object
 		thisPtr->frameHandle_ = hWnd;
+		// The window's thread is the frame's, whichever thread constructed it.
+		thisPtr->moveOwnershipToCurrentThread();
 	}
 	else {
 		thisPtr = reinterpret_cast<Frame*>(::GetWindowLongPtr(hWnd, GWLP_USERDATA));
 	}
 
 	if (thisPtr) {
+		if (message == WM_DESTROY) {
+			thisPtr->windowGoing_ = true;
+		}
+
 		LRESULT lres = 0;
-		if (!thisPtr->handleMessage(message, wParam, lParam, lres)) {
+		bool handled = false;
+		{
+			FrameDispatchScope dispatching(thisPtr);
+			handled = thisPtr->handleMessage(message, wParam, lParam, lres);
+		}
+
+		if (message == WM_DESTROY) {
+			if (thisPtr->owner() != nullptr && !thisPtr->isBeingFreed() && thisPtr->releasesWithWindow()) {
+				thisPtr->release();
+			}
+		}
+		else if (message == WM_NCDESTROY) {
+			// The last message: the handle is dead from here on.
+			thisPtr->frameHandle_ = nullptr;
+			::SetWindowLongPtr(hWnd, GWLP_USERDATA, 0);
+		}
+
+		if (!handled) {
 			return DefWindowProcA(hWnd, message, wParam, lParam);
 		}
 		else {
@@ -148,7 +245,7 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 
 	switch (message) {
 		case WM_CREATE: {
-			if (!frameCreated()) {
+			if (!frameCreated() && Application::instance().quitsWith(*this)) {
 				::PostMessage(frameHandle_, WM_QUIT, 0, 0);
 			}
 			result = true;
@@ -196,7 +293,9 @@ bool Frame::handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& o
 		case WM_DESTROY: {
 			destroy();
 
-			::PostQuitMessage(0);
+			if (Application::instance().quitsWith(*this)) {
+				::PostQuitMessage(0);
+			}
 			result = true;
 		}
 		break;
@@ -356,8 +455,8 @@ bool Frame::frameCreated()
 	//cretate main view
 
 	if (!rootView_->initialize()) {
-		rootView_->destroy();  // frees anything already owned by or built on it
-		delete rootView_;
+		RootView* root = rootView_;
+		root->free();  // with anything already owned by or built on it
 		rootView_ = nullptr;
 
 		return false;
@@ -372,14 +471,21 @@ void Frame::destroy()
 	onDestroyed(*this);
 
 	if (nullptr != rootView_) {
-		rootView_->destroy();
-		delete rootView_;
+		RootView* root = rootView_;
+		root->free();
 	}
-	rootView_ = nullptr;	
+	rootView_ = nullptr;
 }
 
 bool Frame::initialize()
 {
+	if (nullptr == rootView_) {
+		return false;
+	}
+	if (nullptr != frameHandle_) {
+		return true;
+	}
+
 	bool result = true;
 	WNDCLASSEXA wcex;
 	std::string className = "Frame";
@@ -425,7 +531,7 @@ bool Frame::initialize()
 	::ShowWindow(frameHandle_, SW_SHOW);
 	::RedrawWindow(frameHandle_, NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
 
-	return result;
+	return Component::initialize();
 }
 
 std::tuple<Frame*, RootView*> Frame::getTarget(HWND hwnd) 

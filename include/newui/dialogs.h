@@ -227,6 +227,9 @@ namespace newui {
         // message unchanged.
         bool handleMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& outLRESULT) override;
 
+        // Closing a dialog destroys its window, and its caller still reads its views: an owned Dialog stays until freed.
+        bool releasesWithWindow() const override { return false; }
+
     private:
         bool ensureInitialized();
 

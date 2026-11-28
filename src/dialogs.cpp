@@ -433,7 +433,7 @@ bool Dialog::initialize()
     //::ShowWindow(frameHandle_, SW_SHOW);
     //::RedrawWindow(frameHandle_, NULL, NULL, RDW_INVALIDATE | RDW_ERASENOW | RDW_ALLCHILDREN);
 
-    return result;
+    return Component::initialize();
 }
 
 bool Dialog::ensureInitialized() {

@@ -72,15 +72,19 @@ namespace newui {
     // subclass's constructor does nothing but store what it was given, and everything that needs the window is built in frameDidLoad().
     //
     // The other window events are forwarded the same way (frameShouldClose / frameWillClose / frameDidResize), so a subclass overrides what it
-    // needs and never subscribes to the Frame itself. It does not own the Frame: the Frame must outlive the controller, or be destroyed after
-    // the controller is (the destructor unsubscribes).
+    // needs and never subscribes to the Frame itself.
+    //
+    // The controller belongs to its frame: attach it with frame->addComponent(new T(*frame)) and the frame frees it, while the window
+    // still exists. It does not own the Frame.
     //
     // A base constructor cannot reach a subclass override, so a controller made for a Frame whose window already exists calls load() itself
     // once it is fully constructed; load() is a no-op after the first call and is also what a caller uses to run frameDidLoad() for a Frame
     // that will never get a native window.
     //
-    // Recommended setup: the FrameController itself stays wherever the application keeps it (often the stack in main), and the controllers
-    // for the window's features are owned by the root view:
+    // Setup: the frame owns the FrameController, and the root view owns the controllers for the window's features:
+    //
+    //     auto* frame = Application::instance().createFrame<Frame>();
+    //     frame->addComponent(new MainController(*frame));
     //
     //     void frameDidLoad() override {
     //         search_ = frame().rootView().createOwned<SearchController>(frame().rootView());   // search_ is a ComponentRef

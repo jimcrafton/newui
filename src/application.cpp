@@ -40,7 +40,40 @@ Application::Application() {
     }
 }
 
-Application::~Application() = default;
+Application::~Application() {
+    // Frames still here (run() frees them) are left alone: this is static destruction, too late to tear windows down.
+    if (frameOwner_ != nullptr && frameOwner_->componentCount() > 0) {
+        frameOwner_.release();
+    }
+}
+
+Component& Application::frameOwner() {
+    // A new one whenever it is empty, so that component ownership's thread is the one making the frames now.
+    if (frameOwner_ == nullptr || frameOwner_->componentCount() == 0) {
+        frameOwner_ = std::make_unique<Component>();
+    }
+    return *frameOwner_;
+}
+
+std::vector<Frame*> Application::frames() const {
+    std::vector<Frame*> result;
+    if (frameOwner_ != nullptr) {
+        for (Component* component : frameOwner_->components()) {
+            result.push_back(static_cast<Frame*>(component));
+        }
+    }
+    return result;
+}
+
+void Application::freeFrames() {
+    while (frameOwner_ != nullptr && frameOwner_->componentCount() > 0) {
+        const std::size_t before = frameOwner_->componentCount();
+        frameOwner_->components().back()->free();
+        if (frameOwner_->componentCount() >= before) {
+            break;  // refused (another thread, or already being freed further up the stack)
+        }
+    }
+}
 
 void Application::setName(const std::string& name) {
     
@@ -304,6 +337,8 @@ void Application::run() {
 		//runLoop_.onEnd += Application::runLoopDone;
 
 		RunLoop::current().run();
+
+		freeFrames();
 
 		if (bufferedPaintInitialized) {
 			::BufferedPaintUnInit();

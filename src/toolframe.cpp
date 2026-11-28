@@ -43,7 +43,7 @@ namespace newui {
         if (!hwnd || hwnd != frameHandle()) {
             return false;
         }
-        return true;
+        return Component::initialize();
     }
 
     void ToolFrame::setActivatesOnClick(bool activates) {

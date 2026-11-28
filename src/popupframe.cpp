@@ -66,7 +66,7 @@ namespace newui {
         DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
         ::DwmSetWindowAttribute(frameHandle(), DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 
-        return true;
+        return Component::initialize();
     }
 
     void PopupFrame::moveTo(const Rect& screenBounds) {
