@@ -108,18 +108,26 @@ namespace newui
             siblings.erase(std::remove(siblings.begin(), siblings.end(), this), siblings.end());
         }
 
-        if (view_ != nullptr) {
-            if (container_ != nullptr) {
+        // An expired lifetime means the view has already been destroyed (by its parent or its owner): nothing is left to do.
+        if (view_ != nullptr && !viewLife_.expired()) {
+            // The container is only touched while it still holds the view: it may itself be gone.
+            if (container_ != nullptr && view_->parent() == container_) {
                 container_->removeChild(view_);
             }
-            view_->destroy();
-            delete view_;
+            // An owned view is its owner's to free.
+            if (view_->owner() == nullptr) {
+                view_->destroy();
+                delete view_;
+            }
         }
     }
 
     SubView* ViewController::view() {
         if (view_ == nullptr) {
             view_ = loadView();
+            if (view_ != nullptr) {
+                viewLife_ = static_cast<const Component*>(view_)->lifetime();
+            }
             viewDidLoad();
         }
         return view_;

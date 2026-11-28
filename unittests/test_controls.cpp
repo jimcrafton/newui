@@ -1,6 +1,7 @@
 #include "newui/controls.h"
 #include "newui/items.h"
 #include "newui/keyboard_constants.h"
+#include "newui/segmentedcontrol.h"
 
 #include <gtest/gtest.h>
 

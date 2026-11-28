@@ -147,8 +147,9 @@ namespace newui {
         // subclass's version (its part of the object is already gone by
         // the time ~ViewController runs), so this only does the non-
         // virtual cleanup: detach view() from its container if still
-        // attached, then destroy()+delete it. Call dismiss() first for a
-        // clean lifecycle-callback-driven teardown.
+        // attached, then destroy()+delete it - unless a component owns it
+        // (it is then left to that owner), or it has been destroyed already.
+        // Call dismiss() first for a clean lifecycle-callback-driven teardown.
         virtual ~ViewController();
 
         // Lazily builds view() on first access (loadView(), then
@@ -241,6 +242,7 @@ namespace newui {
         void waitForAnimationThen(Animation* animation, void (ViewController::* onComplete)());
 
         SubView* view_ = nullptr;
+        std::weak_ptr<const void> viewLife_;
         View* container_ = nullptr;
         ViewController* parentController_ = nullptr;
         std::vector<ViewController*> childControllers_;

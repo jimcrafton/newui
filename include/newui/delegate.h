@@ -63,6 +63,7 @@ namespace newui {
     };
 
 class RunLoop; // Forward declaration; include newui/runloop.h to call postCall.
+class Component; // newui/component.h; postCall treats a sender derived from it specially.
 
 // Handle returned by Delegate::postCall. The caller can wait() (or
 // waitFor()/isDone()) on it to find out when the posted callback batch has
@@ -115,9 +116,24 @@ private:
     std::shared_ptr<State> state_;
 };
 
-// Opaque handle returned by Delegate::add, used to remove() that specific
-// listener later. A default-constructed Connection is never connected
-// (remove() on it is a no-op) - useful as a "not subscribed yet" sentinel.
+namespace detail {
+// What a Connection needs from the delegate it came from, without knowing the delegate's type.
+struct DelegateStateBase {
+    virtual void remove(std::uint64_t id) = 0;
+
+protected:
+    ~DelegateStateBase() = default;
+};
+}  // namespace detail
+
+// Handle returned by Delegate::add for that specific listener: pass it to
+// the delegate's remove(), or call disconnect() on it. It holds the
+// delegate's state only weakly, so disconnect() is safe after the delegate
+// has been destroyed (it then does nothing). A default-constructed
+// Connection is never connected (remove() and disconnect() on it are
+// no-ops) - useful as a "not subscribed yet" sentinel. Copies refer to the
+// same listener. connected() says the handle names a listener, not that the
+// listener is still there.
 class Connection {
 public:
     Connection() = default;
@@ -130,22 +146,68 @@ public:
         return connected();
     }
 
+    // Removes the listener from the delegate it was added to (or the one that delegate was moved into), and forgets it.
+    void disconnect() {
+        const std::uint64_t id = std::exchange(id_, 0);
+        std::weak_ptr<detail::DelegateStateBase> weak;
+        weak.swap(state_);
+        if (id != 0) {
+            if (std::shared_ptr<detail::DelegateStateBase> state = weak.lock()) {
+                state->remove(id);
+            }
+        }
+    }
+
 private:
     template<typename, typename...> friend class Delegate;
 
-    explicit Connection(std::uint64_t id) : id_(id) {}
+    Connection(std::uint64_t id, std::weak_ptr<detail::DelegateStateBase> state) : id_(id), state_(std::move(state)) {}
 
     std::uint64_t id_ = 0;
+    std::weak_ptr<detail::DelegateStateBase> state_;
+};
+
+// A Connection that disconnects itself when it is destroyed or assigned over.
+class ScopedConnection {
+public:
+    ScopedConnection() = default;
+    ScopedConnection(Connection connection) : connection_(std::move(connection)) {}
+    ~ScopedConnection() { disconnect(); }
+
+    ScopedConnection(const ScopedConnection&) = delete;
+    ScopedConnection& operator=(const ScopedConnection&) = delete;
+
+    ScopedConnection(ScopedConnection&& other) noexcept : connection_(std::exchange(other.connection_, Connection())) {}
+
+    ScopedConnection& operator=(ScopedConnection&& other) noexcept {
+        if (this != &other) {
+            Connection incoming = std::exchange(other.connection_, Connection());
+            disconnect();
+            connection_ = std::move(incoming);
+        }
+        return *this;
+    }
+
+    bool connected() const {
+        return connection_.connected();
+    }
+
+    explicit operator bool() const {
+        return connected();
+    }
+
+    void disconnect() {
+        connection_.disconnect();
+    }
+
+private:
+    Connection connection_;
 };
 
 namespace detail {
 // A single counter shared by every Delegate<...> specialization: it only
 // needs to hand out ids that are unique within one Delegate's slot list,
-// and a process-wide monotonic counter trivially satisfies that. Keeping
-// it out of Delegate itself (rather than a std::atomic member) means
-// Delegate stays copyable - it holds nothing but a shared_ptr, same as
-// before - which several owning classes (e.g. MenuItem) rely on via their
-// own implicitly-generated copy assignment.
+// and a process-wide monotonic counter trivially satisfies that.
 inline std::uint64_t nextConnectionId() {
     static std::atomic<std::uint64_t> counter{0};
     return counter.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -167,6 +229,15 @@ inline std::uint64_t nextConnectionId() {
 // later. Listeners are type-erased with std::function, so unlike a plain
 // function pointer they can't be compared for equality; that's why removal
 // goes through the Connection token instead of by value.
+//
+// A removed listener is not called again, even by a syncCall already under
+// way or a postCall already queued; a queued postCall calls nothing if the
+// delegate has been destroyed, or if its sender is a Component that has been
+// freed or is Destroying. A copy gets its own listener list, starting
+// with the same listeners: adding or removing on one leaves the other alone,
+// and a Connection's disconnect() acts on the delegate it was added to. A
+// move takes the listeners and their Connections with it and leaves the
+// source empty.
 template<typename SenderT, typename... Args>
 class Delegate {
     static_assert(!std::is_reference<SenderT>::value,
@@ -180,7 +251,27 @@ public:
     using FunctionPtr = SyncReturn(*)(SenderRefT, Args...);
     using Callback = std::function<SyncReturn(SenderRefT, Args...)>;
 
-    Delegate() : slots_(std::make_shared<const SlotList>()) {}
+    Delegate() : state_(std::make_shared<State>()) {}
+
+    Delegate(const Delegate& other) : state_(std::make_shared<State>()) {
+        state_->slots = copiedSlots(*other.state_);
+    }
+
+    Delegate& operator=(const Delegate& other) {
+        if (this != &other) {
+            state_->replace(copiedSlots(*other.state_));
+        }
+        return *this;
+    }
+
+    Delegate(Delegate&& other) noexcept : state_(std::exchange(other.state_, std::make_shared<State>())) {}
+
+    Delegate& operator=(Delegate&& other) noexcept {
+        if (this != &other) {
+            state_ = std::exchange(other.state_, std::make_shared<State>());
+        }
+        return *this;
+    }
 
     // Accepts a free function, a lambda (capturing or not), or any other
     // SyncReturn(SenderRefT, Args...)-callable. Not describable - see
@@ -212,8 +303,8 @@ public:
             return Connection();
         }
         std::uint64_t id = detail::nextConnectionId();
-        addSlot(Slot{id, std::move(fn), std::move(descriptor)});
-        return Connection(id);
+        state_->append(Slot{id, std::make_shared<std::atomic<bool>>(true), std::move(fn), std::move(descriptor)});
+        return Connection(id, state_);
     }
 
     // Overload kept distinct from add(Callback) so &SomeTemplateFn resolves
@@ -290,20 +381,23 @@ public:
         if (!connection) {
             return;
         }
-        removeSlot(connection.id_);
+        state_->remove(connection.id_);
     }
 
     // Disconnects every listener tagged with descriptor (see add(descriptor, Callback)). An empty
     // descriptor removes nothing - undescribed listeners can't be told apart.
     void removeDescribed(const std::string& descriptor) {
         if (!descriptor.empty()) {
-            removeSlotsDescribedAs(descriptor);
+            state_->removeIf([&descriptor](const Slot& slot) { return slot.descriptor == descriptor; });
         }
     }
 
     void syncCall(SenderRefT sender, Args... args) const {
-        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
+        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&state_->slots);
         for (const Slot& slot : *snapshot) {
+            if (!slot.isActive()) {
+                continue;
+            }
             auto result = slot.fn(sender, args...);
 			if (result.error()) {
 				return;
@@ -316,8 +410,11 @@ public:
 	}
 
     SyncReturn syncCallFirst(SenderRefT sender, Args... args) const {
-        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
+        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&state_->slots);
         for (const Slot& slot : *snapshot) {
+            if (!slot.isActive()) {
+                continue;
+            }
             auto result = slot.fn(sender, args...);
             if (result.handled()) {
                 return result;
@@ -333,11 +430,34 @@ public:
     // that task to finish; its result() is the same as syncCall's early-out
     // semantics would produce (last SyncReturn, or the one that errored).
     AsyncReturn postCall(RunLoop& runLoop, SenderPtrT sender, Args... args) const {
-        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
+        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&state_->slots);
+        std::weak_ptr<State> delegate = state_;
+        std::weak_ptr<const void> senderLife;
+        if constexpr (std::is_base_of<Component, SenderT>::value) {
+            // Named through a dependent type, as Component is only declared here.
+            const std::conditional_t<true, Component, SenderT>* component = sender;
+            senderLife = component->lifetime();
+        }
         AsyncReturn asyncReturn;
-        runLoop.post([snapshot, asyncReturn, sender, args...]() {
+        runLoop.post([snapshot, delegate, senderLife, asyncReturn, sender, args...]() {
             SyncReturn result(SyncReturn::Ignored);
             for (const Slot& slot : *snapshot) {
+                if (delegate.expired()) {
+                    break;
+                }
+                if constexpr (std::is_base_of<Component, SenderT>::value) {
+                    // The lifetime is checked first: the sender may no longer exist.
+                    if (senderLife.expired()) {
+                        break;
+                    }
+                    const std::conditional_t<true, Component, SenderT>* component = sender;
+                    if (component->isDestroying()) {
+                        break;
+                    }
+                }
+                if (!slot.isActive()) {
+                    continue;
+                }
                 result = slot.fn(*sender, args...);
                 if (result.error()) {
                     break;
@@ -356,7 +476,7 @@ public:
     // View::dropTarget()'s delegates before bothering to extract a
     // payload that's about to go nowhere).
     bool empty() const {
-        return std::atomic_load(&slots_)->empty();
+        return std::atomic_load(&state_->slots)->empty();
     }
 
     // Every currently-connected slot's own descriptor, skipping any that
@@ -367,7 +487,7 @@ public:
     // "delegates" block (reflectionio.h) to write out. Snapshots slots_
     // the same lock-free way syncCall() does.
     std::vector<std::string> describedListeners() const {
-        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&slots_);
+        std::shared_ptr<const SlotList> snapshot = std::atomic_load(&state_->slots);
         std::vector<std::string> result;
         for (const Slot& slot : *snapshot) {
             if (!slot.descriptor.empty()) {
@@ -380,65 +500,102 @@ public:
 private:
     struct Slot {
         std::uint64_t id;
+        // Shared by every snapshot holding this listener, so removing it reaches the calls already under way.
+        std::shared_ptr<std::atomic<bool>> active;
         Callback fn;
         std::string descriptor;  // empty - not describable, see add(descriptor, Callback)
+
+        bool isActive() const {
+            return active->load(std::memory_order_acquire);
+        }
+
+        void deactivate() const {
+            active->store(false, std::memory_order_release);
+        }
     };
 
     using SlotList = std::vector<Slot>;
 
-    // slots_ is a plain (non-atomic) shared_ptr, so ordinary assignment
+    // One empty list for every delegate nothing has been added to (lists are never changed in place).
+    static const std::shared_ptr<const SlotList>& emptySlots() {
+        static const std::shared_ptr<const SlotList> empty = std::make_shared<const SlotList>();
+        return empty;
+    }
+
+    // The listener list lives apart from the Delegate so that a Connection
+    // can refer to it weakly and outlive the delegate.
+    //
+    // slots is a plain (non-atomic) shared_ptr, so ordinary assignment
     // from multiple threads would be a data race - atomic_load/
     // atomic_compare_exchange_weak are what make access to that one
     // shared_ptr variable itself thread-safe. The retry loop is needed on
     // top of that: without it, two concurrent add()/remove() calls could
     // both read the same oldList, each build their own updated copy, and
     // whichever atomic_store'd second would silently discard the other's
-    // change. The CAS only publishes newList if slots_ is still oldList;
+    // change. The CAS only publishes newList if slots is still oldList;
     // if another thread published first, it fails, refreshes oldList to
     // the current value, and the loop rebuilds updated on top of that -
     // so no update is ever lost. In the uncontended case (the common one)
     // the CAS succeeds first try and the loop runs once.
-    void addSlot(Slot slot) {
-        std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots_);
-        std::shared_ptr<const SlotList> newList;
-        do {
-            auto updated = std::make_shared<SlotList>(*oldList);
-            updated->push_back(slot);
-            newList = std::move(updated);
-        } while (!std::atomic_compare_exchange_weak(&slots_, &oldList, newList));
+    struct State final : detail::DelegateStateBase {
+        std::shared_ptr<const SlotList> slots = emptySlots();
+
+        void append(Slot slot) {
+            std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots);
+            std::shared_ptr<const SlotList> newList;
+            do {
+                auto updated = std::make_shared<SlotList>(*oldList);
+                updated->push_back(slot);
+                newList = std::move(updated);
+            } while (!std::atomic_compare_exchange_weak(&slots, &oldList, newList));
+        }
+
+        void remove(std::uint64_t id) override {
+            removeIf([id](const Slot& slot) { return slot.id == id; });
+        }
+
+        // Same retry-on-conflict scheme as append. The removed listeners are deactivated once the new list is published.
+        template<typename Predicate>
+        void removeIf(Predicate matches) {
+            std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots);
+            std::shared_ptr<const SlotList> newList;
+            do {
+                auto updated = std::make_shared<SlotList>(*oldList);
+                updated->erase(std::remove_if(updated->begin(), updated->end(), matches), updated->end());
+                if (updated->size() == oldList->size()) {
+                    return;
+                }
+                newList = std::move(updated);
+            } while (!std::atomic_compare_exchange_weak(&slots, &oldList, newList));
+            for (const Slot& slot : *oldList) {
+                if (matches(slot)) {
+                    slot.deactivate();
+                }
+            }
+        }
+
+        void replace(std::shared_ptr<const SlotList> newList) {
+            std::shared_ptr<const SlotList> oldList = std::atomic_exchange(&slots, std::move(newList));
+            for (const Slot& slot : *oldList) {
+                slot.deactivate();
+            }
+        }
+    };
+
+    // The other delegate's listeners with flags of their own, so that removing one from a copy leaves the original calling it.
+    static std::shared_ptr<const SlotList> copiedSlots(const State& state) {
+        auto copy = std::make_shared<SlotList>(*std::atomic_load(&state.slots));
+        for (Slot& slot : *copy) {
+            slot.active = std::make_shared<std::atomic<bool>>(true);
+        }
+        return copy;
     }
 
-    // Same retry-on-conflict scheme as addSlot - see the comment there.
-    void removeSlotsDescribedAs(const std::string& descriptor) {
-        std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots_);
-        std::shared_ptr<const SlotList> newList;
-        do {
-            auto updated = std::make_shared<SlotList>(*oldList);
-            updated->erase(std::remove_if(updated->begin(), updated->end(),
-                                           [&descriptor](const Slot& slot) { return slot.descriptor == descriptor; }),
-                           updated->end());
-            newList = std::move(updated);
-        } while (!std::atomic_compare_exchange_weak(&slots_, &oldList, newList));
-    }
-
-    void removeSlot(std::uint64_t id) {
-        std::shared_ptr<const SlotList> oldList = std::atomic_load(&slots_);
-        std::shared_ptr<const SlotList> newList;
-        do {
-            auto updated = std::make_shared<SlotList>(*oldList);
-            updated->erase(std::remove_if(updated->begin(), updated->end(),
-                                           [id](const Slot& slot) { return slot.id == id; }),
-                           updated->end());
-            newList = std::move(updated);
-        } while (!std::atomic_compare_exchange_weak(&slots_, &oldList, newList));
-    }
-
-    std::shared_ptr<const SlotList> slots_;
+    std::shared_ptr<State> state_;
 };
 
 // Holds the connections an owner made to delegates it does not own, and removes them all when it goes away (or on clear()), newest first.
-// Every delegate added here must still exist when the Connections is cleared or destroyed - an observer has to be destroyed before the
-// subjects it observes (a Delegate cannot tell that a Connection to it has outlived it).
+// The delegates may be destroyed before or after the Connections.
 class Connections {
 public:
     Connections() = default;
@@ -447,15 +604,15 @@ public:
     Connections(const Connections&) = delete;
     Connections& operator=(const Connections&) = delete;
 
-    Connections(Connections&& other) noexcept : removers_(std::move(other.removers_)) {
-        other.removers_.clear();
+    Connections(Connections&& other) noexcept : connections_(std::move(other.connections_)) {
+        other.connections_.clear();
     }
 
     Connections& operator=(Connections&& other) noexcept {
         if (this != &other) {
             clear();
-            removers_ = std::move(other.removers_);
-            other.removers_.clear();
+            connections_ = std::move(other.connections_);
+            other.connections_.clear();
         }
         return *this;
     }
@@ -463,25 +620,24 @@ public:
     // Same as delegate.add(fn), remembering the connection.
     template<typename DelegateT>
     void add(DelegateT& delegate, typename DelegateT::Callback fn) {
-        Connection connection = delegate.add(std::move(fn));
-        removers_.push_back([&delegate, connection] { delegate.remove(connection); });
+        connections_.push_back(delegate.add(std::move(fn)));
     }
 
     // Disconnects everything added so far.
     void clear() {
-        while (!removers_.empty()) {
-            std::function<void()> remover = std::move(removers_.back());
-            removers_.pop_back();
-            remover();
+        while (!connections_.empty()) {
+            Connection connection = std::move(connections_.back());
+            connections_.pop_back();
+            connection.disconnect();
         }
     }
 
     std::size_t size() const {
-        return removers_.size();
+        return connections_.size();
     }
 
 private:
-    std::vector<std::function<void()>> removers_;
+    std::vector<Connection> connections_;
 };
 
 }

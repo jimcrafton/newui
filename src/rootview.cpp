@@ -760,7 +760,7 @@ namespace newui {
 			SubView* recovered = nullptr;
 			for (View* v = removedSubtreeRoot->parent(); v != nullptr && v != this; v = v->parent()) {
 				SubView* candidate = dynamic_cast<SubView*>(v);
-				if (candidate != nullptr && candidate->canBecomeFocused()) {
+				if (candidate != nullptr && !candidate->isDestroying() && candidate->canBecomeFocused()) {
 					recovered = candidate;
 					break;
 				}

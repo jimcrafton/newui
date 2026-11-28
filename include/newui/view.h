@@ -681,9 +681,17 @@ namespace newui {
         void setDropTarget(std::unique_ptr<DropTarget> dropTarget) { dropTarget_ = std::move(dropTarget); }
 
         virtual bool initialize();
+        // Tears this view down: frees the components it owns, then destroys and deletes the child views nothing owns
+        // (an owned one is only detached), then fires onDestroyed. free() calls this for an owned view.
         virtual void destroy();
 
     protected:
+        // Component's lifetime hooks, for a view: the child views going with it are marked too, a released view is hidden
+        // at once, and free() runs destroy().
+        void markDestroyingTree() override;
+        void aboutToBeReleased() override;
+        void tearDownForFree() override;
+
         // Cascades the Component::initialize() dispatch this override chains into (see
         // view.cpp) onto every existing child, so a subtree several levels deep - not just this
         // View itself - gets initialize()'d in one call. Covers RootView's own directly-attached
@@ -852,6 +860,12 @@ namespace newui {
         View* parent_ = nullptr;
 
         RootView* rootView_ = nullptr;
+
+        // destroy() has run to the end.
+        bool destroyed_ = false;
+
+        // Takes an owned child (or one being freed) out of this view without destroying or deleting it.
+        void detachSurvivingChild(SubView* child);
 
         // The one place parent_ is ever written outside of setParent() itself -
         // SubView::addChild()/removeChild() and RootView::addChild()/removeChild() (their own

@@ -9,6 +9,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -78,6 +80,77 @@ TEST(RunLoopPostCall, StopsAtFirstError) {
 
     EXPECT_TRUE(asyncReturn.result().error());
     EXPECT_EQ(g_secondCallCount, 0);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+namespace {
+
+// Runs `whileQueued` while the loop is held, so a call posted inside it has not started yet.
+template<typename F>
+void withLoopHeld(newui::RunLoop& runLoop, F whileQueued) {
+    std::promise<void> release;
+    std::shared_future<void> released = release.get_future().share();
+    runLoop.post([released]() { released.wait(); });
+    whileQueued();
+    release.set_value();
+}
+
+newui::Delegate<int>::Callback countCalls(std::atomic<int>& count) {
+    return [&count](int&) {
+        ++count;
+        return newui::SyncReturn::Handled;
+    };
+}
+
+}  // namespace
+
+TEST(RunLoopPostCall, AListenerRemovedWhileTheCallIsQueuedIsNotCalled) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
+
+    std::atomic<int> removed{0};
+    std::atomic<int> kept{0};
+    newui::Delegate<int> delegate;
+    newui::Connection connection = delegate.add(countCalls(removed));
+    delegate.add(countCalls(kept));
+
+    int sender = 0;
+    newui::AsyncReturn asyncReturn;
+    withLoopHeld(runLoop, [&]() {
+        asyncReturn = delegate.postCall(runLoop, &sender);
+        connection.disconnect();
+    });
+
+    ASSERT_TRUE(asyncReturn.waitFor(std::chrono::seconds(5)));
+    EXPECT_EQ(removed, 0);
+    EXPECT_EQ(kept, 1);
+
+    runLoop.quit();
+    loopThread.join();
+}
+
+TEST(RunLoopPostCall, ACallQueuedOnADelegateThatIsThenDestroyedCallsNothing) {
+    auto [runLoopPtr, loopThread] = newui::RunLoop::runThreaded();
+    newui::RunLoop& runLoop = *runLoopPtr;
+    runLoop.waitForStart();
+
+    std::atomic<int> count{0};
+    auto delegate = std::make_unique<newui::Delegate<int>>();
+    delegate->add(countCalls(count));
+
+    int sender = 0;
+    newui::AsyncReturn asyncReturn;
+    withLoopHeld(runLoop, [&]() {
+        asyncReturn = delegate->postCall(runLoop, &sender);
+        delegate.reset();
+    });
+
+    ASSERT_TRUE(asyncReturn.waitFor(std::chrono::seconds(5))) << "the AsyncReturn still completes";
+    EXPECT_TRUE(asyncReturn.result().ignored());
+    EXPECT_EQ(count, 0);
 
     runLoop.quit();
     loopThread.join();

@@ -356,6 +356,7 @@ bool Frame::frameCreated()
 	//cretate main view
 
 	if (!rootView_->initialize()) {
+		rootView_->destroy();  // frees anything already owned by or built on it
 		delete rootView_;
 		rootView_ = nullptr;
 

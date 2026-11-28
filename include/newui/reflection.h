@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <newui/component.h>
 #include <newui/delegate.h>
 #include <newui/utils.h>
 
@@ -318,6 +319,17 @@ namespace newui::reflection {
         struct has_destroy_method<T, std::void_t<decltype(std::declval<T&>().destroy())>> : std::true_type {};
         template<typename T>
         inline constexpr bool has_destroy_method_v = has_destroy_method<T>::value;
+
+        // True when element is a Component that another one owns, and so is not for its container to delete.
+        template<typename T>
+        bool isOwnedComponent(const T* element) {
+            if constexpr (std::is_base_of_v<newui::Component, T>) {
+                return static_cast<const newui::Component*>(element)->owner() != nullptr;
+            } else {
+                (void)element;
+                return false;
+            }
+        }
 
         // True when T is a complete type (typeid(T) is ill-formed otherwise).
         template<typename T, typename = void>
@@ -1887,7 +1899,7 @@ namespace newui::reflection {
                         if (removeFn_) {
                             removeFn_(*static_cast<SourceT*>(instance), existing);
                         }
-                        if (countFn_(*static_cast<SourceT*>(instance)) < countBefore) {
+                        if (countFn_(*static_cast<SourceT*>(instance)) < countBefore && !detail::isOwnedComponent(existing)) {
                             if constexpr (detail::has_destroy_method_v<PointeeT>) {
                                 existing->destroy();
                             }

@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <memory>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -466,6 +467,311 @@ TEST(Connections, MovedFromOwnerNoLongerRemoves) {
     moved.clear();
     delegate.syncCall(sender);
     EXPECT_EQ(g_callCount, 1);
+}
+
+namespace {
+
+newui::Delegate<int>::Callback countInto(int& count) {
+    return [&count](int&) {
+        ++count;
+        return newui::SyncReturn::Handled;
+    };
+}
+
+}  // namespace
+
+TEST(Connections, CanBeDestroyedAfterItsDelegate) {
+    int count = 0;
+    auto delegate = std::make_unique<newui::Delegate<int>>();
+    {
+        newui::Connections connections;
+        connections.add(*delegate, countInto(count));
+        delegate.reset();
+    }
+    EXPECT_EQ(count, 0);
+}
+
+TEST(Connections, SizeAndClearStillWorkOnceTheDelegatesAreGone) {
+    int count = 0;
+    newui::Connections connections;
+    {
+        newui::Delegate<int> delegate;
+        connections.add(delegate, countInto(count));
+    }
+    EXPECT_EQ(connections.size(), 1u);
+    connections.clear();
+    EXPECT_EQ(connections.size(), 0u);
+}
+
+TEST(Connection, DisconnectRemovesOnlyItsOwnListener) {
+    int first = 0;
+    int second = 0;
+    newui::Delegate<int> delegate;
+    newui::Connection connection = delegate.add(countInto(first));
+    delegate.add(countInto(second));
+
+    connection.disconnect();
+    EXPECT_FALSE(connection.connected());
+    connection.disconnect();
+
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(first, 0);
+    EXPECT_EQ(second, 1);
+}
+
+TEST(Connection, DisconnectAfterTheDelegateIsGoneDoesNothing) {
+    int count = 0;
+    newui::Connection connection;
+    {
+        newui::Delegate<int> delegate;
+        connection = delegate.add(countInto(count));
+    }
+    EXPECT_TRUE(connection.connected()) << "it still names a listener";
+    connection.disconnect();
+    EXPECT_FALSE(connection.connected());
+}
+
+TEST(Connection, DisconnectOnADefaultConnectionDoesNothing) {
+    newui::Connection connection;
+    connection.disconnect();
+    EXPECT_FALSE(connection.connected());
+}
+
+TEST(Connection, DestroyingTheDelegateReleasesItsListeners) {
+    auto token = std::make_shared<int>(0);
+    newui::Connection connection;
+    {
+        newui::Delegate<int> delegate;
+        connection = delegate.add([token](int&) { return newui::SyncReturn::Handled; });
+        EXPECT_EQ(token.use_count(), 2);
+    }
+    EXPECT_EQ(token.use_count(), 1) << "an outstanding Connection does not keep the listener alive";
+}
+
+TEST(ScopedConnection, DisconnectsWhenDestroyed) {
+    int count = 0;
+    newui::Delegate<int> delegate;
+    {
+        newui::ScopedConnection connection = delegate.add(countInto(count));
+        EXPECT_TRUE(connection.connected());
+        int sender = 0;
+        delegate.syncCall(sender);
+    }
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(count, 1);
+    EXPECT_TRUE(delegate.empty());
+}
+
+TEST(ScopedConnection, AssigningOverItDisconnectsThePreviousListener) {
+    int first = 0;
+    int second = 0;
+    newui::Delegate<int> delegate;
+    newui::ScopedConnection connection = delegate.add(countInto(first));
+    connection = delegate.add(countInto(second));
+
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(first, 0);
+    EXPECT_EQ(second, 1);
+}
+
+TEST(ScopedConnection, MovingHandsTheListenerOver) {
+    int count = 0;
+    newui::Delegate<int> delegate;
+    newui::ScopedConnection outer;
+    {
+        newui::ScopedConnection inner = delegate.add(countInto(count));
+        outer = std::move(inner);
+        EXPECT_FALSE(inner.connected());
+        newui::ScopedConnection constructed = std::move(outer);
+        outer = std::move(constructed);
+    }
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(count, 1);
+    EXPECT_TRUE(outer.connected());
+}
+
+TEST(ScopedConnection, CanBeDestroyedAfterItsDelegate) {
+    int count = 0;
+    newui::ScopedConnection connection;
+    {
+        newui::Delegate<int> delegate;
+        connection = delegate.add(countInto(count));
+    }
+    connection.disconnect();
+    EXPECT_FALSE(connection.connected());
+}
+
+TEST(Delegate, AListenerRemovedByAnEarlierOneIsNotCalledInThatPass) {
+    int removed = 0;
+    int after = 0;
+    newui::Delegate<int> delegate;
+    newui::Connection victim;
+    delegate.add([&](int&) {
+        victim.disconnect();
+        return newui::SyncReturn::Handled;
+    });
+    victim = delegate.add(countInto(removed));
+    delegate.add(countInto(after));
+
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(removed, 0);
+    EXPECT_EQ(after, 1);
+}
+
+TEST(Delegate, AListenerRemovedByAnEarlierOneIsNotCalledBySyncCallFirst) {
+    int removed = 0;
+    newui::Delegate<int> delegate;
+    newui::Connection victim;
+    delegate.add([&](int&) {
+        delegate.remove(victim);
+        return newui::SyncReturn::Ignored;
+    });
+    victim = delegate.add(countInto(removed));
+
+    int sender = 0;
+    EXPECT_TRUE(delegate.syncCallFirst(sender).ignored());
+    EXPECT_EQ(removed, 0);
+}
+
+TEST(Delegate, AListenerRemovedByDescriptorDuringACallIsNotCalled) {
+    int removed = 0;
+    newui::Delegate<int> delegate;
+    delegate.add([&](int&) {
+        delegate.removeDescribed("victim");
+        return newui::SyncReturn::Handled;
+    });
+    delegate.add("victim", countInto(removed));
+
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(removed, 0);
+}
+
+TEST(Delegate, AListenerAddedDuringACallWaitsForTheNextOne) {
+    int added = 0;
+    newui::Delegate<int> delegate;
+    bool done = false;
+    delegate.add([&](int&) {
+        if (!done) {
+            done = true;
+            delegate.add(countInto(added));
+        }
+        return newui::SyncReturn::Handled;
+    });
+
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(added, 0);
+    delegate.syncCall(sender);
+    EXPECT_EQ(added, 1);
+}
+
+TEST(Delegate, CopiesHaveIndependentListenerLists) {
+    int shared = 0;
+    int onlyOriginal = 0;
+    int onlyCopy = 0;
+    newui::Delegate<int> original;
+    newui::Connection connection = original.add(countInto(shared));
+    newui::Delegate<int> copy = original;
+    original.add(countInto(onlyOriginal));
+    copy.add(countInto(onlyCopy));
+
+    const newui::Connection handle = connection;
+    connection.disconnect();
+    int sender = 0;
+    original.syncCall(sender);
+    EXPECT_EQ(shared, 0);
+    EXPECT_EQ(onlyOriginal, 1);
+    EXPECT_EQ(onlyCopy, 0);
+
+    copy.syncCall(sender);
+    EXPECT_EQ(shared, 1) << "disconnect() acts on the delegate the listener was added to, not on copies";
+    EXPECT_EQ(onlyCopy, 1);
+
+    copy.remove(handle);
+    copy.syncCall(sender);
+    EXPECT_EQ(shared, 1) << "remove() on the copy takes it out of the copy";
+}
+
+TEST(Delegate, CopyAssignmentKeepsTheTargetsConnectionsUsable) {
+    int count = 0;
+    newui::Delegate<int> source;
+    newui::Connection fromSource = source.add(countInto(count));
+    newui::Delegate<int> target;
+    target = source;
+    target = *&target;
+
+    int sender = 0;
+    target.syncCall(sender);
+    EXPECT_EQ(count, 1);
+
+    target.remove(fromSource);
+    target.syncCall(sender);
+    EXPECT_EQ(count, 1);
+    source.syncCall(sender);
+    EXPECT_EQ(count, 2);
+}
+
+TEST(Delegate, MovingTakesTheListenersAndTheirConnections) {
+    int count = 0;
+    newui::Delegate<int> source;
+    newui::Connection connection = source.add(countInto(count));
+    newui::Delegate<int> moved = std::move(source);
+
+    int sender = 0;
+    EXPECT_TRUE(source.empty());
+    source.syncCall(sender);
+    EXPECT_EQ(count, 0);
+    moved.syncCall(sender);
+    EXPECT_EQ(count, 1);
+
+    newui::Delegate<int> assigned;
+    assigned = std::move(moved);
+    connection.disconnect();
+    assigned.syncCall(sender);
+    EXPECT_EQ(count, 1);
+
+    source.add(countInto(count));
+    source.syncCall(sender);
+    EXPECT_EQ(count, 2) << "a moved-from delegate is still usable";
+}
+
+TEST(Delegate, AddAndRemoveFromTwoThreadsWhileAThirdCalls) {
+    newui::Delegate<int> delegate;
+    std::atomic<int> permanentCalls{0};
+    delegate.add([&permanentCalls](int&) {
+        ++permanentCalls;
+        return newui::SyncReturn::Handled;
+    });
+
+    std::atomic<bool> stop{false};
+    std::thread caller([&]() {
+        int sender = 0;
+        while (!stop) {
+            delegate.syncCall(sender);
+        }
+    });
+    auto churn = [&delegate]() {
+        for (int i = 0; i < 2000; ++i) {
+            newui::ScopedConnection connection = delegate.add([](int&) { return newui::SyncReturn::Handled; });
+        }
+    };
+    std::thread first(churn);
+    std::thread second(churn);
+    first.join();
+    second.join();
+    stop = true;
+    caller.join();
+
+    const int before = permanentCalls;
+    int sender = 0;
+    delegate.syncCall(sender);
+    EXPECT_EQ(permanentCalls, before + 1);
 }
 
 TEST(Connections, ListenerCanBeRemovedWhileItIsRunning) {

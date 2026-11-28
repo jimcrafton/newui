@@ -29,6 +29,8 @@ namespace newui {
 	void View::destroy()
 	{
 		markDestroying();
+		// Owned components (controllers and the like) go while the tree they watch is still whole.
+		destroyOwnedComponents();
 		// Deliberately re-reads childViews_.front() each pass rather than
 		// holding an iterator across the loop: child->destroy() removes
 		// itself from its parent's childViews_ (see SubView::destroy()'s
@@ -46,8 +48,12 @@ namespace newui {
 		std::size_t count = childViews_.size();
 		while (!childViews_.empty()) {
 			SubView* child = childViews_.front();
-			child->destroy();  // removes itself from childViews_ - see above
-			delete child;
+			if (child->owner() != nullptr || child->isBeingFreed()) {
+				detachSurvivingChild(child);  // its owner (or the free() under way) deletes it
+			} else {
+				child->destroy();  // removes itself from childViews_ - see above
+				delete child;
+			}
 			--count;
 			if (count == 0 && !childViews_.empty()) {
 				throw std::runtime_error("removal logic busted in this view");
@@ -55,6 +61,45 @@ namespace newui {
 		}
 
 		onDestroyed(*this);
+		destroyed_ = true;
+	}
+
+	void View::detachSurvivingChild(SubView* child)
+	{
+		removeChild(child);
+		// A container may refuse to give up a child it needs (ScrollView and its viewport), but it is going away.
+		if (std::find(childViews_.begin(), childViews_.end(), child) != childViews_.end()) {
+			if (RootView* root = child->rootView()) {
+				root->notifySubViewRemoved(child);
+			}
+			childViews_.erase(std::remove(childViews_.begin(), childViews_.end(), child), childViews_.end());
+			child->internal_setParent(nullptr);
+			child->propagateRootView(nullptr);
+		}
+	}
+
+	void View::markDestroyingTree()
+	{
+		Component::markDestroyingTree();
+		for (SubView* child : childViews_) {
+			// A child owned from outside what is going away outlives this view, so it is left usable.
+			const Component* owner = child->owner();
+			if (!child->isDestroying() && (owner == nullptr || owner->isDestroying())) {
+				child->markDestroyingTree();
+			}
+		}
+	}
+
+	void View::aboutToBeReleased()
+	{
+		setVisible(false);
+	}
+
+	void View::tearDownForFree()
+	{
+		if (!destroyed_) {
+			destroy();  // a SubView takes itself out of its parent here
+		}
 	}
 
 	Point View::localToRoot(const Point& localPt) const
@@ -239,10 +284,7 @@ namespace newui {
 	}
 
 	void View::markDestroying() {
-		setDestroying();
-		for (SubView* child : childViews_) {
-			child->markDestroying();
-		}
+		markDestroyingTree();
 	}
 
 	void View::themeChanged() {

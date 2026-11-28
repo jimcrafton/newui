@@ -180,8 +180,7 @@ namespace newui {
             }
         }
 
-        destroy();
-        delete this;
+        free();  // destroy(), then delete - also leaving the owner, if a component owns this popup
     }
 
     void PopupTool::present() {

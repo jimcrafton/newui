@@ -5,6 +5,9 @@ add_executable(newui_tests
     test_automation.cpp
     test_application.cpp
     test_delegate.cpp
+    test_component.cpp
+    test_viewownership.cpp
+    test_freenotification.cpp
     test_runloop.cpp
     test_color.cpp
     test_viewstyle.cpp
