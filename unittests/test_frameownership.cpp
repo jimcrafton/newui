@@ -189,6 +189,62 @@ TEST_F(FrameOwnership, AFrameConstructedOnOneThreadBelongsToItsWindowsThread) {
     });
 }
 
+#ifdef NDEBUG
+TEST_F(FrameOwnership, AControllerItsFrameDoesNotOwnDoesNotLoad) {
+    Frame frame;
+    {
+        ProbeController unowned(frame, "unowned");
+        unowned.load();
+        EXPECT_FALSE(unowned.isLoaded());
+        EXPECT_NE(unowned.loadError().find("owned by its frame"), std::string::npos);
+    }
+    auto* misplaced = new ProbeController(frame, "misplaced");
+    frame.rootView().addComponent(misplaced);
+    misplaced->load();
+    EXPECT_FALSE(misplaced->isLoaded());
+
+    frame.addComponent(misplaced);
+    misplaced->load();
+
+    EXPECT_TRUE(misplaced->isLoaded());
+    EXPECT_TRUE(misplaced->loadError().empty());
+    misplaced->free();
+}
+#else
+TEST(FrameOwnershipDeathTest, LoadingAControllerItsFrameDoesNotOwnAsserts) {
+    EXPECT_DEATH(
+        {
+            Frame frame;
+            ProbeController unowned(frame, "unowned");
+            unowned.load();
+        },
+        "");
+}
+
+TEST(FrameOwnershipDeathTest, CreatingTheWindowOfAnUnownedControllerAsserts) {
+    EXPECT_DEATH(
+        {
+            Frame frame;
+            ProbeController unowned(frame, "unowned");
+            frame.initialize();
+        },
+        "");
+}
+#endif
+
+TEST_F(FrameOwnership, AnOwnedControllerAttachedAfterTheWindowExistsLoadsWhenAsked) {
+    auto* frame = new Frame();
+    showHidden(*frame);
+    auto* controller = new ProbeController(*frame, "late");
+    frame->addComponent(controller);
+    EXPECT_FALSE(controller->isLoaded());
+
+    controller->load();
+
+    EXPECT_TRUE(controller->isLoaded());
+    frame->free();
+}
+
 TEST_F(FrameOwnership, FreeingAFrameTakesOwnedFramesThenTheWindowThenTheViews) {
     auto* main = Application::instance().createFrame<Probe<Frame>>("main");
     Application::instance().setFrame(main);

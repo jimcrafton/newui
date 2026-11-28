@@ -75,11 +75,12 @@ namespace newui {
     // needs and never subscribes to the Frame itself.
     //
     // The controller belongs to its frame: attach it with frame->addComponent(new T(*frame)) and the frame frees it, while the window
-    // still exists. It does not own the Frame.
+    // still exists. It does not own the Frame. This is enforced when it loads: a controller its frame does not own asserts in debug
+    // builds, does not run frameDidLoad(), and reports it in loadError() (which quits the application when the window was being created).
     //
-    // A base constructor cannot reach a subclass override, so a controller made for a Frame whose window already exists calls load() itself
-    // once it is fully constructed; load() is a no-op after the first call and is also what a caller uses to run frameDidLoad() for a Frame
-    // that will never get a native window.
+    // A controller made for a Frame whose window already exists is loaded by calling load() once it is attached to the frame; load() is a
+    // no-op after the first successful call and is also what a caller uses to run frameDidLoad() for a Frame that will never get a native
+    // window.
     //
     // Setup: the frame owns the FrameController, and the root view owns the controllers for the window's features:
     //
@@ -107,10 +108,10 @@ namespace newui {
         Frame& frame() const { return frame_; }
         // True once frameDidLoad() has run.
         bool isLoaded() const { return loaded_; }
-        // Runs frameDidLoad() if it has not run yet. Called by Frame::onCreated. An exception from frameDidLoad() is caught (it would unwind
+        // Runs frameDidLoad() if it has not run yet and the frame owns this. Called by Frame::onCreated. An exception from frameDidLoad() is caught (it would unwind
         // through the window procedure) and kept in loadError(); created by the application, a failed load also quits the loop.
         void load();
-        // The message of the exception frameDidLoad() ended with; empty when it succeeded.
+        // Why the last load() failed (the exception frameDidLoad() ended with, or that the frame does not own this); empty when it succeeded.
         const std::string& loadError() const { return loadError_; }
 
     protected:

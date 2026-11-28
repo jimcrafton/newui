@@ -2,6 +2,7 @@
 #include "newui/controllers.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 
@@ -59,6 +60,13 @@ namespace newui
         if (loaded_) {
             return;
         }
+        // Checked here rather than in the constructor: the caller attaches the controller after making it.
+        if (owner() != &frame_) {
+            loadError_ = "a FrameController must be owned by its frame: frame->addComponent(new T(*frame))";
+            assert(false && "newui::FrameController is not owned by its frame");
+            return;
+        }
+        loadError_.clear();
         loaded_ = true;
         // Normally runs inside WM_CREATE, and an exception must not unwind through the window procedure.
         try {
