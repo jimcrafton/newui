@@ -107,6 +107,9 @@ namespace newui
             auto& siblings = parentController_->childControllers_;
             siblings.erase(std::remove(siblings.begin(), siblings.end(), this), siblings.end());
         }
+        for (ViewController* child : childControllers_) {
+            child->parentController_ = nullptr;
+        }
 
         // An expired lifetime means the view has already been destroyed (by its parent or its owner): nothing is left to do.
         if (view_ != nullptr && !viewLife_.expired()) {
@@ -159,9 +162,15 @@ namespace newui
         waitForAnimationThen(disappearingAnimation(), &ViewController::finishDisappearing);
     }
 
-    void ViewController::addChildController(ViewController* child) {
+    void ViewController::addChildController(ViewController* child, ChildOwnership ownership) {
         if (child == nullptr) {
             return;
+        }
+        if (ownership == ChildOwnership::Parent) {
+            addComponent(child);
+            if (child->owner() != this) {
+                return;
+            }
         }
         child->present(view(), this);
     }
@@ -171,7 +180,8 @@ namespace newui
     }
 
     void ViewController::finishDisappearing() {
-        if (container_ != nullptr && view_ != nullptr) {
+        // As in the destructor: the view, and with it the container, may have been destroyed meanwhile.
+        if (container_ != nullptr && view_ != nullptr && !viewLife_.expired() && view_->parent() == container_) {
             container_->removeChild(view_);
         }
 
@@ -193,7 +203,11 @@ namespace newui
 
         RunLoop& loop = RunLoop::current();
         if (loop) {
-            loop.postIdle([this, animation, onComplete]() {
+            std::weak_ptr<const void> alive = lifetime();
+            loop.postIdle([this, alive, animation, onComplete]() {
+                if (alive.expired()) {
+                    return true;  // this controller was freed while waiting
+                }
                 if (AnimationManager::currentFrame() < animation->endTime()) {
                     return false;
                 }

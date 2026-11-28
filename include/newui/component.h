@@ -72,7 +72,8 @@ namespace newui {
     // object. For a View, ownership is separate from the visual parent: a
     // parent being destroyed deletes the children nothing owns, as ever, and
     // only detaches the owned ones; destroying a view frees what it owns before
-    // its children go.
+    // its children go. So the controllers a window's root view owns are gone
+    // before any of its views (see FrameController in controllers.h).
     //
     // Ownership operations belong to one thread (the UI thread): a component
     // remembers the thread that first used them. lifetime() may be called

@@ -78,6 +78,20 @@ namespace newui {
     // A base constructor cannot reach a subclass override, so a controller made for a Frame whose window already exists calls load() itself
     // once it is fully constructed; load() is a no-op after the first call and is also what a caller uses to run frameDidLoad() for a Frame
     // that will never get a native window.
+    //
+    // Recommended setup: the FrameController itself stays wherever the application keeps it (often the stack in main), and the controllers
+    // for the window's features are owned by the root view:
+    //
+    //     void frameDidLoad() override {
+    //         search_ = frame().rootView().createOwned<SearchController>(frame().rootView());   // search_ is a ComponentRef
+    //     }
+    //
+    // The root view frees what it owns, last added first, as the first step of its own teardown (the window's WM_DESTROY): every view and the
+    // native window still exist, so a feature controller's beforeDestruction() may still read them (to save window placement, say), and no
+    // view has been torn down yet. Subscriptions a controller makes with Component::connect() end before its beforeDestruction() runs, so
+    // nothing calls back into a controller on its way out. Override beforeDestruction() to stop what would otherwise reach it later: timers
+    // (RunLoop::cancelDelayed), background work (cancel, then wait) and run-loop actions it registered. A vetoed close frees nothing.
+    // A pointer to such a controller dangles once the window is gone: hold a ComponentRef (componentref.h) if it is used after that.
     class FrameController : public Controller {
     public:
         explicit FrameController(Frame& frame);
@@ -117,6 +131,12 @@ namespace newui {
         Connection sizedConnection_;
     };
 
+    // Who frees a child ViewController added with ViewController::addChildController().
+    enum class ChildOwnership {
+        Caller,  // whoever made it, as for any other object
+        Parent,  // the parent controller owns it (Component::addComponent): a heap object, freed when the parent is free()d
+    };
+
     // The VC in MVC - owns exactly one root SubView (view()), lazily built
     // via loadView()/viewDidLoad(), plus an appear/disappear lifecycle and
     // parent/child containment - modeled on UIKit's UIViewController, sized
@@ -142,6 +162,8 @@ namespace newui {
     public:
         ViewController() = default;
 
+        // Child controllers still listed here are left without a parentController().
+        //
         // Does NOT fire viewWillDisappear()/viewDidDisappear() - calling a
         // virtual function from a destructor never reaches an overriding
         // subclass's version (its part of the object is already gone by
@@ -181,7 +203,14 @@ namespace newui {
         // Convenience for the common case: presenting into a parent
         // controller's own view(). Equivalent to
         // child->present(view(), this).
-        void addChildController(ViewController* child);
+        //
+        // With ChildOwnership::Parent this controller also takes ownership of
+        // child, which must be a heap object nothing else deletes. Dismissing
+        // either one frees nothing; the child is freed when this controller is,
+        // so this controller must then be ended with free() / release() (or by
+        // its own owner), not `delete`. If ownership is refused (see
+        // Component::addComponent) nothing is presented.
+        void addChildController(ViewController* child, ChildOwnership ownership = ChildOwnership::Caller);
 
         // Convenience matching addChildController() above - equivalent to
         // dismiss().

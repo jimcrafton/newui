@@ -8,6 +8,7 @@ add_executable(newui_tests
     test_component.cpp
     test_viewownership.cpp
     test_freenotification.cpp
+    test_windowclose.cpp
     test_runloop.cpp
     test_color.cpp
     test_viewstyle.cpp
