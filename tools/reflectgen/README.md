@@ -323,7 +323,9 @@ than relying on the bypass define indefinitely.
 
 **No system LLVM found?** `configure_libclang()` falls back automatically:
 if `LIBCLANG_PATH`/the default `C:\Program Files\LLVM\bin\libclang.dll`
-doesn't exist, it pulls just the native library out of the `libclang`
+doesn't exist, it uses the libclang that ships with Visual Studio's Clang
+tools (found through `vswhere`, under `VC\Tools\Llvm\<arch>\bin`). That one
+matches the installed MSVC STL. Only if there is none either does it pull just the native library out of the `libclang`
 PyPI package's wheel (via `pip download`, not `pip install` - that avoids
 clobbering the `clang` bindings package already in this venv, since both
 packages occupy the same `clang/` import path) and caches it under

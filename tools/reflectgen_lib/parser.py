@@ -10,6 +10,7 @@ scriptgen (Python bindings) are separate tools on top of it. See tools/reflectge
 import argparse
 import glob
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -45,11 +46,13 @@ DEFAULT_LIBCLANG_PATH = r"C:\Program Files\LLVM\bin\libclang.dll"
 
 # Where a downloaded fallback native library (see fetch_fallback_libclang()
 # below) is cached, so it's only ever downloaded once per venv. Lives next
-# to .venv, not inside site-packages - installing the `libclang` PyPI
-# package properly would collide with the `clang` bindings package already
-# installed (both occupy the same clang/ import path), so instead this
-# pulls just the native library out of libclang's wheel by hand.
-FALLBACK_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "libclang-fallback")
+# inside tools/reflectgen/.venv, not in site-packages - installing the
+# `libclang` PyPI package properly would collide with the `clang` bindings
+# package already installed (both occupy the same clang/ import path), so
+# instead this pulls just the native library out of libclang's wheel by hand.
+FALLBACK_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reflectgen", ".venv", "libclang-fallback"
+)
 FALLBACK_LIB_NAME = "libclang.dll" if os.name == "nt" else "libclang.so"
 
 
@@ -95,16 +98,42 @@ def fetch_fallback_libclang():
                 sys.stderr.write(f"reflectgen: {FALLBACK_LIB_NAME} not found inside {os.path.basename(wheels[0])}\n")
                 return None
             os.makedirs(FALLBACK_CACHE_DIR, exist_ok=True)
-            with zf.open(member) as src, open(cached, "wb") as dst:
+            # Parallel build steps can all get here at once, and Windows refuses to overwrite a
+            # DLL another process has loaded: write privately, then publish with an atomic rename.
+            partial = f"{cached}.{os.getpid()}.tmp"
+            with zf.open(member) as src, open(partial, "wb") as dst:
                 dst.write(src.read())
+            try:
+                os.replace(partial, cached)
+            except OSError:
+                os.remove(partial)
+                if not os.path.isfile(cached):
+                    raise
 
     return cached if os.path.isfile(cached) else None
+
+
+def find_visual_studio_libclang():
+    vswhere = os.path.join(
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        "Microsoft Visual Studio", "Installer", "vswhere.exe",
+    )
+    if not os.path.isfile(vswhere):
+        return None
+    arch = "ARM64" if platform.machine().upper() == "ARM64" else "x64"
+    result = subprocess.run(
+        [vswhere, "-latest", "-products", "*", "-utf8", "-find", rf"VC\Tools\Llvm\{arch}\bin\libclang.dll"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    found = result.stdout.strip().splitlines()
+    return found[0] if result.returncode == 0 and found else None
 
 
 def configure_libclang():
     path = os.environ.get("LIBCLANG_PATH", DEFAULT_LIBCLANG_PATH)
     if not os.path.isfile(path):
-        path = fetch_fallback_libclang()
+        # Visual Studio's own copy comes first: its STL rejects the older release pip publishes (STL1000).
+        path = find_visual_studio_libclang() or fetch_fallback_libclang()
 
     if path and os.path.isfile(path):
         cindex.Config.set_library_file(path)

@@ -40,14 +40,51 @@
 
 set(NEWUI_REFLECTGEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen)
 set(NEWUI_REFLECTGEN_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/reflectgen_lib)
-set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_DIR}/.venv/Scripts/python.exe)
+set(NEWUI_REFLECTGEN_VENV_DIR ${NEWUI_REFLECTGEN_DIR}/.venv)
+if(WIN32)
+    set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_VENV_DIR}/Scripts/python.exe)
+else()
+    set(NEWUI_REFLECTGEN_PYTHON ${NEWUI_REFLECTGEN_VENV_DIR}/bin/python)
+endif()
+
+# Bootstrap reflectgen's venv automatically at configure time: create it if
+# missing, and (re)install requirements.txt whenever it's newer than the
+# stamp file written after the last successful install.
+set(NEWUI_REFLECTGEN_REQUIREMENTS ${NEWUI_REFLECTGEN_DIR}/requirements.txt)
+set(NEWUI_REFLECTGEN_VENV_STAMP ${NEWUI_REFLECTGEN_VENV_DIR}/.requirements.stamp)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${NEWUI_REFLECTGEN_REQUIREMENTS})
 
 if(NOT EXISTS ${NEWUI_REFLECTGEN_PYTHON})
-    message(FATAL_ERROR
-        "reflectgen: '${NEWUI_REFLECTGEN_PYTHON}' not found - run the setup steps in "
-        "tools/reflectgen/README.md ('python -m venv .venv' then "
-        "'.venv\\Scripts\\pip install -r requirements.txt' from tools/reflectgen) "
-        "before configuring.")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(NOT Python3_EXECUTABLE)
+        message(FATAL_ERROR
+            "reflectgen: no system Python 3 found to create '${NEWUI_REFLECTGEN_VENV_DIR}' - "
+            "install Python 3 or follow tools/reflectgen/README.md's setup steps manually.")
+    endif()
+    message(STATUS "reflectgen: creating venv at ${NEWUI_REFLECTGEN_VENV_DIR}")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m venv ${NEWUI_REFLECTGEN_VENV_DIR}
+        RESULT_VARIABLE venv_result
+        OUTPUT_VARIABLE venv_output
+        ERROR_VARIABLE venv_output)
+    if(NOT venv_result EQUAL 0 OR NOT EXISTS ${NEWUI_REFLECTGEN_PYTHON})
+        message(FATAL_ERROR "reflectgen: 'python -m venv' failed:\n${venv_output}")
+    endif()
+    file(REMOVE ${NEWUI_REFLECTGEN_VENV_STAMP})
+endif()
+
+if(NOT EXISTS ${NEWUI_REFLECTGEN_VENV_STAMP}
+   OR ${NEWUI_REFLECTGEN_REQUIREMENTS} IS_NEWER_THAN ${NEWUI_REFLECTGEN_VENV_STAMP})
+    message(STATUS "reflectgen: installing requirements into venv")
+    execute_process(
+        COMMAND ${NEWUI_REFLECTGEN_PYTHON} -m pip install -r ${NEWUI_REFLECTGEN_REQUIREMENTS}
+        RESULT_VARIABLE pip_result
+        OUTPUT_VARIABLE pip_output
+        ERROR_VARIABLE pip_output)
+    if(NOT pip_result EQUAL 0)
+        message(FATAL_ERROR "reflectgen: pip install failed:\n${pip_output}")
+    endif()
+    file(TOUCH ${NEWUI_REFLECTGEN_VENV_STAMP})
 endif()
 
 # Directories newui's own newui_add_reflectgen_output(newui) call (below, in
