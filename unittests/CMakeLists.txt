@@ -10,6 +10,7 @@ add_executable(newui_tests
     test_freenotification.cpp
     test_windowclose.cpp
     test_frameownership.cpp
+    test_backpointers.cpp
     test_runloop.cpp
     test_color.cpp
     test_viewstyle.cpp

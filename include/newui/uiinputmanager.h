@@ -1,5 +1,6 @@
 #pragma once
 
+#include <newui/componentref.h>
 #include <newui/subview.h>
 
 namespace newui {
@@ -92,18 +93,17 @@ namespace newui {
         }
 
         View* redirectTarget() const {
-            return redirectTarget_;
+            return redirectTarget_.get();
         }
 
-        // Non-owning - same convention as Control::action() (controls.h):
-        // whoever built the tree keeps owning the real target, this is
-        // just a pointer to it.
+        // Non-owning: whoever built the tree keeps owning the real target.
+        // Reads as null once the target is destroyed.
         void setRedirectTarget(View* target) {
             redirectTarget_ = target;
         }
 
     private:
-        View* redirectTarget_ = nullptr;
+        ComponentRef<View> redirectTarget_;
     };
 
     // Singleton home for the mouse/keyboard *policy* decisions this

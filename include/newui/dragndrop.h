@@ -4,6 +4,7 @@
 
 #include <blend2d/blend2d.h>
 
+#include <newui/componentref.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
 
@@ -290,7 +291,7 @@ private:
     Microsoft::WRL::ComPtr<IDataObject> currentDataObject_;
     std::wstring currentText_;       // the drag's CF_UNICODETEXT payload, cached at drag-enter
     bool hasCurrentText_ = false;
-    View* hoverView_ = nullptr;      // non-owning; the View whose DropTarget last got onTextDragOver
+    ComponentRef<View> hoverView_;   // the View whose DropTarget last got onTextDragOver, while it lasts
     Microsoft::WRL::ComPtr<IDropTargetHelper> dropTargetHelper_;
 };
 

@@ -5466,7 +5466,7 @@ namespace newui {
         if (selectedIndex_.has_value() && (model == nullptr || *selectedIndex_ >= model->size())) {
             selectedIndex_.reset();
         }
-        if (popupListView_ != nullptr) {
+        if (popupListView_) {
             popupListView_->setController(controller_);
         }
         style().markDirty();
@@ -5480,7 +5480,7 @@ namespace newui {
         }
         // The popup list shares controller_, so it already sees the new model - it only needs a
         // content-size refresh and a repaint.
-        if (popupListView_ != nullptr) {
+        if (popupListView_) {
             popupListView_->onContentSizeChanged(*popupListView_);
             popupListView_->style().markDirty();
         }
@@ -5601,6 +5601,14 @@ namespace newui {
             return;
         }
 
+        // A popup whose views have gone (its window destroyed with the one that owned it) is built again.
+        if (popup_ != nullptr && !popupListView_) {
+            if (popup_->frameHandle() != nullptr) {
+                ::DestroyWindow(popup_->frameHandle());
+            }
+            popup_.reset();
+        }
+
         bool firstOpen = (popup_ == nullptr);
         if (firstOpen) {
             popup_ = std::make_unique<PopupFrame>();
@@ -5623,7 +5631,7 @@ namespace newui {
             popupScroll_ = new ScrollView();
             popupScroll_->setVisible(true);
             popupScroll_->setLayoutParams(std::make_unique<FlexLayoutParams>(1.0f));
-            popupScroll_->addChild(popupListView_);
+            popupScroll_->addChild(popupListView_.get());
 
             // A real Layout (not manual bounds-poking) is load-bearing
             // here, not just tidy - see the long comment on why in this
@@ -5639,7 +5647,7 @@ namespace newui {
             popupLayout->setSpacing(0.0f);
             popupLayout->setPadding(0.0f);
             popup_->rootView().setLayout(std::move(popupLayout));
-            popup_->rootView().addChild(popupScroll_);
+            popup_->rootView().addChild(popupScroll_.get());
 
             // Without an explicit background, whatever's behind an
             // unpainted RootView shows through as a solid black rect
@@ -5813,7 +5821,7 @@ namespace newui {
     }
 
     void DropDownList::moveKeyboardHighlight(int delta) {
-        if (popupListView_ == nullptr) {
+        if (!popupListView_) {
             return;
         }
         std::size_t count = popupListView_->controller().itemCount();

@@ -491,11 +491,11 @@ COMDropTarget::COMDropTarget(RootView& rootView) : rootView_(rootView) {
 }
 
 void COMDropTarget::endHover() {
-    if (hoverView_ == nullptr) {
-        return;
+    View* view = hoverView_.get();
+    hoverView_.reset();
+    if (view == nullptr) {
+        return;  // nothing hovered, or it has been destroyed since
     }
-    View* view = hoverView_;
-    hoverView_ = nullptr;
     if (DropTarget* dropTarget = view->dropTarget(); dropTarget != nullptr && !dropTarget->onDragLeave.empty()) {
         dropTarget->onDragLeave(*dropTarget);
     }
@@ -503,7 +503,7 @@ void COMDropTarget::endHover() {
 
 void COMDropTarget::updateHover(const Point& clientPt, DWORD* effect) {
     View* target = findDropTargetView(rootView_, clientPt, currentDataObject_.Get());
-    if (target != hoverView_) {
+    if (target != hoverView_.get()) {
         endHover();
     }
 

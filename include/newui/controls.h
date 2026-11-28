@@ -9,6 +9,7 @@
 
 #include <newui/newui.h>
 #include <newui/action.h>
+#include <newui/componentref.h>
 #include <newui/controllers.h>
 #include <newui/delegate.h>
 #include <newui/geometry.h>
@@ -3143,9 +3144,10 @@ namespace newui {
         // wheel - ListView already answers onQueryContentSize (its own constructor), so it needs
         // no LayoutParams of its own once it's ScrollView's content child; only popupScroll_ does
         // (to fill popup_->rootView()'s own vertical FlexLayout). Both owned by popup_->rootView()'s
-        // normal addChild() chain, not by this class directly.
-        ScrollView* popupScroll_ = nullptr;
-        ListView* popupListView_ = nullptr;
+        // normal addChild() chain, not by this class directly - and both go with the popup's window,
+        // which Windows destroys along with the window that owned it.
+        ComponentRef<ScrollView> popupScroll_;
+        ComponentRef<ListView> popupListView_;
         std::optional<std::size_t> selectedIndex_;
 
         // Captured from style() at construction (DropDownList::DropDownList()) -

@@ -1,4 +1,5 @@
 #include "newui/automation.h"
+#include "newui/componentref.h"
 
 #include "newui/controls.h"
 #include "newui/menus.h"
@@ -129,23 +130,27 @@ std::string failure(const Request& request, const std::string& message) {
     return reply(request, false, "\"error\":" + quote(message));
 }
 
-// Only windows the app exposed are visible to a driver.
+// Only windows the app exposed are visible to a driver. An entry reads as null once its window is gone.
 std::mutex exposedMutex;
-std::vector<RootView*> exposed;
+std::vector<ComponentRef<RootView>> exposed;
 
 std::vector<RootView*> exposedRoots() {
     std::lock_guard<std::mutex> lock(exposedMutex);
-    return exposed;
+    std::vector<RootView*> roots;
+    for (const ComponentRef<RootView>& entry : exposed) {
+        if (entry) {
+            roots.push_back(entry.get());
+        }
+    }
+    return roots;
 }
 
+// Drops root, and any entry whose window is gone.
 void forget(RootView* root) {
     std::lock_guard<std::mutex> lock(exposedMutex);
-    exposed.erase(std::remove(exposed.begin(), exposed.end(), root), exposed.end());
-}
-
-SyncReturn rootDestroyed(View& sender) {
-    forget(static_cast<RootView*>(&sender));
-    return SyncReturn::Ignored;
+    exposed.erase(std::remove_if(exposed.begin(), exposed.end(), [root](const ComponentRef<RootView>& entry) {
+        return entry.get() == nullptr || entry.get() == root;
+    }), exposed.end());
 }
 
 View* findNamed(const std::string& name) {
@@ -621,14 +626,14 @@ std::string Automation::handle(const std::string& requestJson) {
 }
 
 void Automation::expose(RootView& root) {
-    {
-        std::lock_guard<std::mutex> lock(exposedMutex);
-        if (std::find(exposed.begin(), exposed.end(), &root) != exposed.end()) {
+    forget(nullptr);
+    std::lock_guard<std::mutex> lock(exposedMutex);
+    for (const ComponentRef<RootView>& entry : exposed) {
+        if (entry.get() == &root) {
             return;
         }
-        exposed.push_back(&root);
     }
-    root.onDestroyed.add(&rootDestroyed);
+    exposed.emplace_back(&root);
 }
 
 void Automation::unexpose(RootView& root) {

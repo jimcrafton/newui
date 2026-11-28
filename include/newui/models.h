@@ -10,6 +10,7 @@
 
 #include "newui/newui.h"
 #include "newui/component.h"
+#include "newui/componentref.h"
 #include "newui/delegate.h"
 
 
@@ -78,13 +79,12 @@ namespace newui {
         // own comment.
         void addView(View* view);
 
-        // Unregisters view (already-removed or unknown views are a no-op)
-        // - also called automatically when a registered view fires its own
-        // onDestroyed, so views_ never holds a dangling pointer past that
-        // point.
+        // Unregisters view (already-removed or unknown views are a no-op).
+        // A view that is destroyed drops out by itself, from the moment its
+        // teardown starts.
         void removeView(View* view);
 
-        std::size_t viewCount() const { return views_.size(); }
+        std::size_t viewCount() const;
 
         // Marks every registered view's style dirty (ViewStyle::markDirty()),
         // so each one repaints reflecting this Model's current state on its
@@ -97,20 +97,11 @@ namespace newui {
         void updateAllViews();
 
     private:
-        SyncReturn handleViewDestroyed(View& view);
+        // Drops the entries whose view has gone.
+        void forgetDestroyedViews();
 
-        // Views are not owned by Model. When a view is added, the model
-        // subscribes to that view's own onDestroyed delegate so it's
-        // removed automatically if the view goes away first - views_ never
-        // holds a dangling pointer past that, without every caller having
-        // to remember to call removeView() themselves before deleting a
-        // view. viewDestroyedConnections_ is kept in lockstep with views_
-        // (same index) purely so removeView() can drop that subscription
-        // too when a view is unregistered while still alive - otherwise a
-        // harmless but wasteful dead subscription would sit on that view's
-        // onDestroyed for the rest of its life.
-        std::vector<View*> views_;
-        std::vector<Connection> viewDestroyedConnections_;
+        // Views are not owned by Model; each entry reads as null once its view is gone.
+        std::vector<ComponentRef<View>> views_;
         std::uint32_t updateFlags_ = UpdateFlags::NoFlags;
     };
 

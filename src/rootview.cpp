@@ -723,6 +723,9 @@ namespace newui {
 			return;
 		}
 
+		if (activeDragView_ != nullptr && isWithinSubtree(activeDragView_, removedSubtreeRoot)) {
+			activeDragView_ = nullptr;
+		}
 		if (lastTapTarget_ != nullptr && isWithinSubtree(lastTapTarget_, removedSubtreeRoot)) {
 			lastTapTarget_ = nullptr;
 		}

@@ -126,63 +126,46 @@ namespace newui {
         Model::setValue(newValue, key);
     }
 
-    Model::~Model() {
-        // Views that outlive the model must not call back into it from their onDestroyed.
-        for (std::size_t i = 0; i < views_.size(); ++i) {
-            views_[i]->onDestroyed.remove(viewDestroyedConnections_[i]);
-        }
-    }
+    Model::~Model() = default;
 
     void Model::addView(View* view) {
         if (view == nullptr) {
             return;
         }
-        if (std::find(views_.begin(), views_.end(), view) != views_.end()) {
-            return;
+        forgetDestroyedViews();
+        for (const ComponentRef<View>& existing : views_) {
+            if (existing.get() == view) {
+                return;
+            }
         }
-        views_.push_back(view);
-        viewDestroyedConnections_.push_back(view->onDestroyed.add(this, &Model::handleViewDestroyed));
+        ComponentRef<View> added(view);
+        if (added) {
+            views_.push_back(added);
+        }
     }
 
     void Model::removeView(View* view) {
-        auto it = std::find(views_.begin(), views_.end(), view);
-        if (it == views_.end()) {
-            return;
-        }
-        std::size_t index = static_cast<std::size_t>(it - views_.begin());
+        forgetDestroyedViews();
+        views_.erase(std::remove_if(views_.begin(), views_.end(),
+            [view](const ComponentRef<View>& existing) { return existing.get() == view; }), views_.end());
+    }
 
-        // The view whose onDestroyed we're unsubscribing from is still
-        // alive here (removeView() called directly, not via
-        // handleViewDestroyed()) - unlike the destroyed case, where
-        // removing the now-dangling subscription would be pointless (the
-        // view, and its Delegate, are already gone).
-        if (view != nullptr) {
-            view->onDestroyed.remove(viewDestroyedConnections_[index]);
-        }
-
-        views_.erase(it);
-        viewDestroyedConnections_.erase(viewDestroyedConnections_.begin() + static_cast<std::ptrdiff_t>(index));
+    std::size_t Model::viewCount() const {
+        return static_cast<std::size_t>(std::count_if(views_.begin(), views_.end(),
+            [](const ComponentRef<View>& view) { return view.get() != nullptr; }));
     }
 
     void Model::updateAllViews() {
-        for (View* view : views_) {
-            view->style().markDirty();
+        for (const ComponentRef<View>& view : views_) {
+            if (view) {
+                view->style().markDirty();
+            }
         }
     }
 
-    SyncReturn Model::handleViewDestroyed(View& view) {
-        auto it = std::find(views_.begin(), views_.end(), &view);
-        if (it == views_.end()) {
-            return SyncReturn::Ignored;
-        }
-        std::size_t index = static_cast<std::size_t>(it - views_.begin());
-
-        // view is already being destroyed - its own onDestroyed Delegate
-        // is going away along with it, so there's nothing to unsubscribe
-        // here (unlike removeView()'s still-alive case above).
-        views_.erase(it);
-        viewDestroyedConnections_.erase(viewDestroyedConnections_.begin() + static_cast<std::ptrdiff_t>(index));
-        return SyncReturn::Handled;
+    void Model::forgetDestroyedViews() {
+        views_.erase(std::remove_if(views_.begin(), views_.end(),
+            [](const ComponentRef<View>& view) { return view.get() == nullptr; }), views_.end());
     }
 
     // -----------------------------------------------------------------
